@@ -1,0 +1,13 @@
+[package]
+name = "rustc_codegen_gpu"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+melior = "0.24.0"
+
+[lib]
+crate-type = ["dylib"]
+
+[package.metadata.rust-analyzer]
+rustc_private = true

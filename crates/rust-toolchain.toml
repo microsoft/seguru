@@ -1,0 +1,4 @@
+[toolchain]
+#channel = "1.86.0"
+channel = "nightly-2025-02-14"
+components = [ "rustc", "rustc-dev", "llvm-tools", "llvm-tools-preview" ]

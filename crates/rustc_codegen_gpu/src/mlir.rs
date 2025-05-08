@@ -8,8 +8,9 @@ use melior::{
     utility::register_all_dialects,
     Context,
 };
+use rustc_span::{source_map::SourceMap, Loc, Span};
 
-fn test() {
+pub(crate) fn generate_test_module<'a>(loc: Loc) -> Module<'a> {
     // We need a registry to hold all the dialects
     let registry = DialectRegistry::new();
     // Register all dialects that come with MLIR.
@@ -22,7 +23,12 @@ fn test() {
 
     // A location is a debug location like in LLVM, in MLIR all
     // operations need a location, even if its "unknown".
-    let location = Location::unknown(&context);
+    let location = Location::new(
+        &context,
+        format!("{}", loc.file.name.prefer_local()).as_str(),
+        loc.line,
+        loc.col.0,
+    );
 
     // A MLIR module is akin to a LLVM module.
     let module = Module::new(location);
@@ -77,4 +83,5 @@ fn test() {
     ));
 
     assert!(module.as_operation().verify());
+    module
 }

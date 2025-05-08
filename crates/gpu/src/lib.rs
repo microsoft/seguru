@@ -20,7 +20,7 @@ pub struct Scope<'scope, 'env: 'scope> {
     env: PhantomData<&'env mut &'env ()>,
 }
 
-impl<'scope, 'env: 'scope>  ThreadScope<'scope, 'env> {
+impl<'scope, 'env: 'scope> ThreadScope<'scope, 'env> {
     pub fn spawn<F, T>(self, f: F) -> ScopedJoinHandle<'scope, T>
     where
         F: FnOnce() -> T + Send + 'scope,
@@ -30,10 +30,12 @@ impl<'scope, 'env: 'scope>  ThreadScope<'scope, 'env> {
     }
 }
 
-
 pub fn scope<'env, F, T>(f: F) -> T
 where
-    F: for<'scope> FnOnce(&'scope std::thread::Scope<'scope, 'env>, Vec<Vec<ThreadScope<'scope, 'env>>>) -> T,
+    F: for<'scope> FnOnce(
+        &'scope std::thread::Scope<'scope, 'env>,
+        Vec<Vec<ThreadScope<'scope, 'env>>>,
+    ) -> T,
 {
     unimplemented!()
 }
@@ -64,7 +66,7 @@ impl Thread {
     }
 
     // Returns the number of threads in the thread block (aka the block size) along the x, y, or z dimension.
-    // MLIR: gpu.block_dim 
+    // MLIR: gpu.block_dim
     pub fn block_dim(&self) -> Dim {
         unimplemented!()
     }
@@ -75,7 +77,7 @@ impl Thread {
     }
 
     // Returns the thread id, i.e. the index of the current thread within the block along the x, y, or z dimension.
-    // MLIR: gpu.block_dim 
+    // MLIR: gpu.block_dim
     pub fn local_thread(&self) -> Dim {
         unimplemented!()
     }
@@ -89,11 +91,15 @@ impl Thread {
     }
 
     pub fn local_thread_id(&self) -> usize {
-        self.local_thread().x + self.local_thread().y * self.block_dim().x + self.local_thread().z * self.block_dim().x * self.block_dim().y
+        self.local_thread().x
+            + self.local_thread().y * self.block_dim().x
+            + self.local_thread().z * self.block_dim().x * self.block_dim().y
     }
 
     pub fn global_thread_id(&self) -> usize {
-        self.global_invocation().x + self.global_invocation().y * self.grid_dim().x + self.global_invocation().z * self.grid_dim().x * self.grid_dim().y
+        self.global_invocation().x
+            + self.global_invocation().y * self.grid_dim().x
+            + self.global_invocation().z * self.grid_dim().x * self.grid_dim().y
     }
 }
 
@@ -102,8 +108,7 @@ pub fn sync() {
     unimplemented!()
 }
 
-pub fn thread() -> Thread
-{
+pub fn thread() -> Thread {
     unimplemented!()
 }
 
@@ -158,11 +163,11 @@ impl<T> Shared<T> {
         unimplemented!()
     }
 
-    pub fn write(&mut self) -> SharedWriteGuard<'_, T> {
+    pub fn write(&self) -> SharedWriteGuard<'_, T> {
         unimplemented!()
     }
 
-    pub fn read(&mut self) -> SharedReadGuard<'_, T> {
+    pub fn read(&self) -> SharedReadGuard<'_, T> {
         unimplemented!()
     }
 }

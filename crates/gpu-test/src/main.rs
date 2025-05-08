@@ -1,18 +1,21 @@
 use gpu::Shared;
 
-
 /// RUSTFLAGS="-Zcodegen-backend=`realpath ../target/debug/librustc_codegen_gpu.dylib`" cargo build
-/// 
-pub const M: usize = 1024; 
-pub const N: usize = 4096; 
+///
+pub const M: usize = 1024;
+pub const N: usize = 4096;
 pub const K: usize = 512;
 pub const BK: usize = 16; // Block size for shared memory
 
 /// assume BK * BK == number of threads in a block x axis.
-fn kernel(a: &[u8], b: &[u8], c: &mut u8, a_s: Shared<&mut [u8]>, b_s: Shared<&mut [u8]>, bk: usize) {
-    let mut a_s = a_s;
-    let mut b_s = b_s;
-    
+fn kernel(
+    a: &[u8],
+    b: &[u8],
+    c: &mut u8,
+    a_s: Shared<[u8; BK * BK]>,
+    b_s: Shared<[u8; BK * BK]>,
+    bk: usize,
+) {
     let thread = gpu::thread();
     let unique_col = thread.local_thread_id() % bk;
     let unique_row = thread.local_thread_id() / bk;
@@ -31,11 +34,11 @@ fn kernel(a: &[u8], b: &[u8], c: &mut u8, a_s: Shared<&mut [u8]>, b_s: Shared<&m
 }
 
 fn main() {
-    let rows = 2;  // Adjust to fit your example size
+    let rows = 2; // Adjust to fit your example size
     let cols = 2;
 
     // Initialize the result as a mutable vector
-    let a = [0;K * M];
+    let a = [0; K * M];
     let b = [0; N * K];
     let mut result = [0; M * N];
 
@@ -43,7 +46,7 @@ fn main() {
 
     // Specify chunk size (this determines how many elements each thread will process)
     let chunk_size = 1;
-    
+
     // Similar to thread::scope to ensure all threads live during the scope
     // in gpu::grid should be called for only once inside one scope.
     gpu::scope(|s, grid| {

@@ -5,6 +5,9 @@ edition = "2021"
 
 [dependencies]
 melior = "0.24.0"
+mlir-sys = "0.5.0"
+log = "0.4.1"
+log-derive = "0.4.1"
 
 [lib]
 crate-type = ["dylib"]

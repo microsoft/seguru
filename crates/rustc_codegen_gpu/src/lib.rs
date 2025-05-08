@@ -20,3 +20,9 @@ mod builder;
 mod context;
 mod mlir;
 mod write;
+
+#[no_mangle]
+pub fn __rustc_codegen_backend() -> Box<dyn rustc_codegen_ssa::traits::CodegenBackend> {
+    env_logger::init();
+    Box::new(backend::GPUCodegenBackend::new())
+}

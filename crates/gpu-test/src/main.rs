@@ -7,6 +7,7 @@ pub const N: usize = 4096;
 pub const K: usize = 512;
 pub const BK: usize = 16; // Block size for shared memory
 
+#[no_mangle]
 /// assume BK * BK == number of threads in a block x axis.
 fn kernel(
     a: &[u8],
@@ -33,6 +34,7 @@ fn kernel(
     }
 }
 
+#[no_mangle]
 fn main() {
     let rows = 2; // Adjust to fit your example size
     let cols = 2;

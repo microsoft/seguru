@@ -46,25 +46,23 @@ pub(crate) fn codegen(
     })
 }
 
-pub(crate) fn module_codegen<'tcx, 'mlir>(
-    tcx: rustc_middle::ty::TyCtxt<'tcx>,
-    (cgu_name, mlir_ctx): (Symbol, &'mlir melior::Context),
+pub(crate) fn module_codegen(
+    tcx: rustc_middle::ty::TyCtxt<'_>,
+    (cgu_name, mlir_ctx): (Symbol, &'static melior::Context),
 ) -> ModuleCodegen<GPUCodeGenModule> {
     let cgu = tcx.codegen_unit(cgu_name);
     let module = GPUCodeGenModule {
         llvm_module: None,
         mlir_module: None,
     };
-    let mlir_ctx = crate::context::MLIRContext {
-        ctx: mlir_ctx,
-        dummy: std::marker::PhantomData,
-    };
-    let cx = GPUCodegenContext::<'tcx, 'mlir, 'mlir>::new(tcx, mlir_ctx);
-    let mono_items = cgu.items_in_deterministic_order(tcx);
-    for (mono_item, mono_data) in mono_items {
-        if let MonoItem::Fn(func) = mono_item {
-        } else {
-            mono_item.define::<GpuBuilder<'_, '_, '_>>(&mut cx, item_data);
+    {
+        let cx = GPUCodegenContext::new(tcx, mlir_ctx);
+        let mono_items = cgu.items_in_deterministic_order(tcx);
+        for &(mono_item, data) in &mono_items {
+            mono_item.predefine::<GpuBuilder<'_, '_, '_>>(&cx, data.linkage, data.visibility);
+        }
+        for (mono_item, mono_data) in mono_items {
+            mono_item.define::<GpuBuilder<'_, '_, '_>>(&cx);
         }
     }
     let m = ModuleCodegen::new_regular(cgu_name.to_string(), module);

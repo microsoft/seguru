@@ -21,7 +21,7 @@ use crate::mlir;
 type LlvmCodegenModule = <LlvmCodegenBackend as WriteBackendMethods>::Module;
 
 #[derive(Clone)]
-pub struct GPUCodegenBackend(Arc<melior::Context>);
+pub struct GPUCodegenBackend();
 unsafe impl rustc_data_structures::sync::DynSync for GPUCodegenBackend {}
 unsafe impl Send for GPUCodegenBackend {}
 unsafe impl Sync for GPUCodegenBackend {}
@@ -40,7 +40,7 @@ pub fn llvm_backend() -> Box<LlvmCodegenBackend> {
 
 impl GPUCodegenBackend {
     pub fn new() -> Self {
-        Self(Arc::new(melior::Context::new()))
+        Self()
     }
 }
 
@@ -389,10 +389,11 @@ impl ExtraBackendMethods for GPUCodegenBackend {
     ) -> (rustc_codegen_ssa::ModuleCodegen<Self::Module>, u64) {
         let start_time = std::time::Instant::now();
         let dep_node = tcx.codegen_unit(cgu_name).codegen_dep_node(tcx);
+        let ctx: &'static melior::Context = Box::leak(Box::new(melior::Context::new()));
         let (module, _) = tcx.dep_graph.with_task(
             dep_node,
             tcx,
-            (cgu_name, self.0.as_ref()),
+            (cgu_name, ctx),
             crate::write::module_codegen,
             Some(rustc_middle::dep_graph::hash_result),
         );
@@ -472,7 +473,3 @@ impl CodegenBackend for GPUCodegenBackend {
     }
 }
 
-#[no_mangle]
-pub fn __rustc_codegen_backend() -> Box<dyn CodegenBackend> {
-    Box::new(GPUCodegenBackend::new())
-}

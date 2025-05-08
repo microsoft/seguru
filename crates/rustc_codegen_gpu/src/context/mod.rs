@@ -20,18 +20,15 @@ use rustc_middle::ty::layout::{HasTyCtxt, HasTypingEnv};
 
 use self::ty::MLIRType;
 
-pub(crate) struct MLIRContext<'ml, 'a> {
-    pub ctx: &'ml melior::Context,
-    pub dummy: PhantomData<&'a mlir_ir::operation::Operation<'ml>>,
-}
 pub(crate) struct GPUCodegenContext<'tcx, 'ml, 'a> {
-    mlir_ctx: MLIRContext<'ml, 'a>,
+    pub mlir_ctx: &'ml melior::Context,
+    pub dummy: PhantomData<&'a mlir_ir::operation::Operation<'ml>>,
     tcx: rustc_middle::ty::TyCtxt<'tcx>,
 }
 
 impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
-    pub fn new(tcx: rustc_middle::ty::TyCtxt<'tcx>, mlir_ctx: MLIRContext<'ml, 'a>) -> Self {
-        Self { mlir_ctx, tcx }
+    pub fn new(tcx: rustc_middle::ty::TyCtxt<'tcx>, mlir_ctx: &'ml melior::Context) -> Self {
+        Self { mlir_ctx, tcx, dummy: PhantomData }
     }
 }
 
@@ -76,7 +73,12 @@ impl<'tcx, 'ml, 'a> PreDefineCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'm
         visibility: rustc_middle::mir::mono::Visibility,
         symbol_name: &str,
     ) {
-        todo!()
+        log::trace!(
+            "Predefining function with name `{}` with linkage `{:?}` and attributes `{:?}`",
+            symbol_name,
+            linkage,
+            self.tcx.codegen_fn_attrs(instance.def_id())
+        );
     }
 }
 

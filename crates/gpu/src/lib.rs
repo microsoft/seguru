@@ -21,6 +21,7 @@ pub struct Scope<'scope, 'env: 'scope> {
 }
 
 impl<'scope, 'env: 'scope> ThreadScope<'scope, 'env> {
+    #[no_mangle]
     pub fn spawn<F, T>(self, f: F) -> ScopedJoinHandle<'scope, T>
     where
         F: FnOnce() -> T + Send + 'scope,
@@ -30,6 +31,7 @@ impl<'scope, 'env: 'scope> ThreadScope<'scope, 'env> {
     }
 }
 
+#[no_mangle]
 pub fn scope<'env, F, T>(f: F) -> T
 where
     F: for<'scope> FnOnce(
@@ -53,6 +55,7 @@ pub struct Dim {
 }
 
 impl<'scope, 'env: 'scope> ThreadScope<'scope, 'env> {
+    #[no_mangle]
     fn thread(&self) -> Thread {
         unimplemented!()
     }
@@ -61,27 +64,32 @@ impl<'scope, 'env: 'scope> ThreadScope<'scope, 'env> {
 impl Thread {
     // Returns the block id, i.e. the index of the current block within the grid along the x, y, or z dimension.
     // MLIR: gpu.block_id
+    #[no_mangle]
     pub fn block_id(&self) -> Dim {
         unimplemented!()
     }
 
     // Returns the number of threads in the thread block (aka the block size) along the x, y, or z dimension.
     // MLIR: gpu.block_dim
+    #[no_mangle]
     pub fn block_dim(&self) -> Dim {
         unimplemented!()
     }
 
     // Returns the number of thread blocks in the grid along the x, y, or z dimension.
+    #[no_mangle]
     pub fn grid_dim(&self) -> Dim {
         unimplemented!()
     }
 
     // Returns the thread id, i.e. the index of the current thread within the block along the x, y, or z dimension.
     // MLIR: gpu.block_dim
+    #[no_mangle]
     pub fn local_thread(&self) -> Dim {
         unimplemented!()
     }
 
+    #[no_mangle]
     pub fn global_invocation(&self) -> Dim {
         Dim {
             x: self.block_id().x * self.block_dim().x + self.local_thread().x,
@@ -90,12 +98,14 @@ impl Thread {
         }
     }
 
+    #[no_mangle]
     pub fn local_thread_id(&self) -> usize {
         self.local_thread().x
             + self.local_thread().y * self.block_dim().x
             + self.local_thread().z * self.block_dim().x * self.block_dim().y
     }
 
+    #[no_mangle]
     pub fn global_thread_id(&self) -> usize {
         self.global_invocation().x
             + self.global_invocation().y * self.grid_dim().x
@@ -103,12 +113,15 @@ impl Thread {
     }
 }
 
+#[no_mangle]
+#[rustfmt::skip]
 pub fn sync() {
     // MLIR: gpu.sync
     unimplemented!()
 }
 
-pub fn thread() -> Thread {
+#[no_mangle]
+pub fn thread2() -> Thread {
     unimplemented!()
 }
 

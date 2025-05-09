@@ -8,7 +8,7 @@ use melior::{
     utility::register_all_dialects,
     Context,
 };
-use rustc_span::{source_map::SourceMap, Loc, Span};
+use rustc_span::Loc;
 
 pub(crate) fn generate_test_module<'a>(loc: Loc) -> Module<'a> {
     // We need a registry to hold all the dialects

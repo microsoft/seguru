@@ -3,16 +3,16 @@ mod asm;
 mod const_static;
 mod coverage;
 mod debug;
+mod misc;
+mod to_mir_func;
 mod ty;
 
 use core::panic;
 use rustc_abi::{self, HasDataLayout};
-use rustc_codegen_ssa::common::TypeKind;
 use rustc_codegen_ssa::traits::{
-    BackendTypes, BaseTypeCodegenMethods, CoverageInfoBuilderMethods, DerivedTypeCodegenMethods,
-    MiscCodegenMethods, PreDefineCodegenMethods,
+    BackendTypes, BaseTypeCodegenMethods, PreDefineCodegenMethods,
 };
-use std::{marker::PhantomData, sync::Arc};
+use std::marker::PhantomData;
 
 use melior::ir as mlir_ir;
 use melior::ir::{r#type as mlir_type, TypeLike};
@@ -22,19 +22,53 @@ use self::ty::MLIRType;
 
 pub(crate) struct GPUCodegenContext<'tcx, 'ml, 'a> {
     pub mlir_ctx: &'ml melior::Context,
+    pub mlir_module: &'ml melior::ir::Module<'ml>,
+    pub mlir_body: melior::ir::BlockRef<'ml, 'ml>,
     pub dummy: PhantomData<&'a mlir_ir::operation::Operation<'ml>>,
     tcx: rustc_middle::ty::TyCtxt<'tcx>,
 }
 
-impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
-    pub fn new(tcx: rustc_middle::ty::TyCtxt<'tcx>, mlir_ctx: &'ml melior::Context) -> Self {
-        Self { mlir_ctx, tcx, dummy: PhantomData }
+impl<'tcx, 'ml, 'a> std::fmt::Debug for GPUCodegenContext<'tcx, 'ml, 'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GPUCodegenContext")
+            .field("mlir_ctx", &self.mlir_ctx)
+            .field("mlir_module", &self.mlir_module)
+            .field("mlir_body", &self.mlir_body)
+            .field("dummy", &self.dummy)
+            .finish()
     }
 }
 
-pub(crate) struct Funclet<'tcx, 'a> {
-    cleanuppad: mlir_ir::Value<'tcx, 'a>,
-    operand: mlir_ir::operation::OperationRef<'tcx, 'a>,
+impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
+    pub fn new(
+        tcx: rustc_middle::ty::TyCtxt<'tcx>,
+        mlir_ctx: &'ml melior::Context,
+        mlir_module: &'ml melior::ir::Module<'ml>,
+        mlir_body: melior::ir::BlockRef<'ml, 'ml>,
+    ) -> Self {
+        let location = melior::ir::Location::unknown(mlir_ctx);
+        Self {
+            mlir_ctx,
+            tcx,
+            mlir_module,
+            mlir_body,
+            dummy: PhantomData,
+        }
+    }
+}
+
+impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
+    pub fn to_mlir_loc(&self, span: rustc_span::Span) -> melior::ir::Location<'ml> {
+        let source_map = self.tcx.sess.source_map();
+        let loc = source_map.lookup_char_pos(span.lo());
+
+        melior::ir::Location::new(
+            self.mlir_ctx,
+            format!("{}", loc.file.name.prefer_local()).as_str(),
+            loc.line,
+            loc.col.0,
+        )
+    }
 }
 
 impl<'tcx, 'ml, 'a> HasTypingEnv<'tcx> for GPUCodegenContext<'tcx, 'ml, 'a> {

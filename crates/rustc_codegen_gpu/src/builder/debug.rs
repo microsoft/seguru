@@ -1,4 +1,4 @@
-use rustc_codegen_ssa::traits::{CoverageInfoBuilderMethods, DebugInfoBuilderMethods};
+use rustc_codegen_ssa::traits::DebugInfoBuilderMethods;
 
 use super::GpuBuilder;
 

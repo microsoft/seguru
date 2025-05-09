@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use rustc_codegen_ssa::mono_item::MonoItemExt;
 use rustc_codegen_ssa::ModuleCodegen;
 use rustc_codegen_ssa::{
@@ -7,7 +5,6 @@ use rustc_codegen_ssa::{
     CompiledModule,
 };
 use rustc_errors::DiagCtxtHandle;
-use rustc_middle::mir::mono::MonoItem;
 
 use crate::{
     backend::{GPUCodeGenModule, GPUCodegenBackend},
@@ -42,13 +39,13 @@ pub(crate) fn codegen(
         bytecode: None,
         assembly: None,
         llvm_ir: None,
-        links_from_incr_cache: todo!(),
+        links_from_incr_cache: vec![],
     })
 }
 
-pub(crate) fn module_codegen(
-    tcx: rustc_middle::ty::TyCtxt<'_>,
-    (cgu_name, mlir_ctx): (Symbol, &'static melior::Context),
+pub(crate) fn module_codegen<'tcx>(
+    tcx: rustc_middle::ty::TyCtxt<'tcx>,
+    (cgu_name, cx): (Symbol, GPUCodegenContext<'tcx, 'static, 'static>),
 ) -> ModuleCodegen<GPUCodeGenModule> {
     let cgu = tcx.codegen_unit(cgu_name);
     let module = GPUCodeGenModule {
@@ -56,7 +53,6 @@ pub(crate) fn module_codegen(
         mlir_module: None,
     };
     {
-        let cx = GPUCodegenContext::new(tcx, mlir_ctx);
         let mono_items = cgu.items_in_deterministic_order(tcx);
         for &(mono_item, data) in &mono_items {
             mono_item.predefine::<GpuBuilder<'_, '_, '_>>(&cx, data.linkage, data.visibility);

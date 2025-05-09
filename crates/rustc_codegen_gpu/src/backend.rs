@@ -1,4 +1,4 @@
-use log_derive::*;
+use melior::ir::Location;
 use rustc_codegen_llvm::LlvmCodegenBackend;
 use rustc_codegen_ssa::back::lto::{LtoModuleCodegen, ThinModule, ThinShared};
 use rustc_codegen_ssa::traits::{CodegenBackend, ExtraBackendMethods, WriteBackendMethods};
@@ -13,7 +13,7 @@ use rustc_middle::ty::TyCtxt;
 use rustc_middle::util::Providers;
 use rustc_session::Session;
 use rustc_span::{Span, Symbol};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::{any::Any, collections::HashMap};
 
 use crate::mlir;
@@ -390,6 +390,11 @@ impl ExtraBackendMethods for GPUCodegenBackend {
         let start_time = std::time::Instant::now();
         let dep_node = tcx.codegen_unit(cgu_name).codegen_dep_node(tcx);
         let ctx: &'static melior::Context = Box::leak(Box::new(melior::Context::new()));
+        let location = Location::unknown(ctx);
+        let mlir_module: &'static melior::ir::Module =
+            Box::leak(Box::new(melior::ir::Module::new(location)));
+        let mlir_body = mlir_module.body();
+        let ctx = crate::context::GPUCodegenContext::new(tcx, ctx, mlir_module, mlir_body);
         let (module, _) = tcx.dep_graph.with_task(
             dep_node,
             tcx,
@@ -472,4 +477,3 @@ impl CodegenBackend for GPUCodegenBackend {
         (codegen_results, work_products)
     }
 }
-

@@ -1,4 +1,4 @@
-use rustc_codegen_ssa::traits::{CoverageInfoBuilderMethods, DebugInfoCodegenMethods};
+use rustc_codegen_ssa::traits::DebugInfoCodegenMethods;
 
 use super::GPUCodegenContext;
 
@@ -25,7 +25,8 @@ impl<'tcx, 'ml, 'a> DebugInfoCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'm
             Self::DILocation,
         >,
     > {
-        todo!()
+        log::trace!("create_function_debug_context");
+        None
     }
 
     fn dbg_scope_fn(

@@ -5,17 +5,23 @@ mod intrinsic;
 
 use std::{marker::PhantomData, ops::Deref};
 
-use melior::ir as mlir_ir;
+use melior::ir::{self as mlir_ir, BlockLike, RegionLike, RegionRef};
 use rustc_codegen_ssa::traits::{
-    AsmBuilderMethods, BackendTypes, BaseTypeCodegenMethods, BuilderMethods,
-    IntrinsicCallBuilderMethods, StaticBuilderMethods,
+    AsmBuilderMethods, BackendTypes, BuilderMethods, StaticBuilderMethods,
 };
 
 use crate::context::GPUCodegenContext;
 
 pub(crate) struct GpuBuilder<'tcx, 'ml, 'a> {
-    pub cx: &'tcx GPUCodegenContext<'tcx, 'ml, 'a>,
+    pub cx: &'a GPUCodegenContext<'tcx, 'ml, 'a>,
+    pub cur_block: <GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::BasicBlock,
     dummy: PhantomData<&'a mlir_ir::operation::Operation<'ml>>,
+}
+
+impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
+    pub fn cur_func(&self) -> Option<<GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::Function> {
+        self.cur_block.parent_operation()
+    }
 }
 
 impl<'tcx, 'ml, 'a> BackendTypes for GpuBuilder<'tcx, 'ml, 'a> {
@@ -63,15 +69,19 @@ impl<'tcx, 'ml, 'a> Deref for GpuBuilder<'tcx, 'ml, 'a> {
     type Target = GPUCodegenContext<'tcx, 'ml, 'a>;
 }
 
-impl<'tcx, 'ml, 'a, 'val> BuilderMethods<'a, 'tcx> for GpuBuilder<'tcx, 'ml, 'val> {
+impl<'tcx, 'ml, 'a: 'val, 'val> BuilderMethods<'a, 'tcx> for GpuBuilder<'tcx, 'ml, 'val> {
     type CodegenCx = GPUCodegenContext<'tcx, 'ml, 'val>;
 
     fn build(cx: &'a Self::CodegenCx, llbb: Self::BasicBlock) -> Self {
-        todo!()
+        Self {
+            cx,
+            cur_block: llbb,
+            dummy: PhantomData,
+        }
     }
 
     fn cx(&self) -> &Self::CodegenCx {
-        todo!()
+        self.cx
     }
 
     fn llbb(&self) -> Self::BasicBlock {
@@ -82,12 +92,21 @@ impl<'tcx, 'ml, 'a, 'val> BuilderMethods<'a, 'tcx> for GpuBuilder<'tcx, 'ml, 'va
         todo!()
     }
 
-    fn append_block(cx: &'a Self::CodegenCx, llfn: Self::Function, name: &str) -> Self::BasicBlock {
-        todo!()
+    fn append_block(
+        cx: &'a Self::CodegenCx,
+        llfn: mlir_ir::operation::OperationRef<'ml, 'a>,
+        name: &str,
+    ) -> Self::BasicBlock {
+        log::trace!("append_block({:?}, name: {:?})", llfn, name);
+        let name = rustc_data_structures::small_c_str::SmallCStr::new(name);
+        let region: RegionRef<'ml, 'a> = unsafe { llfn.to_ref() }.region(0).unwrap();
+        let block: mlir_ir::BlockRef<'ml, 'a> = region.append_block(melior::ir::Block::new(&[]));
+        block
+        //llvm::LLVMAppendBasicBlockInContext(cx.llcx, llfn, name.as_ptr())
     }
 
     fn append_sibling_block(&mut self, name: &str) -> Self::BasicBlock {
-        todo!()
+        Self::append_block(self.cx, self.cur_func().unwrap(), name)
     }
 
     fn switch_to_block(&mut self, llbb: Self::BasicBlock) {

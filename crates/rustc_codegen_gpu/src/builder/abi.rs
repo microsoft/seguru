@@ -1,14 +1,6 @@
-use std::marker::PhantomData;
-
-use melior::ir as mlir_ir;
 use rustc_abi::HasDataLayout;
-use rustc_codegen_ssa::traits::{
-    AbiBuilderMethods, ArgAbiBuilderMethods, AsmBuilderMethods, BackendTypes,
-    BaseTypeCodegenMethods, BuilderMethods, IntrinsicCallBuilderMethods, StaticBuilderMethods,
-};
-use rustc_middle::ty::layout::{FnAbiOf, FnAbiOfHelpers, HasTyCtxt, HasTypingEnv, LayoutOfHelpers};
-
-use crate::context::GPUCodegenContext;
+use rustc_codegen_ssa::traits::{AbiBuilderMethods, ArgAbiBuilderMethods};
+use rustc_middle::ty::layout::{FnAbiOfHelpers, HasTyCtxt, HasTypingEnv, LayoutOfHelpers};
 
 use super::GpuBuilder;
 

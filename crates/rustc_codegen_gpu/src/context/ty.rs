@@ -1,6 +1,4 @@
-use rustc_codegen_ssa::traits::{
-    LayoutTypeCodegenMethods, MiscCodegenMethods, TypeMembershipCodegenMethods,
-};
+use rustc_codegen_ssa::traits::{LayoutTypeCodegenMethods, TypeMembershipCodegenMethods};
 
 use super::GPUCodegenContext;
 
@@ -91,54 +89,6 @@ impl<'tcx, 'ml, 'a> LayoutTypeCodegenMethods<'tcx> for GPUCodegenContext<'tcx, '
         index: usize,
         immediate: bool,
     ) -> Self::Type {
-        todo!()
-    }
-}
-
-impl<'tcx, 'ml, 'a> MiscCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, 'a> {
-    fn vtables(
-        &self,
-    ) -> &std::cell::RefCell<
-        rustc_data_structures::fx::FxHashMap<
-            (
-                rustc_middle::ty::Ty<'tcx>,
-                Option<rustc_middle::ty::ExistentialTraitRef<'tcx>>,
-            ),
-            Self::Value,
-        >,
-    > {
-        todo!()
-    }
-
-    fn get_fn(&self, instance: rustc_middle::ty::Instance<'tcx>) -> Self::Function {
-        todo!()
-    }
-
-    fn get_fn_addr(&self, instance: rustc_middle::ty::Instance<'tcx>) -> Self::Value {
-        todo!()
-    }
-
-    fn eh_personality(&self) -> Self::Value {
-        todo!()
-    }
-
-    fn sess(&self) -> &rustc_session::Session {
-        todo!()
-    }
-
-    fn codegen_unit(&self) -> &'tcx rustc_middle::mir::mono::CodegenUnit<'tcx> {
-        todo!()
-    }
-
-    fn set_frame_pointer_type(&self, llfn: Self::Function) {
-        todo!()
-    }
-
-    fn apply_target_cpu_attr(&self, llfn: Self::Function) {
-        todo!()
-    }
-
-    fn declare_c_main(&self, fn_type: Self::Type) -> Option<Self::Function> {
         todo!()
     }
 }

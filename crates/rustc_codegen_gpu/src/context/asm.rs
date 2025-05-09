@@ -1,4 +1,4 @@
-use rustc_codegen_ssa::traits::{AsmBuilderMethods, AsmCodegenMethods};
+use rustc_codegen_ssa::traits::AsmCodegenMethods;
 
 use super::GPUCodegenContext;
 

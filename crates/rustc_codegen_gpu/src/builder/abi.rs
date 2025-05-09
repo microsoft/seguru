@@ -54,7 +54,13 @@ impl<'tcx, 'ml, 'a> FnAbiOfHelpers<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
 
 impl<'tcx, 'ml, 'a> AbiBuilderMethods for GpuBuilder<'tcx, 'ml, 'a> {
     fn get_param(&mut self, index: usize) -> Self::Value {
-        todo!()
+        let cur_fn = self.cur_operation().unwrap();
+        log::trace!("get_param({})", index);
+        if index >= cur_fn.operand_count() {
+            panic!("index out of bounds");
+        }
+        let val = cur_fn.operand(index);
+        val.expect("failed to get params")
     }
 }
 

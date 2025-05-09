@@ -1,3 +1,5 @@
+#![feature(register_tool)]
+#![register_tool(gpu_codegen)]
 use gpu::Shared;
 
 /// RUSTFLAGS="-Zcodegen-backend=`realpath ../target/debug/librustc_codegen_gpu.dylib`" cargo build
@@ -17,7 +19,7 @@ fn kernel(
     b_s: Shared<[u8; BK * BK]>,
     bk: usize,
 ) {
-    let thread = gpu::thread();
+    let thread = gpu::thread2();
     let unique_col = thread.local_thread_id() % bk;
     let unique_row = thread.local_thread_id() / bk;
     for bkIdx in (0..K).step_by(BK) {
@@ -27,7 +29,7 @@ fn kernel(
         mut_a[unique_row * BK + unique_col] = a[unique_row * BK + bkIdx * BK + unique_col];
         mut_b[unique_row * BK + unique_col] = b[unique_row * BK + bkIdx * BK + unique_col];
         let a = a_s.read();
-        let a = b_s.read();
+        let b = b_s.read();
         for k in 0..BK {
             *c = *c + a[unique_row * M + k] * b[k * N + unique_col]; // Modify each value in the chunk
         }
@@ -36,9 +38,6 @@ fn kernel(
 
 #[no_mangle]
 fn main() {
-    let rows = 2; // Adjust to fit your example size
-    let cols = 2;
-
     // Initialize the result as a mutable vector
     let a = [0; K * M];
     let b = [0; N * K];
@@ -47,7 +46,6 @@ fn main() {
     // Flatten the vector into a slice to use chunk_mut
 
     // Specify chunk size (this determines how many elements each thread will process)
-    let chunk_size = 1;
 
     // Similar to thread::scope to ensure all threads live during the scope
     // in gpu::grid should be called for only once inside one scope.
@@ -56,7 +54,7 @@ fn main() {
         let mut chunks: std::slice::ChunksMut<'_, u8> = result.chunks_mut(1);
         for block in grid {
             // Split the flattened result into chunks of size `chunk_size` using `chunks_mut`
-            let mut chunk = chunks.next().unwrap();
+            let chunk = chunks.next().unwrap();
             let mut chunk_row = chunk.chunks_mut(1);
             let a_s = gpu::Shared::<[u8; BK * BK]>::new();
             let b_s = gpu::Shared::<[u8; BK * BK]>::new();

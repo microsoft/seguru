@@ -5,12 +5,12 @@ mod intrinsic;
 
 use std::{marker::PhantomData, ops::Deref};
 
-use melior::ir::{self as mlir_ir, BlockLike, RegionLike, RegionRef};
+use melior::ir::{self as mlir_ir, BlockLike, Location, RegionLike, RegionRef};
 use rustc_codegen_ssa::traits::{
     AsmBuilderMethods, BackendTypes, BuilderMethods, StaticBuilderMethods,
 };
 
-use crate::context::GPUCodegenContext;
+use crate::{context::GPUCodegenContext, mlir::MLIROpHelpers};
 
 pub(crate) struct GpuBuilder<'tcx, 'ml, 'a> {
     pub cx: &'a GPUCodegenContext<'tcx, 'ml, 'a>,
@@ -19,8 +19,12 @@ pub(crate) struct GpuBuilder<'tcx, 'ml, 'a> {
 }
 
 impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
-    pub fn cur_func(&self) -> Option<<GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::Function> {
+    pub fn cur_fn(&self) -> Option<<GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::Function> {
         self.cur_block.parent_operation()
+    }
+
+    pub fn cur_operation(&self) -> Option<&'a mlir_ir::Operation<'ml>> {
+        self.cur_fn().map(|f| unsafe { f.to_ref() })
     }
 }
 
@@ -100,13 +104,19 @@ impl<'tcx, 'ml, 'a: 'val, 'val> BuilderMethods<'a, 'tcx> for GpuBuilder<'tcx, 'm
         log::trace!("append_block({:?}, name: {:?})", llfn, name);
         let name = rustc_data_structures::small_c_str::SmallCStr::new(name);
         let region: RegionRef<'ml, 'a> = unsafe { llfn.to_ref() }.region(0).unwrap();
-        let block: mlir_ir::BlockRef<'ml, 'a> = region.append_block(melior::ir::Block::new(&[]));
+        let types = llfn.get_op_operands_types();
+        let block: mlir_ir::BlockRef<'ml, 'a> = region.append_block(melior::ir::Block::new(
+            &types
+                .iter()
+                .map(|t| (t.clone(), Location::unknown(cx.mlir_ctx)))
+                .collect::<Vec<_>>(),
+        ));
         block
         //llvm::LLVMAppendBasicBlockInContext(cx.llcx, llfn, name.as_ptr())
     }
 
     fn append_sibling_block(&mut self, name: &str) -> Self::BasicBlock {
-        Self::append_block(self.cx, self.cur_func().unwrap(), name)
+        Self::append_block(self.cx, self.cur_fn().unwrap(), name)
     }
 
     fn switch_to_block(&mut self, llbb: Self::BasicBlock) {

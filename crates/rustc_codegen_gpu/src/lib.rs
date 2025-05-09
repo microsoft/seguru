@@ -15,6 +15,7 @@ extern crate rustc_session;
 extern crate rustc_span;
 extern crate rustc_target;
 
+mod attr;
 mod backend;
 mod builder;
 mod context;

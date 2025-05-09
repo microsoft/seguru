@@ -15,5 +15,5 @@ cargo build
 
 ```bash
 cd crates/gpu-test
-RUSTFLAGS="-Zcodegen-backend=`realpath ../target/debug/librustc_codegen_gpu.dylib`" cargo build
+RUST_LOG=trace RUSTFLAGS="-Zcodegen-backend=`realpath ../target/debug/librustc_codegen_gpu.dylib`" cargo build
 ```

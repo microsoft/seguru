@@ -53,56 +53,7 @@ unsafe impl Sync for MLIRModule {}
 
 pub struct GPUCodeGenModule {
     pub llvm_module: Option<LlvmCodegenModule>,
-    pub mlir_module: Option<Arc<MLIRModule>>,
-}
-
-struct ForLoopPrinter<'tcx, 'a> {
-    tcx: TyCtxt<'tcx>,
-    mlir_module: HashMap<Span, Arc<melior::ir::Module<'a>>>,
-}
-
-impl<'tcx, 'a> Visitor<'tcx> for ForLoopPrinter<'tcx, 'a> {
-    fn visit_expr(&mut self, expr: &'tcx Expr<'tcx>) {
-        if let ExprKind::Call(func_expr, _) = &expr.kind {
-            eprintln!("Consider reviewing this call for translation");
-            if let ExprKind::Path(rustc_hir::QPath::Resolved(None, fun_path)) = func_expr.kind {
-                let Some(def_id) = fun_path.res.opt_def_id() else {
-                    // 🎯 Got it!
-                    panic!("Function call without def_id");
-                };
-                if self.tcx.def_path_str(def_id) == "gpu::scope" {
-                    dbg!(expr);
-                    let source_map = self.tcx.sess.source_map();
-                    let loc = source_map.lookup_char_pos(func_expr.span.lo());
-                    let mlir_module = mlir::generate_test_module(loc);
-                    self.mlir_module
-                        .insert(func_expr.span, Arc::new(mlir_module));
-                    // This is where we would translate the function
-                    // to MLIR or LLVM IR.
-                }
-
-                if self.tcx.def_path_str(def_id) == "gpu::ThreadScope::spawn" {
-                    // This is where we would translate the function
-                    // to MLIR or LLVM IR.
-                }
-            }
-        }
-        walk_expr(self, expr);
-    }
-}
-
-impl<'tcx, 'a> ForLoopPrinter<'tcx, 'a> {
-    pub fn printall_loops(&mut self) {
-        eprintln!("Printing all loops in the crate");
-        /*for item_id in self.tcx.hir().items() {
-            let item = self.tcx.hir().item(item_id);
-            if let rustc_hir::ItemKind::Fn { body, .. } = &item.kind {
-                dbg!(body);
-                let body = self.tcx.hir().body(*body);
-                self.visit_body(body);
-            }
-        }*/
-    }
+    pub mlir_module: Option<MLIRModule>,
 }
 
 impl GPUCodegenBackend {
@@ -389,16 +340,10 @@ impl ExtraBackendMethods for GPUCodegenBackend {
     ) -> (rustc_codegen_ssa::ModuleCodegen<Self::Module>, u64) {
         let start_time = std::time::Instant::now();
         let dep_node = tcx.codegen_unit(cgu_name).codegen_dep_node(tcx);
-        let ctx: &'static melior::Context = Box::leak(Box::new(melior::Context::new()));
-        let location = Location::unknown(ctx);
-        let mlir_module: &'static melior::ir::Module =
-            Box::leak(Box::new(melior::ir::Module::new(location)));
-        let mlir_body = mlir_module.body();
-        let ctx = crate::context::GPUCodegenContext::new(tcx, ctx, mlir_module, mlir_body);
         let (module, _) = tcx.dep_graph.with_task(
             dep_node,
             tcx,
-            (cgu_name, ctx),
+            cgu_name,
             crate::write::module_codegen,
             Some(rustc_middle::dep_graph::hash_result),
         );
@@ -441,11 +386,6 @@ impl CodegenBackend for GPUCodegenBackend {
         need_metadata_module: bool,
     ) -> Box<dyn std::any::Any> {
         // Provide a dummy implementation or actual logic
-        let mut visitor = ForLoopPrinter {
-            tcx,
-            mlir_module: HashMap::new(),
-        };
-        visitor.printall_loops();
         let x = Box::new(rustc_codegen_ssa::base::codegen_crate(
             GPUCodegenBackend::new(),
             tcx,
@@ -475,5 +415,9 @@ impl CodegenBackend for GPUCodegenBackend {
             .join(sess);
         eprintln!("join_codegen");
         (codegen_results, work_products)
+    }
+
+    fn link(&self, sess: &Session, codegen_results: CodegenResults, outputs: &rustc_session::config::OutputFilenames) {
+        eprintln!("todo link {:?}", codegen_results.modules);
     }
 }

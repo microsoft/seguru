@@ -10,6 +10,47 @@ use melior::{
 };
 use rustc_span::Loc;
 
+pub enum MLIRVisibility {
+    Public,
+    Private,
+    Nested,
+}
+
+impl From<MLIRVisibility> for &str {
+    fn from(visibility: MLIRVisibility) -> Self {
+        match visibility {
+            MLIRVisibility::Public => "public",
+            MLIRVisibility::Private => "private",
+            MLIRVisibility::Nested => "nested",
+        }
+    }
+}
+
+pub trait MLIROpHelpers<'ml> {
+    fn get_op_operands_types(&self) -> Vec<melior::ir::r#type::Type<'ml>>;
+    fn set_op_visible<'a: 'ml>(&mut self, ctx: &'a Context, val: MLIRVisibility);
+}
+
+impl<'ml> MLIROpHelpers<'ml> for Operation<'ml> {
+    fn set_op_visible<'a: 'ml>(&mut self, ctx: &'a Context, val: MLIRVisibility) {
+        let attr = melior::ir::attribute::StringAttribute::new(ctx, val.into());
+        self.set_attribute("visibility", attr.into());
+    }
+    fn get_op_operands_types(&self) -> Vec<melior::ir::r#type::Type<'ml>> {
+        let type_attr: melior::ir::attribute::TypeAttribute = self
+            .attribute("function_type")
+            .unwrap()
+            .try_into()
+            .expect("invalid func attr");
+        let func_type: FunctionType = type_attr.value().try_into().expect("invalid function type");
+        let mut ret = vec![];
+        for i in 0..func_type.input_count() {
+            ret.push(func_type.input(i).unwrap());
+        }
+        ret
+    }
+}
+
 pub(crate) fn generate_test_module<'a>(loc: Loc) -> Module<'a> {
     // We need a registry to hold all the dialects
     let registry = DialectRegistry::new();

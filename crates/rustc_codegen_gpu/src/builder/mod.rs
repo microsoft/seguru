@@ -5,26 +5,35 @@ mod intrinsic;
 
 use std::{marker::PhantomData, ops::Deref};
 
-use melior::ir::{self as mlir_ir, BlockLike, Location, RegionLike, RegionRef};
+use log_derive::logfn;
+use melior::dialect::memref as mlir_memref;
+use melior::dialect::ods::memref as mlir_ods_memref;
+use melior::ir::attribute::DenseI64ArrayAttribute;
+use melior::ir::r#type::{self as mlir_type, MemRefType};
+
+use melior::ir::{self as mlir_ir, BlockLike, Location, RegionLike, RegionRef, ValueLike};
 use rustc_codegen_ssa::traits::{
-    AsmBuilderMethods, BackendTypes, BuilderMethods, StaticBuilderMethods,
+    AsmBuilderMethods, BackendTypes, BaseTypeCodegenMethods, BuilderMethods, StaticBuilderMethods,
 };
 
+use crate::mlir::BlockRefWithTime;
 use crate::{context::GPUCodegenContext, mlir::MLIROpHelpers};
 
 pub(crate) struct GpuBuilder<'tcx, 'ml, 'a> {
     pub cx: &'a GPUCodegenContext<'tcx, 'ml, 'a>,
     pub cur_block: <GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::BasicBlock,
+    pub cur_span: Option<rustc_span::Span>,
     dummy: PhantomData<&'a mlir_ir::operation::Operation<'ml>>,
 }
 
 impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
-    pub fn cur_fn(&self) -> Option<<GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::Function> {
-        self.cur_block.parent_operation()
+    pub fn cur_loc(&self) -> Location<'ml> {
+        self.cur_span
+            .map_or(self.cx.unknown_loc(), |span| self.cx.to_mlir_loc(span))
     }
 
-    pub fn cur_operation(&self) -> Option<&'a mlir_ir::Operation<'ml>> {
-        self.cur_fn().map(|f| unsafe { f.to_ref() })
+    pub fn cur_block(&self) -> &'a mlir_ir::Block<'ml> {
+        self.cur_block.to_ref()
     }
 }
 
@@ -50,7 +59,7 @@ impl<'tcx, 'ml, 'a> StaticBuilderMethods for GpuBuilder<'tcx, 'ml, 'a> {
     }
 }
 
-impl<'tcx, 'ml, 'a> AsmBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
+impl<'tcx: 'a, 'ml: 'a, 'a> AsmBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
     fn codegen_inline_asm(
         &mut self,
         template: &[rustc_ast::InlineAsmTemplatePiece],
@@ -73,13 +82,16 @@ impl<'tcx, 'ml, 'a> Deref for GpuBuilder<'tcx, 'ml, 'a> {
     type Target = GPUCodegenContext<'tcx, 'ml, 'a>;
 }
 
-impl<'tcx, 'ml, 'a: 'val, 'val> BuilderMethods<'a, 'tcx> for GpuBuilder<'tcx, 'ml, 'val> {
+impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
+    for GpuBuilder<'tcx, 'ml, 'val>
+{
     type CodegenCx = GPUCodegenContext<'tcx, 'ml, 'val>;
 
     fn build(cx: &'a Self::CodegenCx, llbb: Self::BasicBlock) -> Self {
         Self {
             cx,
             cur_block: llbb,
+            cur_span: None,
             dummy: PhantomData,
         }
     }
@@ -93,7 +105,8 @@ impl<'tcx, 'ml, 'a: 'val, 'val> BuilderMethods<'a, 'tcx> for GpuBuilder<'tcx, 'm
     }
 
     fn set_span(&mut self, span: rustc_span::Span) {
-        todo!()
+        log::trace!("set_span({:?})", span);
+        self.cur_span.replace(span);
     }
 
     fn append_block(
@@ -116,7 +129,7 @@ impl<'tcx, 'ml, 'a: 'val, 'val> BuilderMethods<'a, 'tcx> for GpuBuilder<'tcx, 'm
     }
 
     fn append_sibling_block(&mut self, name: &str) -> Self::BasicBlock {
-        Self::append_block(self.cx, self.cur_fn().unwrap(), name)
+        todo!();
     }
 
     fn switch_to_block(&mut self, llbb: Self::BasicBlock) {
@@ -315,7 +328,11 @@ impl<'tcx, 'ml, 'a: 'val, 'val> BuilderMethods<'a, 'tcx> for GpuBuilder<'tcx, 'm
     }
 
     fn from_immediate(&mut self, val: Self::Value) -> Self::Value {
-        todo!()
+        if val.r#type() == self.cx().type_i1() {
+            self.zext(val, self.cx().type_i8())
+        } else {
+            val
+        }
     }
 
     fn to_immediate_scalar(&mut self, val: Self::Value, scalar: rustc_abi::Scalar) -> Self::Value {
@@ -323,11 +340,30 @@ impl<'tcx, 'ml, 'a: 'val, 'val> BuilderMethods<'a, 'tcx> for GpuBuilder<'tcx, 'm
     }
 
     fn alloca(&mut self, size: rustc_abi::Size, align: rustc_abi::Align) -> Self::Value {
-        todo!()
+        let loc = self.cur_loc();
+        log::trace!("alloca({:?}, {:?})", size, align);
+
+        let mem_ref_ty =
+            mlir_type::MemRefType::new(self.type_i8(), &[size.bytes() as i64], None, None);
+        let op = melior::dialect::memref::alloca(
+            self.mlir_ctx,
+            mem_ref_ty,
+            &[],
+            &[],
+            Some(mlir_ir::attribute::IntegerAttribute::new(
+                self.cx.type_i64(),
+                align.bytes() as i64,
+            )),
+            loc,
+        );
+        let op = self.cur_block().append_operation(op);
+        op.result(0).unwrap().into()
     }
 
+    #[logfn(TRACE)]
     fn dynamic_alloca(&mut self, size: Self::Value, align: rustc_abi::Align) -> Self::Value {
-        todo!()
+        // add dynamic_size in memref::alloca
+        todo!();
     }
 
     fn load(&mut self, ty: Self::Type, ptr: Self::Value, align: rustc_abi::Align) -> Self::Value {
@@ -378,7 +414,10 @@ impl<'tcx, 'ml, 'a: 'val, 'val> BuilderMethods<'a, 'tcx> for GpuBuilder<'tcx, 'm
         ptr: Self::Value,
         align: rustc_abi::Align,
     ) -> Self::Value {
-        todo!()
+        let op = mlir_memref::store(val, ptr, &[], self.cur_loc());
+        self.cur_block().append_operation(op);
+        // TODO(check): memref::store op does not return a value.
+        val
     }
 
     fn store_with_flags(
@@ -388,7 +427,7 @@ impl<'tcx, 'ml, 'a: 'val, 'val> BuilderMethods<'a, 'tcx> for GpuBuilder<'tcx, 'm
         align: rustc_abi::Align,
         flags: rustc_codegen_ssa::MemFlags,
     ) -> Self::Value {
-        todo!()
+        self.store(val, ptr, align)
     }
 
     fn atomic_store(
@@ -411,7 +450,34 @@ impl<'tcx, 'ml, 'a: 'val, 'val> BuilderMethods<'a, 'tcx> for GpuBuilder<'tcx, 'm
         ptr: Self::Value,
         indices: &[Self::Value],
     ) -> Self::Value {
-        todo!()
+        log::trace!("inbounds_gep({:?}, {:?} {:?})", ty, ptr, indices);
+        if indices.len() != 1 {
+            panic!("only supports single index");
+        }
+        let strides = [];
+        let sizes = [];
+        let static_offsets = DenseI64ArrayAttribute::new(self.mlir_ctx, &[]).into();
+        let static_size = DenseI64ArrayAttribute::new(self.mlir_ctx, &[]).into();
+        let static_strides = DenseI64ArrayAttribute::new(self.mlir_ctx, &[]).into();
+
+        let result_ty = MemRefType::new(ty, &[indices.len() as i64], None, None);
+        let op = self.cur_block().append_operation(
+            mlir_ods_memref::reinterpret_cast(
+                self.mlir_ctx,
+                ty,
+                ptr,
+                indices,
+                &sizes,
+                &strides,
+                static_offsets,
+                static_size,
+                static_strides,
+                self.cur_loc(),
+            )
+            .into(),
+        );
+        log::trace!("reinterpret_cast({:?})", op);
+        op.result(0).unwrap().into()
     }
 
     fn trunc(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {

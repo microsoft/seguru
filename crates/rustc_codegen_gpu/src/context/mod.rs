@@ -10,20 +10,23 @@ mod ty;
 
 use rustc_abi::{self, HasDataLayout};
 use rustc_codegen_ssa::traits::BackendTypes;
-use std::collections::HashMap;
 use std::marker::PhantomData;
+use std::{collections::HashMap, sync::RwLock};
 
 use melior::ir as mlir_ir;
 use rustc_middle::ty::layout::{HasTyCtxt, HasTypingEnv};
+
+use crate::mlir::BlockRefWithTime;
 
 use self::ty::MLIRType;
 
 pub(crate) struct GPUCodegenContext<'tcx, 'ml, 'a> {
     pub mlir_ctx: &'ml melior::Context,
     pub mlir_module: &'ml melior::ir::Module<'ml>,
-    pub mlir_body: melior::ir::BlockRef<'ml, 'ml>,
+    pub mlir_body: melior::ir::BlockRef<'ml, 'a>,
     pub dummy: PhantomData<&'a mlir_ir::operation::Operation<'ml>>,
     pub fn_db: HashMap<rustc_hir::def_id::DefId, mlir_ir::operation::OperationRef<'ml, 'a>>,
+    pub const_alloc: RwLock<HashMap<rustc_const_eval::interpret::AllocId, mlir_ir::Value<'ml, 'a>>>,
     tcx: rustc_middle::ty::TyCtxt<'tcx>,
 }
 
@@ -53,11 +56,19 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             mlir_body,
             dummy: PhantomData,
             fn_db: HashMap::new(),
+            const_alloc: RwLock::new(HashMap::new()),
         }
+    }
+
+    pub fn mlir_body(&self) -> &'a melior::ir::Block<'ml> {
+        self.mlir_body.to_ref()
     }
 }
 
 impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
+    pub fn unknown_loc(&self) -> melior::ir::Location<'ml> {
+        melior::ir::Location::unknown(self.mlir_ctx)
+    }
     pub fn to_mlir_loc(&self, span: rustc_span::Span) -> melior::ir::Location<'ml> {
         let source_map = self.tcx.sess.source_map();
         let loc = source_map.lookup_char_pos(span.lo());

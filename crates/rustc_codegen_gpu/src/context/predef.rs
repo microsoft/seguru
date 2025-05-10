@@ -1,7 +1,7 @@
 use rustc_codegen_ssa::traits::PreDefineCodegenMethods;
 use rustc_middle::mir::mono::Linkage;
 
-use crate::{attr::GpuAttributes, mlir::MLIRVisibility};
+use crate::mlir::MLIRVisibility;
 
 use super::GPUCodegenContext;
 

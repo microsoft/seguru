@@ -1,3 +1,4 @@
+use log_derive::{logfn, logfn_inputs};
 use melior::dialect::llvm::r#type as mlir_llvm_type;
 use rustc_abi::{BackendRepr, Primitive};
 use rustc_codegen_ssa::traits::{
@@ -8,57 +9,20 @@ use rustc_middle::ty::layout::LayoutOf;
 
 use super::GPUCodegenContext;
 
-use melior::ir::TypeLike;
 use melior::ir::{self as mlir_ir, r#type as mlir_type};
+use melior::ir::{ShapedTypeLike, TypeLike};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum MLIRType<'ctx> {
-    Raw(mlir_ir::Type<'ctx>),
-    Array(mlir_ir::Type<'ctx>),
-}
-
-impl<'a> MLIRType<'a> {
-    pub(crate) fn array(a: mlir_ir::Type<'a>) -> Self {
-        MLIRType::Array(a)
-    }
-}
-
-impl<'ctx> From<mlir_ir::Type<'ctx>> for MLIRType<'ctx> {
-    fn from(ty: mlir_ir::Type<'ctx>) -> Self {
-        MLIRType::Raw(ty)
-    }
-}
-
-impl<'ctx> From<MLIRType<'ctx>> for mlir_ir::Type<'ctx> {
-    fn from(ty: MLIRType<'ctx>) -> Self {
-        match ty {
-            MLIRType::Raw(ty) => ty,
-            MLIRType::Array(ty) => ty,
-        }
-    }
-}
-
-pub(crate) fn array_element<'ctx>(ty: &mlir_ir::Type<'ctx>) -> mlir_ir::Type<'ctx> {
-    unsafe {
-        let raw = mlir_ir::Type::from(*ty).to_raw();
-        mlir_ir::Type::from_raw(mlir_sys::mlirLLVMArrayTypeGetElementType(raw))
-    }
-}
+pub type MLIRType<'ctx> = mlir_ir::Type<'ctx>;
 
 impl<'tcx, 'ml, 'a> TypeMembershipCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, 'a> {}
 
 impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     fn type_empty(&self) -> MLIRType<'ml> {
-        MLIRType::from(mlir_ir::Type::from(mlir_type::TupleType::new(
-            self.mlir_ctx,
-            &[],
-        )))
+        MLIRType::from(mlir_type::TupleType::new(self.mlir_ctx, &[]))
     }
-    fn type_i1(&self) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type {
-        MLIRType::from(mlir_ir::Type::from(mlir_type::IntegerType::new(
-            self.mlir_ctx,
-            1,
-        )))
+
+    pub(crate) fn type_i1(&self) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type {
+        MLIRType::from(mlir_type::IntegerType::new(self.mlir_ctx, 1))
     }
 
     pub fn type_padding_filler(
@@ -73,39 +37,43 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         self.type_array(self.type_from_integer(unit), size / unit_size)
     }
 
+    /// TODO(delete): this should never be called
     fn type_struct(
         &self,
         fields: &[<GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type],
         packed: bool,
     ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type {
-        MLIRType::from(mlir_ir::Type::from(mlir_llvm_type::r#struct(
+        MLIRType::from(mlir_llvm_type::r#struct(
             self.mlir_ctx,
             &fields.iter().map(|a| (*a).into()).collect::<Vec<_>>(),
             packed,
-        )))
+        ))
     }
 
+    #[logfn_inputs(Trace)]
+    #[logfn(Trace)]
     fn scalar_mlir_type(
         &self,
         scalar: &rustc_abi::Scalar,
-        ty: Option<rustc_middle::ty::Ty<'tcx>>,
+        ptr_ty: Option<&rustc_middle::ty::Ty<'tcx>>,
+        immediate: bool,
     ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type {
-        if scalar.is_bool() {
+        if immediate && scalar.is_bool() {
             return self.type_i1();
         }
         match scalar.primitive() {
             Primitive::Int(i, _signed) => self.type_from_integer(i),
             Primitive::Float(f) => self.type_from_float(f),
             Primitive::Pointer(a) => {
-                let ty = ty.unwrap().builtin_deref(true).unwrap();
-                log::trace!("Pointer: {:?}", ty);
+                log::trace!("Pointer: {:?}", ptr_ty);
+                let ty = ptr_ty.unwrap().builtin_deref(true).unwrap();
                 let layout = self.layout_of(ty);
-                MLIRType::from(mlir_ir::Type::from(mlir_type::MemRefType::new(
-                    self.mlir_type(layout).into(),
+                MLIRType::from(mlir_type::MemRefType::new(
+                    self.mlir_type(layout, immediate).into(),
                     &[1],
                     None,
                     None,
-                )))
+                ))
             }
         }
     }
@@ -138,7 +106,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 result.push(self.type_padding_filler(padding, padding_align));
             }
 
-            result.push(self.mlir_type(field));
+            result.push(self.mlir_type(field, false));
             offset = target_offset + field.size;
             prev_effective_align = effective_field_align;
         }
@@ -168,30 +136,32 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     pub(crate) fn mlir_type(
         &self,
         layout: rustc_middle::ty::layout::TyAndLayout<'tcx>,
+        immediate: bool,
     ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type {
         let cx = self.mlir_ctx;
         match layout.backend_repr {
             BackendRepr::Scalar(scalar) => {
                 log::trace!("Scalar: {:?}", scalar);
-                self.scalar_mlir_type(&scalar, Some(layout.ty))
+                self.scalar_mlir_type(&scalar, Some(&layout.ty), immediate)
             }
             BackendRepr::ScalarPair(s1, s2) => {
                 log::trace!("ScalarPair: {:?} {:?}", s1, s2);
                 // An immediate pair always contains just the two elements, without any padding
                 // filler, as it should never be stored to memory.
-                let t1 = self.scalar_mlir_type(&s1, None).into();
-                let t2 = self.scalar_mlir_type(&s2, None).into();
-                MLIRType::from(mlir_ir::Type::from(mlir_type::TupleType::new(
-                    self.mlir_ctx,
-                    &[t1, t2],
-                )))
+                let t1 = self
+                    .scalar_pair_element_backend_type(layout, 0, false)
+                    .into();
+                let t2 = self
+                    .scalar_pair_element_backend_type(layout, 1, false)
+                    .into();
+                MLIRType::from(mlir_type::TupleType::new(self.mlir_ctx, &[t1, t2]))
             }
             BackendRepr::SimdVector { element, count } => todo!(),
             BackendRepr::Memory { .. } if !layout.is_zst() => match &layout.fields {
                 rustc_abi::FieldsShape::Primitive => todo!(),
                 rustc_abi::FieldsShape::Union(non_zero) => todo!(),
                 rustc_abi::FieldsShape::Array { stride, count } => {
-                    let elem = self.mlir_type(layout.field(self, 0));
+                    let elem = self.mlir_type(layout.field(self, 0), immediate);
                     self.type_array(elem, *count)
                 }
                 rustc_abi::FieldsShape::Arbitrary {
@@ -210,45 +180,30 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
 
 impl<'tcx, 'ml, 'a> BaseTypeCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
     fn type_i8(&self) -> Self::Type {
-        MLIRType::from(mlir_ir::Type::from(mlir_type::IntegerType::new(
-            self.mlir_ctx,
-            8,
-        )))
+        MLIRType::from(mlir_type::IntegerType::new(self.mlir_ctx, 8))
     }
 
     fn type_i16(&self) -> Self::Type {
-        MLIRType::from(mlir_ir::Type::from(mlir_type::IntegerType::new(
-            self.mlir_ctx,
-            16,
-        )))
+        MLIRType::from(mlir_type::IntegerType::new(self.mlir_ctx, 16))
     }
 
     fn type_i32(&self) -> Self::Type {
-        MLIRType::from(mlir_ir::Type::from(mlir_type::IntegerType::new(
-            self.mlir_ctx,
-            32,
-        )))
+        MLIRType::from(mlir_type::IntegerType::new(self.mlir_ctx, 32))
     }
 
     fn type_i64(&self) -> Self::Type {
-        MLIRType::from(mlir_ir::Type::from(mlir_type::IntegerType::new(
-            self.mlir_ctx,
-            64,
-        )))
+        MLIRType::from(mlir_type::IntegerType::new(self.mlir_ctx, 64))
     }
 
     fn type_i128(&self) -> Self::Type {
-        MLIRType::from(mlir_ir::Type::from(mlir_type::IntegerType::new(
-            self.mlir_ctx,
-            128,
-        )))
+        MLIRType::from(mlir_type::IntegerType::new(self.mlir_ctx, 128))
     }
 
     fn type_isize(&self) -> Self::Type {
-        MLIRType::from(mlir_ir::Type::from(mlir_type::IntegerType::new(
+        MLIRType::from(mlir_type::IntegerType::new(
             self.mlir_ctx,
             size_of::<isize>() as u32 * 8,
-        )))
+        ))
     }
 
     fn type_f16(&self) -> Self::Type {
@@ -268,15 +223,15 @@ impl<'tcx, 'ml, 'a> BaseTypeCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> 
     }
 
     fn type_array(&self, ty: Self::Type, len: u64) -> Self::Type {
-        MLIRType::Array(melior::dialect::llvm::r#type::array(ty.into(), len as u32))
+        MLIRType::from(mlir_type::RankedTensorType::new(&[len], ty.into(), None))
     }
 
     fn type_func(&self, args: &[Self::Type], ret: Self::Type) -> Self::Type {
-        MLIRType::from(mlir_ir::Type::from(mlir_type::FunctionType::new(
+        MLIRType::from(mlir_type::FunctionType::new(
             self.mlir_ctx,
             &args.iter().map(|a| (*a).into()).collect::<Vec<_>>(),
             &[ret.into()],
-        )))
+        ))
     }
 
     fn type_ptr(&self) -> Self::Type {
@@ -284,9 +239,12 @@ impl<'tcx, 'ml, 'a> BaseTypeCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> 
     }
 
     fn element_type(&self, ty: Self::Type) -> Self::Type {
-        match ty {
-            MLIRType::Raw(ty) => unimplemented!(),
-            MLIRType::Array(ty) => MLIRType::array(array_element(&ty)),
+        if ty.is_ranked_tensor() {
+            mlir_type::RankedTensorType::try_from(ty).unwrap().element()
+        } else if ty.is_mem_ref() {
+            mlir_type::MemRefType::try_from(ty).unwrap().element()
+        } else {
+            panic!("Unsupported type: {:?}", ty);
         }
     }
 
@@ -307,39 +265,36 @@ impl<'tcx, 'ml, 'a> BaseTypeCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> 
     }
 
     fn type_ptr_ext(&self, address_space: rustc_abi::AddressSpace) -> Self::Type {
-        MLIRType::from(mlir_ir::Type::from(melior::dialect::llvm::r#type::pointer(
+        MLIRType::from(melior::dialect::llvm::r#type::pointer(
             self.mlir_ctx,
             address_space.0,
-        )))
+        ))
     }
 
     fn type_kind(&self, ty: Self::Type) -> rustc_codegen_ssa::common::TypeKind {
-        match ty {
-            MLIRType::Array(_) => return rustc_codegen_ssa::common::TypeKind::Array,
-            MLIRType::Raw(ty) => {
-                if ty.is_float() {
-                    rustc_codegen_ssa::common::TypeKind::Float
-                } else if ty.is_integer() {
-                    rustc_codegen_ssa::common::TypeKind::Integer
-                } else if ty.is_vector() {
-                    rustc_codegen_ssa::common::TypeKind::Vector
-                } else if ty.is_llvm_pointer_type() {
-                    rustc_codegen_ssa::common::TypeKind::Pointer
-                } else if ty.is_function() {
-                    rustc_codegen_ssa::common::TypeKind::Function
-                } else if ty.is_vector() {
-                    rustc_codegen_ssa::common::TypeKind::Vector
-                } else {
-                    panic!("Unsupported type: {:?}", ty);
-                }
-            }
+        if ty.is_float() {
+            rustc_codegen_ssa::common::TypeKind::Float
+        } else if ty.is_integer() {
+            rustc_codegen_ssa::common::TypeKind::Integer
+        } else if ty.is_ranked_tensor() {
+            rustc_codegen_ssa::common::TypeKind::Array
+        } else if ty.is_llvm_pointer_type() {
+            rustc_codegen_ssa::common::TypeKind::Pointer
+        } else if ty.is_function() {
+            rustc_codegen_ssa::common::TypeKind::Function
+        } else if ty.is_vector() {
+            rustc_codegen_ssa::common::TypeKind::Vector
+        } else {
+            panic!("Unsupported type: {:?}", ty);
         }
     }
 }
 
 impl<'tcx, 'ml, 'a> LayoutTypeCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, 'a> {
     fn backend_type(&self, layout: rustc_middle::ty::layout::TyAndLayout<'tcx>) -> Self::Type {
-        todo!()
+        let ty = self.mlir_type(layout, false);
+        log::trace!("backend_type: {:?}", ty);
+        ty
     }
 
     fn cast_backend_type(&self, ty: &rustc_target::callconv::CastTarget) -> Self::Type {
@@ -350,7 +305,7 @@ impl<'tcx, 'ml, 'a> LayoutTypeCodegenMethods<'tcx> for GPUCodegenContext<'tcx, '
         &self,
         fn_abi: &rustc_target::callconv::FnAbi<'tcx, rustc_middle::ty::Ty<'tcx>>,
     ) -> Self::Type {
-        todo!()
+        self.fn_abi_to_fn_type(fn_abi).into()
     }
 
     fn fn_ptr_backend_type(
@@ -368,7 +323,7 @@ impl<'tcx, 'ml, 'a> LayoutTypeCodegenMethods<'tcx> for GPUCodegenContext<'tcx, '
         &self,
         layout: rustc_middle::ty::layout::TyAndLayout<'tcx>,
     ) -> Self::Type {
-        self.mlir_type(layout)
+        self.mlir_type(layout, true)
     }
 
     fn is_backend_immediate(&self, layout: rustc_middle::ty::layout::TyAndLayout<'tcx>) -> bool {
@@ -383,12 +338,29 @@ impl<'tcx, 'ml, 'a> LayoutTypeCodegenMethods<'tcx> for GPUCodegenContext<'tcx, '
         matches!(layout.backend_repr, BackendRepr::ScalarPair(..))
     }
 
+    #[logfn_inputs(Trace)]
+    #[logfn(Trace)]
     fn scalar_pair_element_backend_type(
         &self,
         layout: rustc_middle::ty::layout::TyAndLayout<'tcx>,
         index: usize,
         immediate: bool,
     ) -> Self::Type {
-        todo!()
+        let BackendRepr::ScalarPair(a, b) = layout.backend_repr else {
+            panic!(
+                "TyAndLayout::scalar_pair_element_llty({:?}): not applicable",
+                self
+            );
+        };
+        let pair_typs = match layout.ty.kind() {
+            rustc_middle::ty::TyKind::Slice(ty) => [Some(ty), None],
+            rustc_middle::ty::TyKind::Ref(_, ty, _) => [Some(&layout.ty), None],
+            _ => {
+                todo!("{:?}", layout.ty.kind());
+            }
+        };
+        let scalar = [a, b][index];
+        let ty = pair_typs[index];
+        self.scalar_mlir_type(&scalar, ty, immediate)
     }
 }

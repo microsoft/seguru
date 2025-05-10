@@ -499,6 +499,7 @@ dependencies = [
  "log",
  "log-derive",
  "melior",
+ "melior-macro",
  "mlir-sys",
 ]
 

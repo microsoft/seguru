@@ -1,6 +1,5 @@
 #![feature(register_tool)]
 #![register_tool(gpu_codegen)]
-use gpu::Shared;
 
 /// RUSTFLAGS="-Zcodegen-backend=`realpath ../target/debug/librustc_codegen_gpu.dylib`" cargo build
 ///
@@ -10,62 +9,24 @@ pub const K: usize = 512;
 pub const BK: usize = 16; // Block size for shared memory
 
 #[no_mangle]
+#[gpu_codegen::kernel]
 /// assume BK * BK == number of threads in a block x axis.
-fn kernel(
-    a: &[u8],
-    b: &[u8],
-    c: &mut u8,
-    a_s: Shared<[u8; BK * BK]>,
-    b_s: Shared<[u8; BK * BK]>,
-    bk: usize,
-) {
-    let thread = gpu::thread2();
-    let unique_col = thread.local_thread_id() % bk;
-    let unique_row = thread.local_thread_id() / bk;
-    for bkIdx in (0..K).step_by(BK) {
-        let mut mut_a = a_s.write();
-        let mut mut_b = b_s.write();
-        // populate the SMEM caches
-        mut_a[unique_row * BK + unique_col] = a[unique_row * BK + bkIdx * BK + unique_col];
-        mut_b[unique_row * BK + unique_col] = b[unique_row * BK + bkIdx * BK + unique_col];
-        let a = a_s.read();
-        let b = b_s.read();
-        for k in 0..BK {
-            *c = *c + a[unique_row * M + k] * b[k * N + unique_col]; // Modify each value in the chunk
-        }
-    }
+fn kernel(a: &[u8]) {
+    let thread_id_x = gpu::thread_id("x");
+    let thread_id = gpu::global_thread_id();
+    println!("thread: {} {} {} {}", 1, thread_id_x, thread_id, a[0]);
 }
 
-#[no_mangle]
 fn main() {
     // Initialize the result as a mutable vector
-    let a = [0; K * M];
-    let b = [0; N * K];
-    let mut result = [0; M * N];
-
-    // Flatten the vector into a slice to use chunk_mut
-
-    // Specify chunk size (this determines how many elements each thread will process)
-
-    // Similar to thread::scope to ensure all threads live during the scope
-    // in gpu::grid should be called for only once inside one scope.
+    let a = [0; 1];
     gpu::scope(|s, grid| {
         // Split data to avoid concurrent write.
-        let mut chunks: std::slice::ChunksMut<'_, u8> = result.chunks_mut(1);
         for block in grid {
-            // Split the flattened result into chunks of size `chunk_size` using `chunks_mut`
-            let chunk = chunks.next().unwrap();
-            let mut chunk_row = chunk.chunks_mut(1);
-            let a_s = gpu::Shared::<[u8; BK * BK]>::new();
-            let b_s = gpu::Shared::<[u8; BK * BK]>::new();
             for thread in block {
-                let c: &mut [u8] = chunk_row.next().unwrap();
                 // Spawn a thread for each chunk
-                thread.spawn(move || kernel(&a, &b, &mut c[0], a_s, b_s, BK));
+                thread.spawn(move || kernel(&a));
             }
         }
     }); // Ensure that all threads finish execution
-
-    // Print the final result after modification
-    println!("{:?}", result);
 }

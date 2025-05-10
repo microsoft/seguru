@@ -1,3 +1,4 @@
+use melior::ir::BlockLike;
 use rustc_abi::HasDataLayout;
 use rustc_codegen_ssa::traits::{AbiBuilderMethods, ArgAbiBuilderMethods};
 use rustc_middle::ty::layout::{FnAbiOfHelpers, HasTyCtxt, HasTypingEnv, LayoutOfHelpers};
@@ -54,13 +55,12 @@ impl<'tcx, 'ml, 'a> FnAbiOfHelpers<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
 
 impl<'tcx, 'ml, 'a> AbiBuilderMethods for GpuBuilder<'tcx, 'ml, 'a> {
     fn get_param(&mut self, index: usize) -> Self::Value {
-        let cur_fn = self.cur_operation().unwrap();
         log::trace!("get_param({})", index);
-        if index >= cur_fn.operand_count() {
+        if index >= self.cur_block.argument_count() {
             panic!("index out of bounds");
         }
-        let val = cur_fn.operand(index);
-        val.expect("failed to get params")
+        let val = self.cur_block.argument(index).unwrap();
+        Self::Value::from(val)
     }
 }
 

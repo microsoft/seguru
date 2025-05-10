@@ -1,13 +1,19 @@
 use melior::{
-    dialect::{arith, func, DialectRegistry},
+    dialect::{
+        arith, func,
+        ods::func::{ConstantOperation, FuncOperation},
+        DialectRegistry,
+    },
     ir::{
-        attribute::{StringAttribute, TypeAttribute},
+        attribute::{FlatSymbolRefAttribute, StringAttribute, TypeAttribute},
+        operation::OperationResult,
         r#type::FunctionType,
         *,
     },
     utility::register_all_dialects,
     Context,
 };
+use rustc_hir::def::Res;
 use rustc_span::Loc;
 
 pub enum MLIRVisibility {
@@ -16,6 +22,43 @@ pub enum MLIRVisibility {
     Nested,
 }
 
+/// #Safety:
+/// This function should be unsafe because the returned reference has same lifetime with op_ref
+/*pub(crate) fn try_from_op_ref<'ml, 'a, T: TryFrom<Operation<'ml>>>(op_ref: OperationRef<'ml, 'a>) -> Result<&'a T, ()> {
+    let op = unsafe {
+        std::ptr::read(op_ref.to_ref())
+    };
+    if T::try_from(op).is_err() {
+        return Err(());
+    };
+    unsafe { std::mem::transmute(op_ref) }
+}*/
+
+const VALUE_SYM: &'static str = "value";
+const FUNCTION_TYPE_SYM: &'static str = "function_type";
+const VISIBILITY_SYM: &'static str = "visibility";
+
+pub trait ValueToOpRef<'ml, 'a> {
+    fn to_func_sym(&self) -> Result<FlatSymbolRefAttribute<'ml>, melior::Error>;
+}
+
+impl<'ml, 'a> ValueToOpRef<'ml, 'a> for Value<'ml, 'a> {
+    fn to_func_sym(&self) -> Result<FlatSymbolRefAttribute<'ml>, melior::Error> {
+        let op_val: OperationResult<'ml, 'a> = (*self).try_into()?;
+        let op = op_val.owner();
+        op.get_attr_if_sym(ConstantOperation::name(), VALUE_SYM)
+    }
+}
+
+pub trait BlockRefWithTime<'ml, 'a> {
+    fn to_ref(&self) -> &'a Block<'ml>;
+}
+
+impl<'ml, 'a> BlockRefWithTime<'ml, 'a> for BlockRef<'ml, 'a> {
+    fn to_ref(&self) -> &'a Block<'ml> {
+        unsafe { std::mem::transmute(self) }
+    }
+}
 impl From<MLIRVisibility> for &str {
     fn from(visibility: MLIRVisibility) -> Self {
         match visibility {
@@ -28,21 +71,58 @@ impl From<MLIRVisibility> for &str {
 
 pub trait MLIROpHelpers<'ml> {
     fn get_op_operands_types(&self) -> Vec<melior::ir::r#type::Type<'ml>>;
+    fn expect_op_by_sym(&self, sym: &'static str) -> Result<(), melior::Error>;
+    fn get_attr_if_sym<A: TryFrom<melior::ir::Attribute<'ml>>>(
+        &self,
+        sym: &'static str,
+        attr_name: &'static str,
+    ) -> Result<A, melior::Error>;
+    fn get_func_type(&self) -> Result<FunctionType<'ml>, melior::Error>;
+}
+
+pub trait MLIRMutOpHelpers<'ml> {
     fn set_op_visible<'a: 'ml>(&mut self, ctx: &'a Context, val: MLIRVisibility);
 }
 
-impl<'ml> MLIROpHelpers<'ml> for Operation<'ml> {
+impl<'ml> MLIRMutOpHelpers<'ml> for Operation<'ml> {
     fn set_op_visible<'a: 'ml>(&mut self, ctx: &'a Context, val: MLIRVisibility) {
         let attr = melior::ir::attribute::StringAttribute::new(ctx, val.into());
-        self.set_attribute("visibility", attr.into());
+        self.set_attribute(VISIBILITY_SYM, attr.into());
     }
-    fn get_op_operands_types(&self) -> Vec<melior::ir::r#type::Type<'ml>> {
-        let type_attr: melior::ir::attribute::TypeAttribute = self
-            .attribute("function_type")
-            .unwrap()
+}
+
+impl<'ml, 'a> MLIROpHelpers<'ml> for OperationRef<'ml, 'a> {
+    fn expect_op_by_sym(&self, sym: &'static str) -> Result<(), melior::Error> {
+        if self.name().as_string_ref().as_str().unwrap() == sym {
+            return Ok(());
+        } else {
+            return Err(melior::Error::OperandNotFound(sym));
+        }
+    }
+
+    fn get_attr_if_sym<A: TryFrom<melior::ir::Attribute<'ml>>>(
+        &self,
+        sym: &'static str,
+        attr_name: &'static str,
+    ) -> Result<A, melior::Error> {
+        self.expect_op_by_sym(sym)?;
+        self.attribute(attr_name)?
             .try_into()
-            .expect("invalid func attr");
-        let func_type: FunctionType = type_attr.value().try_into().expect("invalid function type");
+            .map_err(|e| melior::Error::AttributeExpected(attr_name, "get_attr_if_sym".to_string()))
+    }
+
+    fn get_func_type(&self) -> Result<FunctionType<'ml>, melior::Error> {
+        self.get_attr_if_sym::<TypeAttribute>(FuncOperation::name(), FUNCTION_TYPE_SYM)
+            .map(|attr| {
+                attr.value().try_into().map_err(|e| {
+                    melior::Error::TypeExpected(FUNCTION_TYPE_SYM, "get_func_type".to_string())
+                })
+            })
+            .and_then(|func_type| func_type)
+    }
+
+    fn get_op_operands_types(&self) -> Vec<melior::ir::r#type::Type<'ml>> {
+        let func_type = self.get_func_type().unwrap();
         let mut ret = vec![];
         for i in 0..func_type.input_count() {
             ret.push(func_type.input(i).unwrap());
@@ -51,6 +131,7 @@ impl<'ml> MLIROpHelpers<'ml> for Operation<'ml> {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn generate_test_module<'a>(loc: Loc) -> Module<'a> {
     // We need a registry to hold all the dialects
     let registry = DialectRegistry::new();

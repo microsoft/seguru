@@ -105,7 +105,6 @@ impl Thread {
             + self.local_thread().z * self.block_dim().x * self.block_dim().y
     }
 
-    #[no_mangle]
     pub fn global_thread_id(&self) -> usize {
         self.global_invocation().x
             + self.global_invocation().y * self.grid_dim().x
@@ -122,6 +121,22 @@ pub fn sync() {
 
 #[no_mangle]
 pub fn thread2() -> Thread {
+    unimplemented!()
+}
+
+pub enum DimType {
+    X,
+    Y,
+    Z,
+}
+
+#[no_mangle]
+pub fn thread_id(d: &str) -> usize {
+    unimplemented!()
+}
+
+#[no_mangle]
+pub fn global_thread_id() -> usize {
     unimplemented!()
 }
 

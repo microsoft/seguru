@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use rustc_codegen_ssa::mono_item::MonoItemExt;
 use rustc_codegen_ssa::ModuleCodegen;
 use rustc_codegen_ssa::{

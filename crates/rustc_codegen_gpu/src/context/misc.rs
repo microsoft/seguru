@@ -37,12 +37,12 @@ impl<'tcx, 'ml> MiscCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, '_> {
         if self.fn_db.contains_key(&def_id) {
             self.fn_db[&def_id]
         } else {
-            panic!("function not found in fn_db")
+            self.to_mir_func_decl(instance, crate::mlir::MLIRVisibility::Public)
         }
     }
 
     fn get_fn_addr(&self, instance: rustc_middle::ty::Instance<'tcx>) -> Self::Value {
-        todo!()
+        self.to_mir_func_const(instance)
     }
 
     fn eh_personality(&self) -> Self::Value {

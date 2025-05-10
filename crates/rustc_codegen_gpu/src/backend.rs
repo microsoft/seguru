@@ -1,22 +1,15 @@
-use melior::ir::Location;
 use rustc_codegen_llvm::LlvmCodegenBackend;
 use rustc_codegen_ssa::back::lto::{LtoModuleCodegen, ThinModule, ThinShared};
 use rustc_codegen_ssa::traits::{CodegenBackend, ExtraBackendMethods, WriteBackendMethods};
 use rustc_codegen_ssa::{CodegenResults, ModuleCodegen};
 use rustc_data_structures::fx::FxIndexMap;
-use rustc_hir::{
-    intravisit::{walk_expr, Visitor},
-    Expr, ExprKind,
-};
 use rustc_middle::dep_graph::{WorkProduct, WorkProductId};
 use rustc_middle::ty::TyCtxt;
 use rustc_middle::util::Providers;
 use rustc_session::Session;
-use rustc_span::{Span, Symbol};
+use rustc_span::Symbol;
+use std::any::Any;
 use std::sync::Arc;
-use std::{any::Any, collections::HashMap};
-
-use crate::mlir;
 
 type LlvmCodegenModule = <LlvmCodegenBackend as WriteBackendMethods>::Module;
 
@@ -340,16 +333,18 @@ impl ExtraBackendMethods for GPUCodegenBackend {
     ) -> (rustc_codegen_ssa::ModuleCodegen<Self::Module>, u64) {
         let start_time = std::time::Instant::now();
         let dep_node = tcx.codegen_unit(cgu_name).codegen_dep_node(tcx);
-        let (module, _) = tcx.dep_graph.with_task(
+        let (mut module, _) = tcx.dep_graph.with_task(
             dep_node,
             tcx,
             cgu_name,
             crate::write::module_codegen,
             Some(rustc_middle::dep_graph::hash_result),
         );
+        let (llvm_module, cost) = llvm_backend().compile_codegen_unit(tcx, cgu_name);
         let time_to_codegen = start_time.elapsed();
         eprintln!("compile_codegen_unit {}", cgu_name);
         let cost = time_to_codegen.as_nanos() as u64;
+        module.module_llvm.llvm_module = Some(llvm_module.module_llvm);
         (module, cost)
     }
 
@@ -417,7 +412,12 @@ impl CodegenBackend for GPUCodegenBackend {
         (codegen_results, work_products)
     }
 
-    fn link(&self, sess: &Session, codegen_results: CodegenResults, outputs: &rustc_session::config::OutputFilenames) {
-        eprintln!("todo link {:?}", codegen_results.modules);
-    }
+    /*fn link(
+        &self,
+        sess: &Session,
+        codegen_results: CodegenResults,
+        outputs: &rustc_session::config::OutputFilenames,
+    ) {
+        //eprintln!("todo link {:?}", codegen_results.modules);
+    }*/
 }

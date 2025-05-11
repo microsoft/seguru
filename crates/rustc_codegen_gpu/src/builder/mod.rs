@@ -13,7 +13,8 @@ use melior::ir::r#type::{self as mlir_type, MemRefType};
 
 use melior::ir::{self as mlir_ir, BlockLike, Location, RegionLike, RegionRef, ValueLike};
 use rustc_codegen_ssa::traits::{
-    AsmBuilderMethods, BackendTypes, BaseTypeCodegenMethods, BuilderMethods, StaticBuilderMethods,
+    AsmBuilderMethods, BackendTypes, BaseTypeCodegenMethods, BuilderMethods, ConstCodegenMethods,
+    StaticBuilderMethods,
 };
 
 use crate::mlir::BlockRefWithTime;
@@ -22,18 +23,22 @@ use crate::{context::GPUCodegenContext, mlir::MLIROpHelpers};
 pub(crate) struct GpuBuilder<'tcx, 'ml, 'a> {
     pub cx: &'a GPUCodegenContext<'tcx, 'ml, 'a>,
     pub cur_block: <GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::BasicBlock,
-    pub cur_span: Option<rustc_span::Span>,
+    pub cur_span: rustc_span::Span,
+    pub extra_attrs: Vec<mlir_ir::Attribute<'ml>>,
     dummy: PhantomData<&'a mlir_ir::operation::Operation<'ml>>,
 }
 
 impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
     pub fn cur_loc(&self) -> Location<'ml> {
-        self.cur_span
-            .map_or(self.cx.unknown_loc(), |span| self.cx.to_mlir_loc(span))
+        self.cx.to_mlir_loc(self.cur_span)
     }
 
     pub fn cur_block(&self) -> &'a mlir_ir::Block<'ml> {
-        self.cur_block.to_ref()
+        unsafe { self.cur_block.to_ref() }
+    }
+
+    pub fn inside_gpu(&self) -> bool {
+        true
     }
 }
 
@@ -91,7 +96,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         Self {
             cx,
             cur_block: llbb,
-            cur_span: None,
+            cur_span: rustc_span::DUMMY_SP,
+            extra_attrs: vec![],
             dummy: PhantomData,
         }
     }
@@ -105,8 +111,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn set_span(&mut self, span: rustc_span::Span) {
-        log::trace!("set_span({:?})", span);
-        self.cur_span.replace(span);
+        self.cur_span = span;
     }
 
     fn append_block(
@@ -114,7 +119,6 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         llfn: mlir_ir::operation::OperationRef<'ml, 'a>,
         name: &str,
     ) -> Self::BasicBlock {
-        log::trace!("append_block({:?}, name: {:?})", llfn, name);
         let name = rustc_data_structures::small_c_str::SmallCStr::new(name);
         let region: RegionRef<'ml, 'a> = unsafe { llfn.to_ref() }.region(0).unwrap();
         let types = llfn.get_op_operands_types();
@@ -137,7 +141,11 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn ret_void(&mut self) {
-        todo!()
+        if self.inside_gpu() {
+            self.cx.gpu_return(&[], self.cur_loc());
+        } else {
+            self.cx.cpu_return(&[], self.cur_loc());
+        }
     }
 
     fn ret(&mut self, v: Self::Value) {
@@ -341,7 +349,6 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
 
     fn alloca(&mut self, size: rustc_abi::Size, align: rustc_abi::Align) -> Self::Value {
         let loc = self.cur_loc();
-        log::trace!("alloca({:?}, {:?})", size, align);
 
         let mem_ref_ty =
             mlir_type::MemRefType::new(self.type_i8(), &[size.bytes() as i64], None, None);
@@ -450,7 +457,6 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         ptr: Self::Value,
         indices: &[Self::Value],
     ) -> Self::Value {
-        log::trace!("inbounds_gep({:?}, {:?} {:?})", ty, ptr, indices);
         if indices.len() != 1 {
             panic!("only supports single index");
         }
@@ -476,7 +482,6 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             )
             .into(),
         );
-        log::trace!("reinterpret_cast({:?})", op);
         op.result(0).unwrap().into()
     }
 
@@ -711,7 +716,25 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         funclet: Option<&Self::Funclet>,
         instance: Option<rustc_middle::ty::Instance<'tcx>>,
     ) -> Self::Value {
-        todo!()
+        let ftype = fn_abi.map(|abi| self.fn_abi_to_fn_type(abi));
+        let span = self.cur_span;
+        let mut extra_attrs = vec![];
+        extra_attrs.append(&mut self.extra_attrs);
+        let op = self
+            .call_op(llfn, args, ftype, &mut extra_attrs, span)
+            .unwrap();
+        self.extra_attrs = extra_attrs;
+        if let Some(op) = op {
+            let op = self.cur_block().append_operation(op);
+            if op.result_count() > 0 {
+                op.result(0).unwrap().into()
+            } else {
+                llfn
+            }
+        } else {
+            // This is a virtual call used by the compiler.
+            llfn
+        }
     }
 
     fn zext(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {

@@ -332,6 +332,7 @@ impl ExtraBackendMethods for GPUCodegenBackend {
         cgu_name: Symbol,
     ) -> (rustc_codegen_ssa::ModuleCodegen<Self::Module>, u64) {
         let start_time = std::time::Instant::now();
+        //let (llvm_module, cost) = llvm_backend().compile_codegen_unit(tcx, cgu_name);
         let dep_node = tcx.codegen_unit(cgu_name).codegen_dep_node(tcx);
         let (mut module, _) = tcx.dep_graph.with_task(
             dep_node,
@@ -340,11 +341,10 @@ impl ExtraBackendMethods for GPUCodegenBackend {
             crate::write::module_codegen,
             Some(rustc_middle::dep_graph::hash_result),
         );
-        let (llvm_module, cost) = llvm_backend().compile_codegen_unit(tcx, cgu_name);
         let time_to_codegen = start_time.elapsed();
         eprintln!("compile_codegen_unit {}", cgu_name);
         let cost = time_to_codegen.as_nanos() as u64;
-        module.module_llvm.llvm_module = Some(llvm_module.module_llvm);
+        //module.module_llvm.llvm_module = Some(llvm_module.module_llvm);
         (module, cost)
     }
 

@@ -1,5 +1,5 @@
 use melior::dialect::memref as mlir_memref;
-use melior::ir::{self as mlir_ir, r#type as mlir_type};
+use melior::ir::{self as mlir_ir, r#type as mlir_type, TypeLike};
 use melior::{dialect::ods::memref::GlobalOperation, helpers::ArithBlockExt, ir::BlockLike};
 use rustc_abi::Size;
 use rustc_codegen_ssa::traits::{
@@ -10,13 +10,18 @@ use rustc_const_eval::interpret::{alloc_range, AllocRange, GlobalAlloc};
 use crate::mlir;
 
 use super::GPUCodegenContext;
+
+fn get_alloc_name<'tcx>(alloc_id: rustc_const_eval::interpret::AllocId) -> String {
+    format!("memory_alloc_{:?}", alloc_id.0)
+}
+
 impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     pub fn mlir_const_int_from_type(
         &self,
         i: impl std::fmt::Display,
         typ: <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type,
     ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Value {
-        self.mlir_body()
+        self.mlir_body(false)
             .const_int_from_type(self.mlir_ctx, self.unknown_loc(), i, typ)
             .expect("failed to create const int")
     }
@@ -25,7 +30,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         &self,
         i: impl std::fmt::Display,
     ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Value {
-        self.mlir_body()
+        self.mlir_body(false)
             .const_int(
                 self.mlir_ctx,
                 self.unknown_loc(),
@@ -38,17 +43,24 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     fn const_data_memref_from_alloc(
         &self,
         alloc: rustc_const_eval::interpret::ConstAllocation<'_>,
+        name: &str,
     ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Value {
-        let name = GlobalOperation::name();
-        let ty =
+        assert!(alloc.inner().size().bytes() > 0);
+        let ty = self.type_array(self.type_i8(), alloc.inner().len() as u64);
+        let ref_ty =
             mlir_type::MemRefType::new(self.type_i8(), &[alloc.inner().len() as i64], None, None);
         let bytes = alloc
             .inner()
             .get_bytes_unchecked(alloc_range(Size::ZERO, alloc.inner().size()));
-        log::trace!("const_data_memref_from_alloc: {:?}", bytes);
-
-        let value = mlir_ir::attribute::ArrayAttribute::new(
-            self.mlir_ctx,
+        dbg!(
+            "const_data_memref_from_alloc: {} {} {:?} {}",
+            alloc.inner().len(),
+            alloc.inner().size().bytes(),
+            bytes,
+            ty
+        );
+        let value = mlir_ir::attribute::DenseElementsAttribute::new(
+            ty,
             &bytes
                 .iter()
                 .map(|v| {
@@ -56,20 +68,21 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 })
                 .collect::<Vec<_>>(),
         )
+        .unwrap()
         .into();
         let op = mlir_memref::global(
             self.mlir_ctx,
             name,
             None,
-            ty,
+            ref_ty,
             Some(value),
             true,
             None,
             self.unknown_loc(),
         );
-        let op = self.mlir_body().append_operation(op);
-        let op = mlir_memref::get_global(self.mlir_ctx, name, ty, self.unknown_loc());
-        let op = self.mlir_body().append_operation(op);
+        let op = self.mlir_body(false).append_operation(op);
+        let op = mlir_memref::get_global(self.mlir_ctx, name, ref_ty, self.unknown_loc());
+        let op = self.mlir_body(false).append_operation(op);
         op.result(0).unwrap().into()
     }
 
@@ -84,19 +97,23 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 return const_alloc[&alloc_id];
             }
         }
+        let name = get_alloc_name(alloc_id);
         let v = match alloc {
-            GlobalAlloc::Memory(alloc) => self.const_data_memref_from_alloc(alloc),
+            GlobalAlloc::Memory(alloc) => {
+                self.const_name_to_allocid
+                    .write()
+                    .unwrap()
+                    .insert(name.clone(), alloc_id);
+                self.const_data_memref_from_alloc(alloc, name.as_str())
+            }
             GlobalAlloc::VTable(ty, dyn_ty) => {
-                let alloc = self
-                    .tcx
-                    .global_alloc(self.tcx.vtable_allocation((
-                        ty,
-                        dyn_ty.principal().map(|principal| {
-                            self.tcx.instantiate_bound_regions_with_erased(principal)
-                        }),
-                    )))
-                    .unwrap_memory();
-                self.const_data_memref_from_alloc(alloc)
+                let alloc_id = self.tcx.vtable_allocation((
+                    ty,
+                    dyn_ty
+                        .principal()
+                        .map(|principal| self.tcx.instantiate_bound_regions_with_erased(principal)),
+                ));
+                self.const_data_memref_from_alloc_id(alloc_id)
             }
             _ => todo!(),
         };

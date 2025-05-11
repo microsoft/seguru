@@ -1,3 +1,5 @@
+use melior::ir::operation::OperationPrintingFlags;
+use melior::ir::BlockLike;
 use rustc_codegen_ssa::mono_item::MonoItemExt;
 use rustc_codegen_ssa::ModuleCodegen;
 use rustc_codegen_ssa::{
@@ -28,7 +30,22 @@ pub(crate) fn codegen(
             .output_filenames
             .temp_path(rustc_session::config::OutputType::Mir, module_name);
         log::trace!("write MLIR module to {:?}", out);
-        std::fs::write(&out, m.module.as_operation().to_string()).unwrap();
+        let content = m
+            .module
+            .as_operation()
+            .to_string_with_flags(
+                OperationPrintingFlags::new()
+                    .use_local_scope()
+                    .print_generic_operation_form(),
+            )
+            .unwrap();
+        std::fs::write(&out, &content).unwrap();
+        if !m.module.as_operation().verify() {
+            log::trace!("MLIR module verify failed: {}", content);
+            Err(rustc_errors::FatalError)?;
+        }
+        log::trace!("MLIR module verified");
+
         Some(out)
     } else {
         None
@@ -49,15 +66,17 @@ pub(crate) fn module_codegen<'tcx>(
     tcx: rustc_middle::ty::TyCtxt<'tcx>,
     cgu_name: Symbol,
 ) -> ModuleCodegen<GPUCodeGenModule> {
-    let mlir_ctx: &'static melior::Context = Box::leak(Box::new(melior::Context::new()));
-    let location = melior::ir::Location::unknown(mlir_ctx);
-    let mlir_module = melior::ir::Module::new(location);
-    let mlir_body = mlir_module.body();
+    let mlir_ctx = crate::mlir::create_mlir_ctx();
+    let (mlir_module, cpu_block, gpu_block) = crate::mlir::create_top_module(mlir_ctx);
+    let mut blocks = std::collections::HashMap::new();
+    blocks.insert("host".to_string(), cpu_block);
+    blocks.insert("gpu".to_string(), gpu_block);
+
     log::trace!("create MLIR module {}", cgu_name);
     let cgu = tcx.codegen_unit(cgu_name);
     {
         let cx: GPUCodegenContext<'_, '_, '_> =
-            crate::context::GPUCodegenContext::new(tcx, mlir_ctx, &mlir_module, mlir_body);
+            crate::context::GPUCodegenContext::new(tcx, mlir_ctx, &mlir_module, blocks);
         let mono_items = cgu.items_in_deterministic_order(tcx);
         for &(mono_item, data) in &mono_items {
             if is_gpu_code(&tcx, mono_item.def_id()) {

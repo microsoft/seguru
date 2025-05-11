@@ -2,6 +2,7 @@ use melior::ir::BlockLike;
 use rustc_abi::HasDataLayout;
 use rustc_codegen_ssa::traits::{AbiBuilderMethods, ArgAbiBuilderMethods};
 use rustc_middle::ty::layout::{FnAbiOfHelpers, HasTyCtxt, HasTypingEnv, LayoutOfHelpers};
+use rustc_target::callconv::PassMode;
 
 use super::GpuBuilder;
 
@@ -80,7 +81,19 @@ impl<'tcx, 'ml, 'a> ArgAbiBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
         val: Self::Value,
         dst: rustc_codegen_ssa::mir::place::PlaceRef<'tcx, Self::Value>,
     ) {
-        todo!()
+        match arg_abi.mode {
+            PassMode::Ignore => {}
+            PassMode::Direct(_) | PassMode::Pair(..) => {
+                rustc_codegen_ssa::mir::operand::OperandRef::from_immediate_or_packed_pair(
+                    self,
+                    val,
+                    arg_abi.layout,
+                )
+                .val
+                .store(self, dst);
+            }
+            PassMode::Cast { .. } | PassMode::Indirect { .. } => todo!(),
+        }
     }
 
     fn arg_memory_ty(

@@ -1,4 +1,6 @@
 #![feature(negative_impls)]
+#![feature(register_tool)]
+#![register_tool(gpu_codegen)]
 use core::marker::PhantomData;
 use std::{ops::Deref, thread::ScopedJoinHandle};
 
@@ -130,12 +132,24 @@ pub enum DimType {
     Z,
 }
 
-#[no_mangle]
-pub fn thread_id(d: &str) -> usize {
+#[gpu_codegen::builtin(add_mlir_string_attr)]
+pub fn add_mlir_string_attr(_: &'static str) -> usize {
     unimplemented!()
 }
 
-#[no_mangle]
+
+#[gpu_codegen::builtin(gpu.printf)]
+pub fn printf() -> usize {
+    unimplemented!()
+}
+
+
+#[gpu_codegen::builtin(gpu.thread_id)]
+pub fn thread_id() -> usize {
+    unimplemented!()
+}
+
+#[gpu_codegen::builtin(gpu.global_thread_id)]
 pub fn global_thread_id() -> usize {
     unimplemented!()
 }

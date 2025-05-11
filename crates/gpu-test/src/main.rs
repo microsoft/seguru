@@ -8,13 +8,26 @@ pub const N: usize = 4096;
 pub const K: usize = 512;
 pub const BK: usize = 16; // Block size for shared memory
 
+
 #[no_mangle]
 #[gpu_codegen::kernel]
 /// assume BK * BK == number of threads in a block x axis.
 fn kernel(a: &[u8]) {
-    let thread_id_x = gpu::thread_id("x");
+    gpu::add_mlir_string_attr("\"x\"");
+    let thread_id_x = gpu::thread_id();
+    gpu::add_mlir_string_attr("\"x\"");
     let thread_id = gpu::global_thread_id();
-    println!("thread: {} {} {} {}", 1, thread_id_x, thread_id, a[0]);
+    gpu::add_mlir_string_attr("\"x\"");
+    gpu::printf();
+    //println!("thread: {} {} {} {}", 1, thread_id_x, thread_id, a[0]);
+}
+
+#[no_mangle]
+#[gpu_codegen::kernel]
+/// assume BK * BK == number of threads in a block x axis.
+fn kernel2() {
+    gpu::add_mlir_string_attr("\"x\"");
+    let thread_id_x = gpu::thread_id();
 }
 
 fn main() {

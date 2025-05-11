@@ -10,12 +10,14 @@ mod ty;
 
 use rustc_abi::{self, HasDataLayout};
 use rustc_codegen_ssa::traits::BackendTypes;
+use rustc_middle::mir::ConstAlloc;
 use std::marker::PhantomData;
 use std::{collections::HashMap, sync::RwLock};
 
-use melior::ir as mlir_ir;
+use melior::ir::{self as mlir_ir, BlockLike};
 use rustc_middle::ty::layout::{HasTyCtxt, HasTypingEnv};
 
+use crate::attr::GpuItem;
 use crate::mlir::BlockRefWithTime;
 
 use self::ty::MLIRType;
@@ -23,10 +25,11 @@ use self::ty::MLIRType;
 pub(crate) struct GPUCodegenContext<'tcx, 'ml, 'a> {
     pub mlir_ctx: &'ml melior::Context,
     pub mlir_module: &'ml melior::ir::Module<'ml>,
-    pub mlir_body: melior::ir::BlockRef<'ml, 'a>,
+    pub mlir_body: HashMap<String, melior::ir::BlockRef<'ml, 'ml>>,
     pub dummy: PhantomData<&'a mlir_ir::operation::Operation<'ml>>,
-    pub fn_db: HashMap<rustc_hir::def_id::DefId, mlir_ir::operation::OperationRef<'ml, 'a>>,
+    pub fn_db: RwLock<HashMap<rustc_hir::def_id::DefId, mlir_ir::operation::OperationRef<'ml, 'a>>>,
     pub const_alloc: RwLock<HashMap<rustc_const_eval::interpret::AllocId, mlir_ir::Value<'ml, 'a>>>,
+    pub const_name_to_allocid: RwLock<HashMap<String, rustc_const_eval::interpret::AllocId>>,
     tcx: rustc_middle::ty::TyCtxt<'tcx>,
 }
 
@@ -35,18 +38,23 @@ impl<'tcx, 'ml, 'a> std::fmt::Debug for GPUCodegenContext<'tcx, 'ml, 'a> {
         f.debug_struct("GPUCodegenContext")
             .field("mlir_ctx", &self.mlir_ctx)
             .field("mlir_module", &self.mlir_module)
-            .field("mlir_body", &self.mlir_body)
             .field("dummy", &self.dummy)
             .finish()
     }
 }
 
 impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
+    pub fn emit_error(&self, msg: String, span: rustc_span::Span) {
+        let mut diag = self.tcx.sess.dcx().struct_err(msg);
+        diag.span(span);
+        diag.emit();
+    }
+
     pub fn new(
         tcx: rustc_middle::ty::TyCtxt<'tcx>,
         mlir_ctx: &'ml melior::Context,
         mlir_module: &'ml melior::ir::Module<'ml>,
-        mlir_body: melior::ir::BlockRef<'ml, 'ml>,
+        mlir_body: HashMap<String, melior::ir::BlockRef<'ml, 'ml>>,
     ) -> Self {
         let location = melior::ir::Location::unknown(mlir_ctx);
         Self {
@@ -55,13 +63,34 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             mlir_module,
             mlir_body,
             dummy: PhantomData,
-            fn_db: HashMap::new(),
+            fn_db: RwLock::new(HashMap::new()),
             const_alloc: RwLock::new(HashMap::new()),
+            const_name_to_allocid: RwLock::new(HashMap::new()),
         }
     }
 
-    pub fn mlir_body(&self) -> &'a melior::ir::Block<'ml> {
-        self.mlir_body.to_ref()
+    pub fn mlir_body(&self, gpu: bool) -> &'a melior::ir::Block<'ml> {
+        let cpu_block = unsafe { self.mlir_body["host"].to_ref() };
+        if !gpu {
+            return cpu_block;
+        }
+        let gpu_block = unsafe { self.mlir_body["gpu"].to_ref() };
+        gpu_block
+    }
+
+    pub fn get_const_bytes_by_name(&self, name: &str) -> &[u8] {
+        let alloc_id = self.const_name_to_allocid.read().unwrap()[name];
+        let alloc = self.tcx.global_alloc(alloc_id).unwrap_memory();
+        let bytes = self
+            .tcx
+            .global_alloc(alloc_id)
+            .unwrap_memory()
+            .inner()
+            .get_bytes_unchecked(rustc_const_eval::interpret::alloc_range(
+                rustc_abi::Size::ZERO,
+                alloc.inner().size(),
+            ));
+        bytes
     }
 }
 

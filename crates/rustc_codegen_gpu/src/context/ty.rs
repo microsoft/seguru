@@ -43,15 +43,14 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         fields: &[<GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type],
         packed: bool,
     ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type {
-        MLIRType::from(mlir_llvm_type::r#struct(
+        panic!();
+        /*MLIRType::from(mlir_llvm_type::r#struct(
             self.mlir_ctx,
             &fields.iter().map(|a| (*a).into()).collect::<Vec<_>>(),
             packed,
-        ))
+        ))*/
     }
 
-    #[logfn_inputs(Trace)]
-    #[logfn(Trace)]
     fn scalar_mlir_type(
         &self,
         scalar: &rustc_abi::Scalar,
@@ -65,7 +64,6 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             Primitive::Int(i, _signed) => self.type_from_integer(i),
             Primitive::Float(f) => self.type_from_float(f),
             Primitive::Pointer(a) => {
-                log::trace!("Pointer: {:?}", ptr_ty);
                 let ty = ptr_ty.unwrap().builtin_deref(true).unwrap();
                 let layout = self.layout_of(ty);
                 MLIRType::from(mlir_type::MemRefType::new(
@@ -124,12 +122,6 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 result.push(self.type_padding_filler(padding, padding_align));
             }
         }
-        log::trace!(
-            "Struct fields: {:?} packed: {:?} offset: {:?}",
-            result,
-            packed,
-            offset
-        );
         (result, packed)
     }
 
@@ -141,11 +133,9 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let cx = self.mlir_ctx;
         match layout.backend_repr {
             BackendRepr::Scalar(scalar) => {
-                log::trace!("Scalar: {:?}", scalar);
                 self.scalar_mlir_type(&scalar, Some(&layout.ty), immediate)
             }
             BackendRepr::ScalarPair(s1, s2) => {
-                log::trace!("ScalarPair: {:?} {:?}", s1, s2);
                 // An immediate pair always contains just the two elements, without any padding
                 // filler, as it should never be stored to memory.
                 let t1 = self
@@ -162,6 +152,9 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 rustc_abi::FieldsShape::Union(non_zero) => todo!(),
                 rustc_abi::FieldsShape::Array { stride, count } => {
                     let elem = self.mlir_type(layout.field(self, 0), immediate);
+                    if *count == 0 {
+                        dbg!(layout.ty);
+                    }
                     self.type_array(elem, *count)
                 }
                 rustc_abi::FieldsShape::Arbitrary {
@@ -169,8 +162,9 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                     memory_index,
                 } => {
                     let (fields, packed) = self.struct_fields(layout);
-                    self.type_struct(&fields, packed);
+                    dbg!(layout.ty);
                     panic!("GPU programming model does not support struct");
+                    //self.type_struct(&fields, packed);
                 }
             },
             _ => self.type_empty(),
@@ -223,6 +217,9 @@ impl<'tcx, 'ml, 'a> BaseTypeCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> 
     }
 
     fn type_array(&self, ty: Self::Type, len: u64) -> Self::Type {
+        if len == 0 {
+            return ty; // &[T] is the same as &T
+        }
         MLIRType::from(mlir_type::RankedTensorType::new(&[len], ty.into(), None))
     }
 
@@ -293,7 +290,6 @@ impl<'tcx, 'ml, 'a> BaseTypeCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> 
 impl<'tcx, 'ml, 'a> LayoutTypeCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, 'a> {
     fn backend_type(&self, layout: rustc_middle::ty::layout::TyAndLayout<'tcx>) -> Self::Type {
         let ty = self.mlir_type(layout, false);
-        log::trace!("backend_type: {:?}", ty);
         ty
     }
 
@@ -338,8 +334,6 @@ impl<'tcx, 'ml, 'a> LayoutTypeCodegenMethods<'tcx> for GPUCodegenContext<'tcx, '
         matches!(layout.backend_repr, BackendRepr::ScalarPair(..))
     }
 
-    #[logfn_inputs(Trace)]
-    #[logfn(Trace)]
     fn scalar_pair_element_backend_type(
         &self,
         layout: rustc_middle::ty::layout::TyAndLayout<'tcx>,

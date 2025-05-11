@@ -260,7 +260,9 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 fn_type,
                 location,
             );
-            gpu_op.into()
+            let mut op: Operation<'ml> = gpu_op.into();
+            op.set_attribute(crate::mlir::SYM_NAME_SYM, fn_sym.into());
+            op
         };
         if let Some(extra_attr) = gpu_attrs.to_mlir_attribute(&self.mlir_ctx) {
             operation.set_attribute(crate::mlir::BUILTIN_SYM, extra_attr);

@@ -9,6 +9,7 @@ extern crate rustc_data_structures;
 extern crate rustc_driver;
 extern crate rustc_errors;
 extern crate rustc_hir;
+extern crate rustc_index;
 extern crate rustc_metadata;
 extern crate rustc_middle;
 extern crate rustc_session;
@@ -21,6 +22,7 @@ mod builder;
 mod context;
 mod mlir;
 mod write;
+//mod mono;
 
 #[no_mangle]
 pub fn __rustc_codegen_backend() -> Box<dyn rustc_codegen_ssa::traits::CodegenBackend> {

@@ -3,6 +3,7 @@ mod coverage;
 mod debug;
 mod intrinsic;
 
+use std::collections::HashMap;
 use std::{marker::PhantomData, ops::Deref};
 
 use log_derive::logfn;
@@ -11,19 +12,27 @@ use melior::dialect::ods::memref as mlir_ods_memref;
 use melior::ir::attribute::DenseI64ArrayAttribute;
 use melior::ir::r#type::{self as mlir_type, MemRefType};
 
-use melior::ir::{self as mlir_ir, BlockLike, Location, RegionLike, RegionRef, ValueLike};
+use melior::ir::{
+    self as mlir_ir, BlockLike, Location, RegionLike, RegionRef, TypeLike, ValueLike,
+};
 use rustc_codegen_ssa::traits::{
     AsmBuilderMethods, BackendTypes, BaseTypeCodegenMethods, BuilderMethods, ConstCodegenMethods,
-    StaticBuilderMethods,
+    DerivedTypeCodegenMethods, StaticBuilderMethods,
 };
 
-use crate::mlir::BlockRefWithTime;
+use crate::mlir::{self, BlockRefWithTime};
 use crate::{context::GPUCodegenContext, mlir::MLIROpHelpers};
 
+enum FnStackState {
+    Alloca,
+    Store(usize),
+}
 pub(crate) struct GpuBuilder<'tcx, 'ml, 'a> {
     pub cx: &'a GPUCodegenContext<'tcx, 'ml, 'a>,
     pub cur_block: <GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::BasicBlock,
     pub cur_span: rustc_span::Span,
+    pub span_to_type: HashMap<rustc_span::Span, mlir_type::Type<'ml>>,
+    pub stack_state: FnStackState,
     pub extra_attrs: Vec<mlir_ir::Attribute<'ml>>,
     dummy: PhantomData<&'a mlir_ir::operation::Operation<'ml>>,
 }
@@ -37,8 +46,47 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         unsafe { self.cur_block.to_ref() }
     }
 
-    pub fn inside_gpu(&self) -> bool {
-        true
+    pub fn use_value(&mut self, val: Self::Value) {
+        if self.stack_state == FnStackState::Store(0) {
+            self.stack_state = FnStackState::Alloca;
+        }
+        if let Some(op) = self.cur_block().parent_operation() {
+            op.use_value(val);
+        }
+    }
+
+    pub fn skip_op(&mut self, update: bool) -> bool {
+        match self.stack_state {
+            FnStackState::Alloca if self.cur_block().argument_count() > 0 => {
+                if update {
+                    self.stack_state = FnStackState::Store(0);
+                }
+                true
+            }
+            FnStackState::Store(idx) if idx < self.cur_block().argument_count() => {
+                if update {
+                    self.stack_state = FnStackState::Store(idx + 1);
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub fn inside_gpu_mod(&self) -> bool {
+        if let Some(op) = self.cur_block().parent_operation() {
+            op.is_gpu_func()
+        } else {
+            false
+        }
+    }
+
+    pub fn inside_kernel_func(&self) -> bool {
+        if let Some(op) = self.cur_block().parent_operation() {
+            op.is_kernel_func()
+        } else {
+            false
+        }
     }
 }
 
@@ -96,9 +144,11 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         Self {
             cx,
             cur_block: llbb,
+            stack_state: FnStackState::Alloca,
             cur_span: rustc_span::DUMMY_SP,
             extra_attrs: vec![],
             dummy: PhantomData,
+            span_to_type: HashMap::new(),
         }
     }
 
@@ -141,15 +191,22 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn ret_void(&mut self) {
-        if self.inside_gpu() {
-            self.cx.gpu_return(&[], self.cur_loc());
+        let op = if self.inside_kernel_func() {
+            self.cx.gpu_return(&[], self.cur_loc())
         } else {
-            self.cx.cpu_return(&[], self.cur_loc());
-        }
+            self.cx.cpu_return(&[], self.cur_loc())
+        };
+        self.cur_block().append_operation(op);
     }
 
     fn ret(&mut self, v: Self::Value) {
-        todo!()
+        let op = if self.inside_kernel_func() {
+            log::debug!("gpu_return val: {:?} ty: {}", v, v.r#type());
+            self.cx.gpu_return(&[v], self.cur_loc())
+        } else {
+            self.cx.cpu_return(&[v], self.cur_loc())
+        };
+        self.cur_block().append_operation(op);
     }
 
     fn br(&mut self, dest: Self::BasicBlock) {
@@ -348,10 +405,45 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn alloca(&mut self, size: rustc_abi::Size, align: rustc_abi::Align) -> Self::Value {
-        let loc = self.cur_loc();
+        let ty = if self.skip_op(true) {
+            if self.span_to_type.contains_key(&self.cur_span) {
+                self.span_to_type[&self.cur_span]
+            } else {
+                match size.bytes() {
+                    1 => self.type_i8(),
+                    2 => self.type_i16(),
+                    4 => self.type_i32(),
+                    8 => self.type_i64(),
+                    16 => self.type_i128(),
+                    _ => {
+                        panic!("Unsupported size for alloca: {}", size.bytes());
+                    }
+                }
+            }
+        } else {
+            if self.span_to_type.contains_key(&self.cur_span) {
+                let ty = self.span_to_type[&self.cur_span];
+                log::debug!("alloc {:?} {}", self.cur_span, ty);
+                ty
+            } else {
+                todo!("{:?}", self.cur_span);
+            }
+            /*match size.bytes() {
+                1 => self.type_i8(),
+                2 => self.type_i16(),
+                4 => self.type_i32(),
+                8 => self.type_i64(),
+                16 => self.type_i128(),
+                _ => {
+                    panic!("Unsupported size for alloca: {}", size.bytes());
+                }
+            }*/
+        };
 
-        let mem_ref_ty =
-            mlir_type::MemRefType::new(self.type_i8(), &[size.bytes() as i64], None, None);
+        log::debug!("alloc {} {}", ty, size.bytes());
+        let loc = self.cur_loc();
+        dbg!(align);
+        let mem_ref_ty = mlir_type::MemRefType::new(ty, &[1], None, None);
         let op = melior::dialect::memref::alloca(
             self.mlir_ctx,
             mem_ref_ty,
@@ -421,7 +513,11 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         ptr: Self::Value,
         align: rustc_abi::Align,
     ) -> Self::Value {
-        let op = mlir_memref::store(val, ptr, &[], self.cur_loc());
+        if self.skip_op(true) {
+            return val;
+        }
+        let const_idx = self.mlir_const_int_from_type(0, self.type_index(), self.cur_block());
+        let op = mlir_memref::store(val, ptr, &[const_idx], self.cur_loc());
         self.cur_block().append_operation(op);
         // TODO(check): memref::store op does not return a value.
         val
@@ -457,6 +553,9 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         ptr: Self::Value,
         indices: &[Self::Value],
     ) -> Self::Value {
+        if self.skip_op(false) {
+            return ptr;
+        }
         if indices.len() != 1 {
             panic!("only supports single index");
         }
@@ -467,21 +566,24 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         let static_strides = DenseI64ArrayAttribute::new(self.mlir_ctx, &[]).into();
 
         let result_ty = MemRefType::new(ty, &[indices.len() as i64], None, None);
-        let op = self.cur_block().append_operation(
-            mlir_ods_memref::reinterpret_cast(
-                self.mlir_ctx,
-                ty,
-                ptr,
-                indices,
-                &sizes,
-                &strides,
-                static_offsets,
-                static_size,
-                static_strides,
-                self.cur_loc(),
-            )
-            .into(),
+        //let op = self.cur_block().append_operation(
+        mlir_ods_memref::reinterpret_cast(
+            self.mlir_ctx,
+            ty,
+            ptr,
+            indices,
+            &sizes,
+            &strides,
+            static_offsets,
+            static_size,
+            static_strides,
+            self.cur_loc(),
         );
+        // .into(),
+        //);
+        let op = self
+            .cur_block()
+            .append_operation(mlir_memref::cast(ptr, result_ty, self.cur_loc()).into());
         op.result(0).unwrap().into()
     }
 
@@ -538,7 +640,15 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn intcast(&mut self, val: Self::Value, dest_ty: Self::Type, is_signed: bool) -> Self::Value {
-        todo!()
+        let src_ty = val.r#type();
+        let op = if src_ty.is_index() {
+            assert!(dest_ty.is_integer());
+            melior::dialect::arith::index_cast(val, dest_ty, self.cur_loc())
+        } else {
+            todo!()
+        };
+        let op = self.cur_block().append_operation(op);
+        op.result(0).unwrap().into()
     }
 
     fn pointercast(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
@@ -727,7 +837,10 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         if let Some(op) = op {
             let op = self.cur_block().append_operation(op);
             if op.result_count() > 0 {
-                op.result(0).unwrap().into()
+                let ret: mlir_ir::Value<'ml, 'val> = op.result(0).unwrap().into();
+                log::debug!("call op ret: {:?}", ret);
+                self.span_to_type.insert(self.cur_span, ret.r#type());
+                ret
             } else {
                 llfn
             }

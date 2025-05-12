@@ -1,7 +1,12 @@
-use melior::ir::{
-    attribute::StringAttribute, r#type::FunctionType, BlockLike, Location, Operation,
+use melior::{
+    ir::{
+        attribute::StringAttribute, r#type::FunctionType, Attribute, BlockLike, Location, Operation,
+    },
+    pass::gpu,
 };
-use rustc_codegen_ssa::traits::{LayoutTypeCodegenMethods, MiscCodegenMethods};
+use rustc_codegen_ssa::traits::{
+    BaseTypeCodegenMethods, LayoutTypeCodegenMethods, MiscCodegenMethods,
+};
 use rustc_middle::{
     query::Key,
     ty::{
@@ -87,6 +92,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let gpu_attrs = self.get_gpu_attrs(instance.def_id());
         let function =
             melior::ir::attribute::FlatSymbolRefAttribute::new(&self.mlir_ctx, sym.as_str());
+        println!("FlatSymbolRefAttribute: {}", function);
         let op = self.get_fn(instance);
         let ftyp = op.get_func_type().unwrap();
         let is_gpu = op.is_gpu_func();
@@ -146,26 +152,20 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     ) -> Result<Option<melior::ir::Operation<'ml>>, melior::Error> {
         match gpu_item {
             GpuItem::ThreadId => {
+                // attrs must be parsed from #gpu<dim(x)>
                 assert!(attrs.len() == 1);
+                assert!(return_types.len() == 1);
                 let dimention = attrs.pop().unwrap();
                 Ok(Some(
-                    melior::dialect::ods::gpu::thread_id(
-                        self.mlir_ctx,
-                        dimention,
-                        self.to_mlir_loc(span),
-                    )
-                    .into(),
+                    crate::mlir::gpu::thread_id(self.mlir_ctx, dimention, self.to_mlir_loc(span))
+                        .into(),
                 ))
             }
             GpuItem::GlobalThreadId => {
                 let dimention = attrs.pop().unwrap();
                 Ok(Some(
-                    melior::dialect::ods::gpu::global_id(
-                        self.mlir_ctx,
-                        dimention,
-                        self.to_mlir_loc(span),
-                    )
-                    .into(),
+                    crate::mlir::gpu::global_id(self.mlir_ctx, dimention, self.to_mlir_loc(span))
+                        .into(),
                 ))
             }
             GpuItem::Printf => {
@@ -232,7 +232,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         }
         let gpu_attrs = self.get_gpu_attrs(def_id);
         assert!(
-            gpu_attrs.kernel || gpu_attrs.host || gpu_attrs.gpu_item.is_some(),
+            gpu_attrs.kernel || gpu_attrs.host || gpu_attrs.device || gpu_attrs.gpu_item.is_some(),
             r"function {sym} is not a kernel or host function",
         );
         dbg!(&sym);
@@ -242,7 +242,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let fn_type = self.fn_abi_to_fn_type(fn_abi);
         let fn_type = melior::ir::attribute::TypeAttribute::new(fn_type.into());
         let fn_sym = melior::ir::attribute::StringAttribute::new(mlir_ctx, sym.as_str());
-        let mut operation: Operation<'ml> = if gpu_attrs.host {
+        let mut operation: Operation<'ml> = if !gpu_attrs.kernel {
             melior::dialect::ods::func::func(
                 mlir_ctx,
                 melior::ir::Region::new(),
@@ -267,8 +267,9 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         if let Some(extra_attr) = gpu_attrs.to_mlir_attribute(&self.mlir_ctx) {
             operation.set_attribute(crate::mlir::BUILTIN_SYM, extra_attr);
         }
+        let visibility = MLIRVisibility::Private;
         operation.set_op_visible(self.mlir_ctx, visibility);
-        let body = self.mlir_body(false);
+        let body = self.mlir_body(!gpu_attrs.host);
         log::trace!("append operation to block {}", operation);
         let op = body.append_operation(operation);
         self.fn_db.write().unwrap().insert(def_id, op);

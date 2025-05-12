@@ -7,7 +7,7 @@ use super::GPUCodegenContext;
 
 fn to_mlir_visibility(visibility: rustc_middle::mir::mono::Visibility) -> MLIRVisibility {
     match visibility {
-        rustc_middle::mir::mono::Visibility::Default => MLIRVisibility::Public,
+        rustc_middle::mir::mono::Visibility::Default => MLIRVisibility::Private,
         rustc_middle::mir::mono::Visibility::Protected => MLIRVisibility::Public,
         rustc_middle::mir::mono::Visibility::Hidden => MLIRVisibility::Private,
     }

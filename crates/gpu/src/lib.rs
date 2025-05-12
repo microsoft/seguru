@@ -143,7 +143,6 @@ pub fn printf() -> usize {
     unimplemented!()
 }
 
-
 #[gpu_codegen::builtin(gpu.thread_id)]
 pub fn thread_id() -> usize {
     unimplemented!()

@@ -34,7 +34,7 @@ impl<'tcx, 'ml> MiscCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, '_> {
         );
         let location = self.to_mlir_loc(instance.def.default_span(tcx));
         let fn_abi = self.fn_abi_of_instance(instance, rustc_middle::ty::List::empty());
-        self.to_mir_func_decl(instance, crate::mlir::MLIRVisibility::Public)
+        self.to_mir_func_decl(instance, crate::mlir::MLIRVisibility::Private)
     }
 
     fn get_fn_addr(&self, instance: rustc_middle::ty::Instance<'tcx>) -> Self::Value {

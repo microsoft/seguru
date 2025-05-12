@@ -1,5 +1,6 @@
 use std::convert::Infallible;
 
+use melior::pass::gpu;
 use rustc_ast::{
     token::{Token, TokenKind},
     tokenstream::TokenTree,
@@ -12,6 +13,7 @@ use rustc_span::{sym::to_string, Symbol};
 pub(crate) struct GpuAttributes {
     pub kernel: bool,
     pub host: bool,
+    pub device: bool, // a device function called by a kernel but not by host directly
     pub gpu_item: Option<GpuItem>,
 }
 
@@ -61,6 +63,10 @@ pub fn host_symbol() -> Symbol {
     Symbol::intern("host")
 }
 
+pub fn device_symbol() -> Symbol {
+    Symbol::intern("device")
+}
+
 pub fn gpu_builtin_symbol() -> Symbol {
     Symbol::intern("builtin")
 }
@@ -96,6 +102,9 @@ impl GpuAttributes {
             if attr.path_matches(&[gpu_symbol(), host_symbol()]) {
                 gpu_attrs.host = true;
             }
+            if attr.path_matches(&[gpu_symbol(), device_symbol()]) {
+                gpu_attrs.device = true;
+            }
             if attr.path_matches(&[gpu_symbol(), gpu_builtin_symbol()]) {
                 let Attribute::Unparsed(item) = attr else {
                     dbg!(attr);
@@ -128,7 +137,7 @@ impl GpuAttributes {
 pub(crate) fn is_gpu_code(tcx: &rustc_middle::ty::TyCtxt<'_>, def_id: DefId) -> bool {
     let attrs = tcx.get_attrs_unchecked(def_id);
     let gpu_attrs = GpuAttributes::parse(attrs);
-    if gpu_attrs.kernel || gpu_attrs.host {
+    if gpu_attrs.kernel || gpu_attrs.host || gpu_attrs.device {
         true
     } else {
         false

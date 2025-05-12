@@ -16,21 +16,23 @@ fn get_alloc_name<'tcx>(alloc_id: rustc_const_eval::interpret::AllocId) -> Strin
 }
 
 impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
-    pub fn mlir_const_int_from_type(
+    pub(crate) fn mlir_const_int_from_type(
         &self,
         i: impl std::fmt::Display,
         typ: <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type,
+        block: &'a mlir_ir::Block<'ml>,
     ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Value {
-        self.mlir_body(false)
+        block
             .const_int_from_type(self.mlir_ctx, self.unknown_loc(), i, typ)
             .expect("failed to create const int")
     }
 
-    pub fn mlir_const_int<T>(
+    fn mlir_const_int<T>(
         &self,
         i: impl std::fmt::Display,
+        block: &'a mlir_ir::Block<'ml>,
     ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Value {
-        self.mlir_body(false)
+        block
             .const_int(
                 self.mlir_ctx,
                 self.unknown_loc(),
@@ -38,6 +40,21 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 size_of::<T>() as u32 * 8,
             )
             .expect("failed to create const int")
+    }
+
+    fn mlir_global_const_int_from_type(
+        &self,
+        i: impl std::fmt::Display,
+        typ: <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type,
+    ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Value {
+        self.mlir_const_int_from_type(i, typ, self.mlir_body(false))
+    }
+
+    fn mlir_global_const_int<T>(
+        &self,
+        i: impl std::fmt::Display,
+    ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Value {
+        self.mlir_const_int::<T>(i, self.mlir_body(false))
     }
 
     fn const_data_memref_from_alloc(
@@ -80,9 +97,9 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             None,
             self.unknown_loc(),
         );
-        let op = self.mlir_body(false).append_operation(op);
+        let op = self.mlir_body(true).append_operation(op);
         let op = mlir_memref::get_global(self.mlir_ctx, name, ref_ty, self.unknown_loc());
-        let op = self.mlir_body(false).append_operation(op);
+        let op = self.mlir_body(true).append_operation(op);
         op.result(0).unwrap().into()
     }
 
@@ -172,15 +189,15 @@ impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
     }
 
     fn const_usize(&self, i: u64) -> Self::Value {
-        self.mlir_const_int::<usize>(i)
+        self.mlir_global_const_int::<usize>(i)
     }
 
     fn const_uint(&self, t: Self::Type, i: u64) -> Self::Value {
-        self.mlir_const_int_from_type(i, t)
+        self.mlir_global_const_int_from_type(i, t)
     }
 
     fn const_uint_big(&self, t: Self::Type, u: u128) -> Self::Value {
-        self.mlir_const_int_from_type(u, t)
+        self.mlir_global_const_int_from_type(u, t)
     }
 
     fn const_real(&self, t: Self::Type, val: f64) -> Self::Value {
@@ -233,7 +250,10 @@ impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
                         result
                     }
                 } else {
-                    self.mlir_const_int_from_type(cv.assert_scalar_int().to_u128(), ty)
+                    self.mlir_global_const_int_from_type(
+                        cv.assert_scalar_int().to_int(int.size()),
+                        ty,
+                    )
                 }
             }
             rustc_const_eval::interpret::Scalar::Ptr(ptr, s) => {

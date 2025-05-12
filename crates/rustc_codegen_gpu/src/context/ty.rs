@@ -21,8 +21,16 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         MLIRType::from(mlir_type::TupleType::new(self.mlir_ctx, &[]))
     }
 
-    pub(crate) fn type_i1(&self) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type {
+    pub(crate) fn type_index(&self) -> MLIRType<'ml> {
+        mlir_ir::Type::index(self.mlir_ctx)
+    }
+
+    pub(crate) fn type_i1(&self) -> MLIRType<'ml> {
         MLIRType::from(mlir_type::IntegerType::new(self.mlir_ctx, 1))
+    }
+
+    pub(crate) fn type_tensor(&self, ty: MLIRType<'ml>, len: u64) -> MLIRType<'ml> {
+        MLIRType::from(mlir_type::RankedTensorType::new(&[len], ty.into(), None))
     }
 
     pub fn type_padding_filler(
@@ -194,10 +202,7 @@ impl<'tcx, 'ml, 'a> BaseTypeCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> 
     }
 
     fn type_isize(&self) -> Self::Type {
-        MLIRType::from(mlir_type::IntegerType::new(
-            self.mlir_ctx,
-            size_of::<isize>() as u32 * 8,
-        ))
+        self.type_index()
     }
 
     fn type_f16(&self) -> Self::Type {
@@ -220,7 +225,7 @@ impl<'tcx, 'ml, 'a> BaseTypeCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> 
         if len == 0 {
             return ty; // &[T] is the same as &T
         }
-        MLIRType::from(mlir_type::RankedTensorType::new(&[len], ty.into(), None))
+        self.type_tensor(ty, len)
     }
 
     fn type_func(&self, args: &[Self::Type], ret: Self::Type) -> Self::Type {

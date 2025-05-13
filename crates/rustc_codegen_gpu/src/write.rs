@@ -1,8 +1,6 @@
 use std::process::Command;
 
 use melior::ir::operation::OperationPrintingFlags;
-use melior::ir::BlockLike;
-use rustc_ast::format;
 use rustc_codegen_ssa::mono_item::MonoItemExt;
 use rustc_codegen_ssa::ModuleCodegen;
 use rustc_codegen_ssa::{
@@ -64,18 +62,20 @@ pub(crate) fn codegen(
             log::trace!("MLIR module verify failed: {}", content);
             Err(rustc_errors::FatalError)?;
         }
+        // mlir-opt must use "shell" in order to pass correct arguments.
         let mut mlir_opt = Command::new("sh");
-        let MLIR_OPT = "/home/ziqiaozhou/rust-gpu/llvm-project/build-mlir-gpu/bin/mlir-opt";
         let cmd = format!(
             "{} {} -o {} {}",
-            MLIR_OPT,
+            which::which("mlir-opt")
+                .expect("mlir-opt not found")
+                .display(),
             r#"-gpu-lower-to-nvvm-pipeline='opt-level=3 cubin-chip=sm_90a cubin-features=+ptx80'"#,
             out_opt.to_str().unwrap(),
             out.to_str().unwrap()
         );
         let args = ["-c", cmd.as_str()];
         let mlir_opt = mlir_opt
-            .args(&args)
+            .args(args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::inherit());
@@ -96,7 +96,7 @@ pub(crate) fn codegen(
             out_opt.to_str().unwrap(),
         ];
         let mlir_translate = Command::new("mlir-translate")
-            .args(&args)
+            .args(args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::inherit())
@@ -109,7 +109,7 @@ pub(crate) fn codegen(
 
         let args = ["-o", out_bc.to_str().unwrap(), out_ll.to_str().unwrap()];
         let mlir_translate = Command::new("llvm-as")
-            .args(&args)
+            .args(args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::inherit())
@@ -131,7 +131,7 @@ pub(crate) fn codegen(
             panic!("llc failed with status: {:?}", output.status);
         }
         log::trace!("write MLIR obj to {:?}", out_obj);
-        std::fs::copy(&out_obj.to_str().unwrap(), &out_obj_copy.to_str().unwrap()).unwrap();
+        std::fs::copy(out_obj.to_str().unwrap(), out_obj_copy.to_str().unwrap()).unwrap();
         Some(out_obj_copy)
     } else {
         None
@@ -155,7 +155,7 @@ pub(crate) fn module_codegen<'tcx>(
     let mlir_ctx = crate::mlir::create_mlir_ctx();
     let (mlir_module, gpu_block, cpu_block) = crate::mlir::create_top_module(mlir_ctx);
     let mut blocks = std::collections::HashMap::new();
-    blocks.insert("host".to_string(), cpu_block);
+    blocks.insert("host".to_string(), mlir_module.body());
     blocks.insert("gpu".to_string(), gpu_block);
 
     log::trace!("create MLIR module {}", cgu_name);

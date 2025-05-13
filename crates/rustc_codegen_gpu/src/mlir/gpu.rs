@@ -1,10 +1,4 @@
-use melior::{
-    dialect::ods::gpu,
-    ir::{
-        operation::OperationBuilder, r#type::MemRefType, Attribute, Identifier, Location,
-        Operation, Type, Value,
-    },
-};
+use melior::ir::{operation::OperationBuilder, Attribute, Identifier, Location, Operation, Type};
 
 pub fn thread_id<'c>(
     ctx: &'c melior::Context,

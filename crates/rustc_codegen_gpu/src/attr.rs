@@ -1,12 +1,9 @@
-use std::convert::Infallible;
-
-use melior::pass::gpu;
 use rustc_ast::{
     token::{Token, TokenKind},
     tokenstream::TokenTree,
 };
 use rustc_hir::{def_id::DefId, Attribute};
-use rustc_span::{sym::to_string, Symbol};
+use rustc_span::Symbol;
 
 // inspired by rust-gpu's attribute handling
 #[derive(Default, Clone, PartialEq)]
@@ -86,13 +83,11 @@ impl GpuAttributes {
         &self,
         ctx: &'ml melior::Context,
     ) -> Option<melior::ir::Attribute<'ml>> {
-        if let Some(gpu_item) = self.gpu_item {
-            Some(melior::ir::attribute::StringAttribute::new(ctx, gpu_item.into()).into())
-        } else {
-            None
-        }
+        self.gpu_item.map(|gpu_item| {
+            melior::ir::attribute::StringAttribute::new(ctx, gpu_item.into()).into()
+        })
     }
-    pub fn parse<'tcx>(attrs: &'tcx [Attribute]) -> Self {
+    pub fn parse(attrs: &[Attribute]) -> Self {
         let mut gpu_attrs = Self::default();
 
         for attr in attrs {
@@ -137,9 +132,5 @@ impl GpuAttributes {
 pub(crate) fn is_gpu_code(tcx: &rustc_middle::ty::TyCtxt<'_>, def_id: DefId) -> bool {
     let attrs = tcx.get_attrs_unchecked(def_id);
     let gpu_attrs = GpuAttributes::parse(attrs);
-    if gpu_attrs.kernel || gpu_attrs.host || gpu_attrs.device {
-        true
-    } else {
-        false
-    }
+    gpu_attrs.kernel || gpu_attrs.host || gpu_attrs.device
 }

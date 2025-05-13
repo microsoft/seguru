@@ -1,17 +1,15 @@
 use melior::dialect::memref as mlir_memref;
-use melior::ir::{self as mlir_ir, r#type as mlir_type, TypeLike};
-use melior::{dialect::ods::memref::GlobalOperation, helpers::ArithBlockExt, ir::BlockLike};
+use melior::ir::{self as mlir_ir, r#type as mlir_type};
+use melior::{helpers::ArithBlockExt, ir::BlockLike};
 use rustc_abi::Size;
 use rustc_codegen_ssa::traits::{
     BackendTypes, BaseTypeCodegenMethods, ConstCodegenMethods, StaticCodegenMethods,
 };
-use rustc_const_eval::interpret::{alloc_range, AllocRange, GlobalAlloc};
-
-use crate::mlir;
+use rustc_const_eval::interpret::{alloc_range, GlobalAlloc};
 
 use super::GPUCodegenContext;
 
-fn get_alloc_name<'tcx>(alloc_id: rustc_const_eval::interpret::AllocId) -> String {
+fn get_alloc_name(alloc_id: rustc_const_eval::interpret::AllocId) -> String {
     format!("memory_alloc_{:?}", alloc_id.0)
 }
 
@@ -246,8 +244,7 @@ impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
                     if data == 0 {
                         self.const_null(ty)
                     } else {
-                        let result = self.const_undef(ty);
-                        result
+                        self.const_undef(ty)
                     }
                 } else {
                     self.mlir_global_const_int_from_type(

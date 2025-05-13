@@ -3,36 +3,36 @@ mod coverage;
 mod debug;
 mod intrinsic;
 
-use std::collections::HashMap;
-use std::{marker::PhantomData, ops::Deref};
-
+use crate::mlir::ValueToOpRef;
 use log_derive::logfn;
 use melior::dialect::memref as mlir_memref;
 use melior::dialect::ods::memref as mlir_ods_memref;
 use melior::ir::attribute::DenseI64ArrayAttribute;
 use melior::ir::r#type::{self as mlir_type, MemRefType};
+use std::collections::HashMap;
+use std::{marker::PhantomData, ops::Deref};
 
 use melior::ir::{
     self as mlir_ir, BlockLike, Location, RegionLike, RegionRef, TypeLike, ValueLike,
 };
 use rustc_codegen_ssa::traits::{
-    AsmBuilderMethods, BackendTypes, BaseTypeCodegenMethods, BuilderMethods, ConstCodegenMethods,
-    DerivedTypeCodegenMethods, StaticBuilderMethods,
+    AsmBuilderMethods, BackendTypes, BaseTypeCodegenMethods, BuilderMethods, StaticBuilderMethods,
 };
 
-use crate::mlir::{self, BlockRefWithTime};
+use crate::mlir::BlockRefWithTime;
 use crate::{context::GPUCodegenContext, mlir::MLIROpHelpers};
 
 enum FnStackState {
     Alloca,
     Store(usize),
 }
+
 pub(crate) struct GpuBuilder<'tcx, 'ml, 'a> {
     pub cx: &'a GPUCodegenContext<'tcx, 'ml, 'a>,
     pub cur_block: <GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::BasicBlock,
     pub cur_span: rustc_span::Span,
     pub span_to_type: HashMap<rustc_span::Span, mlir_type::Type<'ml>>,
-    pub stack_state: FnStackState,
+    stack_state: FnStackState,
     pub extra_attrs: Vec<mlir_ir::Attribute<'ml>>,
     dummy: PhantomData<&'a mlir_ir::operation::Operation<'ml>>,
 }
@@ -46,12 +46,15 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         unsafe { self.cur_block.to_ref() }
     }
 
-    pub fn use_value(&mut self, val: Self::Value) {
-        if self.stack_state == FnStackState::Store(0) {
-            self.stack_state = FnStackState::Alloca;
-        }
-        if let Some(op) = self.cur_block().parent_operation() {
-            op.use_value(val);
+    pub fn use_value(
+        &mut self,
+        val: <GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::Value,
+    ) -> <GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::Value {
+        if let Ok(op) = val.is_from_op(Some("arith.constant")) {
+            let op = self.cur_block().append_operation((op).clone());
+            op.result(0).unwrap().into()
+        } else {
+            val
         }
     }
 
@@ -73,6 +76,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         }
     }
 
+    #[allow(dead_code)]
     pub fn inside_gpu_mod(&self) -> bool {
         if let Some(op) = self.cur_block().parent_operation() {
             op.is_gpu_func()
@@ -175,7 +179,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         let block: mlir_ir::BlockRef<'ml, 'a> = region.append_block(melior::ir::Block::new(
             &types
                 .iter()
-                .map(|t| (t.clone(), Location::unknown(cx.mlir_ctx)))
+                .map(|t| (*t, Location::unknown(cx.mlir_ctx)))
                 .collect::<Vec<_>>(),
         ));
         block
@@ -202,9 +206,9 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     fn ret(&mut self, v: Self::Value) {
         let op = if self.inside_kernel_func() {
             log::debug!("gpu_return val: {:?} ty: {}", v, v.r#type());
-            self.cx.gpu_return(&[v], self.cur_loc())
+            self.cx.gpu_return(&[self.use_value(v)], self.cur_loc())
         } else {
-            self.cx.cpu_return(&[v], self.cur_loc())
+            self.cx.cpu_return(&[self.use_value(v)], self.cur_loc())
         };
         self.cur_block().append_operation(op);
     }
@@ -420,24 +424,12 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
                     }
                 }
             }
+        } else if self.span_to_type.contains_key(&self.cur_span) {
+            let ty = self.span_to_type[&self.cur_span];
+            log::debug!("alloc {:?} {}", self.cur_span, ty);
+            ty
         } else {
-            if self.span_to_type.contains_key(&self.cur_span) {
-                let ty = self.span_to_type[&self.cur_span];
-                log::debug!("alloc {:?} {}", self.cur_span, ty);
-                ty
-            } else {
-                todo!("{:?}", self.cur_span);
-            }
-            /*match size.bytes() {
-                1 => self.type_i8(),
-                2 => self.type_i16(),
-                4 => self.type_i32(),
-                8 => self.type_i64(),
-                16 => self.type_i128(),
-                _ => {
-                    panic!("Unsupported size for alloca: {}", size.bytes());
-                }
-            }*/
+            todo!("{:?}", self.cur_span);
         };
 
         log::debug!("alloc {} {}", ty, size.bytes());
@@ -513,6 +505,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         ptr: Self::Value,
         align: rustc_abi::Align,
     ) -> Self::Value {
+        let val = self.use_value(val);
         if self.skip_op(true) {
             return val;
         }
@@ -581,9 +574,9 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         );
         // .into(),
         //);
-        let op = self
-            .cur_block()
-            .append_operation(mlir_memref::cast(ptr, result_ty, self.cur_loc()).into());
+        let op =
+            self.cur_block()
+                .append_operation(mlir_memref::cast(ptr, result_ty, self.cur_loc()));
         op.result(0).unwrap().into()
     }
 

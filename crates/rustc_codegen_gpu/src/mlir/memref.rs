@@ -1,7 +1,6 @@
-use melior::ir::{
-    operation::OperationBuilder, r#type::MemRefType, Location, Operation, Type, Value,
-};
+use melior::ir::{operation::OperationBuilder, Location, Operation, Type, Value};
 
+#[allow(dead_code)]
 pub fn reinterpret_cast<'c>(
     ty: Type<'c>,
     ptr: Value<'c, '_>,

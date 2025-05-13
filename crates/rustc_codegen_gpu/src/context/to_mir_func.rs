@@ -1,20 +1,15 @@
-use melior::{
-    ir::{
-        attribute::StringAttribute, r#type::FunctionType, Attribute, BlockLike, Location, Operation,
-    },
-    pass::gpu,
+use melior::ir::{
+    attribute::StringAttribute, r#type::FunctionType, BlockLike, Location, Operation,
 };
-use rustc_codegen_ssa::traits::{
-    BaseTypeCodegenMethods, LayoutTypeCodegenMethods, MiscCodegenMethods,
-};
+use rustc_codegen_ssa::traits::{LayoutTypeCodegenMethods, MiscCodegenMethods};
 use rustc_middle::{
     query::Key,
     ty::{
-        layout::{FnAbiOf, FnAbiOfHelpers, HasTyCtxt, HasTypingEnv},
+        layout::{FnAbiOf, HasTyCtxt},
         Instance,
     },
 };
-use rustc_span::{sym::assert, Span};
+use rustc_span::Span;
 
 use crate::{
     attr::{GpuAttributes, GpuItem},
@@ -37,7 +32,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         ret: &[melior::ir::Value<'ml, 'a>],
         loc: Location<'ml>,
     ) -> melior::ir::Operation<'ml> {
-        melior::dialect::func::r#return(ret, loc).into()
+        melior::dialect::func::r#return(ret, loc)
     }
 
     pub fn call_op(
@@ -56,7 +51,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 return_type.push(ftype.result(i).unwrap());
             }
         } else {
-            assert!(false);
+            panic!("")
         }
         let loc = self.to_mlir_loc(span);
         if let Ok(builtin_sym) = builtin_sym {
@@ -91,7 +86,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let sym = self.tcx.symbol_name(instance).name.to_string();
         let gpu_attrs = self.get_gpu_attrs(instance.def_id());
         let function =
-            melior::ir::attribute::FlatSymbolRefAttribute::new(&self.mlir_ctx, sym.as_str());
+            melior::ir::attribute::FlatSymbolRefAttribute::new(self.mlir_ctx, sym.as_str());
         println!("FlatSymbolRefAttribute: {}", function);
         let op = self.get_fn(instance);
         let ftyp = op.get_func_type().unwrap();
@@ -99,7 +94,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
 
         let mut const_op =
             melior::dialect::func::constant(self.mlir_ctx, function, ftyp, self.unknown_loc());
-        if let Some(extra_attr) = gpu_attrs.to_mlir_attribute(&self.mlir_ctx) {
+        if let Some(extra_attr) = gpu_attrs.to_mlir_attribute(self.mlir_ctx) {
             const_op.set_attribute(crate::mlir::BUILTIN_SYM, extra_attr);
         }
         let const_op: melior::ir::OperationRef<'ml, 'a> =
@@ -123,7 +118,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 }
                 rustc_target::callconv::PassMode::Pair(arg_attributes, arg_attributes1) => {
                     let mlir_arg = self.scalar_pair_element_backend_type(arg.layout, 0, true);
-                    args.push(mlir_arg.into());
+                    args.push(mlir_arg);
                     self.scalar_pair_element_backend_type(arg.layout, 1, true)
                 }
                 rustc_target::callconv::PassMode::Cast { pad_i32, cast } => todo!(),
@@ -133,13 +128,13 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                     on_stack,
                 } => todo!(),
             };
-            args.push(mlir_arg.into());
+            args.push(mlir_arg);
         }
         let mut ret = vec![];
         if !abi.ret.layout.is_zst() {
-            ret.push(self.mlir_type(abi.ret.layout, false).into())
+            ret.push(self.mlir_type(abi.ret.layout, false))
         }
-        FunctionType::new(&self.mlir_ctx, &args, &ret)
+        FunctionType::new(self.mlir_ctx, &args, &ret)
     }
 
     fn call_gpu_builtin_operation(
@@ -156,17 +151,19 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 assert!(attrs.len() == 1);
                 assert!(return_types.len() == 1);
                 let dimention = attrs.pop().unwrap();
-                Ok(Some(
-                    crate::mlir::gpu::thread_id(self.mlir_ctx, dimention, self.to_mlir_loc(span))
-                        .into(),
-                ))
+                Ok(Some(crate::mlir::gpu::thread_id(
+                    self.mlir_ctx,
+                    dimention,
+                    self.to_mlir_loc(span),
+                )))
             }
             GpuItem::GlobalThreadId => {
                 let dimention = attrs.pop().unwrap();
-                Ok(Some(
-                    crate::mlir::gpu::global_id(self.mlir_ctx, dimention, self.to_mlir_loc(span))
-                        .into(),
-                ))
+                Ok(Some(crate::mlir::gpu::global_id(
+                    self.mlir_ctx,
+                    dimention,
+                    self.to_mlir_loc(span),
+                )))
             }
             GpuItem::Printf => {
                 assert!(attrs.len() == 1);
@@ -264,10 +261,16 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             op.set_attribute(crate::mlir::SYM_NAME_SYM, fn_sym.into());
             op
         };
-        if let Some(extra_attr) = gpu_attrs.to_mlir_attribute(&self.mlir_ctx) {
+        if let Some(extra_attr) = gpu_attrs.to_mlir_attribute(self.mlir_ctx) {
             operation.set_attribute(crate::mlir::BUILTIN_SYM, extra_attr);
         }
-        let visibility = MLIRVisibility::Private;
+        let visibility = if !gpu_attrs.host {
+            MLIRVisibility::Private
+        } else if tcx.visibility(def_id).is_public() {
+            MLIRVisibility::Public
+        } else {
+            MLIRVisibility::Private
+        };
         operation.set_op_visible(self.mlir_ctx, visibility);
         let body = self.mlir_body(!gpu_attrs.host);
         log::trace!("append operation to block {}", operation);

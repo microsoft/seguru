@@ -1,5 +1,4 @@
 use rustc_codegen_ssa::traits::PreDefineCodegenMethods;
-use rustc_middle::mir::mono::Linkage;
 
 use crate::mlir::MLIRVisibility;
 
@@ -31,20 +30,13 @@ impl<'tcx, 'ml, 'a> PreDefineCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'm
         symbol_name: &str,
     ) {
         log::trace!(
-            "Predefining function with name `{}` with linkage `{:?}` and attributes `{:?}`",
+            "Predefining function with name `{}` with linkage `{:?}` and attributes `{:?} {:?}`",
             symbol_name,
             linkage,
-            self.tcx.codegen_fn_attrs(instance.def_id())
+            self.tcx.codegen_fn_attrs(instance.def_id()),
+            visibility
         );
-        let visibility = if linkage != Linkage::Internal
-            && self
-                .tcx
-                .is_compiler_builtins(rustc_hir::def_id::LOCAL_CRATE)
-        {
-            MLIRVisibility::Private
-        } else {
-            to_mlir_visibility(visibility)
-        };
+        let visibility = to_mlir_visibility(visibility);
         let decl = self.to_mir_func_decl(instance, visibility);
     }
 }

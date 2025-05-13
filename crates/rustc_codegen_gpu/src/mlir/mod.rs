@@ -1,13 +1,11 @@
 pub(crate) mod gpu;
 mod memref;
 
-use std::path::PathBuf;
-
 use melior::{
     dialect::{
         arith, func,
         ods::{
-            func::{ConstantOperation, FuncOperation},
+            func::FuncOperation,
             gpu::{GPUFuncOperation, GPUModuleOperation},
             memref::GetGlobalOperation,
         },
@@ -22,8 +20,6 @@ use melior::{
     utility::register_all_dialects,
     Context,
 };
-use rustc_ast::Path;
-use rustc_hir::def::Res;
 use rustc_span::Loc;
 
 pub(crate) fn create_mlir_ctx() -> &'static melior::Context {
@@ -52,8 +48,8 @@ pub(crate) fn create_top_module<'ml>(
     ctx: &'ml Context,
 ) -> (
     melior::ir::Module<'ml>,
-    melior::ir::BlockRef<'ml, '_>,
-    melior::ir::BlockRef<'ml, '_>,
+    melior::ir::BlockRef<'ml, 'ml>,
+    melior::ir::BlockRef<'ml, 'ml>,
 ) {
     let location = Location::unknown(ctx);
     let module = Module::new(location);
@@ -78,29 +74,17 @@ pub enum MLIRVisibility {
     Nested,
 }
 
-/// #Safety:
-/// This function should be unsafe because the returned reference has same lifetime with op_ref
-/*pub(crate) fn try_from_op_ref<'ml, 'a, T: TryFrom<Operation<'ml>>>(op_ref: OperationRef<'ml, 'a>) -> Result<&'a T, ()> {
-    let op = unsafe {
-        std::ptr::read(op_ref.to_ref())
-    };
-    if T::try_from(op).is_err() {
-        return Err(());
-    };
-    unsafe { std::mem::transmute(op_ref) }
-}*/
-
-const VALUE_SYM: &'static str = "value";
-const FUNCTION_TYPE_SYM: &'static str = "function_type";
-const VISIBILITY_SYM: &'static str = "sym_visibility";
-const NAME_SYM: &'static str = "name";
-pub const BUILTIN_SYM: &'static str = "gpu_codegen_builtin";
-pub const SYM_NAME_SYM: &'static str = "sym_name";
+const VALUE_SYM: &str = "value";
+const FUNCTION_TYPE_SYM: &str = "function_type";
+const VISIBILITY_SYM: &str = "sym_visibility";
+const NAME_SYM: &str = "name";
+pub const BUILTIN_SYM: &str = "gpu_codegen_builtin";
+pub const SYM_NAME_SYM: &str = "sym_name";
 
 pub trait ValueToOpRef<'ml, 'a> {
     fn to_func_sym(&self) -> Result<FlatSymbolRefAttribute<'ml>, melior::Error>;
     fn to_get_global_name(&self) -> Result<FlatSymbolRefAttribute<'ml>, melior::Error>;
-    fn is_from_op(&self, sym: &'static str) -> bool;
+    fn is_from_op(&self, sym: Option<&'static str>) -> Result<Operation<'ml>, melior::Error>;
     fn get_op_attr<T: TryFrom<Attribute<'ml>>>(
         &self,
         attr_name: &'static str,
@@ -130,12 +114,16 @@ impl<'ml, 'a> ValueToOpRef<'ml, 'a> for Value<'ml, 'a> {
         op.get_attr_if_sym(GetGlobalOperation::name(), NAME_SYM)
     }
 
-    fn is_from_op(&self, sym: &'static str) -> bool {
+    fn is_from_op(&self, sym: Option<&'static str>) -> Result<Operation<'ml>, melior::Error> {
         let Ok(op_val) = OperationResult::<'ml, 'a>::try_from(*self) else {
-            return false;
+            return Err(melior::Error::ResultNotFound("is_from_op"));
         };
         let op = op_val.owner();
-        op.expect_op_by_sym(sym).is_ok()
+        let Some(sym) = sym else {
+            return Ok((*op).clone());
+        };
+        op.expect_op_by_sym(sym)?;
+        Ok((*op).clone())
     }
 }
 
@@ -169,8 +157,6 @@ pub trait MLIROpHelpers<'ml> {
         attr_name: &'static str,
     ) -> Result<A, melior::Error>;
     fn get_func_type(&self) -> Result<FunctionType<'ml>, melior::Error>;
-
-    fn need_erase(&self) -> bool;
 }
 
 pub trait MLIRMutOpHelpers<'ml> {
@@ -199,14 +185,12 @@ impl<'ml, 'a> MLIROpHelpers<'ml> for OperationRef<'ml, 'a> {
     fn is_kernel_func(&self) -> bool {
         self.expect_op_by_sym(GPUFuncOperation::name()).is_ok()
     }
-    fn need_erase(&self) -> bool {
-        self.has_attribute(BUILTIN_SYM)
-    }
+
     fn expect_op_by_sym(&self, sym: &'static str) -> Result<(), melior::Error> {
         if self.name().as_string_ref().as_str().unwrap() == sym {
-            return Ok(());
+            Ok(())
         } else {
-            return Err(melior::Error::OperandNotFound(sym));
+            Err(melior::Error::OperandNotFound(sym))
         }
     }
 

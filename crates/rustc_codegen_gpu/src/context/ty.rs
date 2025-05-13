@@ -1,5 +1,3 @@
-use log_derive::{logfn, logfn_inputs};
-use melior::dialect::llvm::r#type as mlir_llvm_type;
 use rustc_abi::{BackendRepr, Primitive};
 use rustc_codegen_ssa::traits::{
     BackendTypes, BaseTypeCodegenMethods, DerivedTypeCodegenMethods, LayoutTypeCodegenMethods,
@@ -30,7 +28,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     }
 
     pub(crate) fn type_tensor(&self, ty: MLIRType<'ml>, len: u64) -> MLIRType<'ml> {
-        MLIRType::from(mlir_type::RankedTensorType::new(&[len], ty.into(), None))
+        MLIRType::from(mlir_type::RankedTensorType::new(&[len], ty, None))
     }
 
     pub fn type_padding_filler(
@@ -43,20 +41,6 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let unit_size = unit.size().bytes();
         assert_eq!(size % unit_size, 0);
         self.type_array(self.type_from_integer(unit), size / unit_size)
-    }
-
-    /// TODO(delete): this should never be called
-    fn type_struct(
-        &self,
-        fields: &[<GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type],
-        packed: bool,
-    ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type {
-        panic!();
-        /*MLIRType::from(mlir_llvm_type::r#struct(
-            self.mlir_ctx,
-            &fields.iter().map(|a| (*a).into()).collect::<Vec<_>>(),
-            packed,
-        ))*/
     }
 
     fn scalar_mlir_type(
@@ -75,7 +59,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 let ty = ptr_ty.unwrap().builtin_deref(true).unwrap();
                 let layout = self.layout_of(ty);
                 MLIRType::from(mlir_type::MemRefType::new(
-                    self.mlir_type(layout, immediate).into(),
+                    self.mlir_type(layout, immediate),
                     &[1],
                     None,
                     None,
@@ -146,12 +130,8 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             BackendRepr::ScalarPair(s1, s2) => {
                 // An immediate pair always contains just the two elements, without any padding
                 // filler, as it should never be stored to memory.
-                let t1 = self
-                    .scalar_pair_element_backend_type(layout, 0, false)
-                    .into();
-                let t2 = self
-                    .scalar_pair_element_backend_type(layout, 1, false)
-                    .into();
+                let t1 = self.scalar_pair_element_backend_type(layout, 0, false);
+                let t2 = self.scalar_pair_element_backend_type(layout, 1, false);
                 MLIRType::from(mlir_type::TupleType::new(self.mlir_ctx, &[t1, t2]))
             }
             BackendRepr::SimdVector { element, count } => todo!(),
@@ -229,11 +209,7 @@ impl<'tcx, 'ml, 'a> BaseTypeCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> 
     }
 
     fn type_func(&self, args: &[Self::Type], ret: Self::Type) -> Self::Type {
-        MLIRType::from(mlir_type::FunctionType::new(
-            self.mlir_ctx,
-            &args.iter().map(|a| (*a).into()).collect::<Vec<_>>(),
-            &[ret.into()],
-        ))
+        MLIRType::from(mlir_type::FunctionType::new(self.mlir_ctx, args, &[ret]))
     }
 
     fn type_ptr(&self) -> Self::Type {

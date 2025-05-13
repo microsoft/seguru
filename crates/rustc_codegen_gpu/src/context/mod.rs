@@ -10,14 +10,12 @@ mod ty;
 
 use rustc_abi::{self, HasDataLayout};
 use rustc_codegen_ssa::traits::BackendTypes;
-use rustc_middle::mir::ConstAlloc;
 use std::marker::PhantomData;
 use std::{collections::HashMap, sync::RwLock};
 
-use melior::ir::{self as mlir_ir, BlockLike};
+use melior::ir::{self as mlir_ir};
 use rustc_middle::ty::layout::{HasTyCtxt, HasTypingEnv};
 
-use crate::attr::GpuItem;
 use crate::mlir::BlockRefWithTime;
 
 use self::ty::MLIRType;

@@ -186,10 +186,10 @@ impl WriteBackendMethods for GPUCodegenBackend {
             dcx,
             modules
                 .into_iter()
-                .map(|m| Self::to_llvm_modele_code_gen(m))
+                .map(Self::to_llvm_modele_code_gen)
                 .collect(),
         );
-        ret.map(|m| Self::module_code_gen_from_llvm(m))
+        ret.map(Self::module_code_gen_from_llvm)
     }
 
     fn run_fat_lto(
@@ -225,7 +225,7 @@ impl WriteBackendMethods for GPUCodegenBackend {
                 (
                     modules
                         .into_iter()
-                        .map(|m| Self::lto_module_from_llvm(m))
+                        .map(Self::lto_module_from_llvm)
                         .collect(),
                     work_products,
                 )
@@ -268,7 +268,7 @@ impl WriteBackendMethods for GPUCodegenBackend {
             &GPUCodegenBackend::to_llvm_context(cgcx),
             GPUCodegenBackend::to_llvm_thin_module(thin),
         )
-        .map(|m| GPUCodegenBackend::module_code_gen_from_llvm(m))
+        .map(GPUCodegenBackend::module_code_gen_from_llvm)
     }
 
     unsafe fn codegen(
@@ -334,7 +334,7 @@ impl ExtraBackendMethods for GPUCodegenBackend {
         let start_time = std::time::Instant::now();
         //let (llvm_module, cost) = llvm_backend().compile_codegen_unit(tcx, cgu_name);
         let dep_node = tcx.codegen_unit(cgu_name).codegen_dep_node(tcx);
-        let (mut module, _) = tcx.dep_graph.with_task(
+        let (module, _) = tcx.dep_graph.with_task(
             dep_node,
             tcx,
             cgu_name,

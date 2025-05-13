@@ -137,7 +137,6 @@ pub fn add_mlir_string_attr(_: &'static str) -> usize {
     unimplemented!()
 }
 
-
 #[gpu_codegen::builtin(gpu.printf)]
 pub fn printf() -> usize {
     unimplemented!()

@@ -338,7 +338,7 @@ impl ExtraBackendMethods for GPUCodegenBackend {
             dep_node,
             tcx,
             cgu_name,
-            crate::write::module_codegen,
+            crate::codegen::module_codegen,
             Some(rustc_middle::dep_graph::hash_result),
         );
         let time_to_codegen = start_time.elapsed();

@@ -20,6 +20,12 @@ pub enum GpuItem {
     GlobalThreadId,
     Printf,
     AddStringAttr,
+    Scope,
+    Grid,
+    Block,
+    Launch,
+    IntoIter,
+    IterNext,
 }
 
 impl TryFrom<&str> for GpuItem {
@@ -28,7 +34,13 @@ impl TryFrom<&str> for GpuItem {
             "gpu.thread_id" => GpuItem::ThreadId,
             "gpu.global_thread_id" => GpuItem::GlobalThreadId,
             "gpu.printf" => GpuItem::Printf,
+            "gpu.scope" => GpuItem::Scope,
+            "gpu.block" => GpuItem::Block,
+            "gpu.grid" => GpuItem::Grid,
+            "gpu.launch" => GpuItem::Launch,
             "add_mlir_string_attr" => GpuItem::AddStringAttr,
+            "gpu.into_iter" => GpuItem::IntoIter,
+            "gpu.next" => GpuItem::IterNext,
             _ => return Err(()),
         };
         Ok(ret)
@@ -44,6 +56,12 @@ impl From<GpuItem> for &'static str {
             GpuItem::GlobalThreadId => "gpu.global_thread_id",
             GpuItem::Printf => "gpu.printf",
             GpuItem::AddStringAttr => "add_mlir_string_attr",
+            GpuItem::Scope => "gpu.scope",
+            GpuItem::Grid => "gpu.grid",
+            GpuItem::Block => "gpu.block",
+            GpuItem::Launch => "gpu.launch",
+            GpuItem::IntoIter => "gpu.into_iter",
+            GpuItem::IterNext => "gpu.next",
         }
     }
 }
@@ -122,7 +140,11 @@ impl GpuAttributes {
                         .concat(),
                     _ => panic!("gpu builtin func must have a name"),
                 };
-                gpu_attrs.gpu_item = Some(sym.as_str().try_into().unwrap());
+                gpu_attrs.gpu_item = Some(
+                    sym.as_str()
+                        .try_into()
+                        .expect(format!("Unsupported builtin item {}", sym.as_str()).as_str()),
+                );
             }
         }
         gpu_attrs

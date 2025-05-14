@@ -19,10 +19,10 @@ extern crate rustc_target;
 mod attr;
 mod backend;
 mod builder;
+mod codegen;
 mod context;
 mod mlir;
 mod write;
-//mod mono;
 
 #[no_mangle]
 pub fn __rustc_codegen_backend() -> Box<dyn rustc_codegen_ssa::traits::CodegenBackend> {

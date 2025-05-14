@@ -13,7 +13,7 @@ use rustc_codegen_ssa::traits::BackendTypes;
 use std::marker::PhantomData;
 use std::{collections::HashMap, sync::RwLock};
 
-use melior::ir::{self as mlir_ir};
+use melior::ir::{self as mlir_ir, TypeLike};
 use rustc_middle::ty::layout::{HasTyCtxt, HasTypingEnv};
 
 use crate::mlir::BlockRefWithTime;
@@ -96,6 +96,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     pub fn unknown_loc(&self) -> melior::ir::Location<'ml> {
         melior::ir::Location::unknown(self.mlir_ctx)
     }
+
     pub fn to_mlir_loc(&self, span: rustc_span::Span) -> melior::ir::Location<'ml> {
         let source_map = self.tcx.sess.source_map();
         let loc = source_map.lookup_char_pos(span.lo());
@@ -106,6 +107,10 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             loc.line,
             loc.col.0,
         )
+    }
+
+    pub fn use_raw_type(&self, ty: ty::MLIRType<'_>) -> ty::MLIRType<'ml> {
+        unsafe { ty::MLIRType::from_raw(ty.to_raw()) }
     }
 }
 

@@ -72,7 +72,7 @@ impl<'tcx, 'ml, 'a> ArgAbiBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
         idx: &mut usize,
         dst: rustc_codegen_ssa::mir::place::PlaceRef<'tcx, Self::Value>,
     ) {
-        todo!()
+        log::warn!("store_fn_arg {:?} {} {:?}", arg_abi, idx, dst);
     }
 
     fn store_arg(

@@ -1,5 +1,6 @@
 #![feature(register_tool)]
 #![register_tool(gpu_codegen)]
+#![feature(stmt_expr_attributes)]
 #![no_std]
 
 /// RUSTFLAGS="-Zcodegen-backend=`realpath ../target/debug/librustc_codegen_gpu.dylib`" cargo build
@@ -18,7 +19,7 @@ fn kernel_print(a: &[u8]) {
 }
 
 #[no_mangle]
-#[gpu_codegen::kernel]
+#[gpu_codegen::device]
 /// assume BK * BK == number of threads in a block x axis.
 fn kernel(a: &[u8]) {
     let c = kernel2();
@@ -43,21 +44,18 @@ fn kernel2() -> u32 {
 #[no_mangle]
 #[gpu_codegen::host]
 /// assume BK * BK == number of threads in a block x axis.
-pub fn host(a: &[u8; 10], b: &[u8;10], result: &mut [u8; 10]) -> u32 {
-    gpu::scope(|s, grid| {
-        // Split data to avoid concurrent write.
-        let mut chunks: std::slice::ChunksMut<'_, u8> = result.chunks_mut(1);
-        for block in grid {
-            // Split the flattened result into chunks of size `chunk_size` using `chunks_mut`
-            let chunk = chunks.next().unwrap();
-            let mut chunk_row = chunk.chunks_mut(1);
-            let a_s = gpu::Shared::<[u8; BK * BK]>::new();
-            let b_s = gpu::Shared::<[u8; BK * BK]>::new();
-            for thread in block {
-                let c: &mut [u8] = chunk_row.next().unwrap();
-                // Spawn a thread for each chunk
-                thread.spawn(move || kernel(&a, &b, &mut c[0], a_s, b_s, BK));
+pub fn host(a: &[u8; 10], b: &[u8; 10], result: &mut [u8; 10]) {
+    gpu::scope(
+        #[gpu_codegen::device]
+        |s| {
+            // Split data to avoid concurrent write.
+            for x in gpu::grid(4, 1, 1) {
+                // Split the flattened result into chunks of size `chunk_size` using `chunks_mut`
+                for y in gpu::block(4, 1, 1) {
+                    // Spawn a thread for each chunk
+                    gpu::launch(*x, *y, move || kernel(a));
+                }
             }
-        }
-    }); // Ensure t
+        },
+    ); // Ensure t
 }

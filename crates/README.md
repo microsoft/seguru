@@ -30,5 +30,7 @@ cargo build --release
 ```bash
 cd crates/gpu-test
 RUST_LOG=trace RUSTFLAGS="-Zcodegen-backend=`realpath ../target/release/librustc_codegen_gpu.so`" cargo build
+RUST_LOG=trace RUSTFLAGS="-Zcodegen-backend=`realpath ../target/release/librustc_codegen_gpu.dylib`" cargo build
+
 ```
 mlir-opt  -gpu-lower-to-nvvm-pipeline="cubin-chip=sm_90a cubin-features=+ptx80 opt-level=3" /home/ziqiaozhou/rust-gpu/rust-gpu/crates/target/debug/deps/gpu-82572710cbc56735.dikxuq9cyrfdskw44vf8x9rsg.rcgu.bc

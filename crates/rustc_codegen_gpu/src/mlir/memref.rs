@@ -1,4 +1,7 @@
-use melior::ir::{operation::OperationBuilder, Location, Operation, Type, Value};
+use melior::ir::{
+    operation::OperationBuilder, Attribute, AttributeLike, Location, Operation, Type, TypeLike,
+    Value,
+};
 
 #[allow(dead_code)]
 pub fn reinterpret_cast<'c>(

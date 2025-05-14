@@ -22,27 +22,45 @@ pub struct Scope<'scope, 'env: 'scope> {
     env: PhantomData<&'env mut &'env ()>,
 }
 
-impl<'scope, 'env: 'scope> ThreadScope<'scope, 'env> {
-    #[no_mangle]
-    pub fn spawn<F, T>(self, f: F) -> ScopedJoinHandle<'scope, T>
-    where
-        F: FnOnce() -> T + Send + 'scope,
-        T: Send + 'scope,
-    {
-        unimplemented!()
-    }
-}
-
-#[no_mangle]
+#[gpu_codegen::builtin(gpu.scope)]
 pub fn scope<'env, F, T>(f: F) -> T
 where
     F: for<'scope> FnOnce(
-        &'scope std::thread::Scope<'scope, 'env>,
-        Vec<Vec<ThreadScope<'scope, 'env>>>,
+        ThreadScope,
     ) -> T,
+{
+    f(ThreadScope {
+        scope: PhantomData,
+        env: PhantomData,
+    })
+}
+
+pub type Tuple3 = [usize; 3];
+
+#[gpu_codegen::builtin(gpu.grid)]
+pub fn grid(x: usize, y: usize, z: usize) -> &'static [Tuple3]
 {
     unimplemented!()
 }
+
+#[gpu_codegen::builtin(gpu.block)]
+pub fn block(x: usize, y: usize, z: usize) -> &'static [Tuple3]
+{
+    unimplemented!()
+}
+
+#[gpu_codegen::builtin(gpu.launch)]
+ pub fn launch<'scope, F, T>(block: Tuple3, thread: Tuple3, f: F)
+where
+    F: FnOnce() -> T + Send + 'scope,
+    T: Send + 'scope,
+{
+    unimplemented!()
+}
+
+#[gpu_codegen::builtin(gpu.into_iter)]
+pub fn into_iter<>() -> ()
+{}
 
 pub struct ThreadScope<'scope, 'env: 'scope> {
     scope: PhantomData<&'scope mut &'scope ()>,
@@ -136,6 +154,7 @@ pub enum DimType {
 pub fn add_mlir_string_attr(_: &'static str) -> usize {
     unimplemented!()
 }
+
 
 #[gpu_codegen::builtin(gpu.printf)]
 pub fn printf() -> usize {

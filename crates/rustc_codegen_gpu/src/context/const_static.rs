@@ -7,10 +7,22 @@ use rustc_codegen_ssa::traits::{
 };
 use rustc_const_eval::interpret::{alloc_range, GlobalAlloc};
 
+use crate::mlir::ValueToOpRef;
+
 use super::GPUCodegenContext;
 
 fn get_alloc_name(alloc_id: rustc_const_eval::interpret::AllocId) -> String {
     format!("memory_alloc_{:?}", alloc_id.0)
+}
+
+pub(crate) fn mlir_val_to_const_int<'ml, 'a>(value: melior::ir::Value<'ml, 'a>) -> Option<u128> {
+    if let Ok(op) = value.is_from_op(Some("arith.constant")) {
+        let op = melior::dialect::ods::arith::ConstantOperation::try_from(op).unwrap();
+        let s = op.value().unwrap().to_string();
+        Some(s.parse().unwrap())
+    } else {
+        None
+    }
 }
 
 impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
@@ -219,7 +231,9 @@ impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
     }
 
     fn const_to_opt_u128(&self, v: Self::Value, sign_ext: bool) -> Option<u128> {
-        todo!()
+        dbg!(v);
+        log::debug!("{}", self.mlir_module.as_operation().to_string());
+        mlir_val_to_const_int(v)
     }
 
     fn const_data_from_alloc(

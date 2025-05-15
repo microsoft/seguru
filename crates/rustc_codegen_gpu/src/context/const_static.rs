@@ -19,14 +19,15 @@ pub(crate) fn mlir_val_to_const_int<'ml, 'a>(value: melior::ir::Value<'ml, 'a>) 
     if let Ok(op) = value.is_from_op(Some("arith.constant")) {
         let op = melior::dialect::ods::arith::ConstantOperation::try_from(op).unwrap();
         let s = op.value().unwrap().to_string();
-        Some(s.parse().unwrap())
+        dbg!(&s);
+        Some(s.split_once(":").unwrap().0.trim().parse().unwrap())
     } else {
         None
     }
 }
 
 impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
-    pub(crate) fn mlir_const_int_from_type(
+    pub(crate) fn mlir_const_val_from_type(
         &self,
         i: impl std::fmt::Display,
         typ: <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type,
@@ -57,7 +58,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         i: impl std::fmt::Display,
         typ: <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type,
     ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Value {
-        self.mlir_const_int_from_type(i, typ, self.mlir_body(false))
+        self.mlir_const_val_from_type(i, typ, self.mlir_body(false))
     }
 
     fn mlir_global_const_int<T>(
@@ -67,7 +68,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         self.mlir_const_int::<T>(i, self.mlir_body(false))
     }
 
-    fn const_data_memref_from_alloc(
+    pub(crate) fn const_data_memref_from_alloc(
         &self,
         alloc: rustc_const_eval::interpret::ConstAllocation<'_>,
         name: &str,
@@ -79,7 +80,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let bytes = alloc
             .inner()
             .get_bytes_unchecked(alloc_range(Size::ZERO, alloc.inner().size()));
-        dbg!(
+        log::debug!(
             "const_data_memref_from_alloc: {} {} {:?} {}",
             alloc.inner().len(),
             alloc.inner().size().bytes(),
@@ -113,7 +114,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         op.result(0).unwrap().into()
     }
 
-    fn const_data_memref_from_alloc_id(
+    pub(crate) fn const_data_memref_from_alloc_id(
         &self,
         alloc_id: rustc_const_eval::interpret::AllocId,
     ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Value {
@@ -227,12 +228,11 @@ impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
     }
 
     fn const_to_opt_uint(&self, v: Self::Value) -> Option<u64> {
-        todo!()
+        self.const_to_opt_u128(v, false).map(|v| v as u64)
     }
 
     fn const_to_opt_u128(&self, v: Self::Value, sign_ext: bool) -> Option<u128> {
         dbg!(v);
-        log::debug!("{}", self.mlir_module.as_operation().to_string());
         mlir_val_to_const_int(v)
     }
 

@@ -143,7 +143,7 @@ impl GpuAttributes {
                 gpu_attrs.gpu_item = Some(
                     sym.as_str()
                         .try_into()
-                        .expect(format!("Unsupported builtin item {}", sym.as_str()).as_str()),
+                        .unwrap_or_else(|_| panic!("Unsupported builtin item {}", sym.as_str())),
                 );
             }
         }

@@ -26,7 +26,8 @@ cargo build --release
 ```
 
 ### Run
-
+export PATH=/home/ziqiaozhou/rust-gpu/llvm-project/build-mlir-gpu/bin:$PATH
+export LD_LIBRARY_PATH=/home/ziqiaozhou/rust-gpu/llvm-project/build-mlir-gpu/lib:$LD_LIBRARY_PATH
 ```bash
 cd crates/gpu-test
 RUST_LOG=trace RUSTFLAGS="-Zcodegen-backend=`realpath ../target/release/librustc_codegen_gpu.so`" cargo build

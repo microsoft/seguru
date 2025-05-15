@@ -1,7 +1,5 @@
 use std::process::Command;
 
-use melior::ir::operation::OperationPrintingFlags;
-use rustc_codegen_ssa::mono_item::MonoItemExt;
 use rustc_codegen_ssa::ModuleCodegen;
 use rustc_codegen_ssa::{
     back::write::{CodegenContext, ModuleConfig},
@@ -9,13 +7,7 @@ use rustc_codegen_ssa::{
 };
 use rustc_errors::DiagCtxtHandle;
 
-use crate::attr::is_gpu_code;
-use crate::{
-    backend::{GPUCodeGenModule, GPUCodegenBackend},
-    builder::GpuBuilder,
-    context::GPUCodegenContext,
-};
-use rustc_span::Symbol;
+use crate::backend::{GPUCodeGenModule, GPUCodegenBackend};
 
 pub(crate) fn codegen(
     cgcx: &CodegenContext<GPUCodegenBackend>,
@@ -25,7 +17,6 @@ pub(crate) fn codegen(
 ) -> Result<rustc_codegen_ssa::CompiledModule, rustc_errors::FatalError> {
     let mod_name = module.name.clone();
     let module_name = Some(&mod_name[..]);
-    log::trace!("try write MLIR module to");
     let out = if let Some(m) = module.module_llvm.mlir_module {
         let out = cgcx
             .output_filenames
@@ -48,22 +39,15 @@ pub(crate) fn codegen(
             Some(copy.as_str()),
         );
         log::debug!("write MLIR module to {:?}", out);
-        let content = m
-            .module
-            .as_operation()
-            .to_string_with_flags(
-                OperationPrintingFlags::new()
-                    .use_local_scope()
-                    .print_generic_operation_form(),
-            )
-            .unwrap();
+        let content = m.module.as_operation().to_string();
+        log::debug!("[Done]write MLIR module to {:?}", out);
         std::fs::write(&out, &content).unwrap();
         if !m.module.as_operation().verify() {
             log::trace!("MLIR module verify failed: {}", content);
-            Err(rustc_errors::FatalError)?;
+            //Err(rustc_errors::FatalError)?;
         }
         // mlir-opt must use "shell" in order to pass correct arguments.
-        /*let mut mlir_opt = Command::new("sh");
+        let mut mlir_opt = Command::new("sh");
         let cmd = format!(
             "{} {} -o {} {}",
             which::which("mlir-opt")
@@ -132,8 +116,7 @@ pub(crate) fn codegen(
         }
         log::trace!("write MLIR obj to {:?}", out_obj);
         std::fs::copy(out_obj.to_str().unwrap(), out_obj_copy.to_str().unwrap()).unwrap();
-        Some(out_obj_copy)*/
-        Some(out)
+        Some(out_obj_copy)
     } else {
         None
     };

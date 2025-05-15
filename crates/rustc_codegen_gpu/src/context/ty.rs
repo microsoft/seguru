@@ -15,6 +15,13 @@ pub type MLIRType<'ctx> = mlir_ir::Type<'ctx>;
 impl<'tcx, 'ml, 'a> TypeMembershipCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, 'a> {}
 
 impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
+    pub(crate) fn align_to_attr(
+        &self,
+        align: rustc_abi::Align,
+    ) -> mlir_ir::attribute::IntegerAttribute<'ml> {
+        mlir_ir::attribute::IntegerAttribute::new(self.type_i64(), align.bytes() as i64)
+    }
+
     fn tensor_to_memref(&self, ty: MLIRType<'ml>) -> Option<(MLIRType<'ml>, Vec<i64>)> {
         let mut rank = vec![];
         if ty.is_ranked_tensor() {
@@ -32,7 +39,9 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         MLIRType::from(mlir_type::Type::none(self.mlir_ctx))
     }
 
-    fn type_tuple(&self, types: &[MLIRType<'ml>]) -> MLIRType<'ml> {
+    /// Note: Tuple is an abstract type in MLIR,
+    /// so we need to use self.expand_type to get the real types.
+    pub(crate) fn type_tuple(&self, types: &[MLIRType<'ml>]) -> MLIRType<'ml> {
         MLIRType::from(mlir_type::TupleType::new(self.mlir_ctx, types))
     }
 
@@ -52,8 +61,12 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let mut rets: Vec<MLIRType<'ml>> = vec![];
         if let Ok(tuple) = mlir_type::TupleType::<'ml>::try_from(ty) {
             for i in 0..tuple.type_count() {
-                let t = tuple.r#type(i).unwrap();
-                rets.push(self.use_raw_type(t));
+                let t = self.use_raw_type(tuple.r#type(i).unwrap());
+                if t.is_tuple() {
+                    rets.append(&mut self.expand_type(t));
+                } else {
+                    rets.push(t);
+                }
             }
             rets
         } else {
@@ -77,7 +90,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             | rustc_middle::ty::TyKind::Slice(_)
             | rustc_middle::ty::TyKind::RawPtr(..)
             | rustc_middle::ty::TyKind::Ref(..) => {
-                let ty = ty.builtin_deref(true).expect(format!("{:?}", ty).as_str());
+                let ty = ty.builtin_deref(true).unwrap_or_else(|| panic!("{:?}", ty));
                 let layout = self.layout_of(ty);
                 let deref_type = self.mlir_type(layout, immediate);
                 let (primi_ty, rank) = if let Some((ty, rank)) = self.tensor_to_memref(deref_type) {
@@ -88,18 +101,19 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 MLIRType::from(mlir_type::MemRefType::new(primi_ty, &rank, None, None))
             }
             rustc_middle::ty::TyKind::Closure(id, args) => {
-                /*let upvars = args.as_closure().tupled_upvars_ty();
-                let layout = self.layout_of(upvars);
-                let intyp = self.mlir_type(layout, immediate);
-                log::trace!("closure: {:?}", intyp);*/
+                log::trace!("closure {}", ty);
                 let closure_args = args.as_closure();
-                let sig = closure_args.sig().skip_binder();
-                let args = sig
-                    .inputs()
-                    .iter()
-                    .map(|arg| self.ty_to_mlir_type(arg, immediate));
-                let ret = self.ty_to_mlir_type(&sig.output(), immediate);
-                self.type_func(&args.collect::<Vec<_>>(), ret)
+                let mut mlir_args = vec![];
+                // A closure is represented as a tuple of the function pointer and the upvars
+                mlir_args.append(&mut self.expand_type(
+                    self.ty_to_mlir_type(&closure_args.sig_as_fn_ptr_ty(), immediate),
+                ));
+                mlir_args.append(&mut self.expand_type(
+                    self.ty_to_mlir_type(&closure_args.tupled_upvars_ty(), immediate),
+                ));
+
+                //let ret = self.ty_to_mlir_type(&sig.output(), immediate);
+                self.type_tuple(&mlir_args)
             }
             rustc_middle::ty::TyKind::Bool => todo!(),
             rustc_middle::ty::TyKind::Char => todo!(),
@@ -156,14 +170,21 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             },
             rustc_middle::ty::TyKind::Pat(_, _) => todo!(),
             rustc_middle::ty::TyKind::FnDef(_, _) => todo!(),
-            rustc_middle::ty::TyKind::FnPtr(binder, fn_header) => todo!(),
+            rustc_middle::ty::TyKind::FnPtr(binder, fn_header) => {
+                log::trace!("FnPtr {:?} {:?}", binder, fn_header);
+                self.type_ptr()
+            }
             rustc_middle::ty::TyKind::UnsafeBinder(unsafe_binder_inner) => todo!(),
             rustc_middle::ty::TyKind::Dynamic(_, _, dyn_kind) => todo!(),
             rustc_middle::ty::TyKind::CoroutineClosure(_, _) => todo!(),
             rustc_middle::ty::TyKind::Coroutine(_, _) => todo!(),
             rustc_middle::ty::TyKind::CoroutineWitness(_, _) => todo!(),
             rustc_middle::ty::TyKind::Never => todo!(),
-            rustc_middle::ty::TyKind::Tuple(t) => todo!(),
+            rustc_middle::ty::TyKind::Tuple(t) => self.type_tuple(
+                &t.iter()
+                    .map(|arg| self.ty_to_mlir_type(&arg, immediate))
+                    .collect::<Vec<_>>(),
+            ),
             rustc_middle::ty::TyKind::Alias(alias_ty_kind, alias_ty) => todo!(),
             rustc_middle::ty::TyKind::Param(_) => todo!(),
             rustc_middle::ty::TyKind::Bound(debruijn_index, _) => todo!(),
@@ -199,7 +220,6 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         layout: rustc_middle::ty::layout::TyAndLayout<'tcx>,
         immediate: bool,
     ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type {
-        dbg!(layout.ty);
         let cx = self.mlir_ctx;
         match layout.backend_repr {
             BackendRepr::Scalar(scalar) => {
@@ -219,7 +239,6 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 rustc_abi::FieldsShape::Array { stride, count } => {
                     let elem = self.mlir_type(layout.field(self, 0), immediate);
                     if *count == 0 {
-                        dbg!(layout.ty);
                         return elem;
                     }
                     self.type_array(elem, *count)
@@ -229,11 +248,11 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                     memory_index,
                 } => {
                     dbg!(layout.ty);
-                    todo!();
+                    self._ty_to_mlir_type(&layout.ty, immediate)
                 }
             },
             _ => {
-                dbg!(layout.ty);
+                let empty_ty = layout.ty;
                 self.type_empty()
             }
         }

@@ -28,6 +28,7 @@ pub(crate) struct GPUCodegenContext<'tcx, 'ml, 'a> {
     pub fn_db: RwLock<HashMap<rustc_hir::def_id::DefId, mlir_ir::operation::OperationRef<'ml, 'a>>>,
     pub const_alloc: RwLock<HashMap<rustc_const_eval::interpret::AllocId, mlir_ir::Value<'ml, 'a>>>,
     pub const_name_to_allocid: RwLock<HashMap<String, rustc_const_eval::interpret::AllocId>>,
+    pub span_to_types: RwLock<HashMap<rustc_span::Span, mlir_ir::Type<'ml>>>,
     pub tcx: rustc_middle::ty::TyCtxt<'tcx>,
 }
 
@@ -64,6 +65,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             fn_db: RwLock::new(HashMap::new()),
             const_alloc: RwLock::new(HashMap::new()),
             const_name_to_allocid: RwLock::new(HashMap::new()),
+            span_to_types: RwLock::new(HashMap::new()),
         }
     }
 

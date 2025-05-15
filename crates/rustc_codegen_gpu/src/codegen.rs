@@ -1,4 +1,8 @@
-use rustc_codegen_ssa::{mono_item::MonoItemExt, ModuleCodegen};
+
+use rustc_codegen_ssa::{
+    mono_item::MonoItemExt,
+    ModuleCodegen,
+};
 use rustc_span::Symbol;
 
 use crate::{
@@ -36,6 +40,42 @@ pub(crate) fn module_codegen<'tcx>(
             } else {
                 log::trace!("skip {}", mono_item);
                 continue;
+            }
+            match &mono_item {
+                rustc_middle::mir::mono::MonoItem::Fn(instance) => {
+                    let mir = tcx.optimized_mir(instance.def_id());
+                    let output = String::new();
+                    let mut out = Vec::new();
+                    rustc_middle::mir::pretty::write_mir_pretty(
+                        tcx,
+                        Some(instance.def_id()),
+                        &mut out,
+                    )
+                    .unwrap();
+                    log::debug!("mir {}", String::from_utf8(out).unwrap());
+                }
+                /*let traversal_order =
+                        rustc_middle::mir::traversal::mono_reachable_reverse_postorder(
+                            mir, tcx, instance,
+                        );
+                    let fop: melior::ir::OperationRef<'_, '_> = cx.get_fn(instance);
+                    let start_b = GpuBuilder::append_block(&cx, fop, "start");
+                    let builder = GpuBuilder::build(&cx, start_b);
+                    let mut fn_cx: fn_cx::FunctionCx<'_, '_, '_> = fn_cx::FunctionCx {
+                        instance,
+                        mir: &mir,
+                        bx: builder,
+                        local_map: HashMap::new(),
+                    };
+                    for bb in traversal_order {
+                        dbg!(bb);
+                        let bx = GpuBuilder::append_block(&cx, fop, &format!("{bb:?}"));
+                        fn_cx.bx = GpuBuilder::build(&cx, start_b);
+                        fn_cx.codegen_block(bb);
+                    }
+                }*/
+                rustc_middle::mir::mono::MonoItem::Static(def_id) => todo!(),
+                rustc_middle::mir::mono::MonoItem::GlobalAsm(item_id) => todo!(),
             }
             mono_item.define::<GpuBuilder<'_, '_, '_>>(&cx);
         }

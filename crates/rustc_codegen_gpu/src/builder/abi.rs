@@ -72,7 +72,44 @@ impl<'tcx, 'ml, 'a> ArgAbiBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
         idx: &mut usize,
         dst: rustc_codegen_ssa::mir::place::PlaceRef<'tcx, Self::Value>,
     ) {
-        log::warn!("store_fn_arg {:?} {} {:?}", arg_abi, idx, dst);
+        log::warn!(
+            "store_fn_arg {:?} {} {:?} {:?}",
+            arg_abi,
+            idx,
+            dst,
+            self.cur_span
+        );
+        fn next<'ml, 'a>(
+            bx: &GpuBuilder<'_, 'ml, 'a>,
+            idx: &mut usize,
+        ) -> melior::ir::Value<'ml, 'a> {
+            if *idx >= bx.cur_block.argument_count() {
+                dbg!(bx.cur_block().parent_operation());
+                dbg!(*idx);
+                dbg!(bx.cur_block.argument_count());
+                panic!();
+            }
+            let val = bx.cur_block.argument(*idx).unwrap();
+            *idx += 1;
+            val.into()
+        }
+        match arg_abi.mode {
+            PassMode::Ignore => {}
+            PassMode::Direct(_) => {
+                self.store_arg(arg_abi, next(self, idx), dst);
+            }
+            PassMode::Pair(..) => {
+                rustc_codegen_ssa::mir::operand::OperandValue::Pair(
+                    next(self, idx),
+                    next(self, idx),
+                )
+                .store(self, dst);
+            }
+            PassMode::Cast { .. } | PassMode::Indirect { .. } => panic!(
+                "query hooks should've made this `PassMode` impossible: {:#?}",
+                arg_abi
+            ),
+        }
     }
 
     fn store_arg(
@@ -81,6 +118,7 @@ impl<'tcx, 'ml, 'a> ArgAbiBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
         val: Self::Value,
         dst: rustc_codegen_ssa::mir::place::PlaceRef<'tcx, Self::Value>,
     ) {
+        log::warn!("store_arg {:?} {} {:?}", arg_abi.mode, val, dst);
         match arg_abi.mode {
             PassMode::Ignore => {}
             PassMode::Direct(_) | PassMode::Pair(..) => {
@@ -92,7 +130,15 @@ impl<'tcx, 'ml, 'a> ArgAbiBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
                 .val
                 .store(self, dst);
             }
-            PassMode::Cast { .. } | PassMode::Indirect { .. } => todo!(),
+            PassMode::Cast { .. } | PassMode::Indirect { .. } => {
+                rustc_codegen_ssa::mir::operand::OperandRef::from_immediate_or_packed_pair(
+                    self,
+                    val,
+                    arg_abi.layout,
+                )
+                .val
+                .store(self, dst);
+            }
         }
     }
 

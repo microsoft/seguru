@@ -26,7 +26,7 @@ use rustc_codegen_ssa::traits::{
 
 use crate::mlir::BlockRefWithTime;
 use crate::{context::GPUCodegenContext, mlir::MLIROpHelpers};
-
+mod llvm;
 enum FnStackState {
     Alloca,
     Store(usize),
@@ -68,6 +68,73 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         unsafe { self.cur_block.to_ref() }
     }
 
+    fn const_value(
+        &self,
+        val: impl std::fmt::Display,
+        ty: mlir_ir::Type<'ml>,
+    ) -> mlir_ir::Value<'ml, 'a> {
+        self.mlir_const_val_from_type(val, ty, self.cur_block())
+    }
+
+    fn static_size_of(&self, ty: mlir_ir::Type<'_>) -> usize {
+        if ty.is_integer() {
+            self.cx.mlir_integer_width(ty) / 8
+        } else if ty.is_index() || ty.is_mem_ref() {
+            size_of::<usize>()
+        } else if ty.is_float() {
+            self.mlir_float_width(ty) / 8
+        } else if ty.is_tuple() {
+            let tuple = mlir_type::TupleType::try_from(ty).unwrap();
+            let mut total_size = 0;
+            for i in 0..tuple.type_count() {
+                total_size += self.static_size_of(tuple.r#type(i).unwrap());
+            }
+            total_size
+        } else if ty.is_ranked_tensor() {
+            let ranked_ty = mlir_type::RankedTensorType::try_from(ty).unwrap();
+            let ty = self.mlir_element_type(ty);
+            let base_size = self.static_size_of(ty);
+            todo!();
+        } else {
+            panic!("Unsupported type: {:?}", ty);
+        }
+    }
+
+    /*fn size_of(&self, ty: mlir_ir::Type<'_>) -> melior::ir::Value<'ml, 'a> {
+            if ty.is_integer() {
+                self.const_value(self.cx.mlir_integer_width(ty) / 8, self.type_index())
+            } else if ty.is_index() || ty.is_mem_ref(){
+                let op = melior::dialect::ods::index::sizeof(self.mlir_ctx, self.type_index(), self.cur_loc());
+                self.append_op_res(op.into())
+            } else if ty.is_float() {
+                self.const_value(self.mlir_float_width(ty) / 8, self.type_index())
+            } else if ty.is_tuple() {
+                let tuple = mlir_type::TupleType::try_from(ty).unwrap();
+                let mut total_size = None;
+                for i in 0..tuple.type_count() {
+                    let size = self.size_of(tuple.r#type(i).unwrap());
+                    if i > 0 {
+                        let op = melior::dialect::arith::addi(total_size.unwrap(), size, self.cur_loc());
+                        total_size = Some(self.append_op_res(op))
+                    } else {
+                        total_size = Some(size);
+                    }
+                }
+                if total_size.is_none() {
+                    self.const_value(0, self.type_index())
+                } else {
+                    total_size.unwrap()
+                }
+            } else if ty.is_ranked_tensor() {
+                let ranked_ty = mlir_type::RankedTensorType::try_from(ty).unwrap();
+                let ty = self.mlir_element_type(ty);
+                let base_size = self.size_of(ty);
+                todo!();
+            } else {
+                panic!("Unsupported type: {:?}", ty);
+            }
+    }*/
+
     fn get_type_by_span(&self, span: &rustc_span::Span) -> Option<mlir_type::Type<'ml>> {
         if self.span_to_type.contains_key(span) {
             Some(self.span_to_type[span])
@@ -83,6 +150,9 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         val: <GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::Value,
     ) -> <GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::Value {
         if let Ok(op) = val.is_from_op(Some("arith.constant")) {
+            let op = self.append_op((op).clone());
+            op.result(0).unwrap().into()
+        } else if let Ok(op) = val.is_from_op(Some("memref.get_global")) {
             let op = self.append_op((op).clone());
             op.result(0).unwrap().into()
         } else {
@@ -494,29 +564,22 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn alloca(&mut self, size: rustc_abi::Size, align: rustc_abi::Align) -> Self::Value {
-        let count = 1i64;
-        let op = if let Some(ty) = self.get_type_by_span(&self.cur_span) {
-            let loc = self.cur_loc();
-            let mem_ref_ty = mlir_type::MemRefType::new(ty, &[count], None, None);
-            melior::dialect::memref::alloca(
+        let mut count = 1i64;
+        let ty = if let Some(ty) = self.get_type_by_span(&self.cur_span) {
+            ty   
+        } else {
+            count = size.bytes() as i64;
+            self.type_i8()
+        };
+        let mem_ref_ty =  mlir_type::MemRefType::new(ty, &[count], None, None);;
+        let op = melior::dialect::memref::alloca(
                 self.mlir_ctx,
                 mem_ref_ty,
                 &[],
                 &[],
                 Some(self.align_to_attr(align)),
-                loc,
-            )
-        } else {
-            melior::dialect::llvm::alloca(
-                self.mlir_ctx,
-                self.mlir_const_val_from_type(size.bytes(), self.type_i64(), self.cur_block()),
-                self.type_ptr(),
                 self.cur_loc(),
-                melior::dialect::llvm::AllocaOptions::new()
-                    .align(Some(self.align_to_attr(align)))
-                    .elem_type(Some(TypeAttribute::new(self.type_i8()))),
-            )
-        };
+            );
         self.append_op_res(op)
     }
 
@@ -617,10 +680,10 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         ptr: Self::Value,
         align: rustc_abi::Align,
     ) -> Self::Value {
-        if ptr.r#type().is_llvm_pointer_type() {
+        /*if ptr.r#type().is_llvm_pointer_type() {
             let op = melior::dialect::llvm::store(
                 self.mlir_ctx,
-                val,
+                self.val_to_llvm_value(val),
                 ptr,
                 self.cur_loc(),
                 melior::dialect::llvm::LoadStoreOptions::new()
@@ -628,9 +691,18 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             );
             self.append_op(op);
             return val;
-        }
+        }*/
         let val = self.use_value(val);
         let const_idx = self.mlir_const_val_from_type(0, self.type_index(), self.cur_block());
+        let memref_ty = MemRefType::try_from(ptr.r#type()).unwrap();
+        let target_memref_ty = MemRefType::new(val.r#type(), &[1], Some(memref_ty.layout()), memref_ty.memory_space());
+        let prt = if self.mlir_element_type(ptr.r#type()) != val.r#type() {
+            dbg!("Implicit cast {} {}", ptr.r#type(), val.r#type());
+            let op = melior::dialect::memref::view(self.cx.mlir_ctx, ptr, const_idx, &[], target_memref_ty, self.cur_loc());
+            self.append_op_res(op.into())
+        } else {
+            ptr
+        };
         let op = mlir_memref::store(val, ptr, &[const_idx], self.cur_loc());
         self.append_op(op);
         // TODO(check): memref::store op does not return a value.
@@ -667,33 +739,41 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         ptr: Self::Value,
         indices: &[Self::Value],
     ) -> Self::Value {
-        /*if self.skip_op(false) {
-            return ptr;
-        }*/
         if indices.len() != 1 {
             panic!("only supports single index");
         }
         let strides = [];
         let sizes = [];
-        let static_offsets = DenseI64ArrayAttribute::new(self.mlir_ctx, &[]).into();
-        let static_size = DenseI64ArrayAttribute::new(self.mlir_ctx, &[]).into();
-        let static_strides = DenseI64ArrayAttribute::new(self.mlir_ctx, &[]).into();
+
+        let static_offsets = DenseI64ArrayAttribute::new(self.mlir_ctx, &[0]).into();
+        let static_sizes =
+            DenseI64ArrayAttribute::new(self.mlir_ctx, &[self.static_size_of(ty) as i64]).into();
+        let static_strides = DenseI64ArrayAttribute::new(self.mlir_ctx, &[1]).into();
 
         let result_ty = MemRefType::new(ty, &[indices.len() as i64], None, None);
-        mlir_ods_memref::reinterpret_cast(
+        let mut op = mlir_ods_memref::reinterpret_cast(
             self.mlir_ctx,
-            ty,
+            result_ty.into(),
             ptr,
             indices,
             &sizes,
             &strides,
             static_offsets,
-            static_size,
+            static_sizes,
             static_strides,
             self.cur_loc(),
         );
-        let op = self.append_op(mlir_memref::cast(ptr, result_ty, self.cur_loc()));
-        op.result(0).unwrap().into()
+        op.set_static_sizes(static_sizes);
+        op.set_static_offsets(static_offsets);
+        op.set_static_strides(static_strides);
+        let mut op: mlir_ir::Operation<'ml> = op.into();
+        op.set_attribute(
+            "operand_segment_sizes",
+            mlir_ir::attribute::DenseI32ArrayAttribute::new(self.cx.mlir_ctx, &[1, 1, 0, 0]).into(),
+        );
+        self.append_op_res(op.into())
+        //let op = self.append_op(mlir_memref::cast(ptr, result_ty, self.cur_loc()));
+        //op.result(0).unwrap().into()
     }
 
     fn trunc(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
@@ -746,7 +826,11 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn inttoptr(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
-        todo!()
+        let int64_val = self.intcast(val, self.type_i64(), false);
+        let op =
+            melior::dialect::ods::llvm::inttoptr(self.mlir_ctx, dest_ty, int64_val, self.cur_loc())
+                .into();
+        self.append_op_res(op)
     }
 
     fn bitcast(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
@@ -755,11 +839,11 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
 
     fn intcast(&mut self, val: Self::Value, dest_ty: Self::Type, is_signed: bool) -> Self::Value {
         let src_ty = val.r#type();
+        assert!(dest_ty.is_integer());
         let op = if src_ty.is_index() {
-            assert!(dest_ty.is_integer());
             melior::dialect::arith::index_cast(val, dest_ty, self.cur_loc())
         } else {
-            todo!()
+            melior::dialect::arith::index_cast(val, dest_ty, self.cur_loc())
         };
         self.append_op_res(op)
     }
@@ -812,8 +896,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
                 melior::dialect::arith::CmpiPredicate::Sle
             }
         };
-        let op =
-            melior::dialect::arith::cmpi(self.mlir_ctx, predicate, lhs, rhs, self.cur_loc());
+        let op = melior::dialect::arith::cmpi(self.mlir_ctx, predicate, lhs, rhs, self.cur_loc());
         self.append_op_res(op)
     }
 
@@ -868,9 +951,12 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         then_val: Self::Value,
         else_val: Self::Value,
     ) -> Self::Value {
-        self.append_op_res(
-            melior::dialect::arith::select(cond, then_val, else_val, self.cur_loc()),
-        )
+        self.append_op_res(melior::dialect::arith::select(
+            cond,
+            then_val,
+            else_val,
+            self.cur_loc(),
+        ))
     }
 
     fn va_arg(&mut self, list: Self::Value, ty: Self::Type) -> Self::Value {
@@ -1006,6 +1092,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         instance: Option<rustc_middle::ty::Instance<'tcx>>,
     ) -> Self::Value {
         dbg!(instance);
+        let mut args = args.into_iter().map(|arg| self.use_value(*arg)).collect::<Vec<_>>();
         let mut closure_ptrs = vec![];
         if let Some(instance) = instance {
             let mut closure_count = 0;
@@ -1023,15 +1110,15 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
                             rustc_middle::ty::ClosureKind::FnOnce,
                         );
                         log::debug!("Closure def_id: {:?}", closure_def_id);
-                        closure_ptrs.push(self.get_fn_addr(closure_inst));
+                        closure_ptrs.push(self.to_mir_func_const(closure_inst, Some(self.cur_block)));
                     }
                 }
             }
         }
         let args = if closure_ptrs.is_empty() {
-            args
+            &args
         } else if closure_ptrs.len() == 1 {
-            closure_ptrs.append(&mut args.to_vec());
+            closure_ptrs.append(&mut args);
             &closure_ptrs
         } else {
             // TODO: handle multiple closures by check the number of ClosureArgs and group args into different closures.

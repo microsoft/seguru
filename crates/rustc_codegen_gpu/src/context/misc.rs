@@ -38,7 +38,7 @@ impl<'tcx, 'ml> MiscCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, '_> {
     }
 
     fn get_fn_addr(&self, instance: rustc_middle::ty::Instance<'tcx>) -> Self::Value {
-        self.to_mir_func_const(instance)
+        self.to_mir_func_const(instance, None)
     }
 
     fn eh_personality(&self) -> Self::Value {

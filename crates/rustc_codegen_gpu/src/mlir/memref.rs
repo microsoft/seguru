@@ -1,6 +1,6 @@
-use melior::ir::{
-    operation::OperationBuilder, Location, Operation, Type,
-    Value,
+use melior::{
+    ir::{operation::OperationBuilder, Location, Operation, Type, Value, ValueLike},
+    Context,
 };
 
 #[allow(dead_code)]

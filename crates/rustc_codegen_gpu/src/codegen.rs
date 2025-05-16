@@ -1,8 +1,4 @@
-
-use rustc_codegen_ssa::{
-    mono_item::MonoItemExt,
-    ModuleCodegen,
-};
+use rustc_codegen_ssa::{mono_item::MonoItemExt, ModuleCodegen};
 use rustc_span::Symbol;
 
 use crate::{

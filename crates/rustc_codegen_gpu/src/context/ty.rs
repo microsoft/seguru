@@ -7,7 +7,7 @@ use rustc_middle::ty::layout::LayoutOf;
 
 use super::GPUCodegenContext;
 
-use melior::ir::{self as mlir_ir, r#type as mlir_type};
+use melior::ir::{self as mlir_ir, r#type as mlir_type, Location};
 use melior::ir::{ShapedTypeLike, TypeLike};
 
 pub type MLIRType<'ctx> = mlir_ir::Type<'ctx>;
@@ -20,6 +20,26 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         align: rustc_abi::Align,
     ) -> mlir_ir::attribute::IntegerAttribute<'ml> {
         mlir_ir::attribute::IntegerAttribute::new(self.type_i64(), align.bytes() as i64)
+    }
+
+    pub(crate) fn mlir_integer_width(&self, ty: MLIRType<'_>) -> usize {
+        let int_ty = mlir_type::IntegerType::try_from(ty).unwrap();
+        int_ty.width() as usize
+    }
+
+    pub(crate) fn mlir_float_width(&self, ty: MLIRType<'_>) -> usize {
+        assert!(ty.is_float());
+        unsafe { mlir_sys::mlirFloatTypeGetWidth(ty.to_raw()) as usize }
+    }
+
+    pub(crate) fn mlir_element_type<'b>(&self, ty: MLIRType<'b>) -> MLIRType<'b> {
+        if ty.is_ranked_tensor() {
+            mlir_type::RankedTensorType::try_from(ty).unwrap().element()
+        } else if ty.is_mem_ref() {
+            mlir_type::MemRefType::try_from(ty).unwrap().element()
+        } else {
+            panic!("Unsupported type: {:?}", ty);
+        }
     }
 
     fn tensor_to_memref(&self, ty: MLIRType<'ml>) -> Option<(MLIRType<'ml>, Vec<i64>)> {
@@ -92,13 +112,15 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             | rustc_middle::ty::TyKind::Ref(..) => {
                 let ty = ty.builtin_deref(true).unwrap_or_else(|| panic!("{:?}", ty));
                 let layout = self.layout_of(ty);
+                /*
                 let deref_type = self.mlir_type(layout, immediate);
                 let (primi_ty, rank) = if let Some((ty, rank)) = self.tensor_to_memref(deref_type) {
                     (ty, rank)
                 } else {
                     (deref_type, vec![1i64])
                 };
-                MLIRType::from(mlir_type::MemRefType::new(primi_ty, &rank, None, None))
+                ;*/
+                MLIRType::from(mlir_type::MemRefType::new(self.type_i8(), &[layout.size.bytes() as i64], None, None))
             }
             rustc_middle::ty::TyKind::Closure(id, args) => {
                 log::trace!("closure {}", ty);
@@ -316,13 +338,7 @@ impl<'tcx, 'ml, 'a> BaseTypeCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> 
     }
 
     fn element_type(&self, ty: Self::Type) -> Self::Type {
-        if ty.is_ranked_tensor() {
-            mlir_type::RankedTensorType::try_from(ty).unwrap().element()
-        } else if ty.is_mem_ref() {
-            mlir_type::MemRefType::try_from(ty).unwrap().element()
-        } else {
-            panic!("Unsupported type: {:?}", ty);
-        }
+        self.mlir_element_type(ty)
     }
 
     fn vector_length(&self, ty: Self::Type) -> usize {
@@ -330,11 +346,11 @@ impl<'tcx, 'ml, 'a> BaseTypeCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> 
     }
 
     fn float_width(&self, ty: Self::Type) -> usize {
-        todo!()
+        self.mlir_float_width(ty)
     }
 
     fn int_width(&self, ty: Self::Type) -> u64 {
-        todo!()
+        self.mlir_integer_width(ty) as _
     }
 
     fn val_ty(&self, v: Self::Value) -> Self::Type {

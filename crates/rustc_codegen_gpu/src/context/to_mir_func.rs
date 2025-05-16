@@ -1,7 +1,7 @@
-use melior::ir::{attribute::StringAttribute, r#type::FunctionType, BlockLike, Location, Operation};
-use rustc_codegen_ssa::traits::{
-    LayoutTypeCodegenMethods, MiscCodegenMethods,
-};
+use melior::{helpers::BuiltinBlockExt, ir::{
+    attribute::StringAttribute, r#type::FunctionType, Block, BlockLike, Location, Operation
+}};
+use rustc_codegen_ssa::traits::{LayoutTypeCodegenMethods, MiscCodegenMethods};
 use rustc_hir::def_id::DefId;
 use rustc_middle::{
     query::Key,
@@ -117,7 +117,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         }
     }
     /// Get the function pointer value for the given instance.
-    pub fn to_mir_func_const(&self, instance: Instance<'tcx>) -> melior::ir::Value<'ml, 'a> {
+    pub fn to_mir_func_const(&self, instance: Instance<'tcx>, block: Option<melior::ir::BlockRef<'ml, 'a>>) -> melior::ir::Value<'ml, 'a> {
         let sym = self.tcx.symbol_name(instance).name.to_string();
         let gpu_attrs = self.get_gpu_attrs(instance.def_id());
         let function =
@@ -132,10 +132,12 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         if let Some(extra_attr) = gpu_attrs.to_mlir_attribute(self.mlir_ctx) {
             const_op.set_attribute(crate::mlir::BUILTIN_SYM, extra_attr);
         }
-        let const_op: melior::ir::OperationRef<'ml, 'a> =
-            self.mlir_body(is_gpu).append_operation(const_op);
-        let r = const_op.result(0).unwrap();
-        r.into()
+        let op = if let Some(b) = block {
+            b.append_operation(const_op)
+        } else {
+            self.mlir_body(is_gpu).append_operation(const_op)
+        };
+        op.result(0).unwrap().into()
     }
 
     pub fn fn_abi_to_fn_type(

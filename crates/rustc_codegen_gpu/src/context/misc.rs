@@ -1,7 +1,7 @@
 use rustc_codegen_ssa::traits::MiscCodegenMethods;
 use rustc_middle::{
     query::Key,
-    ty::layout::{FnAbiOf, HasTyCtxt, HasTypingEnv},
+    ty::layout::{FnAbiOf, HasTyCtxt},
 };
 
 use super::GPUCodegenContext;
@@ -26,12 +26,7 @@ impl<'tcx, 'ml> MiscCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, '_> {
         let mlir_ctx = self.mlir_ctx;
         let sym = tcx.symbol_name(instance).name;
         let def_id: rustc_hir::def_id::DefId = instance.def_id();
-        log::trace!(
-            "get_fn({:?}: {:?}) => {}",
-            instance,
-            instance.ty(tcx, self.typing_env()),
-            sym
-        );
+        log::trace!("[{}]:get_fn({:?}) => {}", self.cgu_name, instance, sym);
         let location = self.to_mlir_loc(instance.def.default_span(tcx));
         let fn_abi = self.fn_abi_of_instance(instance, rustc_middle::ty::List::empty());
         self.to_mir_func_decl(instance, crate::mlir::MLIRVisibility::Private)

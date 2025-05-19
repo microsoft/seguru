@@ -7,7 +7,7 @@ use rustc_middle::ty::layout::LayoutOf;
 
 use super::GPUCodegenContext;
 
-use melior::ir::{self as mlir_ir, r#type as mlir_type, Location};
+use melior::ir::{self as mlir_ir, r#type as mlir_type};
 use melior::ir::{ShapedTypeLike, TypeLike};
 
 pub type MLIRType<'ctx> = mlir_ir::Type<'ctx>;
@@ -42,7 +42,10 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         }
     }
 
-    fn tensor_to_memref(&self, ty: MLIRType<'ml>) -> Option<(MLIRType<'ml>, Vec<i64>)> {
+    fn primitive_or_tensor_to_memref(
+        &self,
+        ty: MLIRType<'ml>,
+    ) -> Option<(MLIRType<'ml>, Vec<i64>)> {
         let mut rank = vec![];
         if ty.is_ranked_tensor() {
             let tensor_ty = mlir_type::RankedTensorType::try_from(ty).unwrap();
@@ -50,6 +53,8 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 rank.push(tensor_ty.dim_size(i).unwrap() as i64);
             }
             Some((tensor_ty.element(), rank))
+        } else if ty.is_integer() || ty.is_float() {
+            Some((ty, vec![1]))
         } else {
             None
         }
@@ -63,6 +68,13 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     /// so we need to use self.expand_type to get the real types.
     pub(crate) fn type_tuple(&self, types: &[MLIRType<'ml>]) -> MLIRType<'ml> {
         MLIRType::from(mlir_type::TupleType::new(self.mlir_ctx, types))
+    }
+
+    pub(crate) fn type_memref(&self, ty: MLIRType<'ml>) -> MLIRType<'ml> {
+        let (eletype, rank) = self
+            .primitive_or_tensor_to_memref(ty)
+            .expect("Failed to convert to memref");
+        MLIRType::from(mlir_type::MemRefType::new(eletype, &rank, None, None))
     }
 
     pub(crate) fn type_index(&self) -> MLIRType<'ml> {
@@ -94,6 +106,29 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         }
     }
 
+    /// In Rust, a closure is zero-sized. A function will be translated to
+    /// multiple functions specilized with the closure if a function takes a closure as an argument.
+    pub fn ty_to_closure(
+        &self,
+        ty: &rustc_middle::ty::Ty<'tcx>,
+    ) -> Option<rustc_middle::ty::Instance<'tcx>> {
+        if let rustc_middle::ty::Closure(closure_def_id, closure_substs) = *ty.kind() {
+            // ✅ You’ve found the closure passed to this call.
+            // Closure type is represented as a type(ClosureArgs) that implements fn trait. Thus.
+            // the call only see the ClosureArgs as inputs and need to explicitly resolve the closure.
+            let closure_inst = rustc_middle::ty::Instance::resolve_closure(
+                self.tcx,
+                closure_def_id,
+                closure_substs,
+                rustc_middle::ty::ClosureKind::FnOnce,
+            );
+            log::debug!("Closure def_id: {:?}", closure_def_id);
+            Some(closure_inst)
+        } else {
+            None
+        }
+    }
+
     pub fn ty_to_mlir_type(
         &self,
         ty: &rustc_middle::ty::Ty<'tcx>,
@@ -120,16 +155,15 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                     (deref_type, vec![1i64])
                 };
                 ;*/
-                MLIRType::from(mlir_type::MemRefType::new(self.type_i8(), &[layout.size.bytes() as i64], None, None))
+                MLIRType::from(self.type_memref(self.type_i8()))
             }
             rustc_middle::ty::TyKind::Closure(id, args) => {
-                log::trace!("closure {}", ty);
                 let closure_args = args.as_closure();
                 let mut mlir_args = vec![];
-                // A closure is represented as a tuple of the function pointer and the upvars
-                mlir_args.append(&mut self.expand_type(
+                // A closure is represented as a tuple of the upvars
+                /*mlir_args.append(&mut self.expand_type(
                     self.ty_to_mlir_type(&closure_args.sig_as_fn_ptr_ty(), immediate),
-                ));
+                ));*/
                 mlir_args.append(&mut self.expand_type(
                     self.ty_to_mlir_type(&closure_args.tupled_upvars_ty(), immediate),
                 ));
@@ -453,12 +487,11 @@ impl<'tcx, 'ml, 'a> LayoutTypeCodegenMethods<'tcx> for GPUCodegenContext<'tcx, '
                 let pair_typs: [Option<&rustc_middle::ty::Ty<'_>>; 2] =
                     [Some(subtyp1.as_ref().unwrap()), None];
                 if path == "core::slice::Iter" {
-                    let mlir_ty = self._ty_to_mlir_type(&layout.ty, immediate);
-                    let mlir_tuple = mlir_type::TupleType::try_from(mlir_ty).unwrap();
-                    return self.use_raw_type(mlir_tuple.r#type(index).unwrap());
-                } else {
-                    todo!();
+                    log::trace!("slice::Iter");
                 }
+                let mlir_ty = self._ty_to_mlir_type(&layout.ty, immediate);
+                let mlir_tuple = mlir_type::TupleType::try_from(mlir_ty).unwrap();
+                return self.use_raw_type(mlir_tuple.r#type(index).unwrap());
             }
             _ => {
                 todo!("{:?}", layout.ty.kind());

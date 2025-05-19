@@ -48,10 +48,8 @@ fn kernel2(b: &[u8]) -> u32 {
 /// assume BK * BK == number of threads in a block x axis.
 pub fn host(a: &mut [u8; 10], b: &[u8; 10], c: &mut [u8; 10]) {
     a[0] = 1;
-    gpu::scope(|s|s.launch([1, 1, 1], [2, 2, 2], || kernel_print()));
-    gpu::scope(|s|
-        s.launch([1, 1, 1], [2, 2, 2], || kernel_print())
-    );
+    gpu::scope(|s| s.launch([1, 1, 1], [2, 2, 2], || kernel_print()));
+    gpu::scope(|s| s.launch([1, 1, 1], [2, 2, 2], || kernel_print()));
     gpu::scope(
         #[gpu_codegen::device]
         |s| {

@@ -1,6 +1,6 @@
-use melior::{helpers::BuiltinBlockExt, ir::{
-    attribute::StringAttribute, r#type::FunctionType, Block, BlockLike, Location, Operation
-}};
+use melior::ir::{
+    attribute::StringAttribute, r#type::FunctionType, BlockLike, Location, Operation,
+};
 use rustc_codegen_ssa::traits::{LayoutTypeCodegenMethods, MiscCodegenMethods};
 use rustc_hir::def_id::DefId;
 use rustc_middle::{
@@ -117,16 +117,23 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         }
     }
     /// Get the function pointer value for the given instance.
-    pub fn to_mir_func_const(&self, instance: Instance<'tcx>, block: Option<melior::ir::BlockRef<'ml, 'a>>) -> melior::ir::Value<'ml, 'a> {
+    pub fn to_mir_func_const(
+        &self,
+        instance: Instance<'tcx>,
+        block: Option<melior::ir::BlockRef<'ml, 'a>>,
+    ) -> melior::ir::Value<'ml, 'a> {
+        let def_id: rustc_hir::def_id::DefId = instance.def_id();
+
         let sym = self.tcx.symbol_name(instance).name.to_string();
+        if self.fn_ptr_db.read().unwrap().contains_key(&sym) {
+            return self.fn_ptr_db.read().unwrap()[&sym].1;
+        }
         let gpu_attrs = self.get_gpu_attrs(instance.def_id());
         let function =
             melior::ir::attribute::FlatSymbolRefAttribute::new(self.mlir_ctx, sym.as_str());
-        log::trace!("FlatSymbolRefAttribute: {}", function);
         let op = self.get_fn(instance);
         let ftyp = op.get_func_type().unwrap();
         let is_gpu = op.is_gpu_func();
-
         let mut const_op =
             melior::dialect::func::constant(self.mlir_ctx, function, ftyp, self.unknown_loc());
         if let Some(extra_attr) = gpu_attrs.to_mlir_attribute(self.mlir_ctx) {
@@ -137,14 +144,17 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         } else {
             self.mlir_body(is_gpu).append_operation(const_op)
         };
-        op.result(0).unwrap().into()
+        let val = op.result(0).unwrap().into();
+        self.fn_ptr_db.write().unwrap().insert(sym, (instance, val));
+        val
     }
 
-    pub fn fn_abi_to_fn_type(
+    pub fn fn_abi_to_inputs(
         &self,
         abi: &rustc_target::callconv::FnAbi<'tcx, rustc_middle::ty::Ty<'tcx>>,
-    ) -> FunctionType<'ml> {
+    ) -> Vec<melior::ir::Type<'ml>> {
         let mut args = vec![];
+        //let mut closures = vec![];
         for arg in &abi.args {
             let mlir_arg = match &arg.mode {
                 rustc_target::callconv::PassMode::Ignore => {
@@ -165,14 +175,19 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                     on_stack,
                 } => {
                     assert!(!on_stack);
-                    dbg!(attrs);
-                    dbg!(meta_attrs);
-                    dbg!(on_stack);
-                    todo!();
+                    dbg!(arg);
+                    self.type_memref(self.immediate_backend_type(arg.layout))
                 }
             };
             args.append(&mut self.expand_type(mlir_arg));
         }
+        args
+    }
+    pub fn fn_abi_to_fn_type(
+        &self,
+        abi: &rustc_target::callconv::FnAbi<'tcx, rustc_middle::ty::Ty<'tcx>>,
+    ) -> FunctionType<'ml> {
+        let args = self.fn_abi_to_inputs(abi);
         let mut ret = vec![];
         if !abi.ret.layout.is_zst() {
             let t = self.mlir_type(abi.ret.layout, false);
@@ -182,7 +197,8 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         if args.is_empty() && ret.is_empty() {
             dbg!(abi);
         }
-        FunctionType::new(self.mlir_ctx, &args, &ret)
+        let ftype: FunctionType<'ml> = FunctionType::new(self.mlir_ctx, &args, &ret);
+        ftype
     }
 
     fn call_gpu_builtin_operation(
@@ -284,14 +300,14 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             GpuItem::Launch => {
                 log::trace!("gpu.launch args: {:?}", args);
                 extra.args.insert(gpu_item, args.to_vec());
-                let op = melior::ir::operation::OperationBuilder::new(
+                /*let op = melior::ir::operation::OperationBuilder::new(
                     "gpu.launch",
                     self.to_mlir_loc(span),
                 )
                 .add_results(return_types)
                 .build()
-                .unwrap();
-                Ok(Some(op))
+                .unwrap();*/
+                Ok(None)
             }
             GpuItem::IntoIter => todo!(),
             GpuItem::IterNext => todo!(),
@@ -314,19 +330,18 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let def_id: rustc_hir::def_id::DefId = instance.def_id();
         {
             let fn_db = self.fn_db.read().unwrap();
-            if fn_db.contains_key(&def_id) {
-                return fn_db[&def_id];
+            if fn_db.contains_key(&sym) {
+                return fn_db[&sym];
             }
         }
         let mut gpu_attrs = self.get_gpu_attrs(def_id);
-        let need_def =
-            gpu_attrs.kernel || gpu_attrs.host || gpu_attrs.device || gpu_attrs.gpu_item.is_some();
+        let need_def = gpu_attrs.is_gpu_related();
         let span = instance.def.default_span(tcx);
         let location: melior::ir::Location<'ml> = self.to_mlir_loc(span);
         let fn_sym = melior::ir::attribute::StringAttribute::new(mlir_ctx, sym.as_str());
         let fn_abi = self.fn_abi_of_instance(instance, rustc_middle::ty::List::empty());
         dbg!(fn_abi);
-        let fn_type = { self.fn_abi_to_fn_type(fn_abi).into() };
+        let ftype = self.fn_abi_to_fn_type(fn_abi);
         if is_impl_of_trait_method(
             &tcx,
             def_id,
@@ -345,7 +360,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             gpu_attrs.gpu_item = Some(GpuItem::IterNext);
             //self.type_func(&[], self.type_empty())
         }
-        let fn_type = melior::ir::attribute::TypeAttribute::new(fn_type);
+        let fn_type = melior::ir::attribute::TypeAttribute::new(ftype.into());
         let mut operation: Operation<'ml> = if !gpu_attrs.kernel {
             melior::dialect::ods::func::func(
                 mlir_ctx,
@@ -378,11 +393,12 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         } else {
             MLIRVisibility::Private
         };
+        let in_gpu_mod = gpu_attrs.kernel || gpu_attrs.device;
         operation.set_op_visible(self.mlir_ctx, visibility);
-        let body = self.mlir_body(!gpu_attrs.host);
+        let body = self.mlir_body(in_gpu_mod);
         log::trace!("append operation to block {} {:?}", operation, fn_sym);
         let op = body.append_operation(operation);
-        self.fn_db.write().unwrap().insert(def_id, op);
+        self.fn_db.write().unwrap().insert(sym, op);
         op
     }
 }

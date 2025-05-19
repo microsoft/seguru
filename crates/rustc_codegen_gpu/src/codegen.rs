@@ -1,9 +1,7 @@
 use rustc_codegen_ssa::{mono_item::MonoItemExt, ModuleCodegen};
 use rustc_span::Symbol;
 
-use crate::{
-    attr::is_gpu_code, backend::GPUCodeGenModule, builder::GpuBuilder, context::GPUCodegenContext,
-};
+use crate::{backend::GPUCodeGenModule, builder::GpuBuilder, context::GPUCodegenContext};
 
 pub(crate) fn module_codegen<'tcx>(
     tcx: rustc_middle::ty::TyCtxt<'tcx>,
@@ -18,12 +16,18 @@ pub(crate) fn module_codegen<'tcx>(
     log::trace!("create MLIR module {}", cgu_name);
     let cgu = tcx.codegen_unit(cgu_name);
     {
-        let cx: GPUCodegenContext<'_, '_, '_> =
-            crate::context::GPUCodegenContext::new(tcx, mlir_ctx, &mlir_module, blocks);
+        let cx: GPUCodegenContext<'_, '_, '_> = crate::context::GPUCodegenContext::new(
+            cgu_name.as_str().to_string(),
+            tcx,
+            mlir_ctx,
+            &mlir_module,
+            blocks,
+        );
         let mono_items = cgu.items_in_deterministic_order(tcx);
         for &(mono_item, data) in &mono_items {
-            if is_gpu_code(&tcx, mono_item.def_id()) {
-                log::trace!("predefine {}", mono_item);
+            let attr = crate::attr::GpuAttributes::build(&tcx, mono_item.def_id());
+            if attr.is_gpu_related() {
+                log::trace!("define {}", mono_item);
             } else {
                 log::trace!("skip {}", mono_item);
                 continue;
@@ -31,7 +35,8 @@ pub(crate) fn module_codegen<'tcx>(
             mono_item.predefine::<GpuBuilder<'_, '_, '_>>(&cx, data.linkage, data.visibility);
         }
         for (mono_item, mono_data) in mono_items {
-            if is_gpu_code(&tcx, mono_item.def_id()) {
+            let attr = crate::attr::GpuAttributes::build(&tcx, mono_item.def_id());
+            if attr.is_gpu_related() {
                 log::trace!("define {}", mono_item);
             } else {
                 log::trace!("skip {}", mono_item);
@@ -39,7 +44,7 @@ pub(crate) fn module_codegen<'tcx>(
             }
             match &mono_item {
                 rustc_middle::mir::mono::MonoItem::Fn(instance) => {
-                    let mir = tcx.optimized_mir(instance.def_id());
+                    /*let mir = tcx.optimized_mir(instance.def_id());
                     let output = String::new();
                     let mut out = Vec::new();
                     rustc_middle::mir::pretty::write_mir_pretty(
@@ -48,32 +53,14 @@ pub(crate) fn module_codegen<'tcx>(
                         &mut out,
                     )
                     .unwrap();
-                    log::debug!("mir {}", String::from_utf8(out).unwrap());
-                }
-                /*let traversal_order =
-                        rustc_middle::mir::traversal::mono_reachable_reverse_postorder(
-                            mir, tcx, instance,
-                        );
-                    let fop: melior::ir::OperationRef<'_, '_> = cx.get_fn(instance);
-                    let start_b = GpuBuilder::append_block(&cx, fop, "start");
-                    let builder = GpuBuilder::build(&cx, start_b);
-                    let mut fn_cx: fn_cx::FunctionCx<'_, '_, '_> = fn_cx::FunctionCx {
-                        instance,
-                        mir: &mir,
-                        bx: builder,
-                        local_map: HashMap::new(),
-                    };
-                    for bb in traversal_order {
-                        dbg!(bb);
-                        let bx = GpuBuilder::append_block(&cx, fop, &format!("{bb:?}"));
-                        fn_cx.bx = GpuBuilder::build(&cx, start_b);
-                        fn_cx.codegen_block(bb);
+                    log::debug!("mir {}", String::from_utf8(out).unwrap());*/
+                    if !attr.is_builtin() {
+                        mono_item.define::<GpuBuilder<'_, '_, '_>>(&cx);
                     }
-                }*/
+                }
                 rustc_middle::mir::mono::MonoItem::Static(def_id) => todo!(),
                 rustc_middle::mir::mono::MonoItem::GlobalAsm(item_id) => todo!(),
             }
-            mono_item.define::<GpuBuilder<'_, '_, '_>>(&cx);
         }
     }
 

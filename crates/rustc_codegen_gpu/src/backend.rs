@@ -89,11 +89,12 @@ impl GPUCodegenBackend {
 
     fn module_code_gen_from_llvm(
         m: rustc_codegen_ssa::ModuleCodegen<LlvmCodegenModule>,
+        mlir_module: Option<MLIRModule>,
     ) -> rustc_codegen_ssa::ModuleCodegen<GPUCodeGenModule> {
         ModuleCodegen {
             module_llvm: GPUCodeGenModule {
                 llvm_module: Some(m.module_llvm),
-                mlir_module: None,
+                mlir_module,
             },
             name: m.name,
             kind: m.kind,
@@ -154,7 +155,9 @@ impl GPUCodegenBackend {
 
     fn lto_module_from_llvm(m: LtoModuleCodegen<LlvmCodegenBackend>) -> LtoModuleCodegen<Self> {
         match m {
-            LtoModuleCodegen::Fat(m) => LtoModuleCodegen::Fat(Self::module_code_gen_from_llvm(m)),
+            LtoModuleCodegen::Fat(m) => {
+                LtoModuleCodegen::Fat(Self::module_code_gen_from_llvm(m, None))
+            }
             LtoModuleCodegen::Thin(m) => LtoModuleCodegen::Thin(Self::thin_module_from_llvm(m)),
         }
     }
@@ -181,6 +184,14 @@ impl WriteBackendMethods for GPUCodegenBackend {
         eprintln!("run_link starts");
         let cgcx: rustc_codegen_ssa::back::write::CodegenContext<_> =
             GPUCodegenBackend::to_llvm_context(cgcx);
+        let mlir_ctx = crate::mlir::create_mlir_ctx();
+        let final_m = crate::mlir::new_empty_module(mlir_ctx);
+        for m in &modules {
+            if let Some(mlir_m) = &m.module_llvm.mlir_module {
+                use melior::ir::BlockLike;
+                (*final_m.body()).append_operation((*mlir_m.module.as_operation()).clone());
+            }
+        }
         let ret = LlvmCodegenBackend::run_link(
             &cgcx,
             dcx,
@@ -189,7 +200,7 @@ impl WriteBackendMethods for GPUCodegenBackend {
                 .map(Self::to_llvm_modele_code_gen)
                 .collect(),
         );
-        ret.map(Self::module_code_gen_from_llvm)
+        ret.map(|m| Self::module_code_gen_from_llvm(m, Some(MLIRModule { module: final_m })))
     }
 
     fn run_fat_lto(
@@ -268,7 +279,7 @@ impl WriteBackendMethods for GPUCodegenBackend {
             &GPUCodegenBackend::to_llvm_context(cgcx),
             GPUCodegenBackend::to_llvm_thin_module(thin),
         )
-        .map(GPUCodegenBackend::module_code_gen_from_llvm)
+        .map(|x| GPUCodegenBackend::module_code_gen_from_llvm(x, None))
     }
 
     unsafe fn codegen(

@@ -21,11 +21,14 @@ use crate::mlir::BlockRefWithTime;
 use self::ty::MLIRType;
 
 pub(crate) struct GPUCodegenContext<'tcx, 'ml, 'a> {
+    pub cgu_name: String,
     pub mlir_ctx: &'ml melior::Context,
     pub mlir_module: &'ml melior::ir::Module<'ml>,
     pub mlir_body: HashMap<String, melior::ir::BlockRef<'ml, 'ml>>,
     pub dummy: PhantomData<&'a mlir_ir::operation::Operation<'ml>>,
-    pub fn_db: RwLock<HashMap<rustc_hir::def_id::DefId, mlir_ir::operation::OperationRef<'ml, 'a>>>,
+    pub fn_db: RwLock<HashMap<String, mlir_ir::operation::OperationRef<'ml, 'a>>>,
+    pub fn_ptr_db:
+        RwLock<HashMap<String, (rustc_middle::ty::Instance<'tcx>, mlir_ir::Value<'ml, 'a>)>>,
     pub const_alloc: RwLock<HashMap<rustc_const_eval::interpret::AllocId, mlir_ir::Value<'ml, 'a>>>,
     pub const_name_to_allocid: RwLock<HashMap<String, rustc_const_eval::interpret::AllocId>>,
     pub span_to_types: RwLock<HashMap<rustc_span::Span, mlir_ir::Type<'ml>>>,
@@ -50,6 +53,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     }
 
     pub fn new(
+        cgu_name: String,
         tcx: rustc_middle::ty::TyCtxt<'tcx>,
         mlir_ctx: &'ml melior::Context,
         mlir_module: &'ml melior::ir::Module<'ml>,
@@ -57,12 +61,14 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     ) -> Self {
         let location = melior::ir::Location::unknown(mlir_ctx);
         Self {
+            cgu_name,
             mlir_ctx,
             tcx,
             mlir_module,
             mlir_body,
             dummy: PhantomData,
             fn_db: RwLock::new(HashMap::new()),
+            fn_ptr_db: RwLock::new(HashMap::new()),
             const_alloc: RwLock::new(HashMap::new()),
             const_name_to_allocid: RwLock::new(HashMap::new()),
             span_to_types: RwLock::new(HashMap::new()),

@@ -9,6 +9,35 @@ use rustc_errors::DiagCtxtHandle;
 
 use crate::backend::{GPUCodeGenModule, GPUCodegenBackend};
 
+pub(crate) fn mlir_opt(inpath: &str, outpath: &str) -> Result<(), rustc_errors::FatalError> {
+    // mlir-opt must use "shell" in order to pass correct arguments.
+    let mut mlir_opt = Command::new("sh");
+    let cmd = format!(
+        "{} {} -o {} {}",
+        which::which("mlir-opt")
+            .expect("mlir-opt not found")
+            .display(),
+        r#"-gpu-lower-to-nvvm-pipeline='opt-level=3 cubin-chip=sm_90a cubin-features=+ptx80'"#,
+        outpath,
+        inpath
+    );
+    let args = ["-c", cmd.as_str()];
+    let mlir_opt = mlir_opt
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::inherit());
+    println!("{:?}", mlir_opt.get_args());
+    let output = mlir_opt
+        .spawn()
+        .unwrap_or_else(|_| panic!("Failed to spawn mlir-opt"))
+        .wait_with_output()
+        .unwrap();
+    if !output.status.success() {
+        panic!("mlir-opt failed with status: {:?}", output.status);
+    }
+    Ok(())
+}
 pub(crate) fn codegen(
     cgcx: &CodegenContext<GPUCodegenBackend>,
     dcx: DiagCtxtHandle<'_>,
@@ -44,34 +73,10 @@ pub(crate) fn codegen(
         std::fs::write(&out, &content).unwrap();
         if !m.module.as_operation().verify() {
             log::trace!("MLIR module verify failed: {}", content);
-            //Err(rustc_errors::FatalError)?;
+            Err(rustc_errors::FatalError)?;
         }
         // mlir-opt must use "shell" in order to pass correct arguments.
-        let mut mlir_opt = Command::new("sh");
-        let cmd = format!(
-            "{} {} -o {} {}",
-            which::which("mlir-opt")
-                .expect("mlir-opt not found")
-                .display(),
-            r#"-gpu-lower-to-nvvm-pipeline='opt-level=3 cubin-chip=sm_90a cubin-features=+ptx80'"#,
-            out_opt.to_str().unwrap(),
-            out.to_str().unwrap()
-        );
-        let args = ["-c", cmd.as_str()];
-        let mlir_opt = mlir_opt
-            .args(args)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::inherit());
-        println!("{:?}", mlir_opt.get_args());
-        let output = mlir_opt
-            .spawn()
-            .unwrap_or_else(|_| panic!("Failed to spawn mlir-opt"))
-            .wait_with_output()
-            .unwrap();
-        if !output.status.success() {
-            panic!("mlir-opt failed with status: {:?}", output.status);
-        }
+        mlir_opt(out.to_str().unwrap(), out_opt.to_str().unwrap())?;
 
         let args = [
             "-mlir-to-llvmir",

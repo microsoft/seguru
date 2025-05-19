@@ -27,7 +27,11 @@ pub fn scope<'env, F, T>(f: F) -> T
 where
     F: for<'scope> FnOnce(&'scope ThreadScope<'scope, 'env>) -> T,
 {
-    unimplemented!()
+    let scope = ThreadScope {
+        env: PhantomData,
+        scope: PhantomData,
+    };
+    f(&scope)
 }
 
 pub type Tuple3 = [usize; 3];

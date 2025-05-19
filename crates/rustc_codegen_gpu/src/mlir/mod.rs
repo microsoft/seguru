@@ -1,5 +1,6 @@
+pub(crate) mod attr;
 pub(crate) mod gpu;
-mod memref;
+pub(crate) mod memref;
 
 use melior::{
     dialect::{
@@ -42,6 +43,11 @@ pub(crate) fn create_mlir_ctx() -> &'static melior::Context {
     log::debug!("parsed mlir module: {:?}", m);
     log::debug!("attr: {:?}", m.unwrap().body().first_operation().unwrap().block().unwrap().first_operation().unwrap().attribute("dimension"));*/
     ctx
+}
+
+pub(crate) fn new_empty_module<'ml>(ctx: &'ml Context) -> melior::ir::Module<'ml> {
+    let location = Location::unknown(ctx);
+    Module::new(location)
 }
 
 pub(crate) fn create_top_module<'ml>(

@@ -58,7 +58,13 @@ impl<'tcx, 'ml, 'a> AbiBuilderMethods for GpuBuilder<'tcx, 'ml, 'a> {
     fn get_param(&mut self, index: usize) -> Self::Value {
         log::trace!("get_param({})", index);
         if index >= self.cur_block.argument_count() {
-            panic!("index out of bounds");
+            log::warn!("{}", self.cx.mlir_module.as_operation());
+            panic!(
+                "{:?} get_param({}) out of bounds at {:?}",
+                self.cur_block.parent_operation(),
+                index,
+                self.cur_span
+            );
         }
         let val = self.cur_block.argument(index).unwrap();
         Self::Value::from(val)
@@ -72,6 +78,9 @@ impl<'tcx, 'ml, 'a> ArgAbiBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
         idx: &mut usize,
         dst: rustc_codegen_ssa::mir::place::PlaceRef<'tcx, Self::Value>,
     ) {
+        if self.is_unreachable() {
+            return;
+        }
         log::warn!(
             "store_fn_arg {:?} {} {:?} {:?}",
             arg_abi,
@@ -118,6 +127,9 @@ impl<'tcx, 'ml, 'a> ArgAbiBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
         val: Self::Value,
         dst: rustc_codegen_ssa::mir::place::PlaceRef<'tcx, Self::Value>,
     ) {
+        if self.is_unreachable() {
+            return;
+        }
         log::warn!("store_arg {:?} {} {:?}", arg_abi.mode, val, dst);
         match arg_abi.mode {
             PassMode::Ignore => {}

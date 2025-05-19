@@ -97,6 +97,11 @@ pub(crate) fn token_to_string(token: &Token) -> Result<Option<String>, ()> {
 }
 
 impl GpuAttributes {
+    pub fn build(tcx: &rustc_middle::ty::TyCtxt<'_>, def_id: DefId) -> GpuAttributes {
+        let attrs = tcx.get_attrs_unchecked(def_id);
+        GpuAttributes::parse(attrs)
+    }
+
     pub fn to_mlir_attribute<'ml>(
         &self,
         ctx: &'ml melior::Context,
@@ -105,6 +110,15 @@ impl GpuAttributes {
             melior::ir::attribute::StringAttribute::new(ctx, gpu_item.into()).into()
         })
     }
+
+    pub fn is_gpu_related(&self) -> bool {
+        self.kernel || self.host || self.device || self.gpu_item.is_some()
+    }
+
+    pub fn is_builtin(&self) -> bool {
+        self.gpu_item.is_some()
+    }
+
     pub fn parse(attrs: &[Attribute]) -> Self {
         let mut gpu_attrs = Self::default();
 
@@ -149,10 +163,4 @@ impl GpuAttributes {
         }
         gpu_attrs
     }
-}
-
-pub(crate) fn is_gpu_code(tcx: &rustc_middle::ty::TyCtxt<'_>, def_id: DefId) -> bool {
-    let attrs = tcx.get_attrs_unchecked(def_id);
-    let gpu_attrs = GpuAttributes::parse(attrs);
-    gpu_attrs.kernel || gpu_attrs.host || gpu_attrs.device
 }

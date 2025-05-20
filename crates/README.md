@@ -1,11 +1,10 @@
 # A trial to build safe CPU-GPU programming in Rust
 
-
 ## Build and Run
 
-### Dependencies
+### Dependencies to build
 
-Install homebrew
+Somehow the `melior` lib works well with llvm lib installed via homebrew but not the default one via `apt install`
 
 ```
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)
@@ -25,13 +24,37 @@ cd crates/rustc_codegen_gpu
 cargo build --release
 ```
 
-### Run
-export PATH=/home/ziqiaozhou/rust-gpu/llvm-project/build-mlir-gpu/bin:$PATH
-export LD_LIBRARY_PATH=/home/ziqiaozhou/rust-gpu/llvm-project/build-mlir-gpu/lib:$LD_LIBRARY_PATH
-```bash
-cd crates/gpu-test
-RUST_LOG=trace RUSTFLAGS="-Zcodegen-backend=`realpath ../target/release/librustc_codegen_gpu.so`" cargo build
-RUST_LOG=trace RUSTFLAGS="-Zcodegen-backend=`realpath ../target/release/librustc_codegen_gpu.dylib`" cargo build
+### Prepare to Run
+To run the codegen, you need a custom build of llvm project.
 
 ```
-mlir-opt  -gpu-lower-to-nvvm-pipeline="cubin-chip=sm_90a cubin-features=+ptx80 opt-level=3" /home/ziqiaozhou/rust-gpu/rust-gpu/crates/target/debug/deps/gpu-82572710cbc56735.dikxuq9cyrfdskw44vf8x9rsg.rcgu.bc
+cmake -G Ninja ../llvm \
+   -DLLVM_ENABLE_PROJECTS="clang;polly;mlir" \
+   -DLLVM_BUILD_EXAMPLES=ON \
+   -DLLVM_TARGETS_TO_BUILD="Native;NVPTX;AMDGPU" \
+   -DCMAKE_BUILD_TYPE=Release \
+   -DLLVM_ENABLE_ASSERTIONS=ON \
+   -DMLIR_ENABLE_CUDA_RUNNER=ON \
+   -DMLIR_ENABLE_CUDA_CONVERSIONS=ON \
+   -DMLIR_ENABLE_NVPTXCOMPILER=ON \
+   -DNVPTX_COMPILER_INCLUDE_DIR=/usr/local/cuda/targets/x86_64-linux/include/ \
+   -DNVPTX_COMPILER_LIB_DIR=/usr/local/cuda/targets/x86_64-linux/lib \
+   -DCUDACXX=/usr/local/cuda/bin/nvcc \
+   -DCUDA_PATH=/usr/local/cuda \
+   -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc \
+   -DMLIR_ENABLE_C_BINDINGS=ON \
+   -DLINK_POLLY_INTO_TOOLS=ON
+ninja
+```
+
+### Run
+export PATH=~/llvm-project/build-mlir-gpu/bin:$PATH
+export LD_LIBRARY_PATH=~/llvm-project/build-mlir-gpu/lib:$LD_LIBRARY_PATH
+```bash
+cd crates/gpu-test-basic
+RUST_LOG=trace RUSTFLAGS="-Zcodegen-backend=`realpath ../target/release/librustc_codegen_gpu.so`" cargo build
+
+```
+
+You will find target/debug/deps/gpu-xxx.o and it includes a ptx binary in `gpu_bin_cst` symbol. 
+TODO: check whether the generated PTX binary is usable.

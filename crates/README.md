@@ -17,6 +17,8 @@ brew install llvm@20
 
 ### Build codegen backend
 
+You can use the prebuilt llvm for dev.
+
 ```bash
 export PATH=`brew --prefix llvm@20`\bin:$PATH
 export LD_LIBRARY_PATH=`brew --prefix llvm@20`\bin:$LD_LIBRARY_PATH
@@ -48,6 +50,8 @@ ninja
 ```
 
 ### Run
+
+You may need a different llvm build to run it.
 
 ```
 export PATH=~/llvm-project/build-mlir-gpu/bin:$PATH

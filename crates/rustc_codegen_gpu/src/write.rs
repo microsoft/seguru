@@ -13,13 +13,13 @@ pub(crate) fn mlir_opt(inpath: &str, outpath: &str) -> Result<(), rustc_errors::
     // mlir-opt must use "shell" in order to pass correct arguments.
     let mut mlir_opt = Command::new("sh");
     let cmd = format!(
-        "{} {} -o {} {}",
+        "{} {} {} -o {} ",
         which::which("mlir-opt")
             .expect("mlir-opt not found")
             .display(),
-        r#"-gpu-lower-to-nvvm-pipeline='opt-level=3 cubin-chip=sm_90a cubin-features=+ptx80'"#,
+        r#"-gpu-lower-to-nvvm-pipeline='opt-level=3 cubin-chip=sm_80 cubin-features=+ptx80'"#,
+        inpath,
         outpath,
-        inpath
     );
     let args = ["-c", cmd.as_str()];
     let mlir_opt = mlir_opt

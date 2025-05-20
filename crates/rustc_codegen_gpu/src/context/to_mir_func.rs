@@ -1,5 +1,6 @@
-use melior::ir::{
-    attribute::StringAttribute, r#type::FunctionType, BlockLike, Location, Operation,
+use melior::{
+    ir::{attribute::StringAttribute, r#type::FunctionType, BlockLike, Location, Operation},
+    pass::gpu,
 };
 use rustc_codegen_ssa::traits::{LayoutTypeCodegenMethods, MiscCodegenMethods};
 use rustc_hir::def_id::DefId;
@@ -386,7 +387,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         if let Some(extra_attr) = gpu_attrs.to_mlir_attribute(self.mlir_ctx) {
             operation.set_attribute(crate::mlir::BUILTIN_SYM, extra_attr);
         }
-        let visibility = if !gpu_attrs.host {
+        let visibility = if !gpu_attrs.host || !gpu_attrs.kernel {
             MLIRVisibility::Private
         } else if tcx.visibility(def_id).is_public() {
             MLIRVisibility::Public

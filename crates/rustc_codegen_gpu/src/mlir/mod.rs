@@ -62,14 +62,16 @@ pub(crate) fn create_top_module<'ml>(
     let region = Region::new();
     let block = Block::new(&[]);
     let gpu_block = region.append_block(block);
-    let gpu_mod =
-        melior::dialect::ods::gpu::module(ctx, region, StringAttribute::new(ctx, "gpu"), location);
+    let mut gpu_mod: Operation<'ml> =
+        melior::dialect::ods::gpu::module(ctx, region, StringAttribute::new(ctx, "gpu"), location)
+            .into();
+    gpu_mod.set_attribute("visibility", StringAttribute::new(ctx, "public").into());
     let region = Region::new();
     let block = Block::new(&[]);
     let cpu_block = region.append_block(block);
     let cpu_mod = melior::dialect::ods::builtin::module(ctx, region, location);
 
-    module.body().append_operation(gpu_mod.into());
+    module.body().append_operation(gpu_mod);
     module.body().append_operation(cpu_mod.into());
     (module, gpu_block, cpu_block)
 }

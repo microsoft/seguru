@@ -23,7 +23,7 @@ fn kernel_print() {
 #[no_mangle]
 #[gpu_codegen::device]
 /// assume BK * BK == number of threads in a block x axis.
-fn kernel(a: &[u8]) {
+fn kernel(a: &[u8], b: &mut [u8]) {
     let c = kernel2(a);
     let d = c;
     gpu::add_mlir_string_attr("#gpu<dim x>");
@@ -66,5 +66,4 @@ pub fn host(a: &mut [u8; 10], b: &[u8; 10], c: &mut [u8; 10]) {
             //}
         },
     ); // Ensure t
-    kernel(a);
 }

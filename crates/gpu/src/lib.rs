@@ -2,7 +2,6 @@
 #![feature(register_tool)]
 #![register_tool(gpu_codegen)]
 use core::marker::PhantomData;
-use std::{ops::Deref, thread::ScopedJoinHandle};
 
 pub struct Scope<'scope, 'env: 'scope> {
     /// Invariance over 'scope, to make sure 'scope cannot shrink,
@@ -37,17 +36,17 @@ where
 pub type Tuple3 = [usize; 3];
 
 #[gpu_codegen::builtin(gpu.grid)]
-pub fn grid(x: usize, y: usize, z: usize) -> &'static [Tuple3] {
+pub fn grid(_: usize, _: usize, _: usize) -> &'static [Tuple3] {
     unimplemented!()
 }
 
 #[gpu_codegen::builtin(gpu.block)]
-pub fn block(x: usize, y: usize, z: usize) -> &'static [Tuple3] {
+pub fn block(_: usize, _: usize, _: usize) -> &'static [Tuple3] {
     unimplemented!()
 }
 
 #[gpu_codegen::builtin(gpu.launch)]
-pub fn launch<'scope, F, T>(block: Tuple3, thread: Tuple3, f: F)
+pub fn launch<'scope, F, T>(_: Tuple3, _: Tuple3, _: F)
 where
     F: FnOnce() -> T + Send + 'scope,
     T: Send + 'scope,
@@ -56,7 +55,7 @@ where
 }
 
 #[gpu_codegen::builtin(gpu.into_iter)]
-pub fn into_iter() -> () {}
+pub fn into_iter() {}
 
 pub struct ThreadScope<'scope, 'env: 'scope> {
     scope: PhantomData<&'scope mut &'scope ()>,
@@ -71,7 +70,7 @@ pub struct Dim {
 }
 
 impl<'scope, 'env: 'scope> ThreadScope<'scope, 'env> {
-    pub fn launch<F, T>(&self, block: Tuple3, thread: Tuple3, f: F)
+    pub fn launch<F, T>(&self, _: Tuple3, _: Tuple3, _: F)
     where
         F: FnOnce() -> T + Send + 'scope,
         T: Send + 'scope,
@@ -213,6 +212,12 @@ impl<T: ?Sized> core::ops::Deref for SharedReadGuard<'_, T> {
 
 pub struct Shared<T> {
     data: PhantomData<T>,
+}
+
+impl<T> Default for Shared<T> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<T> Shared<T> {

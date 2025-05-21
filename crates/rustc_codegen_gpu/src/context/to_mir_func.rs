@@ -1,6 +1,5 @@
-use melior::{
-    ir::{attribute::StringAttribute, r#type::FunctionType, BlockLike, Location, Operation},
-    pass::gpu,
+use melior::ir::{
+    attribute::StringAttribute, r#type::FunctionType, BlockLike, Location, Operation,
 };
 use rustc_codegen_ssa::traits::{LayoutTypeCodegenMethods, MiscCodegenMethods};
 use rustc_hir::def_id::DefId;
@@ -380,7 +379,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 fn_type,
                 location,
             );
-            let unit_attr = melior::ir::Attribute::unit(&self.mlir_ctx);
+            let unit_attr = melior::ir::Attribute::unit(self.mlir_ctx);
             let mut op: Operation<'ml> = gpu_op.into();
             op.set_attribute("kernel", unit_attr);
             op.set_attribute(crate::mlir::SYM_NAME_SYM, fn_sym.into());

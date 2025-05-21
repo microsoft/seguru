@@ -57,15 +57,6 @@ pub fn static_reinterpret_cast<'c>(
     op
 }
 
-pub fn cast<'c>(
-    mlir_ctx: &'c Context,
-    val: Value<'c, '_>,
-    dest_ty: Type<'c>,
-    location: Location<'c>,
-) -> Operation<'c> {
-    melior::dialect::ods::memref::cast(mlir_ctx, dest_ty, val, location).into()
-}
-
 pub fn extract_strided_metadata<'c>(
     mlir_ctx: &'c Context,
     val: Value<'c, '_>,

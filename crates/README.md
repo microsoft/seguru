@@ -48,8 +48,12 @@ ninja
 ```
 
 ### Run
+
+```
 export PATH=~/llvm-project/build-mlir-gpu/bin:$PATH
 export LD_LIBRARY_PATH=~/llvm-project/build-mlir-gpu/lib:$LD_LIBRARY_PATH
+```
+
 ```bash
 cd crates/gpu-test-basic
 RUST_LOG=trace RUSTFLAGS="-Zcodegen-backend=`realpath ../target/release/librustc_codegen_gpu.so`" cargo build

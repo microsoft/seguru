@@ -1,0 +1,53 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest        
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Install rust toolchain
+        run: rustup toolchain install --profile minimal
+
+      - name: Add rust components
+        run: rustup component add --toolchain nightly-2025-03-28-x86_64-unknown-linux-gnu rustfmt rust-src clippy
+
+      - name: Format
+        working-directory: crates
+        run: cargo fmt --all -- --check
+
+      - name: Dep
+        run: |
+          /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          /home/linuxbrew/.linuxbrew/bin/brew install llvm@20
+
+      - name: Set up LLVM environment
+        run: |
+          LLVM_PREFIX=$(/home/linuxbrew/.linuxbrew/bin/brew --prefix llvm@20)
+          echo "LLVM_PREFIX=$LLVM_PREFIX" >> $GITHUB_ENV
+          echo "$LLVM_PREFIX/bin" >> $GITHUB_PATH
+          echo "LD_LIBRARY_PATH=$LLVM_PREFIX/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+
+      - name: Confirm llvm version
+        run: |
+          which llvm-config
+          llvm-config --version
+
+      - name: Clippy
+        working-directory: crates
+        run: cargo clippy
+
+      - name: Build
+        working-directory: crates
+        run: cargo build

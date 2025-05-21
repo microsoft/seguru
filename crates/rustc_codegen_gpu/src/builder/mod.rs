@@ -1178,7 +1178,6 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         if self.is_unreachable() {
             return llfn;
         }
-        dbg!(instance);
         let args = args
             .iter()
             .map(|arg| self.use_value(*arg))

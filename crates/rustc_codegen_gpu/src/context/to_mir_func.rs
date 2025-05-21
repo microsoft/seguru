@@ -175,7 +175,6 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                     on_stack,
                 } => {
                     assert!(!on_stack);
-                    dbg!(arg);
                     self.type_memref(self.immediate_backend_type(arg.layout))
                 }
             };
@@ -195,7 +194,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             ret.append(&mut t);
         }
         if args.is_empty() && ret.is_empty() {
-            dbg!(abi);
+            log::warn!("function has no args and no ret");
         }
         let ftype: FunctionType<'ml> = FunctionType::new(self.mlir_ctx, &args, &ret);
         ftype
@@ -340,7 +339,6 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let location: melior::ir::Location<'ml> = self.to_mlir_loc(span);
         let fn_sym = melior::ir::attribute::StringAttribute::new(mlir_ctx, sym.as_str());
         let fn_abi = self.fn_abi_of_instance(instance, rustc_middle::ty::List::empty());
-        dbg!(fn_abi);
         let ftype = self.fn_abi_to_fn_type(fn_abi);
         if is_impl_of_trait_method(
             &tcx,

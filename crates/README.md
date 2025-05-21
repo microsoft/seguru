@@ -64,5 +64,6 @@ RUST_LOG=trace RUSTFLAGS="-Zcodegen-backend=`realpath ../target/release/librustc
 
 ```
 
-You will find target/debug/deps/gpu-xxx.o and it includes a ptx binary in `gpu_bin_cst` symbol. 
-TODO: check whether the generated PTX binary is usable.
+You will find target/debug/deps/gpu-xxx.o and it includes a cubin binary in `gpu_bin_cst` symbol.
+
+The code could be launched by mlir-examples/wrapper.cu.

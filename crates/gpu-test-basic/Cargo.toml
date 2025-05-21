@@ -7,4 +7,3 @@ edition = "2021"
 gpu = {path = "../gpu"}
 
 [lib]
-crate-type = ["lib"]

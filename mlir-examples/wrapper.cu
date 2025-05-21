@@ -41,19 +41,8 @@ int main() {
   dump_ptx_to_file(gpu_bin_cst, "kernel.ptx");
   CUfunction kernel;
 
-  checkCudaErrors(
-      cuModuleGetFunction(&kernel, module, "kernel_print")); // Match kernel name
-
-  // Device memory setup
-  int h_a[4] = {1, 2, 3, 4}, h_b[4] = {10, 20, 30, 40}, h_c[4];
-
-  CUdeviceptr d_a, d_b, d_c;
-  checkCudaErrors(cuMemAlloc(&d_a, sizeof(h_a)));
-  checkCudaErrors(cuMemAlloc(&d_b, sizeof(h_b)));
-  checkCudaErrors(cuMemAlloc(&d_c, sizeof(h_c)));
-
-  checkCudaErrors(cuMemcpyHtoD(d_a, h_a, sizeof(h_a)));
-  checkCudaErrors(cuMemcpyHtoD(d_b, h_b, sizeof(h_b)));
+  checkCudaErrors(cuModuleGetFunction(&kernel, module,
+                                      "kernel_print")); // Match kernel name
 
   void *args[] = {};
   checkCudaErrors(cuLaunchKernel(kernel, 1, 1, 1, // grid
@@ -61,10 +50,6 @@ int main() {
                                  0,               // shared mem
                                  0,               // stream
                                  args, 0));
-
-  cuMemFree(d_a);
-  cuMemFree(d_b);
-  cuMemFree(d_c);
   cuModuleUnload(module);
   cuCtxDestroy(ctx);
 

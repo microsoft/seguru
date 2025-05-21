@@ -63,18 +63,21 @@ pub(crate) fn codegen(
             .output_filenames
             .temp_path(rustc_session::config::OutputType::Object, module_name);
         let copy = format!("{}-copy", mod_name);
-        let out_obj_copy = cgcx.output_filenames.temp_path(
+        let out_obj_private = cgcx.output_filenames.temp_path(
             rustc_session::config::OutputType::Object,
             Some(copy.as_str()),
         );
         log::debug!("write MLIR module to {:?}", out);
-        let content = m.module.as_operation().to_string();
-        log::debug!("[Done]write MLIR module to {:?}", out);
-        std::fs::write(&out, &content).unwrap();
+
         if !m.module.as_operation().verify() {
-            log::trace!("MLIR module verify failed: {}", content);
+            log::trace!("MLIR module verify failed.");
             Err(rustc_errors::FatalError)?;
         }
+        let content = m.module.as_operation().to_string();
+        let content = content.replace("attributes {kernel, ", "kernel attributes {");
+
+        std::fs::write(&out, &content).unwrap();
+        log::debug!("[Done]write MLIR module to {:?}", out);
         // mlir-opt must use "shell" in order to pass correct arguments.
         mlir_opt(out.to_str().unwrap(), out_opt.to_str().unwrap())?;
 
@@ -112,16 +115,25 @@ pub(crate) fn codegen(
             .arg("-filetype=obj")
             .arg(out_bc.to_str().unwrap())
             .arg("-o")
-            .arg(out_obj.to_str().unwrap())
+            .arg(out_obj_private.to_str().unwrap())
             .status()
             .map_err(|e| format!("Failed to execute llc: {}", e))
             .unwrap();
         if !status.success() {
             panic!("llc failed with status: {:?}", output.status);
         }
-        log::trace!("write MLIR obj to {:?}", out_obj);
-        std::fs::copy(out_obj.to_str().unwrap(), out_obj_copy.to_str().unwrap()).unwrap();
-        Some(out_obj_copy)
+        let status = Command::new("objcopy")
+            .arg("--globalize-symbol=gpu_bin_cst")
+            .arg(out_obj_private.to_str().unwrap())
+            .arg(out_obj.to_str().unwrap())
+            .status()
+            .map_err(|e| format!("Failed to execute llc: {}", e))
+            .unwrap();
+        if !status.success() {
+            panic!("objcopy failed with status: {:?}", output.status);
+        }
+        log::trace!("copy MLIR obj to {:?}", out_obj);
+        Some(out_obj_private)
     } else {
         None
     };

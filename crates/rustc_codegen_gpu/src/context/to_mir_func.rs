@@ -380,8 +380,11 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 fn_type,
                 location,
             );
+            let unit_attr = melior::ir::Attribute::unit(&self.mlir_ctx);
             let mut op: Operation<'ml> = gpu_op.into();
+            op.set_attribute("kernel", unit_attr);
             op.set_attribute(crate::mlir::SYM_NAME_SYM, fn_sym.into());
+
             op
         };
         if let Some(extra_attr) = gpu_attrs.to_mlir_attribute(self.mlir_ctx) {
@@ -389,10 +392,8 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         }
         let visibility = if !gpu_attrs.host || !gpu_attrs.kernel {
             MLIRVisibility::Private
-        } else if tcx.visibility(def_id).is_public() {
-            MLIRVisibility::Public
         } else {
-            MLIRVisibility::Private
+            MLIRVisibility::Public
         };
         let in_gpu_mod = gpu_attrs.kernel || gpu_attrs.device;
         operation.set_op_visible(self.mlir_ctx, visibility);

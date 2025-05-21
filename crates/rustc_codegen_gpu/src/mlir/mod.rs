@@ -58,7 +58,12 @@ pub(crate) fn create_top_module<'ml>(
     melior::ir::BlockRef<'ml, 'ml>,
 ) {
     let location = Location::unknown(ctx);
-    let module = Module::new(location);
+    let mut module = Module::new(location);
+    let unit_attr = melior::ir::Attribute::unit(ctx);
+
+    module
+        .as_operation_mut()
+        .set_attribute("gpu.container_module", unit_attr);
     let region = Region::new();
     let block = Block::new(&[]);
     let gpu_block = region.append_block(block);

@@ -1061,7 +1061,67 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         lhs: Self::Value,
         rhs: Self::Value,
     ) -> Self::Value {
-        todo!()
+        if self.is_unreachable() {
+            return lhs;
+        }
+        let predicate = match op {
+            rustc_codegen_ssa::common::RealPredicate::RealPredicateFalse => {
+                melior::dialect::arith::CmpfPredicate::False
+            }
+            rustc_codegen_ssa::common::RealPredicate::RealOEQ => {
+                melior::dialect::arith::CmpfPredicate::Oeq
+            }
+            rustc_codegen_ssa::common::RealPredicate::RealOGT => {
+                melior::dialect::arith::CmpfPredicate::Ogt
+            }
+            rustc_codegen_ssa::common::RealPredicate::RealOGE => {
+                melior::dialect::arith::CmpfPredicate::Oge
+            }
+            rustc_codegen_ssa::common::RealPredicate::RealOLT => {
+                melior::dialect::arith::CmpfPredicate::Olt
+            }
+            rustc_codegen_ssa::common::RealPredicate::RealOLE => {
+                melior::dialect::arith::CmpfPredicate::Ole
+            }
+            rustc_codegen_ssa::common::RealPredicate::RealONE => {
+                melior::dialect::arith::CmpfPredicate::One
+            }
+            rustc_codegen_ssa::common::RealPredicate::RealORD => {
+                melior::dialect::arith::CmpfPredicate::Ord
+            }
+            rustc_codegen_ssa::common::RealPredicate::RealUNO => {
+                melior::dialect::arith::CmpfPredicate::Uno
+            }
+            rustc_codegen_ssa::common::RealPredicate::RealUEQ => {
+                melior::dialect::arith::CmpfPredicate::Ueq
+            }
+            rustc_codegen_ssa::common::RealPredicate::RealUGT => {
+                melior::dialect::arith::CmpfPredicate::Ugt
+            }
+            rustc_codegen_ssa::common::RealPredicate::RealUGE => {
+                melior::dialect::arith::CmpfPredicate::Uge
+            }
+            rustc_codegen_ssa::common::RealPredicate::RealULT => {
+                melior::dialect::arith::CmpfPredicate::Ult
+            }
+            rustc_codegen_ssa::common::RealPredicate::RealULE => {
+                melior::dialect::arith::CmpfPredicate::Ule
+            }
+            rustc_codegen_ssa::common::RealPredicate::RealUNE => {
+                melior::dialect::arith::CmpfPredicate::Une
+            }
+            rustc_codegen_ssa::common::RealPredicate::RealPredicateTrue => {
+                melior::dialect::arith::CmpfPredicate::True
+            }
+        };
+        let op = melior::dialect::arith::cmpf(
+            self.mlir_ctx,
+            predicate,
+            self.use_value(lhs),
+            self.use_value(rhs),
+            self.cur_loc(),
+        );
+        self.append_op_res(op)
     }
 
     fn memcpy(

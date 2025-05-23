@@ -462,27 +462,33 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn add(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        let op = melior::dialect::arith::addi(lhs, rhs, self.cur_loc());
+        return self.append_op_res(op);
     }
 
     fn fadd(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        let op = melior::dialect::arith::addf(lhs, rhs, self.cur_loc());
+        return self.append_op_res(op);
     }
 
+    // Do we even handle this?
     fn fadd_fast(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
         todo!()
     }
 
+    // Do we even handle this?
     fn fadd_algebraic(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
         todo!()
     }
 
     fn sub(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        let op = melior::dialect::arith::subi(lhs, rhs, self.cur_loc());
+        return self.append_op_res(op);
     }
 
     fn fsub(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        let op = melior::dialect::arith::subf(lhs, rhs, self.cur_loc());
+        return self.append_op_res(op);
     }
 
     fn fsub_fast(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
@@ -494,11 +500,13 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn mul(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        let op = melior::dialect::arith::muli(lhs, rhs, self.cur_loc());
+        return self.append_op_res(op);
     }
 
     fn fmul(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        let op = melior::dialect::arith::mulf(lhs, rhs, self.cur_loc());
+        return self.append_op_res(op);
     }
 
     fn fmul_fast(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
@@ -510,7 +518,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn udiv(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        let op = melior::dialect::arith::divui(lhs, rhs, self.cur_loc());
+        return self.append_op_res(op);
     }
 
     fn exactudiv(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
@@ -518,7 +527,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn sdiv(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        let op = melior::dialect::arith::divsi(lhs, rhs, self.cur_loc());
+        return self.append_op_res(op);
     }
 
     fn exactsdiv(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
@@ -526,7 +536,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn fdiv(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        let op = melior::dialect::arith::divf(lhs, rhs, self.cur_loc());
+        return self.append_op_res(op);
     }
 
     fn fdiv_fast(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
@@ -538,15 +549,18 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn urem(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        let op = melior::dialect::arith::remui(lhs, rhs, self.cur_loc());
+        return self.append_op_res(op);
     }
 
     fn srem(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        let op = melior::dialect::arith::remsi(lhs, rhs, self.cur_loc());
+        return self.append_op_res(op);
     }
 
     fn frem(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        let op = melior::dialect::arith::remf(lhs, rhs, self.cur_loc());
+        return self.append_op_res(op);
     }
 
     fn frem_fast(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
@@ -558,39 +572,55 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn shl(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        let op = melior::dialect::arith::shli(lhs, rhs, self.cur_loc());
+        return self.append_op_res(op);
     }
 
     fn lshr(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        let op = melior::dialect::arith::shrui(lhs, rhs, self.cur_loc());
+        return self.append_op_res(op);
     }
 
     fn ashr(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        let op = melior::dialect::arith::shrsi(lhs, rhs, self.cur_loc());
+        return self.append_op_res(op);
     }
 
     fn and(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        let op = melior::dialect::arith::andi(lhs, rhs, self.cur_loc());
+        return self.append_op_res(op);
     }
 
     fn or(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        let op = melior::dialect::arith::ori(lhs, rhs, self.cur_loc());
+        return self.append_op_res(op);
     }
 
     fn xor(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        let op = melior::dialect::arith::xori(lhs, rhs, self.cur_loc());
+        return self.append_op_res(op);
     }
 
     fn neg(&mut self, v: Self::Value) -> Self::Value {
-        todo!()
+        let op =
+            melior::dialect::arith::subi(self.const_value(0, self.type_index()), v, self.cur_loc());
+        return self.append_op_res(op);
     }
 
     fn fneg(&mut self, v: Self::Value) -> Self::Value {
-        todo!()
+        let op = melior::dialect::arith::negf(v, self.cur_loc());
+        return self.append_op_res(op);
     }
 
     fn not(&mut self, v: Self::Value) -> Self::Value {
-        todo!()
+        let op = melior::dialect::arith::cmpi(
+            self.mlir_ctx,
+            melior::dialect::arith::CmpiPredicate::Ne,
+            v,
+            self.const_value(0, self.type_index()),
+            self.cur_loc(),
+        );
+        return self.append_op_res(op);
     }
 
     fn checked_binop(

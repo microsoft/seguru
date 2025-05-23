@@ -429,7 +429,57 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         else_llbb: Self::BasicBlock,
         cases: impl ExactSizeIterator<Item = (u128, Self::BasicBlock)>,
     ) {
-        todo!()
+        use crate::rustc_codegen_ssa::traits::AbiBuilderMethods;
+        if self.is_unreachable() {
+            return;
+        }
+
+        // Build the default case
+        let mut else_llbb_args = vec![];
+        for i in 0..else_llbb.argument_count() {
+            else_llbb_args.push(self.get_param(i));
+        }
+
+        // Now handle cases and their lables
+        // Note that MLIR requires lables to be seperated from cases. It also
+        // requires cases to be tuples with their arguments. We have to split
+        // the cases and re-zip it into what we want.
+        let mut case_values = vec![];
+        let mut case_destinations = vec![];
+
+        let mut dest_list: Vec<_> = vec![];
+        let mut cases_args: Vec<_> = vec![];
+
+        // Spliting the tuple since tuples can't be referenced individually
+        for (on_val, dest) in cases {
+            let mut case_args = vec![];
+
+            dest_list.push(dest.clone());
+
+            case_values.push(on_val as i64);
+
+            for i in 0..dest.argument_count() {
+                case_args.push(self.get_param(i));
+            }
+            cases_args.push(case_args.clone());
+        }
+
+        for i in 0..dest_list.len() {
+            // Build the cases
+            case_destinations.push((dest_list[i].deref(), cases_args[i].as_slice()));
+        }
+
+        let op = melior::dialect::cf::switch(
+            self.mlir_ctx,
+            &case_values,
+            v,
+            v.r#type(),
+            (&else_llbb, &else_llbb_args),
+            &case_destinations,
+            self.cur_loc(),
+        )
+        .expect("valid operation");
+        self.append_op(op);
     }
 
     fn invoke(

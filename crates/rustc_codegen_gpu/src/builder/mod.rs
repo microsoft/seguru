@@ -929,7 +929,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn sext(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
-        todo!()
+        let op = melior::dialect::arith::extsi(val, dest_ty, self.cur_loc());
+        self.append_op_res(op)
     }
 
     fn fptoui_sat(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
@@ -961,7 +962,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn fpext(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
-        todo!()
+        let op = melior::dialect::arith::extf(val, dest_ty, self.cur_loc());
+        self.append_op_res(op)
     }
 
     fn ptrtoint(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
@@ -1366,7 +1368,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn zext(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
-        todo!()
+        let op = melior::dialect::arith::extui(val, dest_ty, self.cur_loc());
+        self.append_op_res(op)
     }
 
     fn apply_attrs_to_cleanup_callsite(&mut self, llret: Self::Value) {

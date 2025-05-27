@@ -8,5 +8,5 @@ pub fn kernel_print() {
     gpu::add_mlir_string_attr("\"run\"");
     gpu::printf();
     gpu::add_mlir_string_attr("#gpu<dim x>");
-    let i = gpu::thread_id();
+    let _ = gpu::thread_id();
 }

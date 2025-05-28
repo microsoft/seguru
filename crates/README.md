@@ -15,6 +15,20 @@ Then install LLVM@20 via
 brew install llvm@20
 ```
 
+### Build the codegen ssa for GPU
+
+First you need to initialise the rust project as a git submodule, then go to `rust` and do the initialisation (not sure if necessary anyway)
+
+```bash
+./x setup
+```
+
+Now go to `crates/rustc_codegen_ssa_gpu` and build it.
+
+```bash
+CFG_RELEASE_CHANNEL=1.86.0 CFG_RELEASE=1.86.0 RUSTC_BOOTSTRAP=1 cargo build --release
+```
+
 ### Build codegen backend
 
 You SHOULD use the Homebrew's LLVM to compile the codegen backend.

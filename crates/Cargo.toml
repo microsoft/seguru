@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "rustc_codegen_gpu",
+    "rustc_codegen_ssa_gpu",
     "gpu",
     "gpu-test",
     "gpu-test-basic",

@@ -66,11 +66,8 @@ pub(crate) fn module_codegen<'tcx>(
             }
         }
     }
-    let module = GPUCodeGenModule {
-        mlir_module: Some(crate::backend::MLIRModule {
-            module: mlir_module,
-        }),
-    };
+    let module =
+        GPUCodeGenModule { mlir_module: Some(crate::backend::MLIRModule { module: mlir_module }) };
     let m = ModuleCodegen::new_regular(cgu_name.to_string(), module);
     eprintln!("compile_codegen_unit {}", cgu_name);
     m

@@ -195,9 +195,7 @@ impl ExtraBackendMethods for GPUCodegenBackend {
         alloc_error_handler_kind: rustc_ast::expand::allocator::AllocatorKind,
     ) -> Self::Module {
         GPUCodeGenModule {
-            mlir_module: Some(MLIRModule {
-                module: new_empty_module(create_mlir_ctx()),
-            }),
+            mlir_module: Some(MLIRModule { module: new_empty_module(create_mlir_ctx()) }),
         }
     }
 

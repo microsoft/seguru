@@ -185,8 +185,9 @@ pub(crate) fn SetFunctionCallConv(fn_: &Value, cc: CallConv) {
 // For more details on COMDAT sections see e.g., https://www.airs.com/blog/archives/52
 pub(crate) fn SetUniqueComdat(llmod: &Module, val: &Value) {
     let name_buf = get_value_name(val).to_vec();
-    let name =
-        CString::from_vec_with_nul(name_buf).or_else(|buf| CString::new(buf.into_bytes())).unwrap();
+    let name = CString::from_vec_with_nul(name_buf)
+        .or_else(|buf| CString::new(buf.into_bytes()))
+        .unwrap();
     set_comdat(llmod, val, &name);
 }
 
@@ -352,7 +353,9 @@ impl<'a> OperandBundleOwned<'a> {
                 vals.len() as c_uint,
             )
         };
-        OperandBundleOwned { raw: ptr::NonNull::new(raw).unwrap() }
+        OperandBundleOwned {
+            raw: ptr::NonNull::new(raw).unwrap(),
+        }
     }
 
     /// Returns inner `OperandBundle` type.
@@ -381,7 +384,13 @@ pub(crate) fn add_module_flag_u32(
     value: u32,
 ) {
     unsafe {
-        LLVMRustAddModuleFlagU32(module, merge_behavior, key.as_c_char_ptr(), key.len(), value);
+        LLVMRustAddModuleFlagU32(
+            module,
+            merge_behavior,
+            key.as_c_char_ptr(),
+            key.len(),
+            value,
+        );
     }
 }
 

@@ -1,7 +1,9 @@
 use std::borrow::Cow;
 
 use rustc_abi::{FieldIdx, TagEncoding, VariantIdx, Variants};
-use rustc_codegen_ssa_gpu::debuginfo::type_names::{compute_debuginfo_type_name, cpp_like_debuginfo};
+use rustc_codegen_ssa_gpu::debuginfo::type_names::{
+    compute_debuginfo_type_name, cpp_like_debuginfo,
+};
 use rustc_codegen_ssa_gpu::debuginfo::{tag_base_type, wants_c_like_enum_debuginfo};
 use rustc_codegen_ssa_gpu::traits::MiscCodegenMethods;
 use rustc_hir::def::CtorKind;
@@ -33,7 +35,10 @@ pub(super) fn build_enum_type_di_node<'ll, 'tcx>(
 ) -> DINodeCreationResult<'ll> {
     let enum_type = unique_type_id.expect_ty();
     let &ty::Adt(enum_adt_def, _) = enum_type.kind() else {
-        bug!("build_enum_type_di_node() called with non-enum type: `{:?}`", enum_type)
+        bug!(
+            "build_enum_type_di_node() called with non-enum type: `{:?}`",
+            enum_type
+        )
     };
 
     let enum_type_and_layout = cx.layout_of(enum_type);
@@ -79,10 +84,12 @@ fn build_c_style_enum_di_node<'ll, 'tcx>(
             cx,
             &compute_debuginfo_type_name(cx.tcx, enum_type_and_layout.ty, false),
             tag_base_type(cx.tcx, enum_type_and_layout),
-            enum_adt_def.discriminants(cx.tcx).map(|(variant_index, discr)| {
-                let name = Cow::from(enum_adt_def.variant(variant_index).name.as_str());
-                (name, discr.val)
-            }),
+            enum_adt_def
+                .discriminants(cx.tcx)
+                .map(|(variant_index, discr)| {
+                    let name = Cow::from(enum_adt_def.variant(variant_index).name.as_str());
+                    (name, discr.val)
+                }),
             enum_adt_def_id,
             containing_scope,
         ),
@@ -361,7 +368,10 @@ fn build_coroutine_variant_struct_type_di_node<'ll, 'tcx>(
                 })
                 .collect();
 
-            state_specific_fields.into_iter().chain(common_fields).collect()
+            state_specific_fields
+                .into_iter()
+                .chain(common_fields)
+                .collect()
         },
         |cx| build_generic_type_param_di_nodes(cx, coroutine_type_and_layout.ty),
     )
@@ -377,7 +387,11 @@ enum DiscrResult {
 
 impl DiscrResult {
     fn opt_single_val(&self) -> Option<u128> {
-        if let Self::Value(d) = *self { Some(d) } else { None }
+        if let Self::Value(d) = *self {
+            Some(d)
+        } else {
+            None
+        }
     }
 }
 
@@ -393,11 +407,23 @@ fn compute_discriminant_value<'ll, 'tcx>(
 ) -> DiscrResult {
     match enum_type_and_layout.layout.variants() {
         &Variants::Single { .. } | &Variants::Empty => DiscrResult::NoDiscriminant,
-        &Variants::Multiple { tag_encoding: TagEncoding::Direct, .. } => DiscrResult::Value(
-            enum_type_and_layout.ty.discriminant_for_variant(cx.tcx, variant_index).unwrap().val,
+        &Variants::Multiple {
+            tag_encoding: TagEncoding::Direct,
+            ..
+        } => DiscrResult::Value(
+            enum_type_and_layout
+                .ty
+                .discriminant_for_variant(cx.tcx, variant_index)
+                .unwrap()
+                .val,
         ),
         &Variants::Multiple {
-            tag_encoding: TagEncoding::Niche { ref niche_variants, niche_start, untagged_variant },
+            tag_encoding:
+                TagEncoding::Niche {
+                    ref niche_variants,
+                    niche_start,
+                    untagged_variant,
+                },
             tag,
             ..
         } => {

@@ -194,7 +194,10 @@ pub(crate) enum DLLStorageClass {
 /// though it is not ABI compatible (since it's a C++ enum)
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
-#[expect(dead_code, reason = "Some variants are unused, but are kept to match the C++")]
+#[expect(
+    dead_code,
+    reason = "Some variants are unused, but are kept to match the C++"
+)]
 pub(crate) enum AttributeKind {
     AlwaysInline = 0,
     ByVal = 1,
@@ -323,7 +326,10 @@ impl RealPredicate {
 /// LLVMTypeKind
 #[derive(Copy, Clone, PartialEq, Debug)]
 #[repr(C)]
-#[expect(dead_code, reason = "Some variants are unused, but are kept to match LLVM-C")]
+#[expect(
+    dead_code,
+    reason = "Some variants are unused, but are kept to match LLVM-C"
+)]
 pub(crate) enum TypeKind {
     Void = 0,
     Half = 1,
@@ -449,7 +455,10 @@ pub(crate) enum FileType {
 /// LLVMMetadataType
 #[derive(Copy, Clone)]
 #[repr(C)]
-#[expect(dead_code, reason = "Some variants are unused, but are kept to match LLVM-C")]
+#[expect(
+    dead_code,
+    reason = "Some variants are unused, but are kept to match LLVM-C"
+)]
 pub(crate) enum MetadataType {
     MD_dbg = 0,
     MD_tbaa = 1,
@@ -659,7 +668,10 @@ pub(crate) enum MemoryEffects {
 /// LLVMOpcode
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(C)]
-#[expect(dead_code, reason = "Some variants are unused, but are kept to match LLVM-C")]
+#[expect(
+    dead_code,
+    reason = "Some variants are unused, but are kept to match LLVM-C"
+)]
 pub(crate) enum Opcode {
     Ret = 1,
     Br = 2,

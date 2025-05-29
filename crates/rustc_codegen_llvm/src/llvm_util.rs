@@ -64,15 +64,22 @@ unsafe fn configure_llvm(sess: &Session) {
     }
 
     fn llvm_arg_to_arg_name(full_arg: &str) -> &str {
-        full_arg.trim().split(|c: char| c == '=' || c.is_whitespace()).next().unwrap_or("")
+        full_arg
+            .trim()
+            .split(|c: char| c == '=' || c.is_whitespace())
+            .next()
+            .unwrap_or("")
     }
 
     let cg_opts = sess.opts.cg.llvm_args.iter().map(AsRef::as_ref);
     let tg_opts = sess.target.llvm_args.iter().map(AsRef::as_ref);
     let sess_args = cg_opts.chain(tg_opts);
 
-    let user_specified_args: FxHashSet<_> =
-        sess_args.clone().map(|s| llvm_arg_to_arg_name(s)).filter(|s| !s.is_empty()).collect();
+    let user_specified_args: FxHashSet<_> = sess_args
+        .clone()
+        .map(|s| llvm_arg_to_arg_name(s))
+        .filter(|s| !s.is_empty())
+        .collect();
 
     {
         // This adds the given argument to LLVM. Unless `force` is true
@@ -98,7 +105,12 @@ unsafe fn configure_llvm(sess: &Session) {
             add("-generate-arange-section", false);
         }
 
-        match sess.opts.unstable_opts.merge_functions.unwrap_or(sess.target.merge_functions) {
+        match sess
+            .opts
+            .unstable_opts
+            .merge_functions
+            .unwrap_or(sess.target.merge_functions)
+        {
             MergeFunctions::Disabled | MergeFunctions::Trampolines => {}
             MergeFunctions::Aliases => {
                 add("-mergefunc-use-aliases", false);
@@ -118,7 +130,10 @@ unsafe fn configure_llvm(sess: &Session) {
 
         // HACK(eddyb) LLVM inserts `llvm.assume` calls to preserve align attributes
         // during inlining. Unfortunately these may block other optimizations.
-        add("-preserve-alignment-assumptions-during-inlining=false", false);
+        add(
+            "-preserve-alignment-assumptions-during-inlining=false",
+            false,
+        );
 
         // Use non-zero `import-instr-limit` multiplier for cold callsites.
         add("-import-cold-multiplier=0.1", false);
@@ -184,14 +199,20 @@ pub(crate) struct LLVMFeature<'a> {
 
 impl<'a> LLVMFeature<'a> {
     fn new(llvm_feature_name: &'a str) -> Self {
-        Self { llvm_feature_name, dependency: None }
+        Self {
+            llvm_feature_name,
+            dependency: None,
+        }
     }
 
     fn with_dependency(
         llvm_feature_name: &'a str,
         dependency: TargetFeatureFoldStrength<'a>,
     ) -> Self {
-        Self { llvm_feature_name, dependency: Some(dependency) }
+        Self {
+            llvm_feature_name,
+            dependency: Some(dependency),
+        }
     }
 
     fn contains(&self, feat: &str) -> bool {
@@ -262,9 +283,10 @@ pub(crate) fn to_llvm_features<'a>(sess: &Session, s: &'a str) -> Option<LLVMFea
         ("aarch64", "sme-b16b16") if get_version().0 < 20 => Some(LLVMFeature::new("b16b16")),
         ("aarch64", "flagm2") => Some(LLVMFeature::new("altnzcv")),
         // Rust ties fp and neon together.
-        ("aarch64", "neon") => {
-            Some(LLVMFeature::with_dependency("neon", TargetFeatureFoldStrength::Both("fp-armv8")))
-        }
+        ("aarch64", "neon") => Some(LLVMFeature::with_dependency(
+            "neon",
+            TargetFeatureFoldStrength::Both("fp-armv8"),
+        )),
         // In LLVM neon implicitly enables fp, but we manually enable
         // neon when a feature only implicitly enables fp
         ("aarch64", "fhm") => Some(LLVMFeature::new("fp16fml")),
@@ -284,9 +306,10 @@ pub(crate) fn to_llvm_features<'a>(sess: &Session, s: &'a str) -> Option<LLVMFea
         ("riscv32" | "riscv64", "zama16b") if get_version().0 < 19 => None,
         ("riscv32" | "riscv64", "zacas") if get_version().0 < 20 => None,
         // Enable the evex512 target feature if an avx512 target feature is enabled.
-        ("x86", s) if s.starts_with("avx512") => {
-            Some(LLVMFeature::with_dependency(s, TargetFeatureFoldStrength::EnableOnly("evex512")))
-        }
+        ("x86", s) if s.starts_with("avx512") => Some(LLVMFeature::with_dependency(
+            s,
+            TargetFeatureFoldStrength::EnableOnly("evex512"),
+        )),
         // Support for `wide-arithmetic` will first land in LLVM 20 as part of
         // llvm/llvm-project#111598
         ("wasm32" | "wasm64", "wide-arithmetic") if get_version() < (20, 0, 0) => None,
@@ -345,11 +368,15 @@ pub(crate) fn target_features_cfg(sess: &Session) -> (Vec<Symbol>, Vec<Symbol>) 
 
     // Add enabled and remove disabled features.
     for (enabled, feature) in
-        sess.opts.cg.target_feature.split(',').filter_map(|s| match s.chars().next() {
-            Some('+') => Some((true, Symbol::intern(&s[1..]))),
-            Some('-') => Some((false, Symbol::intern(&s[1..]))),
-            _ => None,
-        })
+        sess.opts
+            .cg
+            .target_feature
+            .split(',')
+            .filter_map(|s| match s.chars().next() {
+                Some('+') => Some((true, Symbol::intern(&s[1..]))),
+                Some('-') => Some((false, Symbol::intern(&s[1..]))),
+                _ => None,
+            })
     {
         if enabled {
             // Also add all transitively implied features.
@@ -370,7 +397,11 @@ pub(crate) fn target_features_cfg(sess: &Session) -> (Vec<Symbol>, Vec<Symbol>) 
             // `features.contains` below.
             #[allow(rustc::potential_query_instability)]
             features.retain(|f| {
-                if sess.target.implied_target_features(f.as_str()).contains(&feature.as_str()) {
+                if sess
+                    .target
+                    .implied_target_features(f.as_str())
+                    .contains(&feature.as_str())
+                {
                     // If `f` if implies `feature`, then `!feature` implies `!f`, so we have to
                     // remove `f`. (This is the standard logical contraposition principle.)
                     false
@@ -417,7 +448,11 @@ pub(crate) fn print_version() {
 pub(crate) fn get_version() -> (u32, u32, u32) {
     // Can be called without initializing LLVM
     unsafe {
-        (llvm::LLVMRustVersionMajor(), llvm::LLVMRustVersionMinor(), llvm::LLVMRustVersionPatch())
+        (
+            llvm::LLVMRustVersionMajor(),
+            llvm::LLVMRustVersionMinor(),
+            llvm::LLVMRustVersionPatch(),
+        )
     }
 }
 
@@ -487,7 +522,10 @@ fn print_target_cpus(sess: &Session, tm: &llvm::TargetMachine, out: &mut String)
     };
     let mut cpus = cpu_names
         .lines()
-        .map(|cpu_name| Cpu { cpu_name, remark: make_remark(cpu_name) })
+        .map(|cpu_name| Cpu {
+            cpu_name,
+            remark: make_remark(cpu_name),
+        })
         .collect::<VecDeque<_>>();
 
     // Only print the "native" entry when host and target are the same arch,
@@ -524,14 +562,16 @@ fn print_target_features(sess: &Session, tm: &llvm::TargetMachine, out: &mut Str
             // LLVM asserts that these are sorted. LLVM and Rust both use byte comparison for these
             // strings.
             let llvm_feature = to_llvm_features(sess, *feature)?.llvm_feature_name;
-            let desc =
-                match llvm_target_features.binary_search_by_key(&llvm_feature, |(f, _d)| f).ok() {
-                    Some(index) => {
-                        known_llvm_target_features.insert(llvm_feature);
-                        llvm_target_features[index].1
-                    }
-                    None => "",
-                };
+            let desc = match llvm_target_features
+                .binary_search_by_key(&llvm_feature, |(f, _d)| f)
+                .ok()
+            {
+                Some(index) => {
+                    known_llvm_target_features.insert(llvm_feature);
+                    llvm_target_features[index].1
+                }
+                None => "",
+            };
 
             Some((*feature, desc))
         })
@@ -558,19 +598,41 @@ fn print_target_features(sess: &Session, tm: &llvm::TargetMachine, out: &mut Str
     for (feature, desc) in &rustc_target_features {
         writeln!(out, "    {feature:max_feature_len$} - {desc}.").unwrap();
     }
-    writeln!(out, "\nCode-generation features supported by LLVM for this target:").unwrap();
+    writeln!(
+        out,
+        "\nCode-generation features supported by LLVM for this target:"
+    )
+    .unwrap();
     for (feature, desc) in &llvm_target_features {
         writeln!(out, "    {feature:max_feature_len$} - {desc}.").unwrap();
     }
     if llvm_target_features.is_empty() {
-        writeln!(out, "    Target features listing is not supported by this LLVM version.")
-            .unwrap();
-    }
-    writeln!(out, "\nUse +feature to enable a feature, or -feature to disable it.").unwrap();
-    writeln!(out, "For example, rustc -C target-cpu=mycpu -C target-feature=+feature1,-feature2\n")
+        writeln!(
+            out,
+            "    Target features listing is not supported by this LLVM version."
+        )
         .unwrap();
-    writeln!(out, "Code-generation features cannot be used in cfg or #[target_feature],").unwrap();
-    writeln!(out, "and may be renamed or removed in a future version of LLVM or rustc.\n").unwrap();
+    }
+    writeln!(
+        out,
+        "\nUse +feature to enable a feature, or -feature to disable it."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "For example, rustc -C target-cpu=mycpu -C target-feature=+feature1,-feature2\n"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "Code-generation features cannot be used in cfg or #[target_feature],"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "and may be renamed or removed in a future version of LLVM or rustc.\n"
+    )
+    .unwrap();
 }
 
 /// Returns the host CPU name, according to LLVM.
@@ -596,7 +658,12 @@ fn handle_native(cpu_name: &str) -> &str {
 }
 
 pub(crate) fn target_cpu(sess: &Session) -> &str {
-    let cpu_name = sess.opts.cg.target_cpu.as_deref().unwrap_or_else(|| &sess.target.cpu);
+    let cpu_name = sess
+        .opts
+        .cg
+        .target_cpu
+        .as_deref()
+        .unwrap_or_else(|| &sess.target.cpu);
     handle_native(cpu_name)
 }
 
@@ -695,7 +762,8 @@ pub(crate) fn global_llvm_features(
                 all_rust_features.push((false, feature));
             } else if !feature.is_empty() {
                 if diagnostics {
-                    sess.dcx().emit_warn(UnknownCTargetFeaturePrefix { feature });
+                    sess.dcx()
+                        .emit_warn(UnknownCTargetFeaturePrefix { feature });
                 }
             }
         }
@@ -728,7 +796,10 @@ pub(crate) fn global_llvm_features(
                                 rust_feature: PossibleFeature::Some { rust_feature },
                             }
                         } else {
-                            UnknownCTargetFeature { feature, rust_feature: PossibleFeature::None }
+                            UnknownCTargetFeature {
+                                feature,
+                                rust_feature: PossibleFeature::None,
+                            }
                         };
                         sess.dcx().emit_warn(unknown_feature);
                     }
@@ -784,18 +855,22 @@ pub(crate) fn global_llvm_features(
         features.extend(feats);
 
         if diagnostics && let Some(f) = check_tied_features(sess, &featsmap) {
-            sess.dcx().emit_err(rustc_codegen_ssa_gpu::errors::TargetFeatureDisableOrEnable {
-                features: f,
-                span: None,
-                missing_features: None,
-            });
+            sess.dcx().emit_err(
+                rustc_codegen_ssa_gpu::errors::TargetFeatureDisableOrEnable {
+                    features: f,
+                    span: None,
+                    missing_features: None,
+                },
+            );
         }
     }
 
     // -Zfixed-x18
     if sess.opts.unstable_opts.fixed_x18 {
         if sess.target.arch != "aarch64" {
-            sess.dcx().emit_fatal(FixedX18InvalidArch { arch: &sess.target.arch });
+            sess.dcx().emit_fatal(FixedX18InvalidArch {
+                arch: &sess.target.arch,
+            });
         } else {
             features.push("+reserve-x18".into());
         }

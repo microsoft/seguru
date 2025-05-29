@@ -22,20 +22,13 @@ pub(crate) fn from_target_feature_attr(
     rust_target_features: &UnordMap<String, target_features::Stability>,
     target_features: &mut Vec<TargetFeature>,
 ) {
-    let Some(list) = attr.meta_item_list() else {
-        return;
-    };
+    let Some(list) = attr.meta_item_list() else { return };
     let bad_item = |span| {
         let msg = "malformed `target_feature` attribute input";
         let code = "enable = \"..\"";
         tcx.dcx()
             .struct_span_err(span, msg)
-            .with_span_suggestion(
-                span,
-                "must be of the form",
-                code,
-                Applicability::HasPlaceholders,
-            )
+            .with_span_suggestion(span, "must be of the form", code, Applicability::HasPlaceholders)
             .emit();
     };
     let rust_features = tcx.features();
@@ -58,10 +51,7 @@ pub(crate) fn from_target_feature_attr(
             let Some(stability) = rust_target_features.get(feature) else {
                 let msg = format!("the feature named `{feature}` is not valid for this target");
                 let mut err = tcx.dcx().struct_span_err(item.span(), msg);
-                err.span_label(
-                    item.span(),
-                    format!("`{feature}` is not valid for this target"),
-                );
+                err.span_label(item.span(), format!("`{feature}` is not valid for this target"));
                 if let Some(stripped) = feature.strip_prefix('+') {
                     let valid = rust_target_features.contains_key(stripped);
                     if valid {
@@ -101,10 +91,7 @@ pub(crate) fn from_target_feature_attr(
                     // all targets, so we can't check their ABI compatibility and anyway we are not
                     // generating code so "it's fine".
                     if !tcx.sess.opts.actually_rustdoc {
-                        if abi_feature_constraints
-                            .incompatible
-                            .contains(&name.as_str())
-                        {
+                        if abi_feature_constraints.incompatible.contains(&name.as_str()) {
                             tcx.dcx().emit_err(errors::ForbiddenTargetFeatureAttr {
                                 span: item.span(),
                                 feature: name.as_str(),
@@ -112,10 +99,7 @@ pub(crate) fn from_target_feature_attr(
                             });
                         }
                     }
-                    target_features.push(TargetFeature {
-                        name,
-                        implied: name != feature_sym,
-                    })
+                    target_features.push(TargetFeature { name, implied: name != feature_sym })
                 }
             }
         }

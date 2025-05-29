@@ -99,17 +99,11 @@ fn reachable_non_generics_provider(tcx: TyCtxt<'_>, _: LocalCrate) -> DefIdMap<S
                 return None;
             }
 
-            if tcx.cross_crate_inlinable(def_id) {
-                None
-            } else {
-                Some(def_id)
-            }
+            if tcx.cross_crate_inlinable(def_id) { None } else { Some(def_id) }
         })
         .map(|def_id| {
             // We won't link right if this symbol is stripped during LTO.
-            let name = tcx
-                .symbol_name(Instance::mono(tcx, def_id.to_def_id()))
-                .name;
+            let name = tcx.symbol_name(Instance::mono(tcx, def_id.to_def_id())).name;
             let used = name == "rust_eh_personality";
 
             let export_level = if special_runtime_crate {
@@ -126,10 +120,7 @@ fn reachable_non_generics_provider(tcx: TyCtxt<'_>, _: LocalCrate) -> DefIdMap<S
             let info = SymbolExportInfo {
                 level: export_level,
                 kind: if tcx.is_static(def_id.to_def_id()) {
-                    if codegen_attrs
-                        .flags
-                        .contains(CodegenFnAttrFlags::THREAD_LOCAL)
-                    {
+                    if codegen_attrs.flags.contains(CodegenFnAttrFlags::THREAD_LOCAL) {
                         SymbolExportKind::Tls
                     } else {
                         SymbolExportKind::Data
@@ -138,9 +129,7 @@ fn reachable_non_generics_provider(tcx: TyCtxt<'_>, _: LocalCrate) -> DefIdMap<S
                     SymbolExportKind::Text
                 },
                 used: codegen_attrs.flags.contains(CodegenFnAttrFlags::USED)
-                    || codegen_attrs
-                        .flags
-                        .contains(CodegenFnAttrFlags::USED_LINKER)
+                    || codegen_attrs.flags.contains(CodegenFnAttrFlags::USED_LINKER)
                     || used,
             };
             (def_id.to_def_id(), info)
@@ -164,10 +153,7 @@ fn reachable_non_generics_provider(tcx: TyCtxt<'_>, _: LocalCrate) -> DefIdMap<S
 fn is_reachable_non_generic_provider_local(tcx: TyCtxt<'_>, def_id: LocalDefId) -> bool {
     let export_threshold = threshold(tcx);
 
-    if let Some(&info) = tcx
-        .reachable_non_generics(LOCAL_CRATE)
-        .get(&def_id.to_def_id())
-    {
+    if let Some(&info) = tcx.reachable_non_generics(LOCAL_CRATE).get(&def_id.to_def_id()) {
         info.level.is_below_threshold(export_threshold)
     } else {
         false
@@ -175,8 +161,7 @@ fn is_reachable_non_generic_provider_local(tcx: TyCtxt<'_>, def_id: LocalDefId) 
 }
 
 fn is_reachable_non_generic_provider_extern(tcx: TyCtxt<'_>, def_id: DefId) -> bool {
-    tcx.reachable_non_generics(def_id.krate)
-        .contains_key(&def_id)
+    tcx.reachable_non_generics(def_id.krate).contains_key(&def_id)
 }
 
 fn exported_symbols_provider_local(
@@ -190,14 +175,11 @@ fn exported_symbols_provider_local(
     // FIXME: Sorting this is unnecessary since we are sorting later anyway.
     //        Can we skip the later sorting?
     let sorted = tcx.with_stable_hashing_context(|hcx| {
-        tcx.reachable_non_generics(LOCAL_CRATE)
-            .to_sorted(&hcx, true)
+        tcx.reachable_non_generics(LOCAL_CRATE).to_sorted(&hcx, true)
     });
 
-    let mut symbols: Vec<_> = sorted
-        .iter()
-        .map(|&(&def_id, &info)| (ExportedSymbol::NonGeneric(def_id), info))
-        .collect();
+    let mut symbols: Vec<_> =
+        sorted.iter().map(|&(&def_id, &info)| (ExportedSymbol::NonGeneric(def_id), info)).collect();
 
     // Export TLS shims
     if !tcx.sess.target.dll_tls_export {
@@ -285,23 +267,11 @@ fn exported_symbols_provider_local(
         }));
     }
 
-    if tcx
-        .sess
-        .opts
-        .unstable_opts
-        .sanitizer
-        .contains(SanitizerSet::MEMORY)
-    {
+    if tcx.sess.opts.unstable_opts.sanitizer.contains(SanitizerSet::MEMORY) {
         let mut msan_weak_symbols = Vec::new();
 
         // Similar to profiling, preserve weak msan symbol during LTO.
-        if tcx
-            .sess
-            .opts
-            .unstable_opts
-            .sanitizer_recover
-            .contains(SanitizerSet::MEMORY)
-        {
+        if tcx.sess.opts.unstable_opts.sanitizer_recover.contains(SanitizerSet::MEMORY) {
             msan_weak_symbols.push("__msan_keep_going");
         }
 
@@ -378,10 +348,7 @@ fn exported_symbols_provider_local(
             }
 
             match *mono_item {
-                MonoItem::Fn(Instance {
-                    def: InstanceKind::Item(def),
-                    args,
-                }) => {
+                MonoItem::Fn(Instance { def: InstanceKind::Item(def), args }) => {
                     if args.non_erasable_generics().next().is_some() {
                         let symbol = ExportedSymbol::Generic(def, args);
                         symbols.push((
@@ -394,15 +361,9 @@ fn exported_symbols_provider_local(
                         ));
                     }
                 }
-                MonoItem::Fn(Instance {
-                    def: InstanceKind::DropGlue(_, Some(ty)),
-                    args,
-                }) => {
+                MonoItem::Fn(Instance { def: InstanceKind::DropGlue(_, Some(ty)), args }) => {
                     // A little sanity-check
-                    assert_eq!(
-                        args.non_erasable_generics().next(),
-                        Some(GenericArgKind::Type(ty))
-                    );
+                    assert_eq!(args.non_erasable_generics().next(), Some(GenericArgKind::Type(ty)));
                     symbols.push((
                         ExportedSymbol::DropGlue(ty),
                         SymbolExportInfo {
@@ -417,10 +378,7 @@ fn exported_symbols_provider_local(
                     args,
                 }) => {
                     // A little sanity-check
-                    assert_eq!(
-                        args.non_erasable_generics().next(),
-                        Some(GenericArgKind::Type(ty))
-                    );
+                    assert_eq!(args.non_erasable_generics().next(), Some(GenericArgKind::Type(ty)));
                     symbols.push((
                         ExportedSymbol::AsyncDropGlueCtorShim(ty),
                         SymbolExportInfo {
@@ -518,9 +476,7 @@ fn upstream_drop_glue_for_provider<'tcx>(
     args: GenericArgsRef<'tcx>,
 ) -> Option<CrateNum> {
     let def_id = tcx.lang_items().drop_in_place_fn()?;
-    tcx.upstream_monomorphizations_for(def_id)?
-        .get(&args)
-        .cloned()
+    tcx.upstream_monomorphizations_for(def_id)?.get(&args).cloned()
 }
 
 fn upstream_async_drop_glue_for_provider<'tcx>(
@@ -528,9 +484,7 @@ fn upstream_async_drop_glue_for_provider<'tcx>(
     args: GenericArgsRef<'tcx>,
 ) -> Option<CrateNum> {
     let def_id = tcx.lang_items().async_drop_in_place_fn()?;
-    tcx.upstream_monomorphizations_for(def_id)?
-        .get(&args)
-        .cloned()
+    tcx.upstream_monomorphizations_for(def_id)?.get(&args).cloned()
 }
 
 fn is_unreachable_local_definition_provider(tcx: TyCtxt<'_>, def_id: LocalDefId) -> bool {
@@ -559,9 +513,8 @@ fn symbol_export_level(tcx: TyCtxt<'_>, sym_def_id: DefId) -> SymbolExportLevel 
     // are not considered for export
     let codegen_fn_attrs = tcx.codegen_fn_attrs(sym_def_id);
     let is_extern = codegen_fn_attrs.contains_extern_indicator();
-    let std_internal = codegen_fn_attrs
-        .flags
-        .contains(CodegenFnAttrFlags::RUSTC_STD_INTERNAL_SYMBOL);
+    let std_internal =
+        codegen_fn_attrs.flags.contains(CodegenFnAttrFlags::RUSTC_STD_INTERNAL_SYMBOL);
 
     if is_extern && !std_internal {
         let target = &tcx.sess.target.llvm_target;
@@ -718,12 +671,7 @@ pub(crate) fn linking_symbol_name_for_instance_in_crate<'tcx>(
 
     let args_in_bytes: u64 = args
         .iter()
-        .map(|abi| {
-            abi.layout
-                .size
-                .bytes()
-                .next_multiple_of(target.pointer_width as u64 / 8)
-        })
+        .map(|abi| abi.layout.size.bytes().next_multiple_of(target.pointer_width as u64 / 8))
         .sum();
     format!("{prefix}{undecorated}{suffix}{args_in_bytes}")
 }
@@ -788,9 +736,7 @@ fn wasm_import_module_map(tcx: TyCtxt<'_>, cnum: CrateNum) -> DefIdMap<String> {
 
     let mut ret = DefIdMap::default();
     for (def_id, lib) in tcx.foreign_modules(cnum).iter() {
-        let module = def_id_to_native_lib
-            .get(def_id)
-            .and_then(|s| s.wasm_import_module());
+        let module = def_id_to_native_lib.get(def_id).and_then(|s| s.wasm_import_module());
         let Some(module) = module else { continue };
         ret.extend(lib.foreign_items.iter().map(|id| {
             assert_eq!(id.krate, cnum);

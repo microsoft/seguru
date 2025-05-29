@@ -295,7 +295,10 @@ impl<'ll, 'tcx> TypeMembershipCodegenMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     fn add_type_metadata(&self, function: &'ll Value, typeid: String) {
         let typeid_metadata = self.typeid_metadata(typeid).unwrap();
         unsafe {
-            let v = [llvm::LLVMValueAsMetadata(self.const_usize(0)), typeid_metadata];
+            let v = [
+                llvm::LLVMValueAsMetadata(self.const_usize(0)),
+                typeid_metadata,
+            ];
             llvm::LLVMRustGlobalAddMetadata(
                 function,
                 llvm::MD_type as c_uint,
@@ -307,7 +310,10 @@ impl<'ll, 'tcx> TypeMembershipCodegenMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     fn set_type_metadata(&self, function: &'ll Value, typeid: String) {
         let typeid_metadata = self.typeid_metadata(typeid).unwrap();
         unsafe {
-            let v = [llvm::LLVMValueAsMetadata(self.const_usize(0)), typeid_metadata];
+            let v = [
+                llvm::LLVMValueAsMetadata(self.const_usize(0)),
+                typeid_metadata,
+            ];
             llvm::LLVMGlobalSetMetadata(
                 function,
                 llvm::MD_type as c_uint,

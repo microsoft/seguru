@@ -98,10 +98,9 @@ pub trait ArchiveBuilderBuilder {
 
             let mut file = match fs::File::create_new(&output_path) {
                 Ok(file) => file,
-                Err(error) => sess.dcx().emit_fatal(ErrorCreatingImportLibrary {
-                    lib_name,
-                    error: error.to_string(),
-                }),
+                Err(error) => sess
+                    .dcx()
+                    .emit_fatal(ErrorCreatingImportLibrary { lib_name, error: error.to_string() }),
             };
 
             let exports = items.into_iter().map(Into::into).collect::<Vec<_>>();
@@ -126,10 +125,8 @@ pub trait ArchiveBuilderBuilder {
                 // See #129020
                 true,
             ) {
-                sess.dcx().emit_fatal(ErrorCreatingImportLibrary {
-                    lib_name,
-                    error: error.to_string(),
-                });
+                sess.dcx()
+                    .emit_fatal(ErrorCreatingImportLibrary { lib_name, error: error.to_string() });
             }
         }
     }
@@ -142,56 +139,30 @@ pub trait ArchiveBuilderBuilder {
     ) -> Result<(), ExtractBundledLibsError<'a>> {
         let archive_map = unsafe {
             Mmap::map(
-                File::open(rlib).map_err(|e| ExtractBundledLibsError::OpenFile {
-                    rlib,
-                    error: Box::new(e),
-                })?,
+                File::open(rlib)
+                    .map_err(|e| ExtractBundledLibsError::OpenFile { rlib, error: Box::new(e) })?,
             )
-            .map_err(|e| ExtractBundledLibsError::MmapFile {
-                rlib,
-                error: Box::new(e),
-            })?
+            .map_err(|e| ExtractBundledLibsError::MmapFile { rlib, error: Box::new(e) })?
         };
-        let archive = ArchiveFile::parse(&*archive_map).map_err(|e| {
-            ExtractBundledLibsError::ParseArchive {
-                rlib,
-                error: Box::new(e),
-            }
-        })?;
+        let archive = ArchiveFile::parse(&*archive_map)
+            .map_err(|e| ExtractBundledLibsError::ParseArchive { rlib, error: Box::new(e) })?;
 
         for entry in archive.members() {
-            let entry = entry.map_err(|e| ExtractBundledLibsError::ReadEntry {
-                rlib,
-                error: Box::new(e),
-            })?;
-            let data =
-                entry
-                    .data(&*archive_map)
-                    .map_err(|e| ExtractBundledLibsError::ArchiveMember {
-                        rlib,
-                        error: Box::new(e),
-                    })?;
-            let name = std::str::from_utf8(entry.name()).map_err(|e| {
-                ExtractBundledLibsError::ConvertName {
-                    rlib,
-                    error: Box::new(e),
-                }
-            })?;
+            let entry = entry
+                .map_err(|e| ExtractBundledLibsError::ReadEntry { rlib, error: Box::new(e) })?;
+            let data = entry
+                .data(&*archive_map)
+                .map_err(|e| ExtractBundledLibsError::ArchiveMember { rlib, error: Box::new(e) })?;
+            let name = std::str::from_utf8(entry.name())
+                .map_err(|e| ExtractBundledLibsError::ConvertName { rlib, error: Box::new(e) })?;
             if !bundled_lib_file_names.contains(&Symbol::intern(name)) {
                 continue; // We need to extract only native libraries.
             }
             let data = search_for_section(rlib, data, ".bundled_lib").map_err(|e| {
-                ExtractBundledLibsError::ExtractSection {
-                    rlib,
-                    error: Box::<dyn Error>::from(e),
-                }
+                ExtractBundledLibsError::ExtractSection { rlib, error: Box::<dyn Error>::from(e) }
             })?;
-            std::fs::write(&outdir.join(&name), data).map_err(|e| {
-                ExtractBundledLibsError::WriteFile {
-                    rlib,
-                    error: Box::new(e),
-                }
-            })?;
+            std::fs::write(&outdir.join(&name), data)
+                .map_err(|e| ExtractBundledLibsError::WriteFile { rlib, error: Box::new(e) })?;
         }
         Ok(())
     }
@@ -354,21 +325,13 @@ pub struct ArArchiveBuilder<'a> {
 
 #[derive(Debug)]
 enum ArchiveEntry {
-    FromArchive {
-        archive_index: usize,
-        file_range: (u64, u64),
-    },
+    FromArchive { archive_index: usize, file_range: (u64, u64) },
     File(PathBuf),
 }
 
 impl<'a> ArArchiveBuilder<'a> {
     pub fn new(sess: &'a Session, object_reader: &'static ObjectReader) -> ArArchiveBuilder<'a> {
-        ArArchiveBuilder {
-            sess,
-            object_reader,
-            src_archives: vec![],
-            entries: vec![],
-        }
+        ArArchiveBuilder { sess, object_reader, src_archives: vec![], entries: vec![] }
     }
 }
 
@@ -390,9 +353,7 @@ fn try_filter_fat_archs(
         .unwrap();
 
     new_f.write_all(
-        desired
-            .data(archive_map_data)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?,
+        desired.data(archive_map_data).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?,
     )?;
 
     Ok(Some(extracted_path))
@@ -434,11 +395,7 @@ impl<'a> ArchiveBuilder for ArArchiveBuilder<'a> {
             archive_path = new_archive_path
         }
 
-        if self
-            .src_archives
-            .iter()
-            .any(|archive| archive.0 == archive_path)
-        {
+        if self.src_archives.iter().any(|archive| archive.0 == archive_path) {
             return Ok(());
         }
 
@@ -454,15 +411,11 @@ impl<'a> ArchiveBuilder for ArArchiveBuilder<'a> {
             if !skip(&file_name) {
                 if entry.is_thin() {
                     let member_path = archive_path.parent().unwrap().join(Path::new(&file_name));
-                    self.entries
-                        .push((file_name.into_bytes(), ArchiveEntry::File(member_path)));
+                    self.entries.push((file_name.into_bytes(), ArchiveEntry::File(member_path)));
                 } else {
                     self.entries.push((
                         file_name.into_bytes(),
-                        ArchiveEntry::FromArchive {
-                            archive_index,
-                            file_range: entry.file_range(),
-                        },
+                        ArchiveEntry::FromArchive { archive_index, file_range: entry.file_range() },
                     ));
                 }
             }
@@ -475,12 +428,7 @@ impl<'a> ArchiveBuilder for ArArchiveBuilder<'a> {
     /// Adds an arbitrary file to this archive
     fn add_file(&mut self, file: &Path) {
         self.entries.push((
-            file.file_name()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .to_string()
-                .into_bytes(),
+            file.file_name().unwrap().to_str().unwrap().to_string().into_bytes(),
             ArchiveEntry::File(file.to_owned()),
         ));
     }
@@ -491,10 +439,9 @@ impl<'a> ArchiveBuilder for ArArchiveBuilder<'a> {
         let sess = self.sess;
         match self.build_inner(output) {
             Ok(any_members) => any_members,
-            Err(error) => sess.dcx().emit_fatal(ArchiveBuildFailure {
-                path: output.to_owned(),
-                error,
-            }),
+            Err(error) => {
+                sess.dcx().emit_fatal(ArchiveBuildFailure { path: output.to_owned(), error })
+            }
         }
     }
 }
@@ -517,10 +464,7 @@ impl<'a> ArArchiveBuilder<'a> {
         for (entry_name, entry) in self.entries {
             let data =
                 match entry {
-                    ArchiveEntry::FromArchive {
-                        archive_index,
-                        file_range,
-                    } => {
+                    ArchiveEntry::FromArchive { archive_index, file_range } => {
                         let src_archive = &self.src_archives[archive_index];
 
                         let data = &src_archive.1

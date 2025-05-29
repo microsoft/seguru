@@ -631,7 +631,9 @@ impl<'a, 'll, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     #[instrument(level = "trace", skip(self))]
     fn load_operand(&mut self, place: PlaceRef<'tcx, &'ll Value>) -> OperandRef<'tcx, &'ll Value> {
         if place.layout.is_unsized() {
-            let tail = self.tcx.struct_tail_for_codegen(place.layout.ty, self.typing_env());
+            let tail = self
+                .tcx
+                .struct_tail_for_codegen(place.layout.ty, self.typing_env());
             if matches!(tail.kind(), ty::Foreign(..)) {
                 // Unsized locals and, at least conceptually, even unsized arguments must be copied
                 // around, which requires dynamically determining their size. Therefore, we cannot
@@ -727,13 +729,22 @@ impl<'a, 'll, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
             OperandValue::Pair(
                 load(0, a, place.layout, place.val.align, Size::ZERO),
-                load(1, b, place.layout, place.val.align.restrict_for_offset(b_offset), b_offset),
+                load(
+                    1,
+                    b,
+                    place.layout,
+                    place.val.align.restrict_for_offset(b_offset),
+                    b_offset,
+                ),
             )
         } else {
             OperandValue::Ref(place.val)
         };
 
-        OperandRef { val, layout: place.layout }
+        OperandRef {
+            val,
+            layout: place.layout,
+        }
     }
 
     fn write_operand_repeatedly(
@@ -807,8 +818,11 @@ impl<'a, 'll, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         assert_eq!(self.cx.type_kind(self.cx.val_ty(ptr)), TypeKind::Pointer);
         unsafe {
             let store = llvm::LLVMBuildStore(self.llbuilder, val, ptr);
-            let align =
-                if flags.contains(MemFlags::UNALIGNED) { 1 } else { align.bytes() as c_uint };
+            let align = if flags.contains(MemFlags::UNALIGNED) {
+                1
+            } else {
+                align.bytes() as c_uint
+            };
             llvm::LLVMSetAlignment(store, align);
             if flags.contains(MemFlags::VOLATILE) {
                 llvm::LLVMSetVolatile(store, llvm::True);
@@ -1114,7 +1128,10 @@ impl<'a, 'll, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         size: &'ll Value,
         flags: MemFlags,
     ) {
-        assert!(!flags.contains(MemFlags::NONTEMPORAL), "non-temporal memcpy not supported");
+        assert!(
+            !flags.contains(MemFlags::NONTEMPORAL),
+            "non-temporal memcpy not supported"
+        );
         let size = self.intcast(size, self.type_isize(), false);
         let is_volatile = flags.contains(MemFlags::VOLATILE);
         unsafe {
@@ -1139,7 +1156,10 @@ impl<'a, 'll, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         size: &'ll Value,
         flags: MemFlags,
     ) {
-        assert!(!flags.contains(MemFlags::NONTEMPORAL), "non-temporal memmove not supported");
+        assert!(
+            !flags.contains(MemFlags::NONTEMPORAL),
+            "non-temporal memmove not supported"
+        );
         let size = self.intcast(size, self.type_isize(), false);
         let is_volatile = flags.contains(MemFlags::VOLATILE);
         unsafe {
@@ -1163,7 +1183,10 @@ impl<'a, 'll, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         align: Align,
         flags: MemFlags,
     ) {
-        assert!(!flags.contains(MemFlags::NONTEMPORAL), "non-temporal memset not supported");
+        assert!(
+            !flags.contains(MemFlags::NONTEMPORAL),
+            "non-temporal memset not supported"
+        );
         let is_volatile = flags.contains(MemFlags::VOLATILE);
         unsafe {
             llvm::LLVMRustBuildMemSet(
@@ -1226,14 +1249,20 @@ impl<'a, 'll, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         unsafe {
             llvm::LLVMSetCleanup(landing_pad, llvm::True);
         }
-        (self.extract_value(landing_pad, 0), self.extract_value(landing_pad, 1))
+        (
+            self.extract_value(landing_pad, 0),
+            self.extract_value(landing_pad, 1),
+        )
     }
 
     fn filter_landing_pad(&mut self, pers_fn: &'ll Value) -> (&'ll Value, &'ll Value) {
         let ty = self.type_struct(&[self.type_ptr(), self.type_i32()], false);
         let landing_pad = self.landing_pad(ty, pers_fn, 1);
         self.add_clause(landing_pad, self.const_array(self.type_ptr(), &[]));
-        (self.extract_value(landing_pad, 0), self.extract_value(landing_pad, 1))
+        (
+            self.extract_value(landing_pad, 0),
+            self.extract_value(landing_pad, 1),
+        )
     }
 
     fn resume(&mut self, exn0: &'ll Value, exn1: &'ll Value) {
@@ -1688,7 +1717,10 @@ impl<'a, 'll, 'tcx> Builder<'a, 'll, 'tcx> {
     fn fptoint_sat(&mut self, signed: bool, val: &'ll Value, dest_ty: &'ll Type) -> &'ll Value {
         let src_ty = self.cx.val_ty(val);
         let (float_ty, int_ty, vector_length) = if self.cx.type_kind(src_ty) == TypeKind::Vector {
-            assert_eq!(self.cx.vector_length(src_ty), self.cx.vector_length(dest_ty));
+            assert_eq!(
+                self.cx.vector_length(src_ty),
+                self.cx.vector_length(dest_ty)
+            );
             (
                 self.cx.element_type(src_ty),
                 self.cx.element_type(dest_ty),
@@ -1706,8 +1738,20 @@ impl<'a, 'll, 'tcx> Builder<'a, 'll, 'tcx> {
         } else {
             format!("llvm.{instr}.sat.i{int_width}.f{float_width}")
         };
-        let f = self.declare_cfn(&name, llvm::UnnamedAddr::No, self.type_func(&[src_ty], dest_ty));
-        self.call(self.type_func(&[src_ty], dest_ty), None, None, f, &[val], None, None)
+        let f = self.declare_cfn(
+            &name,
+            llvm::UnnamedAddr::No,
+            self.type_func(&[src_ty], dest_ty),
+        );
+        self.call(
+            self.type_func(&[src_ty], dest_ty),
+            None,
+            None,
+            f,
+            &[val],
+            None,
+            None,
+        )
     }
 
     pub(crate) fn landing_pad(
@@ -1864,7 +1908,10 @@ impl<'a, 'll, 'tcx> Builder<'a, 'll, 'tcx> {
                 kcfi::typeid_for_fnabi(self.tcx, fn_abi, options)
             };
 
-            Some(llvm::OperandBundleOwned::new("kcfi", &[self.const_u32(kcfi_typeid)]))
+            Some(llvm::OperandBundleOwned::new(
+                "kcfi",
+                &[self.const_u32(kcfi_typeid)],
+            ))
         } else {
             None
         };
@@ -1880,7 +1927,10 @@ impl<'a, 'll, 'tcx> Builder<'a, 'll, 'tcx> {
         num_counters: &'ll Value,
         index: &'ll Value,
     ) {
-        self.call_intrinsic("llvm.instrprof.increment", &[fn_name, hash, num_counters, index]);
+        self.call_intrinsic(
+            "llvm.instrprof.increment",
+            &[fn_name, hash, num_counters, index],
+        );
     }
 
     /// Emits a call to `llvm.instrprof.mcdc.parameters`.
@@ -1903,7 +1953,10 @@ impl<'a, 'll, 'tcx> Builder<'a, 'll, 'tcx> {
             crate::llvm_util::get_version() >= (19, 0, 0),
             "MCDC intrinsics require LLVM 19 or later"
         );
-        self.call_intrinsic("llvm.instrprof.mcdc.parameters", &[fn_name, hash, bitmap_bits]);
+        self.call_intrinsic(
+            "llvm.instrprof.mcdc.parameters",
+            &[fn_name, hash, bitmap_bits],
+        );
     }
 
     #[instrument(level = "debug", skip(self))]
@@ -1924,7 +1977,11 @@ impl<'a, 'll, 'tcx> Builder<'a, 'll, 'tcx> {
 
     #[instrument(level = "debug", skip(self))]
     pub(crate) fn mcdc_condbitmap_reset(&mut self, mcdc_temp: &'ll Value) {
-        self.store(self.const_i32(0), mcdc_temp, self.tcx.data_layout.i32_align.abi);
+        self.store(
+            self.const_i32(0),
+            mcdc_temp,
+            self.tcx.data_layout.i32_align.abi,
+        );
     }
 
     #[instrument(level = "debug", skip(self))]

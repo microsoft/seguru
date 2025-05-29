@@ -44,12 +44,19 @@ pub(super) enum UniqueTypeId<'tcx> {
     /// The ID for the additional wrapper struct type describing an enum variant in CPP-like mode.
     VariantStructTypeCppLikeWrapper(Ty<'tcx>, VariantIdx, private::HiddenZst),
     /// The ID of the artificial type we create for VTables.
-    VTableTy(Ty<'tcx>, Option<ExistentialTraitRef<'tcx>>, private::HiddenZst),
+    VTableTy(
+        Ty<'tcx>,
+        Option<ExistentialTraitRef<'tcx>>,
+        private::HiddenZst,
+    ),
 }
 
 impl<'tcx> UniqueTypeId<'tcx> {
     pub(crate) fn for_ty(tcx: TyCtxt<'tcx>, t: Ty<'tcx>) -> Self {
-        assert_eq!(t, tcx.normalize_erasing_regions(ty::TypingEnv::fully_monomorphized(), t));
+        assert_eq!(
+            t,
+            tcx.normalize_erasing_regions(ty::TypingEnv::fully_monomorphized(), t)
+        );
         UniqueTypeId::Ty(t, private::HiddenZst)
     }
 
@@ -132,8 +139,16 @@ impl<'ll, 'tcx> TypeMap<'ll, 'tcx> {
     /// Adds a `UniqueTypeId` to metadata mapping to the `TypeMap`. The method will
     /// fail if the mapping already exists.
     pub(super) fn insert(&self, unique_type_id: UniqueTypeId<'tcx>, metadata: &'ll DIType) {
-        if self.unique_id_to_di_node.borrow_mut().insert(unique_type_id, metadata).is_some() {
-            bug!("type metadata for unique ID '{:?}' is already in the `TypeMap`!", unique_type_id);
+        if self
+            .unique_id_to_di_node
+            .borrow_mut()
+            .insert(unique_type_id, metadata)
+            .is_some()
+        {
+            bug!(
+                "type metadata for unique ID '{:?}' is already in the `TypeMap`!",
+                unique_type_id
+            );
         }
     }
 
@@ -141,7 +156,10 @@ impl<'ll, 'tcx> TypeMap<'ll, 'tcx> {
         &self,
         unique_type_id: UniqueTypeId<'tcx>,
     ) -> Option<&'ll DIType> {
-        self.unique_id_to_di_node.borrow().get(&unique_type_id).cloned()
+        self.unique_id_to_di_node
+            .borrow()
+            .get(&unique_type_id)
+            .cloned()
     }
 }
 
@@ -152,7 +170,10 @@ pub(crate) struct DINodeCreationResult<'ll> {
 
 impl<'ll> DINodeCreationResult<'ll> {
     pub(crate) fn new(di_node: &'ll DIType, already_stored_in_typemap: bool) -> Self {
-        DINodeCreationResult { di_node, already_stored_in_typemap }
+        DINodeCreationResult {
+            di_node,
+            already_stored_in_typemap,
+        }
     }
 }
 
@@ -176,7 +197,10 @@ impl<'ll, 'tcx> StubInfo<'ll, 'tcx> {
     ) -> StubInfo<'ll, 'tcx> {
         let unique_type_id_str = unique_type_id.generate_unique_id_string(cx.tcx);
         let di_node = build(cx, &unique_type_id_str);
-        StubInfo { metadata: di_node, unique_type_id }
+        StubInfo {
+            metadata: di_node,
+            unique_type_id,
+        }
     }
 }
 
@@ -244,7 +268,10 @@ pub(super) fn stub<'ll, 'tcx>(
             )
         },
     };
-    StubInfo { metadata, unique_type_id }
+    StubInfo {
+        metadata,
+        unique_type_id,
+    }
 }
 
 /// This function enables creating debuginfo nodes that can recursively refer to themselves.
@@ -259,12 +286,21 @@ pub(super) fn build_type_with_children<'ll, 'tcx>(
     members: impl FnOnce(&CodegenCx<'ll, 'tcx>, &'ll DIType) -> SmallVec<&'ll DIType>,
     generics: impl FnOnce(&CodegenCx<'ll, 'tcx>) -> SmallVec<Option<&'ll DIType>>,
 ) -> DINodeCreationResult<'ll> {
-    assert_eq!(debug_context(cx).type_map.di_node_for_unique_id(stub_info.unique_type_id), None);
+    assert_eq!(
+        debug_context(cx)
+            .type_map
+            .di_node_for_unique_id(stub_info.unique_type_id),
+        None
+    );
 
-    debug_context(cx).type_map.insert(stub_info.unique_type_id, stub_info.metadata);
+    debug_context(cx)
+        .type_map
+        .insert(stub_info.unique_type_id, stub_info.metadata);
 
-    let members: SmallVec<_> =
-        members(cx, stub_info.metadata).into_iter().map(|node| Some(node)).collect();
+    let members: SmallVec<_> = members(cx, stub_info.metadata)
+        .into_iter()
+        .map(|node| Some(node))
+        .collect();
     let generics = generics(cx);
 
     if !(members.is_empty() && generics.is_empty()) {
@@ -280,5 +316,8 @@ pub(super) fn build_type_with_children<'ll, 'tcx>(
         }
     }
 
-    DINodeCreationResult { di_node: stub_info.metadata, already_stored_in_typemap: true }
+    DINodeCreationResult {
+        di_node: stub_info.metadata,
+        already_stored_in_typemap: true,
+    }
 }

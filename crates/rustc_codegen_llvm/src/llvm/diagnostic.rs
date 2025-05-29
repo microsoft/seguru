@@ -112,7 +112,10 @@ impl SrcMgrDiagnostic {
             source: have_source.then(|| {
                 let mut spans = vec![InnerSpan::new(loc as usize, loc as usize)];
                 for i in 0..num_ranges {
-                    spans.push(InnerSpan::new(ranges[i * 2] as usize, ranges[i * 2 + 1] as usize));
+                    spans.push(InnerSpan::new(
+                        ranges[i * 2] as usize,
+                        ranges[i * 2 + 1] as usize,
+                    ));
                 }
                 (buffer, spans)
             }),
@@ -194,13 +197,13 @@ impl<'ll> Diagnostic<'ll> {
                     Optimization(OptimizationDiagnostic::unpack(OptimizationAnalysis, di))
                 }
 
-                Dk::OptimizationRemarkAnalysisFPCommute => {
-                    Optimization(OptimizationDiagnostic::unpack(OptimizationAnalysisFPCommute, di))
-                }
+                Dk::OptimizationRemarkAnalysisFPCommute => Optimization(
+                    OptimizationDiagnostic::unpack(OptimizationAnalysisFPCommute, di),
+                ),
 
-                Dk::OptimizationRemarkAnalysisAliasing => {
-                    Optimization(OptimizationDiagnostic::unpack(OptimizationAnalysisAliasing, di))
-                }
+                Dk::OptimizationRemarkAnalysisAliasing => Optimization(
+                    OptimizationDiagnostic::unpack(OptimizationAnalysisAliasing, di),
+                ),
 
                 Dk::OptimizationFailure => {
                     Optimization(OptimizationDiagnostic::unpack(OptimizationFailure, di))

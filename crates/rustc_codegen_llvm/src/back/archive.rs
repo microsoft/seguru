@@ -21,8 +21,15 @@ pub(crate) struct LlvmArchiveBuilder<'a> {
 }
 
 enum Addition {
-    File { path: PathBuf, name_in_archive: String },
-    Archive { path: PathBuf, archive: ArchiveRO, skip: Box<dyn FnMut(&str) -> bool> },
+    File {
+        path: PathBuf,
+        name_in_archive: String,
+    },
+    Archive {
+        path: PathBuf,
+        archive: ArchiveRO,
+        skip: Box<dyn FnMut(&str) -> bool>,
+    },
 }
 
 impl Addition {
@@ -70,8 +77,10 @@ impl<'a> ArchiveBuilder for LlvmArchiveBuilder<'a> {
     /// Adds an arbitrary file to this archive
     fn add_file(&mut self, file: &Path) {
         let name = file.file_name().unwrap().to_str().unwrap();
-        self.additions
-            .push(Addition::File { path: file.to_path_buf(), name_in_archive: name.to_owned() });
+        self.additions.push(Addition::File {
+            path: file.to_path_buf(),
+            name_in_archive: name.to_owned(),
+        });
     }
 
     /// Combine the provided files, rlibs, and native libraries into a single
@@ -79,9 +88,10 @@ impl<'a> ArchiveBuilder for LlvmArchiveBuilder<'a> {
     fn build(mut self: Box<Self>, output: &Path) -> bool {
         match self.build_with_llvm(output) {
             Ok(any_members) => any_members,
-            Err(error) => {
-                self.sess.dcx().emit_fatal(ArchiveBuildFailure { path: output.to_owned(), error })
-            }
+            Err(error) => self.sess.dcx().emit_fatal(ArchiveBuildFailure {
+                path: output.to_owned(),
+                error,
+            }),
         }
     }
 }
@@ -95,7 +105,10 @@ impl ArchiveBuilderBuilder for LlvmArchiveBuilderBuilder {
         // FIXME(#128955) remove a couple of months after #128936 gets merged in case
         // no regression is found.
         if false {
-            Box::new(LlvmArchiveBuilder { sess, additions: Vec::new() })
+            Box::new(LlvmArchiveBuilder {
+                sess,
+                additions: Vec::new(),
+            })
         } else {
             Box::new(ArArchiveBuilder::new(sess, &LLVM_OBJECT_READER))
         }
@@ -147,7 +160,10 @@ fn get_llvm_object_symbols(
             // bitcode since https://github.com/llvm/llvm-project/pull/96848
 
             // We don't have access to the DiagCtxt here to produce a nice warning in the correct format.
-            eprintln!("warning: Failed to read symbol table from LLVM bitcode: {}", error);
+            eprintln!(
+                "warning: Failed to read symbol table from LLVM bitcode: {}",
+                error
+            );
             return Ok(true);
         } else {
             return Err(error);
@@ -198,7 +214,10 @@ impl<'a> LlvmArchiveBuilder<'a> {
         unsafe {
             for addition in &mut additions {
                 match addition {
-                    Addition::File { path, name_in_archive } => {
+                    Addition::File {
+                        path,
+                        name_in_archive,
+                    } => {
                         let path = CString::new(path.to_str().unwrap())?;
                         let name = CString::new(name_in_archive.as_bytes())?;
                         members.push(llvm::LLVMRustArchiveMemberNew(

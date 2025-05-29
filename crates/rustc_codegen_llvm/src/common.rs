@@ -72,7 +72,10 @@ pub(crate) struct Funclet<'ll> {
 
 impl<'ll> Funclet<'ll> {
     pub(crate) fn new(cleanuppad: &'ll Value) -> Self {
-        Funclet { cleanuppad, operand: llvm::OperandBundleOwned::new("funclet", &[cleanuppad]) }
+        Funclet {
+            cleanuppad,
+            operand: llvm::OperandBundleOwned::new("funclet", &[cleanuppad]),
+        }
     }
 
     pub(crate) fn cleanuppad(&self) -> &'ll Value {
@@ -212,9 +215,11 @@ impl<'ll, 'tcx> ConstCodegenMethods for CodegenCx<'ll, 'tcx> {
         let str_global = const_str_cache.get(s).copied().unwrap_or_else(|| {
             let sc = self.const_bytes(s.as_bytes());
             let sym = self.generate_local_symbol_name("str");
-            let g = self.define_global(&sym, self.val_ty(sc)).unwrap_or_else(|| {
-                bug!("symbol `{}` is already defined", sym);
-            });
+            let g = self
+                .define_global(&sym, self.val_ty(sc))
+                .unwrap_or_else(|| {
+                    bug!("symbol `{}` is already defined", sym);
+                });
             llvm::set_initializer(g, sc);
             unsafe {
                 llvm::LLVMSetGlobalConstant(g, True);
@@ -256,7 +261,11 @@ impl<'ll, 'tcx> ConstCodegenMethods for CodegenCx<'ll, 'tcx> {
     }
 
     fn scalar_to_backend(&self, cv: Scalar, layout: abi::Scalar, llty: &'ll Type) -> &'ll Value {
-        let bitsize = if layout.is_bool() { 1 } else { layout.size(self).bits() };
+        let bitsize = if layout.is_bool() {
+            1
+        } else {
+            layout.size(self).bits()
+        };
         match cv {
             Scalar::Int(int) => {
                 let data = int.to_bits(layout.size(self));
@@ -304,9 +313,10 @@ impl<'ll, 'tcx> ConstCodegenMethods for CodegenCx<'ll, 'tcx> {
                             (value, AddressSpace::DATA)
                         }
                     }
-                    GlobalAlloc::Function { instance, .. } => {
-                        (self.get_fn_addr(instance), self.data_layout().instruction_address_space)
-                    }
+                    GlobalAlloc::Function { instance, .. } => (
+                        self.get_fn_addr(instance),
+                        self.data_layout().instruction_address_space,
+                    ),
                     GlobalAlloc::VTable(ty, dyn_ty) => {
                         let alloc = self
                             .tcx

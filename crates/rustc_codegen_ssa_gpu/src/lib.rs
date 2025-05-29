@@ -18,9 +18,9 @@
 #![feature(try_blocks)]
 // tidy-alphabetical-end
 
-//! This crate contains codegen code that is used by all codegen backends (LLVM and others).
-//! The backend-agnostic functions of this crate use functions defined in various traits that
-//! have to be implemented by each backend.
+// This crate contains codegen code that is used by all codegen backends (LLVM and others).
+// The backend-agnostic functions of this crate use functions defined in various traits that
+// have to be implemented by each backend.
 
 use std::collections::BTreeSet;
 use std::io;
@@ -244,13 +244,8 @@ pub struct CodegenResults {
 pub enum CodegenErrors {
     WrongFileType,
     EmptyVersionNumber,
-    EncodingVersionMismatch {
-        version_array: String,
-        rlink_version: u32,
-    },
-    RustcVersionMismatch {
-        rustc_version: String,
-    },
+    EncodingVersionMismatch { version_array: String, rlink_version: u32 },
+    RustcVersionMismatch { rustc_version: String },
     CorruptFile,
 }
 
@@ -273,10 +268,7 @@ pub fn looks_like_rust_object_file(filename: &str) -> bool {
     }
 
     // Strip the ".o" at the end
-    let ext2 = path
-        .file_stem()
-        .and_then(|s| Path::new(s).extension())
-        .and_then(|s| s.to_str());
+    let ext2 = path.file_stem().and_then(|s| Path::new(s).extension()).and_then(|s| s.to_str());
 
     // Check if the "inner" extension
     ext2 == Some(RUST_CGU_EXT)
@@ -354,8 +346,6 @@ pub struct CodegenLintLevels {
 
 impl CodegenLintLevels {
     pub fn from_tcx(tcx: TyCtxt<'_>) -> Self {
-        Self {
-            linker_messages: tcx.lint_level_at_node(LINKER_MESSAGES, CRATE_HIR_ID),
-        }
+        Self { linker_messages: tcx.lint_level_at_node(LINKER_MESSAGES, CRATE_HIR_ID) }
     }
 }

@@ -41,10 +41,17 @@ fn emit_direct_ptr_va_arg<'ll, 'tcx>(
     let va_list_ty = bx.type_ptr();
     let va_list_addr = list.immediate();
 
-    let ptr = bx.load(va_list_ty, va_list_addr, bx.tcx().data_layout.pointer_align.abi);
+    let ptr = bx.load(
+        va_list_ty,
+        va_list_addr,
+        bx.tcx().data_layout.pointer_align.abi,
+    );
 
     let (addr, addr_align) = if allow_higher_align && align > slot_size {
-        (round_pointer_up_to_alignment(bx, ptr, align, bx.type_ptr()), align)
+        (
+            round_pointer_up_to_alignment(bx, ptr, align, bx.type_ptr()),
+            align,
+        )
     } else {
         (ptr, slot_size)
     };
@@ -74,7 +81,9 @@ fn emit_ptr_va_arg<'ll, 'tcx>(
     let layout = bx.cx.layout_of(target_ty);
     let (llty, size, align) = if indirect {
         (
-            bx.cx.layout_of(Ty::new_imm_ptr(bx.cx.tcx, target_ty)).llvm_type(bx.cx),
+            bx.cx
+                .layout_of(Ty::new_imm_ptr(bx.cx.tcx, target_ty))
+                .llvm_type(bx.cx),
             bx.cx.data_layout().pointer_size,
             bx.cx.data_layout().pointer_align,
         )
@@ -85,7 +94,11 @@ fn emit_ptr_va_arg<'ll, 'tcx>(
         emit_direct_ptr_va_arg(bx, list, size, align.abi, slot_size, allow_higher_align);
     if indirect {
         let tmp_ret = bx.load(llty, addr, addr_align);
-        bx.load(bx.cx.layout_of(target_ty).llvm_type(bx.cx), tmp_ret, align.abi)
+        bx.load(
+            bx.cx.layout_of(target_ty).llvm_type(bx.cx),
+            tmp_ret,
+            align.abi,
+        )
     } else {
         bx.load(llty, addr, addr_align)
     }
@@ -179,13 +192,22 @@ fn emit_aapcs_va_arg<'ll, 'tcx>(
 
     // On Stack block
     bx.switch_to_block(on_stack);
-    let stack_value =
-        emit_ptr_va_arg(bx, list, target_ty, false, Align::from_bytes(8).unwrap(), true);
+    let stack_value = emit_ptr_va_arg(
+        bx,
+        list,
+        target_ty,
+        false,
+        Align::from_bytes(8).unwrap(),
+        true,
+    );
     bx.br(end);
 
     bx.switch_to_block(end);
-    let val =
-        bx.phi(layout.immediate_llvm_type(bx), &[reg_value, stack_value], &[in_reg, on_stack]);
+    let val = bx.phi(
+        layout.immediate_llvm_type(bx),
+        &[reg_value, stack_value],
+        &[in_reg, on_stack],
+    );
 
     val
 }
@@ -232,8 +254,11 @@ fn emit_s390x_va_arg<'ll, 'tcx>(
     let padding = padded_size - unpadded_size;
 
     let gpr_type = indirect || !layout.is_single_fp_element(bx.cx);
-    let (max_regs, reg_count, reg_save_index, reg_padding) =
-        if gpr_type { (5, gpr, 2, padding) } else { (4, fpr, 16, 0) };
+    let (max_regs, reg_count, reg_save_index, reg_padding) = if gpr_type {
+        (5, gpr, 2, padding)
+    } else {
+        (4, fpr, 16, 0)
+    };
 
     // Check whether the value was passed in a register or in memory.
     let reg_count_v = bx.load(bx.type_i64(), reg_count, Align::from_bytes(8).unwrap());
@@ -246,7 +271,10 @@ fn emit_s390x_va_arg<'ll, 'tcx>(
     // Work out the address of the value in the register save area.
     let reg_ptr_v = bx.load(bx.type_ptr(), reg_save_area, dl.pointer_align.abi);
     let scaled_reg_count = bx.mul(reg_count_v, bx.const_u64(8));
-    let reg_off = bx.add(scaled_reg_count, bx.const_u64(reg_save_index * 8 + reg_padding));
+    let reg_off = bx.add(
+        scaled_reg_count,
+        bx.const_u64(reg_save_index * 8 + reg_padding),
+    );
     let reg_addr = bx.ptradd(reg_ptr_v, reg_off);
 
     // Update the register count.
@@ -258,8 +286,11 @@ fn emit_s390x_va_arg<'ll, 'tcx>(
     bx.switch_to_block(in_mem);
 
     // Work out the address of the value in the argument overflow area.
-    let arg_ptr_v =
-        bx.load(bx.type_ptr(), overflow_arg_area, bx.tcx().data_layout.pointer_align.abi);
+    let arg_ptr_v = bx.load(
+        bx.type_ptr(),
+        overflow_arg_area,
+        bx.tcx().data_layout.pointer_align.abi,
+    );
     let arg_off = bx.const_u64(padding);
     let mem_addr = bx.ptradd(arg_ptr_v, arg_off);
 
@@ -273,8 +304,11 @@ fn emit_s390x_va_arg<'ll, 'tcx>(
     bx.switch_to_block(end);
     let val_addr = bx.phi(bx.type_ptr(), &[reg_addr, mem_addr], &[in_reg, in_mem]);
     let val_type = layout.llvm_type(bx);
-    let val_addr =
-        if indirect { bx.load(bx.cx.type_ptr(), val_addr, dl.pointer_align.abi) } else { val_addr };
+    let val_addr = if indirect {
+        bx.load(bx.cx.type_ptr(), val_addr, dl.pointer_align.abi)
+    } else {
+        val_addr
+    };
     bx.load(val_type, val_addr, layout.align.abi)
 }
 
@@ -309,10 +343,17 @@ fn emit_xtensa_va_arg<'ll, 'tcx>(
     // (*va).va_ndx
     let va_reg_offset = 4;
     let va_ndx_offset = va_reg_offset + 4;
-    let offset_ptr =
-        bx.inbounds_gep(bx.type_i8(), va_list_addr, &[bx.cx.const_usize(va_ndx_offset)]);
+    let offset_ptr = bx.inbounds_gep(
+        bx.type_i8(),
+        va_list_addr,
+        &[bx.cx.const_usize(va_ndx_offset)],
+    );
 
-    let offset = bx.load(bx.type_i32(), offset_ptr, bx.tcx().data_layout.i32_align.abi);
+    let offset = bx.load(
+        bx.type_i32(),
+        offset_ptr,
+        bx.tcx().data_layout.i32_align.abi,
+    );
     let offset = round_up_to_alignment(bx, offset, layout.align.abi);
 
     let slot_size = layout.size.align_to(Align::from_bytes(4).unwrap()).bytes() as i32;
@@ -328,13 +369,23 @@ fn emit_xtensa_va_arg<'ll, 'tcx>(
 
     bx.switch_to_block(from_regsave);
     // update va_ndx
-    bx.store(offset_next, offset_ptr, bx.tcx().data_layout.pointer_align.abi);
+    bx.store(
+        offset_next,
+        offset_ptr,
+        bx.tcx().data_layout.pointer_align.abi,
+    );
 
     // (*va).va_reg
-    let regsave_area_ptr =
-        bx.inbounds_gep(bx.type_i8(), va_list_addr, &[bx.cx.const_usize(va_reg_offset)]);
-    let regsave_area =
-        bx.load(bx.type_ptr(), regsave_area_ptr, bx.tcx().data_layout.pointer_align.abi);
+    let regsave_area_ptr = bx.inbounds_gep(
+        bx.type_i8(),
+        va_list_addr,
+        &[bx.cx.const_usize(va_reg_offset)],
+    );
+    let regsave_area = bx.load(
+        bx.type_ptr(),
+        regsave_area_ptr,
+        bx.tcx().data_layout.pointer_align.abi,
+    );
     let regsave_value_ptr = bx.inbounds_gep(bx.type_i8(), regsave_area, &[offset]);
     bx.br(end);
 
@@ -353,11 +404,19 @@ fn emit_xtensa_va_arg<'ll, 'tcx>(
     // va_ndx = offset_next_corrected;
     let offset_next_corrected = bx.add(offset_next, bx.const_i32(slot_size));
     // update va_ndx
-    bx.store(offset_next_corrected, offset_ptr, bx.tcx().data_layout.pointer_align.abi);
+    bx.store(
+        offset_next_corrected,
+        offset_ptr,
+        bx.tcx().data_layout.pointer_align.abi,
+    );
 
     // let stack_value_ptr = unsafe { (*va).va_stk.byte_add(offset_corrected) };
     let stack_area_ptr = bx.inbounds_gep(bx.type_i8(), va_list_addr, &[bx.cx.const_usize(0)]);
-    let stack_area = bx.load(bx.type_ptr(), stack_area_ptr, bx.tcx().data_layout.pointer_align.abi);
+    let stack_area = bx.load(
+        bx.type_ptr(),
+        stack_area_ptr,
+        bx.tcx().data_layout.pointer_align.abi,
+    );
     let stack_value_ptr = bx.inbounds_gep(bx.type_i8(), stack_area, &[offset_corrected]);
     bx.br(end);
 
@@ -373,8 +432,11 @@ fn emit_xtensa_va_arg<'ll, 'tcx>(
     //     unsafe { *stack_value_ptr }
     // }
     assert!(bx.tcx().sess.target.endian == Endian::Little);
-    let value_ptr =
-        bx.phi(bx.type_ptr(), &[regsave_value_ptr, stack_value_ptr], &[from_regsave, from_stack]);
+    let value_ptr = bx.phi(
+        bx.type_ptr(),
+        &[regsave_value_ptr, stack_value_ptr],
+        &[from_regsave, from_stack],
+    );
     return bx.load(layout.llvm_type(bx), value_ptr, layout.align.abi);
 }
 
@@ -389,31 +451,63 @@ pub(super) fn emit_va_arg<'ll, 'tcx>(
     let arch = &bx.cx.tcx.sess.target.arch;
     match &**arch {
         // Windows x86
-        "x86" if target.is_like_windows => {
-            emit_ptr_va_arg(bx, addr, target_ty, false, Align::from_bytes(4).unwrap(), false)
-        }
+        "x86" if target.is_like_windows => emit_ptr_va_arg(
+            bx,
+            addr,
+            target_ty,
+            false,
+            Align::from_bytes(4).unwrap(),
+            false,
+        ),
         // Generic x86
-        "x86" => emit_ptr_va_arg(bx, addr, target_ty, false, Align::from_bytes(4).unwrap(), true),
+        "x86" => emit_ptr_va_arg(
+            bx,
+            addr,
+            target_ty,
+            false,
+            Align::from_bytes(4).unwrap(),
+            true,
+        ),
         // Windows AArch64
-        "aarch64" | "arm64ec" if target.is_like_windows => {
-            emit_ptr_va_arg(bx, addr, target_ty, false, Align::from_bytes(8).unwrap(), false)
-        }
+        "aarch64" | "arm64ec" if target.is_like_windows => emit_ptr_va_arg(
+            bx,
+            addr,
+            target_ty,
+            false,
+            Align::from_bytes(8).unwrap(),
+            false,
+        ),
         // macOS / iOS AArch64
-        "aarch64" if target.is_like_osx => {
-            emit_ptr_va_arg(bx, addr, target_ty, false, Align::from_bytes(8).unwrap(), true)
-        }
+        "aarch64" if target.is_like_osx => emit_ptr_va_arg(
+            bx,
+            addr,
+            target_ty,
+            false,
+            Align::from_bytes(8).unwrap(),
+            true,
+        ),
         "aarch64" => emit_aapcs_va_arg(bx, addr, target_ty),
         "s390x" => emit_s390x_va_arg(bx, addr, target_ty),
         // Windows x86_64
         "x86_64" if target.is_like_windows => {
             let target_ty_size = bx.cx.size_of(target_ty).bytes();
             let indirect: bool = target_ty_size > 8 || !target_ty_size.is_power_of_two();
-            emit_ptr_va_arg(bx, addr, target_ty, indirect, Align::from_bytes(8).unwrap(), false)
+            emit_ptr_va_arg(
+                bx,
+                addr,
+                target_ty,
+                indirect,
+                Align::from_bytes(8).unwrap(),
+                false,
+            )
         }
         "xtensa" => emit_xtensa_va_arg(bx, addr, target_ty),
         // For all other architecture/OS combinations fall back to using
         // the LLVM va_arg instruction.
         // https://llvm.org/docs/LangRef.html#va-arg-instruction
-        _ => bx.va_arg(addr.immediate(), bx.cx.layout_of(target_ty).llvm_type(bx.cx)),
+        _ => bx.va_arg(
+            addr.immediate(),
+            bx.cx.layout_of(target_ty).llvm_type(bx.cx),
+        ),
     }
 }

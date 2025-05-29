@@ -28,7 +28,12 @@ pub(crate) fn get_fn<'ll, 'tcx>(cx: &CodegenCx<'ll, 'tcx>, instance: Instance<'t
     }
 
     let sym = tcx.symbol_name(instance).name;
-    debug!("get_fn({:?}: {:?}) => {}", instance, instance.ty(cx.tcx(), cx.typing_env()), sym);
+    debug!(
+        "get_fn({:?}: {:?}) => {}",
+        instance,
+        instance.ty(cx.tcx(), cx.typing_env()),
+        sym
+    );
 
     let fn_abi = cx.fn_abi_of_instance(instance, ty::List::empty());
 

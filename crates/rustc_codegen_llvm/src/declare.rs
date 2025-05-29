@@ -72,7 +72,14 @@ pub(crate) fn declare_raw_fn<'ll, 'tcx>(
 
     let mut attrs = SmallVec::<[_; 4]>::new();
 
-    if cx.tcx.sess.opts.cg.no_redzone.unwrap_or(cx.tcx.sess.target.disable_redzone) {
+    if cx
+        .tcx
+        .sess
+        .opts
+        .cg
+        .no_redzone
+        .unwrap_or(cx.tcx.sess.target.disable_redzone)
+    {
         attrs.push(llvm::AttributeKind::NoRedZone.create_attr(cx.llcx));
     }
 
@@ -117,7 +124,14 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
     ) -> &'ll Value {
         // Visibility should always be default for declarations, otherwise the linker may report an
         // error.
-        declare_raw_fn(self, name, llvm::CCallConv, unnamed, Visibility::Default, fn_type)
+        declare_raw_fn(
+            self,
+            name,
+            llvm::CCallConv,
+            unnamed,
+            Visibility::Default,
+            fn_type,
+        )
     }
 
     /// Declare an entry Function

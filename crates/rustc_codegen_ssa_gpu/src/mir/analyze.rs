@@ -1,5 +1,5 @@
-//! An analysis to determine which locals require allocas and
-//! which do not.
+// An analysis to determine which locals require allocas and
+// which do not.
 
 use rustc_data_structures::graph::dominators::Dominators;
 use rustc_index::bit_set::DenseBitSet;
@@ -25,19 +25,11 @@ pub(crate) fn non_ssa_locals<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
         .map(|decl| {
             let ty = fx.monomorphize(decl.ty);
             let layout = fx.cx.spanned_layout_of(ty, decl.source_info.span);
-            if layout.is_zst() {
-                LocalKind::ZST
-            } else {
-                LocalKind::Unused
-            }
+            if layout.is_zst() { LocalKind::ZST } else { LocalKind::Unused }
         })
         .collect();
 
-    let mut analyzer = LocalAnalyzer {
-        fx,
-        dominators,
-        locals,
-    };
+    let mut analyzer = LocalAnalyzer { fx, dominators, locals };
 
     // Arguments get assigned to by means of the function being called
     for arg in mir.args_iter() {
@@ -128,9 +120,7 @@ impl<'a, 'b, 'tcx, Bx: BuilderMethods<'b, 'tcx>> LocalAnalyzer<'a, 'b, 'tcx, Bx>
                 let base_ty = self.fx.monomorphize(base_ty);
 
                 // ZSTs don't require any actual memory access.
-                let elem_ty = base_ty
-                    .projection_ty(cx.tcx(), self.fx.monomorphize(elem))
-                    .ty;
+                let elem_ty = base_ty.projection_ty(cx.tcx(), self.fx.monomorphize(elem)).ty;
                 let span = self.fx.mir.local_decls[place_ref.local].source_info.span;
                 if cx.spanned_layout_of(elem_ty, span).is_zst() {
                     return;
@@ -187,11 +177,7 @@ impl<'a, 'b, 'tcx, Bx: BuilderMethods<'b, 'tcx>> Visitor<'tcx> for LocalAnalyzer
                 }
             }
         } else {
-            self.visit_place(
-                place,
-                PlaceContext::MutatingUse(MutatingUseContext::Store),
-                location,
-            );
+            self.visit_place(place, PlaceContext::MutatingUse(MutatingUseContext::Store), location);
         }
 
         self.visit_rvalue(rvalue, location);
@@ -335,10 +321,7 @@ pub(crate) fn cleanup_kinds(mir: &mir::Body<'_>) -> IndexVec<mir::BasicBlock, Cl
 
         let mut set_successor = |funclet: mir::BasicBlock, succ| match funclet_succs[funclet] {
             ref mut s @ None => {
-                debug!(
-                    "set_successor: updating successor of {:?} to {:?}",
-                    funclet, succ
-                );
+                debug!("set_successor: updating successor of {:?} to {:?}", funclet, succ);
                 *s = Some(succ);
             }
             Some(s) => {
@@ -368,10 +351,7 @@ pub(crate) fn cleanup_kinds(mir: &mir::Body<'_>) -> IndexVec<mir::BasicBlock, Cl
 
             for succ in data.terminator().successors() {
                 let kind = result[succ];
-                debug!(
-                    "cleanup_kinds: propagating {:?} to {:?}/{:?}",
-                    funclet, succ, kind
-                );
+                debug!("cleanup_kinds: propagating {:?} to {:?}/{:?}", funclet, succ, kind);
                 match kind {
                     CleanupKind::NotCleanup => {
                         result[succ] = CleanupKind::Internal { funclet };
@@ -381,9 +361,7 @@ pub(crate) fn cleanup_kinds(mir: &mir::Body<'_>) -> IndexVec<mir::BasicBlock, Cl
                             set_successor(funclet, succ);
                         }
                     }
-                    CleanupKind::Internal {
-                        funclet: succ_funclet,
-                    } => {
+                    CleanupKind::Internal { funclet: succ_funclet } => {
                         if funclet != succ_funclet {
                             // `succ` has 2 different funclet going into it, so it must
                             // be a funclet by itself.

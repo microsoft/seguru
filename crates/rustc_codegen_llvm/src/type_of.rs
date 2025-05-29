@@ -94,8 +94,11 @@ fn struct_llfields<'a, 'tcx>(
     for i in layout.fields.index_by_increasing_offset() {
         let target_offset = layout.fields.offset(i as usize);
         let field = layout.field(cx, i);
-        let effective_field_align =
-            layout.align.abi.min(field.align.abi).restrict_for_offset(target_offset);
+        let effective_field_align = layout
+            .align
+            .abi
+            .min(field.align.abi)
+            .restrict_for_offset(target_offset);
         packed |= effective_field_align < field.align.abi;
 
         debug!(
@@ -121,7 +124,12 @@ fn struct_llfields<'a, 'tcx>(
     }
     if layout.is_sized() && field_count > 0 {
         if offset > layout.size {
-            bug!("layout: {:#?} stride: {:?} offset: {:?}", layout, layout.size, offset);
+            bug!(
+                "layout: {:#?} stride: {:?} offset: {:?}",
+                layout,
+                layout.size,
+                offset
+            );
         }
         let padding = layout.size - offset;
         if padding != Size::ZERO {
@@ -134,7 +142,10 @@ fn struct_llfields<'a, 'tcx>(
             result.push(cx.type_padding_filler(padding, padding_align));
         }
     } else {
-        debug!("struct_llfields: offset: {:?} stride: {:?}", offset, layout.size);
+        debug!(
+            "struct_llfields: offset: {:?} stride: {:?}",
+            offset, layout.size
+        );
     }
     (result, packed)
 }
@@ -222,7 +233,11 @@ impl<'tcx> LayoutLlvmExt<'tcx> for TyAndLayout<'tcx> {
 
         debug!("llvm_type({:#?})", self);
 
-        assert!(!self.ty.has_escaping_bound_vars(), "{:?} has escaping bound vars", self.ty);
+        assert!(
+            !self.ty.has_escaping_bound_vars(),
+            "{:?} has escaping bound vars",
+            self.ty
+        );
 
         // Make sure lifetimes are erased, to avoid generating distinct LLVM
         // types for Rust types that only differ in the choice of lifetimes.
@@ -240,7 +255,9 @@ impl<'tcx> LayoutLlvmExt<'tcx> for TyAndLayout<'tcx> {
         };
         debug!("--> mapped {:#?} to llty={:?}", self, llty);
 
-        cx.type_lowering.borrow_mut().insert((self.ty, variant_index), llty);
+        cx.type_lowering
+            .borrow_mut()
+            .insert((self.ty, variant_index), llty);
 
         if let Some((llty, layout)) = defer {
             let (llfields, packed) = struct_llfields(cx, layout);
@@ -290,7 +307,10 @@ impl<'tcx> LayoutLlvmExt<'tcx> for TyAndLayout<'tcx> {
         // In other words, this should generally not look at the type at all, but only at the
         // layout.
         let BackendRepr::ScalarPair(a, b) = self.backend_repr else {
-            bug!("TyAndLayout::scalar_pair_element_llty({:?}): not applicable", self);
+            bug!(
+                "TyAndLayout::scalar_pair_element_llty({:?}): not applicable",
+                self
+            );
         };
         let scalar = [a, b][index];
 

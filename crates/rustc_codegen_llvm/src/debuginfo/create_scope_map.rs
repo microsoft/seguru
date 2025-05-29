@@ -121,10 +121,13 @@ fn make_mir_scope<'ll, 'tcx>(
                 cx.typing_env(),
                 ty::EarlyBinder::bind(callee),
             );
-            debug_context.inlined_function_scopes.entry(callee).or_insert_with(|| {
-                let callee_fn_abi = cx.fn_abi_of_instance(callee, ty::List::empty());
-                cx.dbg_scope_fn(callee, callee_fn_abi, None)
-            })
+            debug_context
+                .inlined_function_scopes
+                .entry(callee)
+                .or_insert_with(|| {
+                    let callee_fn_abi = cx.fn_abi_of_instance(callee, ty::List::empty());
+                    cx.dbg_scope_fn(callee, callee_fn_abi, None)
+                })
         }
         None => unsafe {
             llvm::LLVMDIBuilderCreateLexicalBlock(

@@ -105,8 +105,10 @@ pub(crate) fn sanitize_attrs<'ll>(
     if enabled.contains(SanitizerSet::MEMTAG) {
         // Check to make sure the mte target feature is actually enabled.
         let features = cx.tcx.global_backend_features(());
-        let mte_feature =
-            features.iter().map(|s| &s[..]).rfind(|n| ["+mte", "-mte"].contains(&&n[..]));
+        let mte_feature = features
+            .iter()
+            .map(|s| &s[..])
+            .rfind(|n| ["+mte", "-mte"].contains(&&n[..]));
         if let None | Some("-mte") = mte_feature {
             cx.tcx.dcx().emit_err(SanitizerMemtagRequiresMte);
         }
@@ -143,7 +145,11 @@ pub(crate) fn frame_pointer_type_attr<'ll>(cx: &CodegenCx<'ll, '_>) -> Option<&'
         FramePointer::NonLeaf => "non-leaf",
         FramePointer::MayOmit => return None,
     };
-    Some(llvm::CreateAttrStringValue(cx.llcx, "frame-pointer", attr_value))
+    Some(llvm::CreateAttrStringValue(
+        cx.llcx,
+        "frame-pointer",
+        attr_value,
+    ))
 }
 
 fn function_return_attr<'ll>(cx: &CodegenCx<'ll, '_>) -> Option<&'ll Attribute> {
@@ -181,10 +187,18 @@ fn instrument_function_attr<'ll>(cx: &CodegenCx<'ll, '_>) -> SmallVec<[&'ll Attr
         // Function prologue and epilogue are instrumented with NOP sleds,
         // a runtime library later replaces them with detours into tracing code.
         if options.always {
-            attrs.push(llvm::CreateAttrStringValue(cx.llcx, "function-instrument", "xray-always"));
+            attrs.push(llvm::CreateAttrStringValue(
+                cx.llcx,
+                "function-instrument",
+                "xray-always",
+            ));
         }
         if options.never {
-            attrs.push(llvm::CreateAttrStringValue(cx.llcx, "function-instrument", "xray-never"));
+            attrs.push(llvm::CreateAttrStringValue(
+                cx.llcx,
+                "function-instrument",
+                "xray-never",
+            ));
         }
         if options.ignore_loops {
             attrs.push(llvm::CreateAttrString(cx.llcx, "xray-ignore-loops"));
@@ -212,7 +226,11 @@ fn nojumptables_attr<'ll>(cx: &CodegenCx<'ll, '_>) -> Option<&'ll Attribute> {
         return None;
     }
 
-    Some(llvm::CreateAttrStringValue(cx.llcx, "no-jump-tables", "true"))
+    Some(llvm::CreateAttrStringValue(
+        cx.llcx,
+        "no-jump-tables",
+        "true",
+    ))
 }
 
 fn probestack_attr<'ll>(cx: &CodegenCx<'ll, '_>) -> Option<&'ll Attribute> {
@@ -243,7 +261,9 @@ fn probestack_attr<'ll>(cx: &CodegenCx<'ll, '_>) -> Option<&'ll Attribute> {
         // This is defined in the `compiler-builtins` crate for each architecture.
         StackProbeType::Call => "__rust_probestack",
         // Pick from the two above based on the LLVM version.
-        StackProbeType::InlineOrCall { min_llvm_version_for_inline } => {
+        StackProbeType::InlineOrCall {
+            min_llvm_version_for_inline,
+        } => {
             if llvm_util::get_version() < min_llvm_version_for_inline {
                 "__rust_probestack"
             } else {
@@ -251,7 +271,11 @@ fn probestack_attr<'ll>(cx: &CodegenCx<'ll, '_>) -> Option<&'ll Attribute> {
             }
         }
     };
-    Some(llvm::CreateAttrStringValue(cx.llcx, "probe-stack", attr_value))
+    Some(llvm::CreateAttrStringValue(
+        cx.llcx,
+        "probe-stack",
+        attr_value,
+    ))
 }
 
 fn stackprotector_attr<'ll>(cx: &CodegenCx<'ll, '_>) -> Option<&'ll Attribute> {
@@ -273,7 +297,11 @@ fn backchain_attr<'ll>(cx: &CodegenCx<'ll, '_>) -> Option<&'ll Attribute> {
     let requested_features = cx.sess().opts.cg.target_feature.split(',');
     let found_positive = requested_features.clone().any(|r| r == "+backchain");
 
-    if found_positive { Some(llvm::CreateAttrString(cx.llcx, "backchain")) } else { None }
+    if found_positive {
+        Some(llvm::CreateAttrString(cx.llcx, "backchain"))
+    } else {
+        None
+    }
 }
 
 pub(crate) fn target_cpu_attr<'ll>(cx: &CodegenCx<'ll, '_>) -> &'ll Attribute {
@@ -371,7 +399,10 @@ pub(crate) fn llfn_attrs_from_instance<'ll, 'tcx>(
     // You can also find more info on why Windows always requires uwtables here:
     //      https://bugzilla.mozilla.org/show_bug.cgi?id=1302078
     if cx.sess().must_emit_unwind_tables() {
-        to_add.push(uwtable_attr(cx.llcx, cx.sess().opts.unstable_opts.use_sync_unwind));
+        to_add.push(uwtable_attr(
+            cx.llcx,
+            cx.sess().opts.unstable_opts.use_sync_unwind,
+        ));
     }
 
     if cx.sess().opts.unstable_opts.profile_sample_use.is_some() {
@@ -386,17 +417,26 @@ pub(crate) fn llfn_attrs_from_instance<'ll, 'tcx>(
     to_add.extend(probestack_attr(cx));
     to_add.extend(stackprotector_attr(cx));
 
-    if codegen_fn_attrs.flags.contains(CodegenFnAttrFlags::NO_BUILTINS) {
+    if codegen_fn_attrs
+        .flags
+        .contains(CodegenFnAttrFlags::NO_BUILTINS)
+    {
         to_add.push(llvm::CreateAttrString(cx.llcx, "no-builtins"));
     }
 
     if codegen_fn_attrs.flags.contains(CodegenFnAttrFlags::COLD) {
         to_add.push(AttributeKind::Cold.create_attr(cx.llcx));
     }
-    if codegen_fn_attrs.flags.contains(CodegenFnAttrFlags::FFI_PURE) {
+    if codegen_fn_attrs
+        .flags
+        .contains(CodegenFnAttrFlags::FFI_PURE)
+    {
         to_add.push(MemoryEffects::ReadOnly.create_attr(cx.llcx));
     }
-    if codegen_fn_attrs.flags.contains(CodegenFnAttrFlags::FFI_CONST) {
+    if codegen_fn_attrs
+        .flags
+        .contains(CodegenFnAttrFlags::FFI_CONST)
+    {
         to_add.push(MemoryEffects::None.create_attr(cx.llcx));
     }
     if codegen_fn_attrs.flags.contains(CodegenFnAttrFlags::NAKED) {
@@ -418,7 +458,10 @@ pub(crate) fn llfn_attrs_from_instance<'ll, 'tcx>(
                 }
                 if let Some(PacRet { leaf, pc, key }) = pac_ret {
                     if pc {
-                        to_add.push(llvm::CreateAttrString(cx.llcx, "branch-protection-pauth-lr"));
+                        to_add.push(llvm::CreateAttrString(
+                            cx.llcx,
+                            "branch-protection-pauth-lr",
+                        ));
                     }
                     to_add.push(llvm::CreateAttrStringValue(
                         cx.llcx,
@@ -434,8 +477,12 @@ pub(crate) fn llfn_attrs_from_instance<'ll, 'tcx>(
             }
         }
     }
-    if codegen_fn_attrs.flags.contains(CodegenFnAttrFlags::ALLOCATOR)
-        || codegen_fn_attrs.flags.contains(CodegenFnAttrFlags::ALLOCATOR_ZEROED)
+    if codegen_fn_attrs
+        .flags
+        .contains(CodegenFnAttrFlags::ALLOCATOR)
+        || codegen_fn_attrs
+            .flags
+            .contains(CodegenFnAttrFlags::ALLOCATOR_ZEROED)
     {
         to_add.push(create_alloc_family_attr(cx.llcx));
         // apply to argument place instead of function
@@ -443,7 +490,10 @@ pub(crate) fn llfn_attrs_from_instance<'ll, 'tcx>(
         attributes::apply_to_llfn(llfn, AttributePlace::Argument(1), &[alloc_align]);
         to_add.push(llvm::CreateAllocSizeAttr(cx.llcx, 0));
         let mut flags = AllocKindFlags::Alloc | AllocKindFlags::Aligned;
-        if codegen_fn_attrs.flags.contains(CodegenFnAttrFlags::ALLOCATOR) {
+        if codegen_fn_attrs
+            .flags
+            .contains(CodegenFnAttrFlags::ALLOCATOR)
+        {
             flags |= AllocKindFlags::Uninitialized;
         } else {
             flags |= AllocKindFlags::Zeroed;
@@ -454,7 +504,10 @@ pub(crate) fn llfn_attrs_from_instance<'ll, 'tcx>(
         let no_alias = AttributeKind::NoAlias.create_attr(cx.llcx);
         attributes::apply_to_llfn(llfn, AttributePlace::ReturnValue, &[no_alias]);
     }
-    if codegen_fn_attrs.flags.contains(CodegenFnAttrFlags::REALLOCATOR) {
+    if codegen_fn_attrs
+        .flags
+        .contains(CodegenFnAttrFlags::REALLOCATOR)
+    {
         to_add.push(create_alloc_family_attr(cx.llcx));
         to_add.push(llvm::CreateAllocKindAttr(
             cx.llcx,
@@ -470,7 +523,10 @@ pub(crate) fn llfn_attrs_from_instance<'ll, 'tcx>(
         let no_alias = AttributeKind::NoAlias.create_attr(cx.llcx);
         attributes::apply_to_llfn(llfn, AttributePlace::ReturnValue, &[no_alias]);
     }
-    if codegen_fn_attrs.flags.contains(CodegenFnAttrFlags::DEALLOCATOR) {
+    if codegen_fn_attrs
+        .flags
+        .contains(CodegenFnAttrFlags::DEALLOCATOR)
+    {
         to_add.push(create_alloc_family_attr(cx.llcx));
         to_add.push(llvm::CreateAllocKindAttr(cx.llcx, AllocKindFlags::Free));
         // applies to argument place instead of function place
@@ -479,15 +535,19 @@ pub(crate) fn llfn_attrs_from_instance<'ll, 'tcx>(
     }
     // function alignment can be set globally with the `-Zmin-function-alignment=<n>` flag;
     // the alignment from a `#[repr(align(<n>))]` is used if it specifies a higher alignment.
-    if let Some(align) =
-        Ord::max(cx.tcx.sess.opts.unstable_opts.min_function_alignment, codegen_fn_attrs.alignment)
-    {
+    if let Some(align) = Ord::max(
+        cx.tcx.sess.opts.unstable_opts.min_function_alignment,
+        codegen_fn_attrs.alignment,
+    ) {
         llvm::set_alignment(llfn, align);
     }
     if let Some(backchain) = backchain_attr(cx) {
         to_add.push(backchain);
     }
-    to_add.extend(patchable_function_entry_attrs(cx, codegen_fn_attrs.patchable_function_entry));
+    to_add.extend(patchable_function_entry_attrs(
+        cx,
+        codegen_fn_attrs.patchable_function_entry,
+    ));
 
     // Always annotate functions with the target-cpu they are compiled for.
     // Without this, ThinLTO won't inline Rust functions into Clang generated
@@ -497,8 +557,11 @@ pub(crate) fn llfn_attrs_from_instance<'ll, 'tcx>(
     // The target doesn't care; the subtarget reads our attribute.
     to_add.extend(tune_cpu_attr(cx));
 
-    let function_features =
-        codegen_fn_attrs.target_features.iter().map(|f| f.name.as_str()).collect::<Vec<&str>>();
+    let function_features = codegen_fn_attrs
+        .target_features
+        .iter()
+        .map(|f| f.name.as_str())
+        .collect::<Vec<&str>>();
 
     let function_features = function_features
         .iter()
@@ -522,21 +585,40 @@ pub(crate) fn llfn_attrs_from_instance<'ll, 'tcx>(
         // If this function is an import from the environment but the wasm
         // import has a specific module/name, apply them here.
         if let Some(module) = wasm_import_module(cx.tcx, instance.def_id()) {
-            to_add.push(llvm::CreateAttrStringValue(cx.llcx, "wasm-import-module", module));
+            to_add.push(llvm::CreateAttrStringValue(
+                cx.llcx,
+                "wasm-import-module",
+                module,
+            ));
 
-            let name =
-                codegen_fn_attrs.link_name.unwrap_or_else(|| cx.tcx.item_name(instance.def_id()));
+            let name = codegen_fn_attrs
+                .link_name
+                .unwrap_or_else(|| cx.tcx.item_name(instance.def_id()));
             let name = name.as_str();
-            to_add.push(llvm::CreateAttrStringValue(cx.llcx, "wasm-import-name", name));
+            to_add.push(llvm::CreateAttrStringValue(
+                cx.llcx,
+                "wasm-import-name",
+                name,
+            ));
         }
     }
 
-    let global_features = cx.tcx.global_backend_features(()).iter().map(|s| s.as_str());
+    let global_features = cx
+        .tcx
+        .global_backend_features(())
+        .iter()
+        .map(|s| s.as_str());
     let function_features = function_features.iter().map(|s| s.as_str());
-    let target_features: String =
-        global_features.chain(function_features).intersperse(",").collect();
+    let target_features: String = global_features
+        .chain(function_features)
+        .intersperse(",")
+        .collect();
     if !target_features.is_empty() {
-        to_add.push(llvm::CreateAttrStringValue(cx.llcx, "target-features", &target_features));
+        to_add.push(llvm::CreateAttrStringValue(
+            cx.llcx,
+            "target-features",
+            &target_features,
+        ));
     }
 
     attributes::apply_to_llfn(llfn, Function, &to_add);

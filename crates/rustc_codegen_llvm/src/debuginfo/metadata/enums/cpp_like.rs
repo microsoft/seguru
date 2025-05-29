@@ -185,7 +185,10 @@ pub(super) fn build_enum_type_di_node<'ll, 'tcx>(
 ) -> DINodeCreationResult<'ll> {
     let enum_type = unique_type_id.expect_ty();
     let &ty::Adt(enum_adt_def, _) = enum_type.kind() else {
-        bug!("build_enum_type_di_node() called with non-enum type: `{:?}`", enum_type)
+        bug!(
+            "build_enum_type_di_node() called with non-enum type: `{:?}`",
+            enum_type
+        )
     };
 
     let enum_type_and_layout = cx.layout_of(enum_type);
@@ -217,7 +220,9 @@ pub(super) fn build_enum_type_di_node<'ll, 'tcx>(
                     // We don't generate any members for uninhabited types.
                     return smallvec![];
                 }
-                Variants::Single { index: variant_index } => build_single_variant_union_fields(
+                Variants::Single {
+                    index: variant_index,
+                } => build_single_variant_union_fields(
                     cx,
                     enum_adt_def,
                     enum_type_and_layout,
@@ -239,7 +244,10 @@ pub(super) fn build_enum_type_di_node<'ll, 'tcx>(
                     None,
                 ),
                 Variants::Multiple {
-                    tag_encoding: TagEncoding::Niche { untagged_variant, .. },
+                    tag_encoding:
+                        TagEncoding::Niche {
+                            untagged_variant, ..
+                        },
                     ref variants,
                     tag_field,
                     ..
@@ -268,7 +276,10 @@ pub(super) fn build_coroutine_di_node<'ll, 'tcx>(
     let coroutine_type = unique_type_id.expect_ty();
     let def_location = if cx.sess().opts.unstable_opts.debug_info_type_line_numbers {
         let &ty::Coroutine(coroutine_def_id, _) = coroutine_type.kind() else {
-            bug!("build_coroutine_di_node() called with non-coroutine type: `{:?}`", coroutine_type)
+            bug!(
+                "build_coroutine_di_node() called with non-coroutine type: `{:?}`",
+                coroutine_type
+            )
         };
         Some(file_metadata_from_def_id(cx, Some(coroutine_def_id)))
     } else {
@@ -277,7 +288,10 @@ pub(super) fn build_coroutine_di_node<'ll, 'tcx>(
     let coroutine_type_and_layout = cx.layout_of(coroutine_type);
     let coroutine_type_name = compute_debuginfo_type_name(cx.tcx, coroutine_type, false);
 
-    assert!(!wants_c_like_enum_debuginfo(cx.tcx, coroutine_type_and_layout));
+    assert!(!wants_c_like_enum_debuginfo(
+        cx.tcx,
+        coroutine_type_and_layout
+    ));
 
     type_map::build_type_with_children(
         cx,
@@ -292,16 +306,20 @@ pub(super) fn build_coroutine_di_node<'ll, 'tcx>(
             DIFlags::FlagZero,
         ),
         |cx, coroutine_type_di_node| match coroutine_type_and_layout.variants {
-            Variants::Multiple { tag_encoding: TagEncoding::Direct, .. } => {
-                build_union_fields_for_direct_tag_coroutine(
-                    cx,
-                    coroutine_type_and_layout,
-                    coroutine_type_di_node,
-                )
-            }
+            Variants::Multiple {
+                tag_encoding: TagEncoding::Direct,
+                ..
+            } => build_union_fields_for_direct_tag_coroutine(
+                cx,
+                coroutine_type_and_layout,
+                coroutine_type_di_node,
+            ),
             Variants::Single { .. }
             | Variants::Empty
-            | Variants::Multiple { tag_encoding: TagEncoding::Niche { .. }, .. } => {
+            | Variants::Multiple {
+                tag_encoding: TagEncoding::Niche { .. },
+                ..
+            } => {
                 bug!(
                     "Encountered coroutine with non-direct-tag layout: {:?}",
                     coroutine_type_and_layout
@@ -656,8 +674,14 @@ fn build_variant_struct_wrapper_type_di_node<'ll, 'tcx>(
                 DiscrKind::Range128(begin, end) => {
                     let align = cx.align_of(cx.tcx.types.u64);
                     let type_di_node = type_di_node(cx, cx.tcx.types.u64);
-                    let Split128 { hi: begin_hi, lo: begin_lo } = split_128(begin);
-                    let Split128 { hi: end_hi, lo: end_lo } = split_128(end);
+                    let Split128 {
+                        hi: begin_hi,
+                        lo: begin_lo,
+                    } = split_128(begin);
+                    let Split128 {
+                        hi: end_hi,
+                        lo: end_lo,
+                    } = split_128(end);
 
                     fields.push(build_assoc_const(
                         ASSOC_CONST_DISCR128_BEGIN_HI,
@@ -702,7 +726,10 @@ struct Split128 {
 }
 
 fn split_128(value: u128) -> Split128 {
-    Split128 { hi: (value >> 64) as u64, lo: value as u64 }
+    Split128 {
+        hi: (value >> 64) as u64,
+        lo: value as u64,
+    }
 }
 
 fn build_union_fields_for_direct_tag_coroutine<'ll, 'tcx>(
@@ -710,8 +737,11 @@ fn build_union_fields_for_direct_tag_coroutine<'ll, 'tcx>(
     coroutine_type_and_layout: TyAndLayout<'tcx>,
     coroutine_type_di_node: &'ll DIType,
 ) -> SmallVec<&'ll DIType> {
-    let Variants::Multiple { tag_encoding: TagEncoding::Direct, tag_field, .. } =
-        coroutine_type_and_layout.variants
+    let Variants::Multiple {
+        tag_encoding: TagEncoding::Direct,
+        tag_field,
+        ..
+    } = coroutine_type_and_layout.variants
     else {
         bug!("This function only supports layouts with directly encoded tags.")
     };
@@ -721,10 +751,14 @@ fn build_union_fields_for_direct_tag_coroutine<'ll, 'tcx>(
         _ => unreachable!(),
     };
 
-    let coroutine_layout =
-        cx.tcx.coroutine_layout(coroutine_def_id, coroutine_args.kind_ty()).unwrap();
+    let coroutine_layout = cx
+        .tcx
+        .coroutine_layout(coroutine_def_id, coroutine_args.kind_ty())
+        .unwrap();
 
-    let common_upvar_names = cx.tcx.closure_saved_names_of_captured_variables(coroutine_def_id);
+    let common_upvar_names = cx
+        .tcx
+        .closure_saved_names_of_captured_variables(coroutine_def_id);
     let variant_range = coroutine_args.variant_range(coroutine_def_id, cx.tcx);
     let variant_count = (variant_range.start.as_u32()..variant_range.end.as_u32()).len();
 

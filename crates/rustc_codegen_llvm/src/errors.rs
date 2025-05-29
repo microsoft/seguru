@@ -139,7 +139,11 @@ pub enum LlvmError<'a> {
     #[diag(codegen_llvm_parse_bitcode)]
     ParseBitcode,
     #[diag(codegen_llvm_prepare_autodiff)]
-    PrepareAutoDiff { src: String, target: String, error: String },
+    PrepareAutoDiff {
+        src: String,
+        target: String,
+        error: String,
+    },
 }
 
 pub(crate) struct WithLlvmError<'a>(pub LlvmError<'a>, pub String);

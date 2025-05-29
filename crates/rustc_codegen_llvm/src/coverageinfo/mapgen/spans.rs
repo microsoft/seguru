@@ -22,9 +22,20 @@ pub(crate) struct Coords {
 impl Coords {
     /// Attaches a local file ID to these coordinates to produce an `ffi::CoverageSpan`.
     pub(crate) fn make_coverage_span(&self, local_file_id: LocalFileId) -> ffi::CoverageSpan {
-        let &Self { start_line, start_col, end_line, end_col } = self;
+        let &Self {
+            start_line,
+            start_col,
+            end_line,
+            end_col,
+        } = self;
         let file_id = local_file_id.as_u32();
-        ffi::CoverageSpan { file_id, start_line, start_col, end_line, end_col }
+        ffi::CoverageSpan {
+            file_id,
+            start_line,
+            start_col,
+            end_line,
+            end_col,
+        }
     }
 }
 
@@ -98,11 +109,18 @@ fn ensure_non_empty_span(source_map: &SourceMap, span: Span) -> Option<Span> {
 /// discard regions that are improperly ordered, or might be interpreted in a
 /// way that makes them improperly ordered.
 fn check_coords(coords: Coords) -> Option<Coords> {
-    let Coords { start_line, start_col, end_line, end_col } = coords;
+    let Coords {
+        start_line,
+        start_col,
+        end_line,
+        end_col,
+    } = coords;
 
     // Line/column coordinates are supposed to be 1-based. If we ever emit
     // coordinates of 0, `llvm-cov` might misinterpret them.
-    let all_nonzero = [start_line, start_col, end_line, end_col].into_iter().all(|x| x != 0);
+    let all_nonzero = [start_line, start_col, end_line, end_col]
+        .into_iter()
+        .all(|x| x != 0);
     // Coverage mappings use the high bit of `end_col` to indicate that a
     // region is actually a "gap" region, so make sure it's unset.
     let end_col_has_high_bit_unset = (end_col & (1 << 31)) == 0;

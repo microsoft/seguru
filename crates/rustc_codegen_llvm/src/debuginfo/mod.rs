@@ -275,7 +275,11 @@ impl<'ll> CodegenCx<'ll, '_> {
         // Otherwise, emit it. This mimics clang behaviour.
         // See discussion in https://github.com/rust-lang/rust/issues/42921
         if self.sess().target.is_like_msvc {
-            DebugLoc { file, line, col: UNKNOWN_COLUMN_NUMBER }
+            DebugLoc {
+                file,
+                line,
+                col: UNKNOWN_COLUMN_NUMBER,
+            }
         } else {
             DebugLoc { file, line, col }
         }
@@ -367,7 +371,11 @@ impl<'ll, 'tcx> DebugInfoCodegenMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
         let linkage_name = &mangled_name_of_instance(self, instance).name;
         // Omit the linkage_name if it is the same as subprogram name.
-        let linkage_name = if &name == linkage_name { "" } else { linkage_name };
+        let linkage_name = if &name == linkage_name {
+            ""
+        } else {
+            linkage_name
+        };
 
         // FIXME(eddyb) does this need to be separate from `loc.line` for some reason?
         let scope_line = loc.line;
@@ -474,8 +482,12 @@ impl<'ll, 'tcx> DebugInfoCodegenMethods<'tcx> for CodegenCx<'ll, 'tcx> {
                     Some(type_di_node(cx, t))
                 }));
             } else {
-                signature
-                    .extend(fn_abi.args.iter().map(|arg| Some(type_di_node(cx, arg.layout.ty))));
+                signature.extend(
+                    fn_abi
+                        .args
+                        .iter()
+                        .map(|arg| Some(type_di_node(cx, arg.layout.ty))),
+                );
             }
 
             create_DIArray(DIB(cx), &signature[..])

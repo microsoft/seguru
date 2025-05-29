@@ -76,8 +76,13 @@ impl OwnedTargetMachine {
         };
 
         NonNull::new(tm_ptr)
-            .map(|tm_unique| Self { tm_unique, phantom: PhantomData })
-            .ok_or_else(|| LlvmError::CreateTargetMachine { triple: SmallCStr::from(triple) })
+            .map(|tm_unique| Self {
+                tm_unique,
+                phantom: PhantomData,
+            })
+            .ok_or_else(|| LlvmError::CreateTargetMachine {
+                triple: SmallCStr::from(triple),
+            })
     }
 
     /// Returns inner `llvm::TargetMachine` type.

@@ -1,4 +1,4 @@
-//! Reading of the rustc metadata for rlibs and dylibs
+// Reading of the rustc metadata for rlibs and dylibs
 
 use std::borrow::Cow;
 use std::fs::File;
@@ -96,11 +96,7 @@ impl MetadataLoader for DefaultMetadataLoader {
                         })?;
                         get_metadata_xcoff(path, data)
                     }
-                    Err(e) => Err(format!(
-                        "failed to parse aix dylib '{}': {}",
-                        path.display(),
-                        e
-                    )),
+                    Err(e) => Err(format!("failed to parse aix dylib '{}': {}", path.display(), e)),
                 }
             })
         } else {
@@ -126,14 +122,7 @@ pub(super) fn search_for_section<'a>(
     file.section_by_name(section)
         .ok_or_else(|| format!("no `{}` section in '{}'", section, path.display()))?
         .data()
-        .map_err(|e| {
-            format!(
-                "failed to read {} section in '{}': {}",
-                section,
-                path.display(),
-                e
-            )
-        })
+        .map_err(|e| format!("failed to read {} section in '{}': {}", section, path.display(), e))
 }
 
 fn add_gnu_property_note(
@@ -189,9 +178,8 @@ pub(super) fn get_metadata_xcoff<'a>(path: &Path, data: &'a [u8]) -> Result<&'a 
         return Ok(data);
     };
     let info_data = search_for_section(path, data, ".info")?;
-    if let Some(metadata_symbol) = file
-        .symbols()
-        .find(|sym| sym.name() == Ok(AIX_METADATA_SYMBOL_NAME))
+    if let Some(metadata_symbol) =
+        file.symbols().find(|sym| sym.name() == Ok(AIX_METADATA_SYMBOL_NAME))
     {
         let offset = metadata_symbol.address() as usize;
         // The offset specifies the location of rustc metadata in the .info section of XCOFF.
@@ -217,9 +205,8 @@ pub(crate) fn create_object_file(sess: &Session) -> Option<write::Object<'static
         Endian::Little => Endianness::Little,
         Endian::Big => Endianness::Big,
     };
-    let Some((architecture, sub_architecture)) = sess
-        .target
-        .object_architecture(&sess.unstable_target_features)
+    let Some((architecture, sub_architecture)) =
+        sess.target.object_architecture(&sess.unstable_target_features)
     else {
         return None;
     };
@@ -268,11 +255,7 @@ pub(crate) fn create_object_file(sess: &Session) -> Option<write::Object<'static
     let os_abi = elf_os_abi(sess);
     let abi_version = 0;
     add_gnu_property_note(&mut file, architecture, binary_format, endianness);
-    file.flags = FileFlags::Elf {
-        os_abi,
-        abi_version,
-        e_flags,
-    };
+    file.flags = FileFlags::Elf { os_abi, abi_version, e_flags };
     Some(file)
 }
 
@@ -496,21 +479,18 @@ pub(crate) fn create_wrapper_file(
     };
     match file.format() {
         BinaryFormat::Coff => {
-            file.section_mut(section).flags = SectionFlags::Coff {
-                characteristics: pe::IMAGE_SCN_LNK_REMOVE,
-            };
+            file.section_mut(section).flags =
+                SectionFlags::Coff { characteristics: pe::IMAGE_SCN_LNK_REMOVE };
         }
         BinaryFormat::Elf => {
-            file.section_mut(section).flags = SectionFlags::Elf {
-                sh_flags: elf::SHF_EXCLUDE as u64,
-            };
+            file.section_mut(section).flags =
+                SectionFlags::Elf { sh_flags: elf::SHF_EXCLUDE as u64 };
         }
         BinaryFormat::Xcoff => {
             // AIX system linker may aborts if it meets a valid XCOFF file in archive with no .text, no .data and no .bss.
             file.add_section(Vec::new(), b".text".to_vec(), SectionKind::Text);
-            file.section_mut(section).flags = SectionFlags::Xcoff {
-                s_flags: xcoff::STYP_INFO as u32,
-            };
+            file.section_mut(section).flags =
+                SectionFlags::Xcoff { s_flags: xcoff::STYP_INFO as u32 };
             // Encode string stored in .info section of XCOFF.
             // FIXME: The length of data here is not guaranteed to fit in a u32.
             // We may have to split the data into multiple pieces in order to
@@ -560,9 +540,7 @@ pub fn create_compressed_metadata_file(
     symbol_name: &str,
 ) -> Vec<u8> {
     let mut packed_metadata = rustc_metadata::METADATA_HEADER.to_vec();
-    packed_metadata
-        .write_all(&(metadata.raw_data().len() as u64).to_le_bytes())
-        .unwrap();
+    packed_metadata.write_all(&(metadata.raw_data().len() as u64).to_le_bytes()).unwrap();
     packed_metadata.extend(metadata.raw_data());
 
     let Some(mut file) = create_object_file(sess) else {
@@ -628,9 +606,7 @@ pub fn create_compressed_metadata_file_for_xcoff(
     let data_section = file.add_section(Vec::new(), b".data".to_vec(), SectionKind::Data);
     let section = file.add_section(Vec::new(), b".info".to_vec(), SectionKind::Debug);
     file.add_file_symbol("lib.rmeta".into());
-    file.section_mut(section).flags = SectionFlags::Xcoff {
-        s_flags: xcoff::STYP_INFO as u32,
-    };
+    file.section_mut(section).flags = SectionFlags::Xcoff { s_flags: xcoff::STYP_INFO as u32 };
     // Add a global symbol to data_section.
     file.add_symbol(Symbol {
         name: symbol_name.as_bytes().into(),
@@ -710,9 +686,6 @@ pub fn create_metadata_file_for_wasm(sess: &Session, data: &[u8], section_name: 
         name: "linking".into(),
         data: Cow::Borrowed(&[2]),
     });
-    module.section(&wasm_encoder::CustomSection {
-        name: section_name.into(),
-        data: data.into(),
-    });
+    module.section(&wasm_encoder::CustomSection { name: section_name.into(), data: data.into() });
     module.finish()
 }

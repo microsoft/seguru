@@ -114,8 +114,11 @@ impl ExtraBackendMethods for LlvmCodegenBackend {
         alloc_error_handler_kind: AllocatorKind,
     ) -> ModuleLlvm {
         let module_llvm = ModuleLlvm::new_metadata(tcx, module_name);
-        let cx =
-            SimpleCx::new(module_llvm.llmod(), &module_llvm.llcx, tcx.data_layout.pointer_size);
+        let cx = SimpleCx::new(
+            module_llvm.llmod(),
+            &module_llvm.llcx,
+            tcx.data_layout.pointer_size,
+        );
         unsafe {
             allocator::codegen(tcx, cx, module_name, kind, alloc_error_handler_kind);
         }
@@ -227,7 +230,10 @@ impl WriteBackendMethods for LlvmCodegenBackend {
         back::lto::prepare_thin(module, emit_summary)
     }
     fn serialize_module(module: ModuleCodegen<Self::Module>) -> (String, Self::ModuleBuffer) {
-        (module.name, back::lto::ModuleBuffer::new(module.module_llvm.llmod()))
+        (
+            module.name,
+            back::lto::ModuleBuffer::new(module.module_llvm.llmod()),
+        )
     }
     /// Generate autodiff rules
     fn autodiff(
@@ -292,9 +298,13 @@ impl CodegenBackend for LlvmCodegenBackend {
             }
             PrintKind::TlsModels => {
                 writeln!(out, "Available TLS models:").unwrap();
-                for name in
-                    &["global-dynamic", "local-dynamic", "initial-exec", "local-exec", "emulated"]
-                {
+                for name in &[
+                    "global-dynamic",
+                    "local-dynamic",
+                    "initial-exec",
+                    "local-exec",
+                    "emulated",
+                ] {
                     writeln!(out, "    {name}").unwrap();
                 }
                 writeln!(out).unwrap();
@@ -443,7 +453,11 @@ impl ModuleLlvm {
                 }
             };
 
-            Ok(ModuleLlvm { llmod_raw, llcx, tm: ManuallyDrop::new(tm) })
+            Ok(ModuleLlvm {
+                llmod_raw,
+                llcx,
+                tm: ManuallyDrop::new(tm),
+            })
         }
     }
 

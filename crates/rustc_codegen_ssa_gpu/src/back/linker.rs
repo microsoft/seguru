@@ -638,9 +638,7 @@ impl<'a> Linker for GccLinker<'a> {
         } else if self.sess.target.is_like_osx {
             self.link_arg("-force_load").link_arg(path);
         } else {
-            self.link_arg("--whole-archive")
-                .link_arg(path)
-                .link_arg("--no-whole-archive");
+            self.link_arg("--whole-archive").link_arg(path).link_arg("--no-whole-archive");
         }
     }
 
@@ -807,9 +805,7 @@ impl<'a> Linker for GccLinker<'a> {
                 }
             };
             if let Err(error) = res {
-                self.sess
-                    .dcx()
-                    .emit_fatal(errors::LibDefWriteFailure { error });
+                self.sess.dcx().emit_fatal(errors::LibDefWriteFailure { error });
             }
         } else if is_windows {
             let res: io::Result<()> = try {
@@ -824,9 +820,7 @@ impl<'a> Linker for GccLinker<'a> {
                 }
             };
             if let Err(error) = res {
-                self.sess
-                    .dcx()
-                    .emit_fatal(errors::LibDefWriteFailure { error });
+                self.sess.dcx().emit_fatal(errors::LibDefWriteFailure { error });
             }
         } else {
             // Write an LD version script
@@ -843,9 +837,7 @@ impl<'a> Linker for GccLinker<'a> {
                 writeln!(f, "\n  local:\n    *;\n}};")?;
             };
             if let Err(error) = res {
-                self.sess
-                    .dcx()
-                    .emit_fatal(errors::VersionScriptWriteFailure { error });
+                self.sess.dcx().emit_fatal(errors::VersionScriptWriteFailure { error });
             }
         }
 
@@ -1078,9 +1070,7 @@ impl<'a> Linker for MsvcLinker<'a> {
                         }
                     }
                     Err(error) => {
-                        self.sess
-                            .dcx()
-                            .emit_warn(errors::NoNatvisDirectory { error });
+                        self.sess.dcx().emit_warn(errors::NoNatvisDirectory { error });
                     }
                 }
             }
@@ -1130,9 +1120,7 @@ impl<'a> Linker for MsvcLinker<'a> {
             }
         };
         if let Err(error) = res {
-            self.sess
-                .dcx()
-                .emit_fatal(errors::LibDefWriteFailure { error });
+            self.sess.dcx().emit_fatal(errors::LibDefWriteFailure { error });
         }
         let mut arg = OsString::from("/DEF:");
         arg.push(path);
@@ -1276,10 +1264,7 @@ impl<'a> Linker for EmLinker<'a> {
 
         let mut arg = OsString::from("EXPORTED_FUNCTIONS=");
         let encoded = serde_json::to_string(
-            &symbols
-                .iter()
-                .map(|sym| "_".to_owned() + sym)
-                .collect::<Vec<_>>(),
+            &symbols.iter().map(|sym| "_".to_owned() + sym).collect::<Vec<_>>(),
         )
         .unwrap();
         debug!("{encoded}");
@@ -1325,11 +1310,7 @@ impl<'a> WasmLd<'a> {
         //      symbols are how the TLS segments are initialized and configured.
         let mut wasm_ld = WasmLd { cmd, sess };
         if sess.target_features.contains(&sym::atomics) {
-            wasm_ld.link_args(&[
-                "--shared-memory",
-                "--max-memory=1073741824",
-                "--import-memory",
-            ]);
+            wasm_ld.link_args(&["--shared-memory", "--max-memory=1073741824", "--import-memory"]);
             if sess.target.os == "unknown" || sess.target.os == "none" {
                 wasm_ld.link_args(&[
                     "--export=__wasm_init_tls",
@@ -1390,9 +1371,7 @@ impl<'a> Linker for WasmLd<'a> {
         if !whole_archive {
             self.link_or_cc_arg(path);
         } else {
-            self.link_arg("--whole-archive")
-                .link_or_cc_arg(path)
-                .link_arg("--no-whole-archive");
+            self.link_arg("--whole-archive").link_or_cc_arg(path).link_arg("--no-whole-archive");
         }
     }
 
@@ -1528,9 +1507,7 @@ impl<'a> Linker for L4Bender<'a> {
         if !whole_archive {
             self.link_or_cc_arg(path);
         } else {
-            self.link_arg("--whole-archive")
-                .link_or_cc_arg(path)
-                .link_arg("--no-whole-archive");
+            self.link_arg("--whole-archive").link_or_cc_arg(path).link_arg("--no-whole-archive");
         }
     }
 
@@ -1586,9 +1563,7 @@ impl<'a> Linker for L4Bender<'a> {
 
     fn export_symbols(&mut self, _: &Path, _: CrateType, _: &[String]) {
         // ToDo, not implemented, copy from GCC
-        self.sess
-            .dcx()
-            .emit_warn(errors::L4BenderExportingSymbolsUnimplemented);
+        self.sess.dcx().emit_warn(errors::L4BenderExportingSymbolsUnimplemented);
     }
 
     fn subsystem(&mut self, subsystem: &str) {
@@ -1610,11 +1585,7 @@ impl<'a> Linker for L4Bender<'a> {
 
 impl<'a> L4Bender<'a> {
     fn new(cmd: Command, sess: &'a Session) -> L4Bender<'a> {
-        L4Bender {
-            cmd,
-            sess,
-            hinted_static: false,
-        }
+        L4Bender { cmd, sess, hinted_static: false }
     }
 
     fn hint_static(&mut self) {
@@ -1634,11 +1605,7 @@ struct AixLinker<'a> {
 
 impl<'a> AixLinker<'a> {
     fn new(cmd: Command, sess: &'a Session) -> AixLinker<'a> {
-        AixLinker {
-            cmd,
-            sess,
-            hinted_static: None,
-        }
+        AixLinker { cmd, sess, hinted_static: None }
     }
 
     fn hint_static(&mut self) {
@@ -1689,11 +1656,7 @@ impl<'a> Linker for AixLinker<'a> {
 
     fn link_dylib_by_name(&mut self, name: &str, verbatim: bool, _as_needed: bool) {
         self.hint_dynamic();
-        self.link_or_cc_arg(if verbatim {
-            String::from(name)
-        } else {
-            format!("-l{name}")
-        });
+        self.link_or_cc_arg(if verbatim { String::from(name) } else { format!("-l{name}") });
     }
 
     fn link_dylib_by_path(&mut self, path: &Path, _as_needed: bool) {
@@ -1704,11 +1667,7 @@ impl<'a> Linker for AixLinker<'a> {
     fn link_staticlib_by_name(&mut self, name: &str, verbatim: bool, whole_archive: bool) {
         self.hint_static();
         if !whole_archive {
-            self.link_or_cc_arg(if verbatim {
-                String::from(name)
-            } else {
-                format!("-l{name}")
-            });
+            self.link_or_cc_arg(if verbatim { String::from(name) } else { format!("-l{name}") });
         } else {
             let mut arg = OsString::from("-bkeepfile:");
             arg.push(find_native_static_library(name, verbatim, self.sess));
@@ -1770,9 +1729,7 @@ impl<'a> Linker for AixLinker<'a> {
             }
         };
         if let Err(e) = res {
-            self.sess
-                .dcx()
-                .fatal(format!("failed to write export file: {e}"));
+            self.sess.dcx().fatal(format!("failed to write export file: {e}"));
         }
         self.link_arg(format!("-bE:{}", path.to_str().unwrap()));
     }
@@ -2102,9 +2059,7 @@ impl<'a> Linker for BpfLinker<'a> {
             }
         };
         if let Err(error) = res {
-            self.sess
-                .dcx()
-                .emit_fatal(errors::SymbolFileWriteFailure { error });
+            self.sess.dcx().emit_fatal(errors::SymbolFileWriteFailure { error });
         } else {
             self.link_arg("--export-symbols").link_arg(&path);
         }

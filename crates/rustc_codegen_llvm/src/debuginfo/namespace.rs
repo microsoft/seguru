@@ -22,9 +22,15 @@ pub(crate) fn item_namespace<'ll>(cx: &CodegenCx<'ll, '_>, def_id: DefId) -> &'l
     }
 
     let def_key = cx.tcx.def_key(def_id);
-    let parent_scope = def_key
-        .parent
-        .map(|parent| item_namespace(cx, DefId { krate: def_id.krate, index: parent }));
+    let parent_scope = def_key.parent.map(|parent| {
+        item_namespace(
+            cx,
+            DefId {
+                krate: def_id.krate,
+                index: parent,
+            },
+        )
+    });
 
     let namespace_name_string = {
         let mut output = String::with_capacity(64);
@@ -42,6 +48,9 @@ pub(crate) fn item_namespace<'ll>(cx: &CodegenCx<'ll, '_>, def_id: DefId) -> &'l
         )
     };
 
-    debug_context(cx).namespace_map.borrow_mut().insert(def_id, scope);
+    debug_context(cx)
+        .namespace_map
+        .borrow_mut()
+        .insert(def_id, scope);
     scope
 }

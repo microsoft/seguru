@@ -83,7 +83,10 @@ mod type_map;
 /// unique ID can be found in the type map.
 macro_rules! return_if_di_node_created_in_meantime {
     ($cx: expr, $unique_type_id: expr) => {
-        if let Some(di_node) = debug_context($cx).type_map.di_node_for_unique_id($unique_type_id) {
+        if let Some(di_node) = debug_context($cx)
+            .type_map
+            .di_node_for_unique_id($unique_type_id)
+        {
             return DINodeCreationResult::new(di_node, true);
         }
     };
@@ -103,7 +106,10 @@ fn build_fixed_size_array_di_node<'ll, 'tcx>(
     array_type: Ty<'tcx>,
 ) -> DINodeCreationResult<'ll> {
     let ty::Array(element_type, len) = array_type.kind() else {
-        bug!("build_fixed_size_array_di_node() called with non-ty::Array type `{:?}`", array_type)
+        bug!(
+            "build_fixed_size_array_di_node() called with non-ty::Array type `{:?}`",
+            array_type
+        )
     };
 
     let element_type_di_node = type_di_node(cx, *element_type);
@@ -116,8 +122,13 @@ fn build_fixed_size_array_di_node<'ll, 'tcx>(
         .try_to_target_usize(cx.tcx)
         .expect("expected monomorphic const in codegen") as c_longlong;
 
-    let subrange =
-        unsafe { Some(llvm::LLVMRustDIBuilderGetOrCreateSubrange(DIB(cx), 0, upper_bound)) };
+    let subrange = unsafe {
+        Some(llvm::LLVMRustDIBuilderGetOrCreateSubrange(
+            DIB(cx),
+            0,
+            upper_bound,
+        ))
+    };
 
     let subscripts = create_DIArray(DIB(cx), &[subrange]);
     let di_node = unsafe {
@@ -182,7 +193,10 @@ fn build_pointer_or_reference_di_node<'ll, 'tcx>(
                 )
             };
 
-            DINodeCreationResult { di_node, already_stored_in_typemap: false }
+            DINodeCreationResult {
+                di_node,
+                already_stored_in_typemap: false,
+            }
         }
         Some(wide_pointer_kind) => {
             type_map::build_type_with_children(
@@ -292,8 +306,9 @@ fn build_subroutine_type_di_node<'ll, 'tcx>(
         .insert(unique_type_id, recursion_marker_type_di_node(cx));
 
     let fn_ty = unique_type_id.expect_ty();
-    let signature =
-        cx.tcx.normalize_erasing_late_bound_regions(cx.typing_env(), fn_ty.fn_sig(cx.tcx));
+    let signature = cx
+        .tcx
+        .normalize_erasing_late_bound_regions(cx.typing_env(), fn_ty.fn_sig(cx.tcx));
 
     let signature_di_nodes: SmallVec<_> = iter::once(
         // return type
@@ -307,11 +322,18 @@ fn build_subroutine_type_di_node<'ll, 'tcx>(
     )
     .chain(
         // regular arguments
-        signature.inputs().iter().map(|&argument_type| Some(type_di_node(cx, argument_type))),
+        signature
+            .inputs()
+            .iter()
+            .map(|&argument_type| Some(type_di_node(cx, argument_type))),
     )
     .collect();
 
-    debug_context(cx).type_map.unique_id_to_di_node.borrow_mut().remove(&unique_type_id);
+    debug_context(cx)
+        .type_map
+        .unique_id_to_di_node
+        .borrow_mut()
+        .remove(&unique_type_id);
 
     let fn_di_node = create_subroutine_type(cx, create_DIArray(DIB(cx), &signature_di_nodes[..]));
 
@@ -319,7 +341,10 @@ fn build_subroutine_type_di_node<'ll, 'tcx>(
     let name = compute_debuginfo_type_name(cx.tcx, fn_ty, false);
     let (size, align) = match fn_ty.kind() {
         ty::FnDef(..) => (Size::ZERO, Align::ONE),
-        ty::FnPtr(..) => (cx.tcx.data_layout.pointer_size, cx.tcx.data_layout.pointer_align.abi),
+        ty::FnPtr(..) => (
+            cx.tcx.data_layout.pointer_size,
+            cx.tcx.data_layout.pointer_align.abi,
+        ),
         _ => unreachable!(),
     };
     let di_node = unsafe {
@@ -411,7 +436,10 @@ fn build_slice_type_di_node<'ll, 'tcx>(
 
     let element_type_di_node = type_di_node(cx, element_type);
     return_if_di_node_created_in_meantime!(cx, unique_type_id);
-    DINodeCreationResult { di_node: element_type_di_node, already_stored_in_typemap: false }
+    DINodeCreationResult {
+        di_node: element_type_di_node,
+        already_stored_in_typemap: false,
+    }
 }
 
 /// Get the debuginfo node for the given type.
@@ -421,14 +449,19 @@ fn build_slice_type_di_node<'ll, 'tcx>(
 pub(crate) fn type_di_node<'ll, 'tcx>(cx: &CodegenCx<'ll, 'tcx>, t: Ty<'tcx>) -> &'ll DIType {
     let unique_type_id = UniqueTypeId::for_ty(cx.tcx, t);
 
-    if let Some(existing_di_node) = debug_context(cx).type_map.di_node_for_unique_id(unique_type_id)
+    if let Some(existing_di_node) = debug_context(cx)
+        .type_map
+        .di_node_for_unique_id(unique_type_id)
     {
         return existing_di_node;
     }
 
     debug!("type_di_node: {:?} kind: {:?}", t, t.kind());
 
-    let DINodeCreationResult { di_node, already_stored_in_typemap } = match *t.kind() {
+    let DINodeCreationResult {
+        di_node,
+        already_stored_in_typemap,
+    } = match *t.kind() {
         ty::Never | ty::Bool | ty::Char | ty::Int(_) | ty::Uint(_) | ty::Float(_) => {
             build_basic_type_di_node(cx, t)
         }
@@ -445,7 +478,9 @@ pub(crate) fn type_di_node<'ll, 'tcx>(cx: &CodegenCx<'ll, 'tcx>, t: Ty<'tcx>) ->
         // (or if there is no allocator argument).
         ty::Adt(def, args)
             if def.is_box()
-                && args.get(1).is_none_or(|arg| cx.layout_of(arg.expect_ty()).is_1zst()) =>
+                && args
+                    .get(1)
+                    .is_none_or(|arg| cx.layout_of(arg.expect_ty()).is_1zst()) =>
         {
             build_pointer_or_reference_di_node(cx, t, t.expect_boxed_ty(), unique_type_id)
         }
@@ -465,19 +500,21 @@ pub(crate) fn type_di_node<'ll, 'tcx>(cx: &CodegenCx<'ll, 'tcx>, t: Ty<'tcx>) ->
     {
         if already_stored_in_typemap {
             // Make sure that we really do have a `TypeMap` entry for the unique type ID.
-            let di_node_for_uid =
-                match debug_context(cx).type_map.di_node_for_unique_id(unique_type_id) {
-                    Some(di_node) => di_node,
-                    None => {
-                        bug!(
-                            "expected type debuginfo node for unique \
+            let di_node_for_uid = match debug_context(cx)
+                .type_map
+                .di_node_for_unique_id(unique_type_id)
+            {
+                Some(di_node) => di_node,
+                None => {
+                    bug!(
+                        "expected type debuginfo node for unique \
                                type ID '{:?}' to already be in \
                                the `debuginfo::TypeMap` but it \
                                was not.",
-                            unique_type_id,
-                        );
-                    }
-                };
+                        unique_type_id,
+                    );
+                }
+            };
 
             assert_eq!(di_node_for_uid as *const _, di_node as *const _);
         } else {
@@ -490,24 +527,26 @@ pub(crate) fn type_di_node<'ll, 'tcx>(cx: &CodegenCx<'ll, 'tcx>, t: Ty<'tcx>) ->
 
 // FIXME(mw): Cache this via a regular UniqueTypeId instead of an extra field in the debug context.
 fn recursion_marker_type_di_node<'ll, 'tcx>(cx: &CodegenCx<'ll, 'tcx>) -> &'ll DIType {
-    *debug_context(cx).recursion_marker_type.get_or_init(move || {
-        // The choice of type here is pretty arbitrary -
-        // anything reading the debuginfo for a recursive
-        // type is going to see *something* weird - the only
-        // question is what exactly it will see.
-        //
-        // FIXME: the name `<recur_type>` does not fit the naming scheme
-        //        of other types.
-        //
-        // FIXME: it might make sense to use an actual pointer type here
-        //        so that debuggers can show the address.
-        create_basic_type(
-            cx,
-            "<recur_type>",
-            cx.tcx.data_layout.pointer_size,
-            dwarf_const::DW_ATE_unsigned,
-        )
-    })
+    *debug_context(cx)
+        .recursion_marker_type
+        .get_or_init(move || {
+            // The choice of type here is pretty arbitrary -
+            // anything reading the debuginfo for a recursive
+            // type is going to see *something* weird - the only
+            // question is what exactly it will see.
+            //
+            // FIXME: the name `<recur_type>` does not fit the naming scheme
+            //        of other types.
+            //
+            // FIXME: it might make sense to use an actual pointer type here
+            //        so that debuggers can show the address.
+            create_basic_type(
+                cx,
+                "<recur_type>",
+                cx.tcx.data_layout.pointer_size,
+                dwarf_const::DW_ATE_unsigned,
+            )
+        })
 }
 
 fn hex_encode(data: &[u8]) -> String {
@@ -533,8 +572,9 @@ pub(crate) fn file_metadata<'ll>(cx: &CodegenCx<'ll, '_>, source_file: &SourceFi
     ) -> &'ll DIFile {
         debug!(?source_file.name);
 
-        let filename_display_preference =
-            cx.sess().filename_display_preference(RemapPathScopeComponents::DEBUGINFO);
+        let filename_display_preference = cx
+            .sess()
+            .filename_display_preference(RemapPathScopeComponents::DEBUGINFO);
 
         use rustc_session::config::RemapPathScopeComponents;
         let (directory, file_name) = match &source_file.name {
@@ -605,7 +645,10 @@ pub(crate) fn file_metadata<'ll>(cx: &CodegenCx<'ll, '_>, source_file: &SourceFi
             }
             other => {
                 debug!(?other);
-                ("".into(), other.display(filename_display_preference).to_string())
+                (
+                    "".into(),
+                    other.display(filename_display_preference).to_string(),
+                )
             }
         };
 
@@ -617,17 +660,33 @@ pub(crate) fn file_metadata<'ll>(cx: &CodegenCx<'ll, '_>, source_file: &SourceFi
         };
         let hash_value = hex_encode(source_file.src_hash.hash_bytes());
 
-        let source =
-            cx.sess().opts.unstable_opts.embed_source.then_some(()).and(source_file.src.as_ref());
+        let source = cx
+            .sess()
+            .opts
+            .unstable_opts
+            .embed_source
+            .then_some(())
+            .and(source_file.src.as_ref());
 
-        create_file(DIB(cx), &file_name, &directory, &hash_value, hash_kind, source)
+        create_file(
+            DIB(cx),
+            &file_name,
+            &directory,
+            &hash_value,
+            hash_kind,
+            source,
+        )
     }
 }
 
 fn unknown_file_metadata<'ll>(cx: &CodegenCx<'ll, '_>) -> &'ll DIFile {
-    debug_context(cx).created_files.borrow_mut().entry(None).or_insert_with(|| {
-        create_file(DIB(cx), "<unknown>", "", "", llvm::ChecksumKind::None, None)
-    })
+    debug_context(cx)
+        .created_files
+        .borrow_mut()
+        .entry(None)
+        .or_insert_with(|| {
+            create_file(DIB(cx), "<unknown>", "", "", llvm::ChecksumKind::None, None)
+        })
 }
 
 fn create_file<'ll>(
@@ -870,7 +929,10 @@ pub(crate) fn build_compile_unit_di_node<'ll, 'tcx>(
     let mut name_in_debuginfo = tcx
         .sess
         .local_crate_source_file()
-        .map(|src| src.for_scope(&tcx.sess, RemapPathScopeComponents::DEBUGINFO).to_path_buf())
+        .map(|src| {
+            src.for_scope(&tcx.sess, RemapPathScopeComponents::DEBUGINFO)
+                .to_path_buf()
+        })
         .unwrap_or_else(|| PathBuf::from(tcx.crate_name(LOCAL_CRATE).as_str()));
 
     // To avoid breaking split DWARF, we need to ensure that each codegen unit
@@ -919,13 +981,18 @@ pub(crate) fn build_compile_unit_di_node<'ll, 'tcx>(
     };
     let split_name = split_name
         .as_ref()
-        .map(|f| f.for_scope(tcx.sess, RemapPathScopeComponents::DEBUGINFO).to_string_lossy())
+        .map(|f| {
+            f.for_scope(tcx.sess, RemapPathScopeComponents::DEBUGINFO)
+                .to_string_lossy()
+        })
         .unwrap_or_default();
     let kind = DebugEmissionKind::from_generic(tcx.sess.opts.debuginfo);
 
     let dwarf_version = tcx.sess.dwarf_version();
-    let is_dwarf_kind =
-        matches!(tcx.sess.target.debuginfo_kind, DebuginfoKind::Dwarf | DebuginfoKind::DwarfDsym);
+    let is_dwarf_kind = matches!(
+        tcx.sess.target.debuginfo_kind,
+        DebuginfoKind::Dwarf | DebuginfoKind::DwarfDsym
+    );
     // Don't emit `.debug_pubnames` and `.debug_pubtypes` on DWARFv4 or lower.
     let debug_name_table_kind = if is_dwarf_kind && dwarf_version <= 4 {
         DebugNameTableKind::None
@@ -1053,7 +1120,10 @@ fn build_struct_type_di_node<'ll, 'tcx>(
 ) -> DINodeCreationResult<'ll> {
     let struct_type = unique_type_id.expect_ty();
     let ty::Adt(adt_def, _) = struct_type.kind() else {
-        bug!("build_struct_type_di_node() called with non-struct-type: {:?}", struct_type);
+        bug!(
+            "build_struct_type_di_node() called with non-struct-type: {:?}",
+            struct_type
+        );
     };
     assert!(adt_def.is_struct());
     let containing_scope = get_namespace_for_item(cx, adt_def.did());
@@ -1137,7 +1207,11 @@ fn build_upvar_field_di_nodes<'ll, 'tcx>(
         }
     };
 
-    assert!(up_var_tys.iter().all(|t| t == cx.tcx.normalize_erasing_regions(cx.typing_env(), t)));
+    assert!(
+        up_var_tys
+            .iter()
+            .all(|t| t == cx.tcx.normalize_erasing_regions(cx.typing_env(), t))
+    );
 
     let capture_names = cx.tcx.closure_saved_names_of_captured_variables(def_id);
     let layout = cx.layout_of(closure_or_coroutine_ty);
@@ -1168,7 +1242,10 @@ fn build_tuple_type_di_node<'ll, 'tcx>(
 ) -> DINodeCreationResult<'ll> {
     let tuple_type = unique_type_id.expect_ty();
     let &ty::Tuple(component_types) = tuple_type.kind() else {
-        bug!("build_tuple_type_di_node() called with non-tuple-type: {:?}", tuple_type)
+        bug!(
+            "build_tuple_type_di_node() called with non-tuple-type: {:?}",
+            tuple_type
+        )
     };
 
     let tuple_type_and_layout = cx.layout_of(tuple_type);
@@ -1217,7 +1294,10 @@ fn build_closure_env_di_node<'ll, 'tcx>(
     let closure_env_type = unique_type_id.expect_ty();
     let &(ty::Closure(def_id, _) | ty::CoroutineClosure(def_id, _)) = closure_env_type.kind()
     else {
-        bug!("build_closure_env_di_node() called with non-closure-type: {:?}", closure_env_type)
+        bug!(
+            "build_closure_env_di_node() called with non-closure-type: {:?}",
+            closure_env_type
+        )
     };
     let containing_scope = get_namespace_for_item(cx, def_id);
     let type_name = compute_debuginfo_type_name(cx.tcx, closure_env_type, false);
@@ -1334,9 +1414,9 @@ fn build_generic_type_param_di_nodes<'ll, 'tcx>(
     return smallvec![];
 
     fn get_parameter_names(cx: &CodegenCx<'_, '_>, generics: &ty::Generics) -> Vec<Symbol> {
-        let mut names = generics
-            .parent
-            .map_or_else(Vec::new, |def_id| get_parameter_names(cx, cx.tcx.generics_of(def_id)));
+        let mut names = generics.parent.map_or_else(Vec::new, |def_id| {
+            get_parameter_names(cx, cx.tcx.generics_of(def_id))
+        });
         names.extend(generics.own_params.iter().map(|param| param.name));
         names
     }
@@ -1368,7 +1448,9 @@ pub(crate) fn build_global_var_di_node<'ll>(
 
     let is_local_to_unit = is_node_local_to_unit(cx, def_id);
 
-    let DefKind::Static { nested, .. } = cx.tcx.def_kind(def_id) else { bug!() };
+    let DefKind::Static { nested, .. } = cx.tcx.def_kind(def_id) else {
+        bug!()
+    };
     if nested {
         return;
     }
@@ -1379,7 +1461,11 @@ pub(crate) fn build_global_var_di_node<'ll>(
     let linkage_name = mangled_name_of_instance(cx, Instance::mono(tcx, def_id)).name;
     // When empty, linkage_name field is omitted,
     // which is what we want for no_mangle statics
-    let linkage_name = if var_name == linkage_name { "" } else { linkage_name };
+    let linkage_name = if var_name == linkage_name {
+        ""
+    } else {
+        linkage_name
+    };
 
     let global_align = cx.align_of(variable_type);
 
@@ -1438,7 +1524,10 @@ fn build_vtable_type_di_node<'ll, 'tcx>(
     // If `usize` is not pointer-sized and -aligned then the size and alignment computations
     // for the vtable as a whole would be wrong. Let's make sure this holds even on weird
     // platforms.
-    assert_eq!(cx.size_and_align_of(tcx.types.usize), (pointer_size, pointer_align));
+    assert_eq!(
+        cx.size_and_align_of(tcx.types.usize),
+        (pointer_size, pointer_align)
+    );
 
     let vtable_type_name =
         compute_debuginfo_vtable_name(cx.tcx, ty, poly_trait_ref, VTableNameKind::Type);
@@ -1476,9 +1565,10 @@ fn build_vtable_type_di_node<'ll, 'tcx>(
                             //       (coming from different traits).
                             (format!("__method{index}"), void_pointer_type_di_node)
                         }
-                        ty::VtblEntry::TraitVPtr(_) => {
-                            (format!("__super_trait_ptr{index}"), void_pointer_type_di_node)
-                        }
+                        ty::VtblEntry::TraitVPtr(_) => (
+                            format!("__super_trait_ptr{index}"),
+                            void_pointer_type_di_node,
+                        ),
                         ty::VtblEntry::MetadataAlign => ("align".to_string(), usize_di_node),
                         ty::VtblEntry::MetadataSize => ("size".to_string(), usize_di_node),
                         ty::VtblEntry::Vacant => return None,

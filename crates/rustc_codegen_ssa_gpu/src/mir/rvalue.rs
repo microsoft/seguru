@@ -649,10 +649,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 );
                 let val_ty = op.ty(bx.tcx(), lhs.layout.ty, rhs.layout.ty);
                 let operand_ty = Ty::new_tup(bx.tcx(), &[val_ty, bx.tcx().types.bool]);
-                OperandRef {
-                    val: result,
-                    layout: bx.cx().layout_of(operand_ty),
-                }
+                OperandRef { val: result, layout: bx.cx().layout_of(operand_ty) }
             }
             mir::Rvalue::BinaryOp(op, box (ref lhs, ref rhs)) => {
                 let lhs = self.codegen_operand(bx, lhs);
@@ -685,9 +682,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 };
                 OperandRef {
                     val: OperandValue::Immediate(llresult),
-                    layout: bx
-                        .cx()
-                        .layout_of(op.ty(bx.tcx(), lhs.layout.ty, rhs.layout.ty)),
+                    layout: bx.cx().layout_of(op.ty(bx.tcx(), lhs.layout.ty, rhs.layout.ty)),
                 }
             }
 
@@ -712,15 +707,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                         let (_, meta) = operand.val.pointer_parts();
                         assert_eq!(operand.layout.fields.count() > 1, meta.is_some());
                         if let Some(meta) = meta {
-                            (
-                                OperandValue::Immediate(meta),
-                                operand.layout.field(self.cx, 1),
-                            )
+                            (OperandValue::Immediate(meta), operand.layout.field(self.cx, 1))
                         } else {
-                            (
-                                OperandValue::ZeroSized,
-                                bx.cx().layout_of(bx.tcx().types.unit),
-                            )
+                            (OperandValue::ZeroSized, bx.cx().layout_of(bx.tcx().types.unit))
                         }
                     }
                 };
@@ -796,22 +785,11 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                     } else {
                         None
                     };
-                    bx.call(
-                        fn_ty,
-                        fn_attrs,
-                        Some(fn_abi),
-                        fn_ptr,
-                        &[],
-                        None,
-                        Some(instance),
-                    )
+                    bx.call(fn_ty, fn_attrs, Some(fn_abi), fn_ptr, &[], None, Some(instance))
                 } else {
                     bx.get_static(def_id)
                 };
-                OperandRef {
-                    val: OperandValue::Immediate(static_),
-                    layout,
-                }
+                OperandRef { val: OperandValue::Immediate(static_), layout }
             }
             mir::Rvalue::Use(ref operand) => self.codegen_operand(bx, operand),
             mir::Rvalue::Repeat(..) => bug!("{rvalue:?} in codegen_rvalue_operand"),
@@ -862,19 +840,13 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 let content_ty = self.monomorphize(content_ty);
                 let box_layout = bx.cx().layout_of(Ty::new_box(bx.tcx(), content_ty));
 
-                OperandRef {
-                    val: OperandValue::Immediate(val),
-                    layout: box_layout,
-                }
+                OperandRef { val: OperandValue::Immediate(val), layout: box_layout }
             }
             mir::Rvalue::WrapUnsafeBinder(ref operand, binder_ty) => {
                 let operand = self.codegen_operand(bx, operand);
                 let binder_ty = self.monomorphize(binder_ty);
                 let layout = bx.cx().layout_of(binder_ty);
-                OperandRef {
-                    val: operand.val,
-                    layout,
-                }
+                OperandRef { val: operand.val, layout }
             }
         }
     }
@@ -886,9 +858,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             && let LocalRef::Operand(op) = self.locals[index]
             && let ty::Array(_, n) = op.layout.ty.kind()
         {
-            let n = n
-                .try_to_target_usize(bx.tcx())
-                .expect("expected monomorphic const in codegen");
+            let n = n.try_to_target_usize(bx.tcx()).expect("expected monomorphic const in codegen");
             return bx.cx().const_usize(n);
         }
         // use common size calculation for non zero-sized types
@@ -916,10 +886,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             "Address of place was unexpectedly {val:?} for pointee type {ty:?}",
         );
 
-        OperandRef {
-            val,
-            layout: self.cx.layout_of(mk_ptr_ty(self.cx.tcx(), ty)),
-        }
+        OperandRef { val, layout: self.cx.layout_of(mk_ptr_ty(self.cx.tcx(), ty)) }
     }
 
     fn codegen_scalar_binop(
@@ -1021,11 +988,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             }
             mir::BinOp::Shr | mir::BinOp::ShrUnchecked => {
                 let rhs = base::build_shift_expr_rhs(bx, lhs, rhs, op == mir::BinOp::ShrUnchecked);
-                if is_signed {
-                    bx.ashr(lhs, rhs)
-                } else {
-                    bx.lshr(lhs, rhs)
-                }
+                if is_signed { bx.ashr(lhs, rhs) } else { bx.lshr(lhs, rhs) }
             }
             mir::BinOp::Ne
             | mir::BinOp::Lt
@@ -1231,10 +1194,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             OperandValueKind::Immediate(match layout.backend_repr {
                 abi::BackendRepr::Scalar(s) => s,
                 abi::BackendRepr::SimdVector { element, .. } => element,
-                x => span_bug!(
-                    self.mir.span,
-                    "Couldn't translate {x:?} as backend immediate"
-                ),
+                x => span_bug!(self.mir.span, "Couldn't translate {x:?} as backend immediate"),
             })
         } else if self.cx.is_backend_scalar_pair(layout) {
             let abi::BackendRepr::ScalarPair(s1, s2) = layout.backend_repr else {

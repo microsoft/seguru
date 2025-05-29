@@ -50,7 +50,12 @@ impl<'ll> Iterator for ValueIter<'ll> {
 }
 
 pub(crate) fn iter_globals(llmod: &llvm::Module) -> ValueIter<'_> {
-    unsafe { ValueIter { cur: llvm::LLVMGetFirstGlobal(llmod), step: llvm::LLVMGetNextGlobal } }
+    unsafe {
+        ValueIter {
+            cur: llvm::LLVMGetFirstGlobal(llmod),
+            step: llvm::LLVMGetNextGlobal,
+        }
+    }
 }
 
 pub(crate) fn compile_codegen_unit(
@@ -76,10 +81,11 @@ pub(crate) fn compile_codegen_unit(
     fn module_codegen(tcx: TyCtxt<'_>, cgu_name: Symbol) -> ModuleCodegen<ModuleLlvm> {
         let cgu = tcx.codegen_unit(cgu_name);
         let _prof_timer =
-            tcx.prof.generic_activity_with_arg_recorder("codegen_module", |recorder| {
-                recorder.record_arg(cgu_name.to_string());
-                recorder.record_arg(cgu.size_estimate().to_string());
-            });
+            tcx.prof
+                .generic_activity_with_arg_recorder("codegen_module", |recorder| {
+                    recorder.record_arg(cgu_name.to_string());
+                    recorder.record_arg(cgu.size_estimate().to_string());
+                });
         // Instantiate monomorphizations without filling out definitions yet...
         let llvm_module = ModuleLlvm::new(tcx, cgu_name.as_str());
         {
@@ -140,7 +146,9 @@ pub(crate) fn compile_codegen_unit(
 }
 
 pub(crate) fn set_link_section(llval: &Value, attrs: &CodegenFnAttrs) {
-    let Some(sect) = attrs.link_section else { return };
+    let Some(sect) = attrs.link_section else {
+        return;
+    };
     let buf = SmallCStr::new(sect.as_str());
     llvm::set_section(llval, &buf);
 }

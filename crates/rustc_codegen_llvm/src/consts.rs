@@ -134,7 +134,11 @@ pub(crate) fn const_alloc_to_llvm<'ll>(
     // is a valid C string. LLVM only considers bare arrays for this optimization,
     // not arrays wrapped in a struct. LLVM handles this at:
     // https://github.com/rust-lang/llvm-project/blob/acaea3d2bb8f351b740db7ebce7d7a40b9e21488/llvm/lib/Target/TargetLoweringObjectFile.cpp#L249-L280
-    if let &[data] = &*llvals { data } else { cx.const_struct(&llvals, true) }
+    if let &[data] = &*llvals {
+        data
+    } else {
+        cx.const_struct(&llvals, true)
+    }
 }
 
 fn codegen_static_initializer<'ll, 'tcx>(
@@ -154,10 +158,14 @@ fn set_global_alignment<'ll>(cx: &CodegenCx<'ll, '_>, gv: &'ll Value, mut align:
             Ok(min) => align = align.max(min),
             Err(err) => match err {
                 AlignFromBytesError::NotPowerOfTwo(align) => {
-                    cx.sess().dcx().emit_err(InvalidMinimumAlignmentNotPowerOfTwo { align });
+                    cx.sess()
+                        .dcx()
+                        .emit_err(InvalidMinimumAlignmentNotPowerOfTwo { align });
                 }
                 AlignFromBytesError::TooLarge(align) => {
-                    cx.sess().dcx().emit_err(InvalidMinimumAlignmentTooLarge { align });
+                    cx.sess()
+                        .dcx()
+                        .emit_err(InvalidMinimumAlignmentTooLarge { align });
                 }
             },
         }
@@ -221,7 +229,10 @@ fn check_and_apply_linkage<'ll, 'tcx>(
         && common::is_mingw_gnu_toolchain(&cx.tcx.sess.target)
         && let Some(dllimport) = crate::common::get_dllimport(cx.tcx, def_id, sym)
     {
-        cx.declare_global(&common::i686_decorated_name(dllimport, true, true, false), llty)
+        cx.declare_global(
+            &common::i686_decorated_name(dllimport, true, true, false),
+            llty,
+        )
     } else {
         // Generate an external declaration.
         // FIXME(nagisa): investigate whether it can be changed into define_global
@@ -251,9 +262,11 @@ impl<'ll> CodegenCx<'ll, '_> {
         let gv = match kind {
             Some(kind) if !self.tcx.sess.fewer_names() => {
                 let name = self.generate_local_symbol_name(kind);
-                let gv = self.define_global(&name, self.val_ty(cv)).unwrap_or_else(|| {
-                    bug!("symbol `{}` is already defined", name);
-                });
+                let gv = self
+                    .define_global(&name, self.val_ty(cv))
+                    .unwrap_or_else(|| {
+                        bug!("symbol `{}` is already defined", name);
+                    });
                 llvm::set_linkage(gv, llvm::Linkage::PrivateLinkage);
                 gv
             }
@@ -298,7 +311,9 @@ impl<'ll> CodegenCx<'ll, '_> {
         let instance = Instance::mono(self.tcx, def_id);
         trace!(?instance);
 
-        let DefKind::Static { nested, .. } = self.tcx.def_kind(def_id) else { bug!() };
+        let DefKind::Static { nested, .. } = self.tcx.def_kind(def_id) else {
+            bug!()
+        };
         // Nested statics do not have a type, so pick a dummy type and let `codegen_static` figure
         // out the llvm type from the actual evaluated initializer.
         let llty = if nested {
@@ -319,8 +334,10 @@ impl<'ll> CodegenCx<'ll, '_> {
             return g;
         }
 
-        let defined_in_current_codegen_unit =
-            self.codegen_unit.items().contains_key(&MonoItem::Static(def_id));
+        let defined_in_current_codegen_unit = self
+            .codegen_unit
+            .items()
+            .contains_key(&MonoItem::Static(def_id));
         assert!(
             !defined_in_current_codegen_unit,
             "consts::get_static() should always hit the cache for \
@@ -415,7 +432,10 @@ impl<'ll> CodegenCx<'ll, '_> {
         unsafe {
             assert!(
                 llvm::LLVMGetInitializer(
-                    self.instances.borrow().get(&Instance::mono(self.tcx, def_id)).unwrap()
+                    self.instances
+                        .borrow()
+                        .get(&Instance::mono(self.tcx, def_id))
+                        .unwrap()
                 )
                 .is_none()
             );

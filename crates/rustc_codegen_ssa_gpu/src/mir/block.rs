@@ -84,10 +84,7 @@ impl<'a, 'tcx> TerminatorCodegenHelper<'tcx> {
         if is_cleanupret {
             // Cross-funclet jump - need a trampoline
             assert!(base::wants_new_eh_instructions(fx.cx.tcx().sess));
-            debug!(
-                "llbb_with_cleanup: creating cleanup trampoline for {:?}",
-                target
-            );
+            debug!("llbb_with_cleanup: creating cleanup trampoline for {:?}", target);
             let name = &format!("{:?}_cleanup_trampoline_{:?}", self.bb, target);
             let trampoline_llbb = Bx::append_block(fx.cx, fx.llfn, name);
             let mut trampoline_bx = Bx::build(fx.cx, trampoline_llbb);
@@ -255,15 +252,8 @@ impl<'a, 'tcx> TerminatorCodegenHelper<'tcx> {
             }
             MergingSucc::False
         } else {
-            let llret = bx.call(
-                fn_ty,
-                fn_attrs,
-                Some(fn_abi),
-                fn_ptr,
-                llargs,
-                self.funclet(fx),
-                instance,
-            );
+            let llret =
+                bx.call(fn_ty, fn_attrs, Some(fn_abi), fn_ptr, llargs, self.funclet(fx), instance);
             if fx.mir[self.bb].is_cleanup {
                 bx.apply_attrs_to_cleanup_callsite(llret);
             }
@@ -302,10 +292,7 @@ impl<'a, 'tcx> TerminatorCodegenHelper<'tcx> {
             mir::UnwindAction::Unreachable => None,
         };
 
-        if operands
-            .iter()
-            .any(|x| matches!(x, InlineAsmOperandRef::Label { .. }))
-        {
+        if operands.iter().any(|x| matches!(x, InlineAsmOperandRef::Label { .. })) {
             assert!(unwind_target.is_none());
             let ret_llbb = if let Some(target) = destination {
                 fx.llbb(target)
@@ -341,9 +328,7 @@ impl<'a, 'tcx> TerminatorCodegenHelper<'tcx> {
             );
             MergingSucc::False
         } else {
-            bx.codegen_inline_asm(
-                template, operands, options, line_spans, instance, None, None,
-            );
+            bx.codegen_inline_asm(template, operands, options, line_spans, instance, None, None);
 
             if let Some(target) = destination {
                 self.funclet_br(fx, bx, target, mergeable_succ)
@@ -403,11 +388,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             // If `target_cold == otherwise_cold`, the branches have the same weight
             // so there is no expectation. If they differ, the `target` branch is expected
             // when the `otherwise` branch is cold.
-            let expect = if target_cold == otherwise_cold {
-                None
-            } else {
-                Some(otherwise_cold)
-            };
+            let expect = if target_cold == otherwise_cold { None } else { Some(otherwise_cold) };
             if switch_ty == bx.tcx().types.bool {
                 // Don't generate trivial icmps when switching on bool.
                 match test_value {
@@ -487,10 +468,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             let otherwise = targets.otherwise();
             let otherwise_cold = self.cold_blocks[otherwise];
             let otherwise_unreachable = self.mir[otherwise].is_empty_unreachable();
-            let cold_count = targets
-                .iter()
-                .filter(|(_, target)| self.cold_blocks[*target])
-                .count();
+            let cold_count = targets.iter().filter(|(_, target)| self.cold_blocks[*target]).count();
             let none_cold = cold_count == 0;
             let all_cold = cold_count == targets.iter().len();
             if (none_cold && (!otherwise_cold || otherwise_unreachable))
@@ -511,11 +489,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                     helper.llbb_with_cleanup(self, targets.otherwise()),
                     otherwise_cold,
                     target_iter.map(|(value, target)| {
-                        (
-                            value,
-                            helper.llbb_with_cleanup(self, target),
-                            self.cold_blocks[target],
-                        )
+                        (value, helper.llbb_with_cleanup(self, target), self.cold_blocks[target])
                     }),
                 );
             }
@@ -560,17 +534,13 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 }
             }
 
-            PassMode::Cast {
-                cast: cast_ty,
-                pad_i32: _,
-            } => {
+            PassMode::Cast { cast: cast_ty, pad_i32: _ } => {
                 let op = match self.locals[mir::RETURN_PLACE] {
                     LocalRef::Operand(op) => op,
                     LocalRef::PendingOperand => bug!("use of return before def"),
-                    LocalRef::Place(cg_place) => OperandRef {
-                        val: Ref(cg_place.val),
-                        layout: cg_place.layout,
-                    },
+                    LocalRef::Place(cg_place) => {
+                        OperandRef { val: Ref(cg_place.val), layout: cg_place.layout }
+                    }
                     LocalRef::UnsizedPlace(_) => bug!("return type must be sized"),
                 };
                 let llslot = match op.val {
@@ -717,16 +687,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             let is_not_null = bx.append_sibling_block("is_not_null");
             let llty = bx.fn_ptr_backend_type(fn_abi);
             let null = bx.const_null(llty);
-            let non_null = bx.icmp(
-                base::bin_op_to_icmp_predicate(mir::BinOp::Ne, false),
-                drop_fn,
-                null,
-            );
-            bx.cond_br(
-                non_null,
-                is_not_null,
-                helper.llbb_with_cleanup(self, target),
-            );
+            let non_null =
+                bx.icmp(base::bin_op_to_icmp_predicate(mir::BinOp::Ne, false), drop_fn, null);
+            bx.cond_br(non_null, is_not_null, helper.llbb_with_cleanup(self, target));
             bx.switch_to_block(is_not_null);
             self.set_debug_loc(bx, *source_info);
         }
@@ -791,9 +754,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         self.set_debug_loc(bx, terminator.source_info);
 
         // Get the location information.
-        let location = self
-            .get_caller_location(bx, terminator.source_info)
-            .immediate();
+        let location = self.get_caller_location(bx, terminator.source_info).immediate();
 
         // Put together the arguments to the panic entry point.
         let (lang_item, args) = match msg {
@@ -809,10 +770,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 let found = self.codegen_operand(bx, found).immediate();
                 // It's `fn panic_misaligned_pointer_dereference(required: usize, found: usize)`,
                 // and `#[track_caller]` adds an implicit third argument.
-                (
-                    LangItem::PanicMisalignedPointerDereference,
-                    vec![required, found, location],
-                )
+                (LangItem::PanicMisalignedPointerDereference, vec![required, found, location])
             }
             AssertKind::NullPointerDereference => {
                 // It's `fn panic_null_pointer_dereference()`,
@@ -828,18 +786,8 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         let (fn_abi, llfn, instance) = common::build_langcall(bx, Some(span), lang_item);
 
         // Codegen the actual panic invoke/call.
-        let merging_succ = helper.do_call(
-            self,
-            bx,
-            fn_abi,
-            llfn,
-            &args,
-            None,
-            unwind,
-            &[],
-            Some(instance),
-            false,
-        );
+        let merging_succ =
+            helper.do_call(self, bx, fn_abi, llfn, &args, None, unwind, &[], Some(instance), false);
         assert_eq!(merging_succ, MergingSucc::False);
         MergingSucc::False
     }
@@ -994,12 +942,10 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         let abi = sig.abi();
 
         let extra_args = &args[sig.inputs().skip_binder().len()..];
-        let extra_args = bx
-            .tcx()
-            .mk_type_list_from_iter(extra_args.iter().map(|op_arg| {
-                let op_ty = op_arg.node.ty(self.mir, bx.tcx());
-                self.monomorphize(op_ty)
-            }));
+        let extra_args = bx.tcx().mk_type_list_from_iter(extra_args.iter().map(|op_arg| {
+            let op_ty = op_arg.node.ty(self.mir, bx.tcx());
+            self.monomorphize(op_ty)
+        }));
 
         let fn_abi = match instance {
             Some(instance) => bx.fn_abi_of_instance(instance, extra_args),
@@ -1042,25 +988,12 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                     }
                 };
 
-                let args: Vec<_> = args
-                    .iter()
-                    .map(|arg| self.codegen_operand(bx, &arg.node))
-                    .collect();
+                let args: Vec<_> =
+                    args.iter().map(|arg| self.codegen_operand(bx, &arg.node)).collect();
 
-                if matches!(
-                    intrinsic,
-                    ty::IntrinsicDef {
-                        name: sym::caller_location,
-                        ..
-                    }
-                ) {
-                    let location = self.get_caller_location(
-                        bx,
-                        mir::SourceInfo {
-                            span: fn_span,
-                            ..source_info
-                        },
-                    );
+                if matches!(intrinsic, ty::IntrinsicDef { name: sym::caller_location, .. }) {
+                    let location = self
+                        .get_caller_location(bx, mir::SourceInfo { span: fn_span, ..source_info });
 
                     assert_eq!(llargs, []);
                     if let ReturnDest::IndirectOperand(tmp, _) = ret_dest {
@@ -1151,11 +1084,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                         llargs.push(data_ptr);
                         continue 'make_args;
                     }
-                    Ref(PlaceValue {
-                        llval: data_ptr,
-                        llextra: Some(meta),
-                        ..
-                    }) => {
+                    Ref(PlaceValue { llval: data_ptr, llextra: Some(meta), .. }) => {
                         // by-value dynamic dispatch
                         llfn = Some(meth::VirtualIndex::from_index(idx).get_fn(
                             bx,
@@ -1237,13 +1166,8 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 mir_args + 1,
                 "#[track_caller] fn's must have 1 more argument in their ABI than in their MIR: {instance:?} {fn_span:?} {fn_abi:?}",
             );
-            let location = self.get_caller_location(
-                bx,
-                mir::SourceInfo {
-                    span: fn_span,
-                    ..source_info
-                },
-            );
+            let location =
+                self.get_caller_location(bx, mir::SourceInfo { span: fn_span, ..source_info });
             debug!(
                 "codegen_call_terminator({:?}): location={:?} (fn_span {:?})",
                 terminator, location, fn_span
@@ -1296,29 +1220,15 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                     let value = self.codegen_operand(bx, value);
                     InlineAsmOperandRef::In { reg, value }
                 }
-                mir::InlineAsmOperand::Out {
-                    reg,
-                    late,
-                    ref place,
-                } => {
+                mir::InlineAsmOperand::Out { reg, late, ref place } => {
                     let place = place.map(|place| self.codegen_place(bx, place.as_ref()));
                     InlineAsmOperandRef::Out { reg, late, place }
                 }
-                mir::InlineAsmOperand::InOut {
-                    reg,
-                    late,
-                    ref in_value,
-                    ref out_place,
-                } => {
+                mir::InlineAsmOperand::InOut { reg, late, ref in_value, ref out_place } => {
                     let in_value = self.codegen_operand(bx, in_value);
                     let out_place =
                         out_place.map(|out_place| self.codegen_place(bx, out_place.as_ref()));
-                    InlineAsmOperandRef::InOut {
-                        reg,
-                        late,
-                        in_value,
-                        out_place,
-                    }
+                    InlineAsmOperandRef::InOut { reg, late, in_value, out_place }
                 }
                 mir::InlineAsmOperand::Const { ref value } => {
                     let const_value = self.eval_mir_constant(value);
@@ -1348,9 +1258,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 mir::InlineAsmOperand::SymStatic { def_id } => {
                     InlineAsmOperandRef::SymStatic { def_id }
                 }
-                mir::InlineAsmOperand::Label { target_index } => InlineAsmOperandRef::Label {
-                    label: self.llbb(targets[target_index]),
-                },
+                mir::InlineAsmOperand::Label { target_index } => {
+                    InlineAsmOperandRef::Label { label: self.llbb(targets[target_index]) }
+                }
             })
             .collect();
 
@@ -1361,11 +1271,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             &operands,
             options,
             line_spans,
-            if asm_macro.diverges(options) {
-                None
-            } else {
-                targets.get(0).copied()
-            },
+            if asm_macro.diverges(options) { None } else { targets.get(0).copied() },
             unwind,
             instance,
             mergeable_succ,
@@ -1465,10 +1371,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 helper.funclet_br(self, bx, target, mergeable_succ())
             }
 
-            mir::TerminatorKind::SwitchInt {
-                ref discr,
-                ref targets,
-            } => {
+            mir::TerminatorKind::SwitchInt { ref discr, ref targets } => {
                 self.codegen_switchint_terminator(helper, bx, discr, targets);
                 MergingSucc::False
             }
@@ -1483,38 +1386,29 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 MergingSucc::False
             }
 
-            mir::TerminatorKind::Drop {
-                place,
-                target,
-                unwind,
-                replace: _,
-            } => self.codegen_drop_terminator(
-                helper,
-                bx,
-                &terminator.source_info,
-                place,
-                target,
-                unwind,
-                mergeable_succ(),
-            ),
+            mir::TerminatorKind::Drop { place, target, unwind, replace: _ } => self
+                .codegen_drop_terminator(
+                    helper,
+                    bx,
+                    &terminator.source_info,
+                    place,
+                    target,
+                    unwind,
+                    mergeable_succ(),
+                ),
 
-            mir::TerminatorKind::Assert {
-                ref cond,
-                expected,
-                ref msg,
-                target,
-                unwind,
-            } => self.codegen_assert_terminator(
-                helper,
-                bx,
-                terminator,
-                cond,
-                expected,
-                msg,
-                target,
-                unwind,
-                mergeable_succ(),
-            ),
+            mir::TerminatorKind::Assert { ref cond, expected, ref msg, target, unwind } => self
+                .codegen_assert_terminator(
+                    helper,
+                    bx,
+                    terminator,
+                    cond,
+                    expected,
+                    msg,
+                    target,
+                    unwind,
+                    mergeable_succ(),
+                ),
 
             mir::TerminatorKind::Call {
                 ref func,
@@ -1540,7 +1434,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 // FIXME(explicit_tail_calls): implement tail calls in ssa backend
                 span_bug!(
                     terminator.source_info.span,
-                    "`TailCall` terminator is not yet supported by `rustc_codegen_ssa`"
+                    "`TailCall` terminator is not yet supported by `rustc_codegen_ssa_gpu`"
                 )
             }
             mir::TerminatorKind::CoroutineDrop | mir::TerminatorKind::Yield { .. } => {
@@ -1596,24 +1490,13 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 }
                 _ => bug!("codegen_argument: {:?} invalid for pair argument", op),
             },
-            PassMode::Indirect {
-                attrs: _,
-                meta_attrs: Some(_),
-                on_stack: _,
-            } => match op.val {
-                Ref(PlaceValue {
-                    llval: a,
-                    llextra: Some(b),
-                    ..
-                }) => {
+            PassMode::Indirect { attrs: _, meta_attrs: Some(_), on_stack: _ } => match op.val {
+                Ref(PlaceValue { llval: a, llextra: Some(b), .. }) => {
                     llargs.push(a);
                     llargs.push(b);
                     return;
                 }
-                _ => bug!(
-                    "codegen_argument: {:?} invalid for unsized indirect argument",
-                    op
-                ),
+                _ => bug!("codegen_argument: {:?} invalid for unsized indirect argument", op),
             },
             _ => {}
         }
@@ -1762,11 +1645,10 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         bx: &mut Bx,
         source_info: mir::SourceInfo,
     ) -> OperandRef<'tcx, Bx::Value> {
-        self.mir
-            .caller_location_span(source_info, self.caller_location, bx.tcx(), |span: Span| {
-                let const_loc = bx.tcx().span_as_caller_location(span);
-                OperandRef::from_const(bx, const_loc, bx.tcx().caller_location_ty())
-            })
+        self.mir.caller_location_span(source_info, self.caller_location, bx.tcx(), |span: Span| {
+            let const_loc = bx.tcx().span_as_caller_location(span);
+            OperandRef::from_const(bx, const_loc, bx.tcx().caller_location_ty())
+        })
     }
 
     fn get_personality_slot(&mut self, bx: &mut Bx) -> PlaceRef<'tcx, Bx::Value> {
@@ -1776,10 +1658,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         } else {
             let layout = cx.layout_of(Ty::new_tup(
                 cx.tcx(),
-                &[
-                    Ty::new_mut_ptr(cx.tcx(), cx.tcx().types.u8),
-                    cx.tcx().types.i32,
-                ],
+                &[Ty::new_mut_ptr(cx.tcx(), cx.tcx().types.u8), cx.tcx().types.i32],
             ));
             let slot = PlaceRef::alloca(bx, layout);
             self.personality_slot = Some(slot);
@@ -1925,15 +1804,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         } else {
             let fn_ty = bx.fn_decl_backend_type(fn_abi);
 
-            let llret = bx.call(
-                fn_ty,
-                None,
-                Some(fn_abi),
-                fn_ptr,
-                &[],
-                funclet.as_ref(),
-                None,
-            );
+            let llret = bx.call(fn_ty, None, Some(fn_abi), fn_ptr, &[], funclet.as_ref(), None);
             bx.apply_attrs_to_cleanup_callsite(llret);
         }
 
@@ -2006,13 +1877,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 }
             }
         } else {
-            self.codegen_place(
-                bx,
-                mir::PlaceRef {
-                    local: dest.local,
-                    projection: dest.projection,
-                },
-            )
+            self.codegen_place(bx, mir::PlaceRef { local: dest.local, projection: dest.projection })
         };
         if fn_ret.is_indirect() {
             if dest.val.align < dest.layout.align.abi {

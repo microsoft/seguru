@@ -51,14 +51,21 @@ pub(crate) fn prepare_covfun_record<'tcx>(
     instance: Instance<'tcx>,
     is_used: bool,
 ) -> Option<CovfunRecord<'tcx>> {
-    let fn_cov_info = tcx.instance_mir(instance.def).function_coverage_info.as_deref()?;
+    let fn_cov_info = tcx
+        .instance_mir(instance.def)
+        .function_coverage_info
+        .as_deref()?;
     let ids_info = tcx.coverage_ids_info(instance.def)?;
 
     let expressions = prepare_expressions(ids_info);
 
     let mut covfun = CovfunRecord {
         mangled_function_name: tcx.symbol_name(instance).name,
-        source_hash: if is_used { fn_cov_info.function_source_hash } else { 0 },
+        source_hash: if is_used {
+            fn_cov_info.function_source_hash
+        } else {
+            0
+        },
         is_used,
         virtual_file_mapping: VirtualFileMapping::default(),
         expressions,
@@ -109,7 +116,11 @@ fn fill_region_tables<'tcx>(
     // first mapping's span to determine the file.
     let source_map = tcx.sess.source_map();
     let Some(first_span) = (try { fn_cov_info.mappings.first()?.span }) else {
-        debug_assert!(false, "function has no mappings: {:?}", covfun.mangled_function_name);
+        debug_assert!(
+            false,
+            "function has no mappings: {:?}",
+            covfun.mangled_function_name
+        );
         return;
     };
     let source_file = source_map.lookup_source_file(first_span.lo());
@@ -118,7 +129,9 @@ fn fill_region_tables<'tcx>(
     let global_file_id = global_file_table.global_file_id_for_file(&source_file);
 
     // Associate that global file ID with a local file ID for this function.
-    let local_file_id = covfun.virtual_file_mapping.local_id_for_global(global_file_id);
+    let local_file_id = covfun
+        .virtual_file_mapping
+        .local_id_for_global(global_file_id);
 
     // In rare cases, _all_ of a function's spans are discarded, and coverage
     // codegen needs to handle that gracefully to avoid #133606.
@@ -126,7 +139,11 @@ fn fill_region_tables<'tcx>(
     // `-Zcoverage-options=discard-all-spans-in-codegen` to force it to occur.
     let discard_all = tcx.sess.coverage_discard_all_spans_in_codegen();
     let make_coords = |span: Span| {
-        if discard_all { None } else { spans::make_coords(source_map, &source_file, span) }
+        if discard_all {
+            None
+        } else {
+            spans::make_coords(source_map, &source_file, span)
+        }
     };
 
     let ffi::Regions {
@@ -150,21 +167,33 @@ fn fill_region_tables<'tcx>(
             ffi::Counter::from_term(term)
         };
 
-        let Some(coords) = make_coords(span) else { continue };
+        let Some(coords) = make_coords(span) else {
+            continue;
+        };
         let cov_span = coords.make_coverage_span(local_file_id);
 
         match *kind {
             MappingKind::Code { bcb } => {
-                code_regions.push(ffi::CodeRegion { cov_span, counter: counter_for_bcb(bcb) });
+                code_regions.push(ffi::CodeRegion {
+                    cov_span,
+                    counter: counter_for_bcb(bcb),
+                });
             }
-            MappingKind::Branch { true_bcb, false_bcb } => {
+            MappingKind::Branch {
+                true_bcb,
+                false_bcb,
+            } => {
                 branch_regions.push(ffi::BranchRegion {
                     cov_span,
                     true_counter: counter_for_bcb(true_bcb),
                     false_counter: counter_for_bcb(false_bcb),
                 });
             }
-            MappingKind::MCDCBranch { true_bcb, false_bcb, mcdc_params } => {
+            MappingKind::MCDCBranch {
+                true_bcb,
+                false_bcb,
+                mcdc_params,
+            } => {
                 mcdc_branch_regions.push(ffi::MCDCBranchRegion {
                     cov_span,
                     true_counter: counter_for_bcb(true_bcb),

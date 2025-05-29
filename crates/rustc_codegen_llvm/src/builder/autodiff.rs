@@ -114,8 +114,10 @@ fn match_args_from_caller_to_enzyme<'ll>(
                 // A duplicated pointer will have the following two outer_fn arguments:
                 // (..., ptr, ptr, ...). We add the following llvm-ir to our __enzyme call:
                 // (..., metadata! enzyme_dup, ptr, ptr, ...).
-                if matches!(diff_activity, DiffActivity::Duplicated | DiffActivity::DuplicatedOnly)
-                {
+                if matches!(
+                    diff_activity,
+                    DiffActivity::Duplicated | DiffActivity::DuplicatedOnly
+                ) {
                     assert!(
                         unsafe { llvm::LLVMRustGetTypeKind(next_outer_ty) }
                             == llvm::TypeKind::Pointer
@@ -236,8 +238,13 @@ fn generate_enzyme_call<'ll>(
         let mut args = Vec::with_capacity(num_args as usize + 1);
         args.push(fn_to_diff);
 
-        let enzyme_primal_ret = cx.create_metadata("enzyme_primal_return".to_string()).unwrap();
-        if matches!(attrs.ret_activity, DiffActivity::Dual | DiffActivity::Active) {
+        let enzyme_primal_ret = cx
+            .create_metadata("enzyme_primal_return".to_string())
+            .unwrap();
+        if matches!(
+            attrs.ret_activity,
+            DiffActivity::Dual | DiffActivity::Active
+        ) {
             args.push(cx.get_metadata_value(enzyme_primal_ret));
         }
 
@@ -294,11 +301,19 @@ pub(crate) fn differentiate<'ll>(
 
     let diag_handler = cgcx.create_dcx();
 
-    let cx = SimpleCx::new(module.module_llvm.llmod(), module.module_llvm.llcx, cgcx.pointer_size);
+    let cx = SimpleCx::new(
+        module.module_llvm.llmod(),
+        module.module_llvm.llcx,
+        cgcx.pointer_size,
+    );
 
     // First of all, did the user try to use autodiff without using the -Zautodiff=Enable flag?
     if !diff_items.is_empty()
-        && !cgcx.opts.unstable_opts.autodiff.contains(&rustc_session::config::AutoDiff::Enable)
+        && !cgcx
+            .opts
+            .unstable_opts
+            .autodiff
+            .contains(&rustc_session::config::AutoDiff::Enable)
     {
         let dcx = cgcx.create_dcx();
         return Err(dcx.handle().emit_almost_fatal(AutoDiffWithoutEnable));

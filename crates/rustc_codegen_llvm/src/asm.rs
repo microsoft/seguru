@@ -104,7 +104,12 @@ impl<'ll, 'tcx> AsmBuilderMethods<'tcx> for Builder<'_, 'll, 'tcx> {
                     let prefix = if late { "=" } else { "=&" };
                     constraints.push(format!("{}{}", prefix, reg_to_llvm(reg, layout)));
                 }
-                InlineAsmOperandRef::InOut { reg, late, in_value, out_place } => {
+                InlineAsmOperandRef::InOut {
+                    reg,
+                    late,
+                    in_value,
+                    out_place,
+                } => {
                     let layout = if let Some(ref out_place) = out_place {
                         &out_place.layout
                     } else {
@@ -138,7 +143,12 @@ impl<'ll, 'tcx> AsmBuilderMethods<'tcx> for Builder<'_, 'll, 'tcx> {
                     op_idx.insert(idx, constraints.len());
                     constraints.push(reg_to_llvm(reg, Some(&value.layout)));
                 }
-                InlineAsmOperandRef::InOut { reg, late, in_value, out_place: _ } => {
+                InlineAsmOperandRef::InOut {
+                    reg,
+                    late,
+                    in_value,
+                    out_place: _,
+                } => {
                     let value = llvm_fixup_input(
                         self,
                         in_value.immediate(),
@@ -190,7 +200,11 @@ impl<'ll, 'tcx> AsmBuilderMethods<'tcx> for Builder<'_, 'll, 'tcx> {
                         template_str.push_str(s)
                     }
                 }
-                InlineAsmTemplatePiece::Placeholder { operand_idx, modifier, span: _ } => {
+                InlineAsmTemplatePiece::Placeholder {
+                    operand_idx,
+                    modifier,
+                    span: _,
+                } => {
                     match operands[operand_idx] {
                         InlineAsmOperandRef::In { reg, .. }
                         | InlineAsmOperandRef::Out { reg, .. }
@@ -348,17 +362,29 @@ impl<'ll, 'tcx> AsmBuilderMethods<'tcx> for Builder<'_, 'll, 'tcx> {
         // Note that `dest` maybe populated with unreachable_block when asm goto with outputs
         // is used (because we need to codegen callbr which always needs a destination), so
         // here we use the NORETURN option to determine if `dest` should be used.
-        for block in (if options.contains(InlineAsmOptions::NORETURN) { None } else { Some(dest) })
-            .into_iter()
-            .chain(labels.iter().copied().map(Some))
+        for block in (if options.contains(InlineAsmOptions::NORETURN) {
+            None
+        } else {
+            Some(dest)
+        })
+        .into_iter()
+        .chain(labels.iter().copied().map(Some))
         {
             if let Some(block) = block {
                 self.switch_to_block(block);
             }
 
             for (idx, op) in operands.iter().enumerate() {
-                if let InlineAsmOperandRef::Out { reg, place: Some(place), .. }
-                | InlineAsmOperandRef::InOut { reg, out_place: Some(place), .. } = *op
+                if let InlineAsmOperandRef::Out {
+                    reg,
+                    place: Some(place),
+                    ..
+                }
+                | InlineAsmOperandRef::InOut {
+                    reg,
+                    out_place: Some(place),
+                    ..
+                } = *op
                 {
                     let value = if output_types.len() == 1 {
                         result
@@ -396,7 +422,11 @@ impl<'tcx> AsmCodegenMethods<'tcx> for CodegenCx<'_, 'tcx> {
         for piece in template {
             match *piece {
                 InlineAsmTemplatePiece::String(ref s) => template_str.push_str(s),
-                InlineAsmTemplatePiece::Placeholder { operand_idx, modifier: _, span: _ } => {
+                InlineAsmTemplatePiece::Placeholder {
+                    operand_idx,
+                    modifier: _,
+                    span: _,
+                } => {
                     match operands[operand_idx] {
                         GlobalAsmOperandRef::Const { ref string } => {
                             // Const operands get injected directly into the
@@ -503,9 +533,29 @@ pub(crate) fn inline_asm_call<'ll>(
 
         let call = if !labels.is_empty() {
             assert!(catch_funclet.is_none());
-            bx.callbr(fty, None, None, v, inputs, dest.unwrap(), labels, None, None)
+            bx.callbr(
+                fty,
+                None,
+                None,
+                v,
+                inputs,
+                dest.unwrap(),
+                labels,
+                None,
+                None,
+            )
         } else if let Some((catch, funclet)) = catch_funclet {
-            bx.invoke(fty, None, None, v, inputs, dest.unwrap(), catch, funclet, None)
+            bx.invoke(
+                fty,
+                None,
+                None,
+                v,
+                inputs,
+                dest.unwrap(),
+                catch,
+                funclet,
+                None,
+            )
         } else {
             bx.call(fty, None, None, v, inputs, None, None)
         };
@@ -986,7 +1036,10 @@ fn llvm_fixup_input<'ll, 'tcx>(
                 | X86InlineAsmRegClass::ymm_reg
                 | X86InlineAsmRegClass::zmm_reg,
             ),
-            BackendRepr::SimdVector { element, count: count @ (8 | 16) },
+            BackendRepr::SimdVector {
+                element,
+                count: count @ (8 | 16),
+            },
         ) if element.primitive() == Primitive::Float(Float::F16) => {
             bx.bitcast(value, bx.type_vector(bx.type_i16(), count))
         }
@@ -1023,7 +1076,10 @@ fn llvm_fixup_input<'ll, 'tcx>(
                 | ArmInlineAsmRegClass::qreg_low4
                 | ArmInlineAsmRegClass::qreg_low8,
             ),
-            BackendRepr::SimdVector { element, count: count @ (4 | 8) },
+            BackendRepr::SimdVector {
+                element,
+                count: count @ (4 | 8),
+            },
         ) if element.primitive() == Primitive::Float(Float::F16) => {
             bx.bitcast(value, bx.type_vector(bx.type_i16(), count))
         }
@@ -1143,7 +1199,10 @@ fn llvm_fixup_output<'ll, 'tcx>(
                 | X86InlineAsmRegClass::ymm_reg
                 | X86InlineAsmRegClass::zmm_reg,
             ),
-            BackendRepr::SimdVector { element, count: count @ (8 | 16) },
+            BackendRepr::SimdVector {
+                element,
+                count: count @ (8 | 16),
+            },
         ) if element.primitive() == Primitive::Float(Float::F16) => {
             bx.bitcast(value, bx.type_vector(bx.type_f16(), count))
         }
@@ -1180,7 +1239,10 @@ fn llvm_fixup_output<'ll, 'tcx>(
                 | ArmInlineAsmRegClass::qreg_low4
                 | ArmInlineAsmRegClass::qreg_low8,
             ),
-            BackendRepr::SimdVector { element, count: count @ (4 | 8) },
+            BackendRepr::SimdVector {
+                element,
+                count: count @ (4 | 8),
+            },
         ) if element.primitive() == Primitive::Float(Float::F16) => {
             bx.bitcast(value, bx.type_vector(bx.type_f16(), count))
         }
@@ -1283,7 +1345,10 @@ fn llvm_fixup_output_type<'ll, 'tcx>(
                 | X86InlineAsmRegClass::ymm_reg
                 | X86InlineAsmRegClass::zmm_reg,
             ),
-            BackendRepr::SimdVector { element, count: count @ (8 | 16) },
+            BackendRepr::SimdVector {
+                element,
+                count: count @ (8 | 16),
+            },
         ) if element.primitive() == Primitive::Float(Float::F16) => {
             cx.type_vector(cx.type_i16(), count)
         }
@@ -1320,7 +1385,10 @@ fn llvm_fixup_output_type<'ll, 'tcx>(
                 | ArmInlineAsmRegClass::qreg_low4
                 | ArmInlineAsmRegClass::qreg_low8,
             ),
-            BackendRepr::SimdVector { element, count: count @ (4 | 8) },
+            BackendRepr::SimdVector {
+                element,
+                count: count @ (4 | 8),
+            },
         ) if element.primitive() == Primitive::Float(Float::F16) => {
             cx.type_vector(cx.type_i16(), count)
         }

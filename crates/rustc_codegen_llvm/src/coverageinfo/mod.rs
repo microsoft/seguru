@@ -91,8 +91,11 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
 
 impl<'tcx> CoverageInfoBuilderMethods<'tcx> for Builder<'_, '_, 'tcx> {
     fn init_coverage(&mut self, instance: Instance<'tcx>) {
-        let Some(function_coverage_info) =
-            self.tcx.instance_mir(instance.def).function_coverage_info.as_deref()
+        let Some(function_coverage_info) = self
+            .tcx
+            .instance_mir(instance.def)
+            .function_coverage_info
+            .as_deref()
         else {
             return;
         };
@@ -119,7 +122,10 @@ impl<'tcx> CoverageInfoBuilderMethods<'tcx> for Builder<'_, '_, 'tcx> {
             cond_bitmaps.push(cond_bitmap);
         }
 
-        self.coverage_cx().mcdc_condition_bitmap_map.borrow_mut().insert(instance, cond_bitmaps);
+        self.coverage_cx()
+            .mcdc_condition_bitmap_map
+            .borrow_mut()
+            .insert(instance, cond_bitmaps);
     }
 
     #[instrument(level = "debug", skip(self))]
@@ -138,10 +144,15 @@ impl<'tcx> CoverageInfoBuilderMethods<'tcx> for Builder<'_, '_, 'tcx> {
         // When that happens, we currently just discard those statements, so
         // the corresponding code will be undercounted.
         // FIXME(Zalathar): Find a better solution for mixed-coverage builds.
-        let Some(coverage_cx) = &bx.cx.coverage_cx else { return };
+        let Some(coverage_cx) = &bx.cx.coverage_cx else {
+            return;
+        };
 
-        let Some(function_coverage_info) =
-            bx.tcx.instance_mir(instance.def).function_coverage_info.as_deref()
+        let Some(function_coverage_info) = bx
+            .tcx
+            .instance_mir(instance.def)
+            .function_coverage_info
+            .as_deref()
         else {
             debug!("function has a coverage statement but no coverage info");
             return;
@@ -175,16 +186,23 @@ impl<'tcx> CoverageInfoBuilderMethods<'tcx> for Builder<'_, '_, 'tcx> {
             }
             // If a BCB doesn't have an associated physical counter, there's nothing to codegen.
             CoverageKind::VirtualCounter { .. } => {}
-            CoverageKind::CondBitmapUpdate { index, decision_depth } => {
+            CoverageKind::CondBitmapUpdate {
+                index,
+                decision_depth,
+            } => {
                 let cond_bitmap = coverage_cx
                     .try_get_mcdc_condition_bitmap(&instance, decision_depth)
                     .expect("mcdc cond bitmap should have been allocated for updating");
                 let cond_index = bx.const_i32(index as i32);
                 bx.mcdc_condbitmap_update(cond_index, cond_bitmap);
             }
-            CoverageKind::TestVectorBitmapUpdate { bitmap_idx, decision_depth } => {
-                let cond_bitmap =
-                    coverage_cx.try_get_mcdc_condition_bitmap(&instance, decision_depth).expect(
+            CoverageKind::TestVectorBitmapUpdate {
+                bitmap_idx,
+                decision_depth,
+            } => {
+                let cond_bitmap = coverage_cx
+                    .try_get_mcdc_condition_bitmap(&instance, decision_depth)
+                    .expect(
                         "mcdc cond bitmap should have been allocated for merging \
                         into the global bitmap",
                     );

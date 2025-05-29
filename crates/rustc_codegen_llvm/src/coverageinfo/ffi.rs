@@ -31,16 +31,25 @@ pub(crate) struct Counter {
 
 impl Counter {
     /// A `Counter` of kind `Zero`. For this counter kind, the `id` is not used.
-    pub(crate) const ZERO: Self = Self { kind: CounterKind::Zero, id: 0 };
+    pub(crate) const ZERO: Self = Self {
+        kind: CounterKind::Zero,
+        id: 0,
+    };
 
     /// Constructs a new `Counter` of kind `CounterValueReference`.
     pub(crate) fn counter_value_reference(counter_id: CounterId) -> Self {
-        Self { kind: CounterKind::CounterValueReference, id: counter_id.as_u32() }
+        Self {
+            kind: CounterKind::CounterValueReference,
+            id: counter_id.as_u32(),
+        }
     }
 
     /// Constructs a new `Counter` of kind `Expression`.
     pub(crate) fn expression(expression_id: ExpressionId) -> Self {
-        Self { kind: CounterKind::Expression, id: expression_id.as_u32() }
+        Self {
+            kind: CounterKind::Expression,
+            id: expression_id.as_u32(),
+        }
     }
 
     pub(crate) fn from_term(term: CovTerm) -> Self {
@@ -97,20 +106,35 @@ pub(crate) mod mcdc {
     impl From<ConditionInfo> for BranchParameters {
         fn from(value: ConditionInfo) -> Self {
             let to_llvm_cond_id = |cond_id: Option<ConditionId>| {
-                cond_id.and_then(|id| LLVMConditionId::try_from(id.as_usize()).ok()).unwrap_or(-1)
+                cond_id
+                    .and_then(|id| LLVMConditionId::try_from(id.as_usize()).ok())
+                    .unwrap_or(-1)
             };
-            let ConditionInfo { condition_id, true_next_id, false_next_id } = value;
+            let ConditionInfo {
+                condition_id,
+                true_next_id,
+                false_next_id,
+            } = value;
             Self {
                 condition_id: to_llvm_cond_id(Some(condition_id)),
-                condition_ids: [to_llvm_cond_id(false_next_id), to_llvm_cond_id(true_next_id)],
+                condition_ids: [
+                    to_llvm_cond_id(false_next_id),
+                    to_llvm_cond_id(true_next_id),
+                ],
             }
         }
     }
 
     impl From<DecisionInfo> for DecisionParameters {
         fn from(info: DecisionInfo) -> Self {
-            let DecisionInfo { bitmap_idx, num_conditions } = info;
-            Self { bitmap_idx, num_conditions }
+            let DecisionInfo {
+                bitmap_idx,
+                num_conditions,
+            } = info;
+            Self {
+                bitmap_idx,
+                num_conditions,
+            }
         }
     }
 }

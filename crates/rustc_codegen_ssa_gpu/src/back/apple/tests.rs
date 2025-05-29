@@ -21,10 +21,7 @@ fn test_parse_version() {
 }
 
 #[test]
-#[cfg_attr(
-    not(target_os = "macos"),
-    ignore = "xcode-select is only available on macOS"
-)]
+#[cfg_attr(not(target_os = "macos"), ignore = "xcode-select is only available on macOS")]
 fn lookup_developer_dir() {
     let _developer_dir = xcode_select_developer_dir().unwrap();
 }

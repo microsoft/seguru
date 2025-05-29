@@ -48,7 +48,10 @@ pub(crate) fn finalize(cx: &CodegenCx<'_, '_>) {
         llvm_covmap_version
     };
 
-    debug!("Generating coverage map for CodegenUnit: `{}`", cx.codegen_unit.name());
+    debug!(
+        "Generating coverage map for CodegenUnit: `{}`",
+        cx.codegen_unit.name()
+    );
 
     // FIXME(#132395): Can this be none even when coverage is enabled?
     let instances_used = match cx.coverage_cx {
@@ -142,7 +145,9 @@ struct GlobalFileTable {
 
 impl GlobalFileTable {
     fn new() -> Self {
-        Self { raw_file_table: FxIndexMap::default() }
+        Self {
+            raw_file_table: FxIndexMap::default(),
+        }
     }
 
     fn global_file_id_for_file(&mut self, file: &Arc<SourceFile>) -> GlobalFileId {
@@ -174,7 +179,9 @@ impl GlobalFileTable {
 
         // Add the regular entries after the base directory.
         table.extend(self.raw_file_table.values().map(|file| {
-            file.name.for_scope(tcx.sess, RemapPathScopeComponents::MACRO).to_string_lossy()
+            file.name
+                .for_scope(tcx.sess, RemapPathScopeComponents::MACRO)
+                .to_string_lossy()
         }));
 
         llvm_cov::write_filenames_to_buffer(&table)
@@ -212,7 +219,10 @@ impl VirtualFileMapping {
     fn to_vec(&self) -> Vec<u32> {
         // This clone could be avoided by transmuting `&[GlobalFileId]` to `&[u32]`,
         // but it isn't hot or expensive enough to justify the extra unsafety.
-        self.local_to_global.iter().map(|&global| GlobalFileId::as_u32(global)).collect()
+        self.local_to_global
+            .iter()
+            .map(|&global| GlobalFileId::as_u32(global))
+            .collect()
     }
 }
 
@@ -234,11 +244,16 @@ fn generate_covmap_record<'ll>(cx: &CodegenCx<'ll, '_>, version: u32, filenames_
         ],
         /* packed */ false,
     );
-    let covmap_record = cx
-        .const_struct(&[covmap_header, cx.const_bytes(filenames_buffer)], /* packed */ false);
+    let covmap_record = cx.const_struct(
+        &[covmap_header, cx.const_bytes(filenames_buffer)],
+        /* packed */ false,
+    );
 
-    let covmap_global =
-        llvm::add_global(cx.llmod, cx.val_ty(covmap_record), &llvm_cov::covmap_var_name());
+    let covmap_global = llvm::add_global(
+        cx.llmod,
+        cx.val_ty(covmap_record),
+        &llvm_cov::covmap_var_name(),
+    );
     llvm::set_initializer(covmap_global, covmap_record);
     llvm::set_global_constant(covmap_global, true);
     llvm::set_linkage(covmap_global, llvm::Linkage::PrivateLinkage);
@@ -298,8 +313,11 @@ struct UsageSets<'tcx> {
 /// Prepare sets of definitions that are relevant to deciding whether something
 /// is an "unused function" for coverage purposes.
 fn prepare_usage_sets<'tcx>(tcx: TyCtxt<'tcx>) -> UsageSets<'tcx> {
-    let MonoItemPartitions { all_mono_items, codegen_units, .. } =
-        tcx.collect_and_partition_mono_items(());
+    let MonoItemPartitions {
+        all_mono_items,
+        codegen_units,
+        ..
+    } = tcx.collect_and_partition_mono_items(());
 
     // Obtain a MIR body for each function participating in codegen, via an
     // arbitrary instance.
@@ -349,7 +367,11 @@ fn prepare_usage_sets<'tcx>(tcx: TyCtxt<'tcx>) -> UsageSets<'tcx> {
         }
     }
 
-    UsageSets { all_mono_items, used_via_inlining, missing_own_coverage }
+    UsageSets {
+        all_mono_items,
+        used_via_inlining,
+        missing_own_coverage,
+    }
 }
 
 fn make_dummy_instance<'tcx>(tcx: TyCtxt<'tcx>, local_def_id: LocalDefId) -> ty::Instance<'tcx> {

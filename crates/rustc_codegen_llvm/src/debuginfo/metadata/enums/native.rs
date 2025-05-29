@@ -45,7 +45,10 @@ pub(super) fn build_enum_type_di_node<'ll, 'tcx>(
 ) -> DINodeCreationResult<'ll> {
     let enum_type = unique_type_id.expect_ty();
     let &ty::Adt(enum_adt_def, _) = enum_type.kind() else {
-        bug!("build_enum_type_di_node() called with non-enum type: `{:?}`", enum_type)
+        bug!(
+            "build_enum_type_di_node() called with non-enum type: `{:?}`",
+            enum_type
+        )
     };
 
     let containing_scope = get_namespace_for_item(cx, enum_adt_def.did());
@@ -145,13 +148,19 @@ pub(super) fn build_coroutine_di_node<'ll, 'tcx>(
 ) -> DINodeCreationResult<'ll> {
     let coroutine_type = unique_type_id.expect_ty();
     let &ty::Coroutine(coroutine_def_id, coroutine_args) = coroutine_type.kind() else {
-        bug!("build_coroutine_di_node() called with non-coroutine type: `{:?}`", coroutine_type)
+        bug!(
+            "build_coroutine_di_node() called with non-coroutine type: `{:?}`",
+            coroutine_type
+        )
     };
 
     let containing_scope = get_namespace_for_item(cx, coroutine_def_id);
     let coroutine_type_and_layout = cx.layout_of(coroutine_type);
 
-    assert!(!wants_c_like_enum_debuginfo(cx.tcx, coroutine_type_and_layout));
+    assert!(!wants_c_like_enum_debuginfo(
+        cx.tcx,
+        coroutine_type_and_layout
+    ));
 
     let coroutine_type_name = compute_debuginfo_type_name(cx.tcx, coroutine_type, false);
 
@@ -179,8 +188,11 @@ pub(super) fn build_coroutine_di_node<'ll, 'tcx>(
                 .coroutine_layout(coroutine_def_id, coroutine_args.as_coroutine().kind_ty())
                 .unwrap();
 
-            let Variants::Multiple { tag_encoding: TagEncoding::Direct, ref variants, .. } =
-                coroutine_type_and_layout.variants
+            let Variants::Multiple {
+                tag_encoding: TagEncoding::Direct,
+                ref variants,
+                ..
+            } = coroutine_type_and_layout.variants
             else {
                 bug!(
                     "Encountered coroutine with non-direct-tag layout: {:?}",
@@ -188,8 +200,9 @@ pub(super) fn build_coroutine_di_node<'ll, 'tcx>(
                 )
             };
 
-            let common_upvar_names =
-                cx.tcx.closure_saved_names_of_captured_variables(coroutine_def_id);
+            let common_upvar_names = cx
+                .tcx
+                .closure_saved_names_of_captured_variables(coroutine_def_id);
 
             // Build variant struct types
             let variant_struct_type_di_nodes: SmallVec<_> = variants

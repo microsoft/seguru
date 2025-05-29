@@ -27,8 +27,16 @@ const OPTIONAL_COMPONENTS: &[&str] = &[
     "bpf",
 ];
 
-const REQUIRED_COMPONENTS: &[&str] =
-    &["ipo", "bitreader", "bitwriter", "linker", "asmparser", "lto", "coverage", "instrumentation"];
+const REQUIRED_COMPONENTS: &[&str] = &[
+    "ipo",
+    "bitreader",
+    "bitwriter",
+    "linker",
+    "asmparser",
+    "lto",
+    "coverage",
+    "instrumentation",
+];
 
 fn detect_llvm_link() -> (&'static str, &'static str) {
     // Force the link mode we want, preferring static by default, but
@@ -299,7 +307,10 @@ fn main() {
             let path = Path::new(lib);
             if lib.ends_with(".a") {
                 is_static = true;
-                println!("cargo:rustc-link-search=native={}", path.parent().unwrap().display());
+                println!(
+                    "cargo:rustc-link-search=native={}",
+                    path.parent().unwrap().display()
+                );
                 let name = path.file_stem().unwrap().to_str().unwrap();
                 name.trim_start_matches("lib")
             } else {
@@ -338,8 +349,7 @@ fn main() {
             // do this then stupid rust will just -llibz3.so and will fail
             println!("cargo:warning=Why the hell is this libz3? {name}");
             println!("cargo:rustc-link-lib={kind}=z3");
-        }
-        else {
+        } else {
             println!("cargo:rustc-link-lib={kind}={name}");
         }
     }
@@ -355,9 +365,15 @@ fn main() {
     for lib in output(&mut cmd).split_whitespace() {
         if is_crossed {
             if let Some(stripped) = lib.strip_prefix("-LIBPATH:") {
-                println!("cargo:rustc-link-search=native={}", stripped.replace(&host, &target));
+                println!(
+                    "cargo:rustc-link-search=native={}",
+                    stripped.replace(&host, &target)
+                );
             } else if let Some(stripped) = lib.strip_prefix("-L") {
-                println!("cargo:rustc-link-search=native={}", stripped.replace(&host, &target));
+                println!(
+                    "cargo:rustc-link-search=native={}",
+                    stripped.replace(&host, &target)
+                );
             }
         } else if let Some(stripped) = lib.strip_prefix("-LIBPATH:") {
             println!("cargo:rustc-link-search=native={stripped}");
@@ -387,7 +403,11 @@ fn main() {
     let llvm_use_libcxx = tracked_env_var_os("LLVM_USE_LIBCXX");
 
     let stdcppname = if target.contains("openbsd") {
-        if target.contains("sparc64") { "estdc++" } else { "c++" }
+        if target.contains("sparc64") {
+            "estdc++"
+        } else {
+            "c++"
+        }
     } else if target.contains("darwin")
         || target.contains("freebsd")
         || target.contains("windows-gnullvm")
@@ -417,7 +437,10 @@ fn main() {
         if let Some(s) = llvm_static_stdcpp {
             assert!(!cxxflags.contains("stdlib=libc++"));
             let path = PathBuf::from(s);
-            println!("cargo:rustc-link-search=native={}", path.parent().unwrap().display());
+            println!(
+                "cargo:rustc-link-search=native={}",
+                path.parent().unwrap().display()
+            );
             if target.contains("windows") {
                 println!("cargo:rustc-link-lib=static:-bundle={stdcppname}");
             } else {

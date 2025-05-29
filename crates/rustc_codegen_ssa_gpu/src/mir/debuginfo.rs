@@ -130,9 +130,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> DebugInfoOffsetLocation<'tcx, Bx>
 {
     fn deref(&self, bx: &mut Bx) -> Self {
         bx.cx().layout_of(
-            self.ty
-                .builtin_deref(true)
-                .unwrap_or_else(|| bug!("cannot deref `{}`", self.ty)),
+            self.ty.builtin_deref(true).unwrap_or_else(|| bug!("cannot deref `{}`", self.ty)),
         )
     }
 
@@ -212,11 +210,7 @@ fn calculate_debuginfo_offset<
         }
     }
 
-    DebugInfoOffset {
-        direct_offset,
-        indirect_offsets,
-        result: place,
-    }
+    DebugInfoOffset { direct_offset, indirect_offsets, result: place }
 }
 
 impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
@@ -238,11 +232,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
     ) -> Option<(Bx::DIScope, Option<Bx::DILocation>, Span)> {
         let scope = &self.debug_context.as_ref()?.scopes[source_info.scope];
         let span = hygiene::walk_chain_collapsed(source_info.span, self.mir.span);
-        Some((
-            scope.adjust_dbg_scope_for_span(self.cx, span),
-            scope.inlined_at,
-            span,
-        ))
+        Some((scope.adjust_dbg_scope_for_span(self.cx, span), scope.inlined_at, span))
     }
 
     fn spill_operand_to_stack(
@@ -395,15 +385,10 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         var: PerLocalVarDebugInfo<'tcx, Bx::DIVariable>,
     ) {
         let Some(dbg_var) = var.dbg_var else { return };
-        let Some(dbg_loc) = self.dbg_loc(var.source_info) else {
-            return;
-        };
+        let Some(dbg_loc) = self.dbg_loc(var.source_info) else { return };
 
-        let DebugInfoOffset {
-            direct_offset,
-            indirect_offsets,
-            result: _,
-        } = calculate_debuginfo_offset(bx, var.projection, base.layout);
+        let DebugInfoOffset { direct_offset, indirect_offsets, result: _ } =
+            calculate_debuginfo_offset(bx, var.projection, base.layout);
 
         // When targeting MSVC, create extra allocas for arguments instead of pointing multiple
         // dbg_var_addr() calls into the same alloca with offsets. MSVC uses CodeView records
@@ -420,11 +405,8 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             && (direct_offset != Size::ZERO || !matches!(&indirect_offsets[..], [Size::ZERO] | []));
 
         if should_create_individual_allocas {
-            let DebugInfoOffset {
-                direct_offset: _,
-                indirect_offsets: _,
-                result: place,
-            } = calculate_debuginfo_offset(bx, var.projection, base);
+            let DebugInfoOffset { direct_offset: _, indirect_offsets: _, result: place } =
+                calculate_debuginfo_offset(bx, var.projection, base);
 
             // Create a variable which will be a pointer to the actual value
             let ptr_ty = Ty::new_mut_ptr(bx.tcx(), place.layout.ty);
@@ -466,15 +448,8 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 self.debug_introduce_local(bx, local);
             }
 
-            for ConstDebugInfo {
-                name,
-                source_info,
-                operand,
-                dbg_var,
-                dbg_loc,
-                fragment,
-                ..
-            } in consts.into_iter()
+            for ConstDebugInfo { name, source_info, operand, dbg_var, dbg_loc, fragment, .. } in
+                consts.into_iter()
             {
                 self.set_debug_loc(bx, source_info);
                 let base = FunctionCx::spill_operand_to_stack(operand, Some(name), bx);
@@ -553,25 +528,20 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                         Entry::Occupied(o) => o.get().clone(),
                         Entry::Vacant(v) => v
                             .insert(
-                                self.cx
-                                    .create_dbg_var(var.name, var_ty, dbg_scope, var_kind, span),
+                                self.cx.create_dbg_var(var.name, var_ty, dbg_scope, var_kind, span),
                             )
                             .clone(),
                     }
                 } else {
-                    self.cx
-                        .create_dbg_var(var.name, var_ty, dbg_scope, var_kind, span)
+                    self.cx.create_dbg_var(var.name, var_ty, dbg_scope, var_kind, span)
                 }
             });
 
             let fragment = if let Some(ref fragment) = var.composite {
                 let var_layout = self.cx.layout_of(var_ty);
 
-                let DebugInfoOffset {
-                    direct_offset,
-                    indirect_offsets,
-                    result: fragment_layout,
-                } = calculate_debuginfo_offset(bx, &fragment.projection, var_layout);
+                let DebugInfoOffset { direct_offset, indirect_offsets, result: fragment_layout } =
+                    calculate_debuginfo_offset(bx, &fragment.projection, var_layout);
                 assert!(indirect_offsets.is_empty());
 
                 if fragment_layout.size == Size::ZERO {
@@ -601,9 +571,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 }
                 mir::VarDebugInfoContents::Const(c) => {
                     if let Some(dbg_var) = dbg_var {
-                        let Some(dbg_loc) = self.dbg_loc(var.source_info) else {
-                            continue;
-                        };
+                        let Some(dbg_loc) = self.dbg_loc(var.source_info) else { continue };
 
                         let operand = self.eval_mir_constant_to_operand(bx, &c);
                         constants.push(ConstDebugInfo {

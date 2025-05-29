@@ -4,20 +4,20 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-rustc_abi = { path = "../../../rust/compiler/rustc_abi" }
-rustc_ast = { path = "../../../rust/compiler/rustc_ast" }
-rustc_codegen_llvm = { path = "../rustc_codegen_llvm" }
+#rustc_abi = { path = "../../../rust/compiler/rustc_abi" }
+#rustc_ast = { path = "../../../rust/compiler/rustc_ast" }
+#rustc_codegen_llvm = { path = "../rustc_codegen_llvm" }
 rustc_codegen_ssa_gpu = { path = "../rustc_codegen_ssa_gpu" }
-rustc_const_eval = { path = "../../../rust/compiler/rustc_const_eval" }
-rustc_data_structures = { path = "../../../rust/compiler/rustc_data_structures" }
-rustc_errors = { path = "../../../rust/compiler/rustc_errors" }
-rustc_hir = { path = "../../../rust/compiler/rustc_hir" }
-rustc_metadata = { path = "../../../rust/compiler/rustc_metadata" }
-rustc_middle = { path = "../../../rust/compiler/rustc_middle" }
-rustc_session = { path = "../../../rust/compiler/rustc_session" }
-rustc_span = { path = "../../../rust/compiler/rustc_span" }
-rustc_target = { path = "../../../rust/compiler/rustc_target" }
-rustc_type_ir = { path = "../../../rust/compiler/rustc_type_ir" }
+#rustc_const_eval = { path = "../../../rust/compiler/rustc_const_eval" }
+#rustc_data_structures = { path = "../../../rust/compiler/rustc_data_structures" }
+#rustc_errors = { path = "../../../rust/compiler/rustc_errors" }
+#rustc_hir = { path = "../../../rust/compiler/rustc_hir" }
+#rustc_metadata = { path = "../../../rust/compiler/rustc_metadata" }
+#rustc_middle = { path = "../../../rust/compiler/rustc_middle" }
+#rustc_session = { path = "../../../rust/compiler/rustc_session" }
+#rustc_span = { path = "../../../rust/compiler/rustc_span" }
+#rustc_target = { path = "../../../rust/compiler/rustc_target" }
+#rustc_type_ir = { path = "../../../rust/compiler/rustc_type_ir" }
 melior = { version = "0.24.0", features = ["helpers"]}
 melior-macro = { version = "0.17.0"}
 mlir-sys = "0.5.0"

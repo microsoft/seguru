@@ -66,17 +66,8 @@ pub(crate) fn module_codegen<'tcx>(
             }
         }
     }
-    use crate::rustc_codegen_ssa_gpu::traits::ExtraBackendMethods;
-    let llvm_mod = crate::backend::llvm_backend().codegen_allocator(
-        tcx,
-        cgu_name.as_str(),
-        rustc_ast::expand::allocator::AllocatorKind::Global,
-        rustc_ast::expand::allocator::AllocatorKind::Global,
-    );
-    let module = GPUCodeGenModule {
-        llvm_module: Some(llvm_mod),
-        mlir_module: Some(crate::backend::MLIRModule { module: mlir_module }),
-    };
+    let module =
+        GPUCodeGenModule { mlir_module: Some(crate::backend::MLIRModule { module: mlir_module }) };
     let m = ModuleCodegen::new_regular(cgu_name.to_string(), module);
     eprintln!("compile_codegen_unit {}", cgu_name);
     m

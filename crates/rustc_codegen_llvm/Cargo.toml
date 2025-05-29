@@ -1,0 +1,45 @@
+[package]
+name = "rustc_codegen_llvm"
+version = "0.0.0"
+edition = "2024"
+
+[lib]
+test = false
+
+[dependencies]
+# tidy-alphabetical-start
+bitflags = "2.4.1"
+# To avoid duplicate dependencies, this should match the version of gimli used
+# by `rustc_codegen_ssa_gpu` via its `thorin-dwp` dependency.
+gimli = "0.31"
+itertools = "0.12"
+libc = "0.2"
+measureme = "12.0.1"
+object = { version = "0.36.3", default-features = false, features = ["std", "read"] }
+rustc-demangle = "0.1.21"
+rustc_abi = { path = "../../../rust/compiler/rustc_abi" }
+rustc_ast = { path = "../../../rust/compiler/rustc_ast" }
+rustc_attr_parsing = { path = "../../../rust/compiler/rustc_attr_parsing" }
+rustc_codegen_ssa_gpu = { path = "../rustc_codegen_ssa_gpu" }
+rustc_data_structures = { path = "../../../rust/compiler/rustc_data_structures" }
+rustc_errors = { path = "../../../rust/compiler/rustc_errors" }
+rustc_fluent_macro = { path = "../../../rust/compiler/rustc_fluent_macro" }
+rustc_fs_util = { path = "../../../rust/compiler/rustc_fs_util" }
+rustc_hashes = { path = "../../../rust/compiler/rustc_hashes" }
+rustc_hir = { path = "../../../rust/compiler/rustc_hir" }
+rustc_index = { path = "../../../rust/compiler/rustc_index" }
+rustc_llvm = { path = "../rustc_llvm" }
+rustc_macros = { path = "../../../rust/compiler/rustc_macros" }
+rustc_metadata = { path = "../../../rust/compiler/rustc_metadata" }
+rustc_middle = { path = "../../../rust/compiler/rustc_middle" }
+rustc_query_system = { path = "../../../rust/compiler/rustc_query_system" }
+rustc_sanitizers = { path = "../../../rust/compiler/rustc_sanitizers" }
+rustc_session = { path = "../../../rust/compiler/rustc_session" }
+rustc_span = { path = "../../../rust/compiler/rustc_span" }
+rustc_symbol_mangling = { path = "../../../rust/compiler/rustc_symbol_mangling" }
+rustc_target = { path = "../../../rust/compiler/rustc_target" }
+serde = { version = "1", features = [ "derive" ]}
+serde_json = "1"
+smallvec = { version = "1.8.1", features = ["union", "may_dangle"] }
+tracing = "0.1"
+# tidy-alphabetical-end

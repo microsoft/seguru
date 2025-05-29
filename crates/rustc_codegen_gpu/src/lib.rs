@@ -3,7 +3,6 @@
 #![feature(box_patterns)]
 extern crate rustc_abi;
 extern crate rustc_ast;
-extern crate rustc_codegen_llvm;
 extern crate rustc_codegen_ssa_gpu;
 extern crate rustc_const_eval;
 extern crate rustc_data_structures;
@@ -15,6 +14,7 @@ extern crate rustc_session;
 extern crate rustc_span;
 extern crate rustc_target;
 extern crate rustc_type_ir;
+extern crate rustc_driver;
 
 mod attr;
 mod backend;

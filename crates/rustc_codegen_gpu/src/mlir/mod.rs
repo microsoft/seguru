@@ -2,25 +2,16 @@ pub(crate) mod attr;
 pub(crate) mod gpu;
 pub(crate) mod memref;
 
-use melior::{
-    dialect::{
-        arith, func,
-        ods::{
-            func::FuncOperation,
-            gpu::{GPUFuncOperation, GPUModuleOperation},
-            memref::GetGlobalOperation,
-        },
-        DialectRegistry,
-    },
-    ir::{
-        attribute::{FlatSymbolRefAttribute, StringAttribute, TypeAttribute},
-        operation::OperationResult,
-        r#type::FunctionType,
-        *,
-    },
-    utility::register_all_dialects,
-    Context,
-};
+use melior::Context;
+use melior::dialect::ods::func::FuncOperation;
+use melior::dialect::ods::gpu::{GPUFuncOperation, GPUModuleOperation};
+use melior::dialect::ods::memref::GetGlobalOperation;
+use melior::dialect::{DialectRegistry, arith, func};
+use melior::ir::attribute::{FlatSymbolRefAttribute, StringAttribute, TypeAttribute};
+use melior::ir::operation::OperationResult;
+use melior::ir::r#type::FunctionType;
+use melior::ir::*;
+use melior::utility::register_all_dialects;
 use rustc_span::Loc;
 
 pub(crate) fn create_mlir_ctx() -> &'static melior::Context {
@@ -52,18 +43,12 @@ pub(crate) fn new_empty_module<'ml>(ctx: &'ml Context) -> melior::ir::Module<'ml
 
 pub(crate) fn create_top_module<'ml>(
     ctx: &'ml Context,
-) -> (
-    melior::ir::Module<'ml>,
-    melior::ir::BlockRef<'ml, 'ml>,
-    melior::ir::BlockRef<'ml, 'ml>,
-) {
+) -> (melior::ir::Module<'ml>, melior::ir::BlockRef<'ml, 'ml>, melior::ir::BlockRef<'ml, 'ml>) {
     let location = Location::unknown(ctx);
     let mut module = Module::new(location);
     let unit_attr = melior::ir::Attribute::unit(ctx);
 
-    module
-        .as_operation_mut()
-        .set_attribute("gpu.container_module", unit_attr);
+    module.as_operation_mut().set_attribute("gpu.container_module", unit_attr);
     let region = Region::new();
     let block = Block::new(&[]);
     let gpu_block = region.append_block(block);

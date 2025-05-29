@@ -1,3 +1,6 @@
+use std::any::Any;
+use std::sync::Arc;
+
 use rustc_codegen_llvm::LlvmCodegenBackend;
 use rustc_codegen_ssa_gpu::back::lto::{LtoModuleCodegen, ThinModule, ThinShared};
 use rustc_codegen_ssa_gpu::traits::{CodegenBackend, ExtraBackendMethods, WriteBackendMethods};
@@ -8,8 +11,6 @@ use rustc_middle::ty::TyCtxt;
 use rustc_middle::util::Providers;
 use rustc_session::Session;
 use rustc_span::Symbol;
-use std::any::Any;
-use std::sync::Arc;
 
 type LlvmCodegenModule = <LlvmCodegenBackend as WriteBackendMethods>::Module;
 
@@ -92,10 +93,7 @@ impl GPUCodegenBackend {
         mlir_module: Option<MLIRModule>,
     ) -> rustc_codegen_ssa_gpu::ModuleCodegen<GPUCodeGenModule> {
         ModuleCodegen {
-            module_llvm: GPUCodeGenModule {
-                llvm_module: Some(m.module_llvm),
-                mlir_module,
-            },
+            module_llvm: GPUCodeGenModule { llvm_module: Some(m.module_llvm), mlir_module },
             name: m.name,
             kind: m.kind,
             thin_lto_buffer: m.thin_lto_buffer,
@@ -195,10 +193,7 @@ impl WriteBackendMethods for GPUCodegenBackend {
         let ret = LlvmCodegenBackend::run_link(
             &cgcx,
             dcx,
-            modules
-                .into_iter()
-                .map(Self::to_llvm_modele_code_gen)
-                .collect(),
+            modules.into_iter().map(Self::to_llvm_modele_code_gen).collect(),
         );
         ret.map(|m| Self::module_code_gen_from_llvm(m, Some(MLIRModule { module: final_m })))
     }
@@ -223,23 +218,14 @@ impl WriteBackendMethods for GPUCodegenBackend {
             WorkProduct,
         )>,
     ) -> Result<
-        (
-            Vec<rustc_codegen_ssa_gpu::back::lto::LtoModuleCodegen<Self>>,
-            Vec<WorkProduct>,
-        ),
+        (Vec<rustc_codegen_ssa_gpu::back::lto::LtoModuleCodegen<Self>>, Vec<WorkProduct>),
         rustc_errors::FatalError,
     > {
         eprintln!("run_thin_lto starts");
         let cgcx = GPUCodegenBackend::to_llvm_context(cgcx);
         LlvmCodegenBackend::run_thin_lto(&cgcx, modules, cached_modules).map(
             |(modules, work_products)| {
-                (
-                    modules
-                        .into_iter()
-                        .map(Self::lto_module_from_llvm)
-                        .collect(),
-                    work_products,
-                )
+                (modules.into_iter().map(Self::lto_module_from_llvm).collect(), work_products)
             },
         )
     }
@@ -331,10 +317,7 @@ impl ExtraBackendMethods for GPUCodegenBackend {
         eprintln!("codegen_allocator");
         let llvm_mod =
             llvm_backend().codegen_allocator(tcx, module_name, kind, alloc_error_handler_kind);
-        GPUCodeGenModule {
-            llvm_module: Some(llvm_mod),
-            mlir_module: None,
-        }
+        GPUCodeGenModule { llvm_module: Some(llvm_mod), mlir_module: None }
     }
 
     fn compile_codegen_unit(
@@ -395,12 +378,7 @@ impl CodegenBackend for GPUCodegenBackend {
         let x = Box::new(rustc_codegen_ssa_gpu::base::codegen_crate(
             GPUCodegenBackend::new(),
             tcx,
-            tcx.sess
-                .opts
-                .cg
-                .target_cpu
-                .clone()
-                .unwrap_or_else(|| tcx.sess.target.cpu.to_string()),
+            tcx.sess.opts.cg.target_cpu.clone().unwrap_or_else(|| tcx.sess.target.cpu.to_string()),
             metadata,
             need_metadata_module,
         ));

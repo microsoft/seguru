@@ -1,14 +1,10 @@
+use melior::Context;
+use melior::ir::attribute::{DenseI32ArrayAttribute, DenseI64ArrayAttribute};
+use melior::ir::operation::OperationBuilder;
+use melior::ir::r#type::MemRefType;
+use melior::ir::{Location, Operation, Type, TypeLike, Value, ValueLike};
+
 use crate::mlir::attr::StridedLayoutAttribute;
-use melior::ir::TypeLike;
-use melior::{
-    ir::{
-        attribute::{DenseI32ArrayAttribute, DenseI64ArrayAttribute},
-        operation::OperationBuilder,
-        r#type::MemRefType,
-        Location, Operation, Type, Value, ValueLike,
-    },
-    Context,
-};
 
 pub fn static_reinterpret_cast<'c>(
     mlir_ctx: &'c Context,
@@ -48,11 +44,8 @@ pub fn static_reinterpret_cast<'c>(
     op.set_attribute("static_strides", static_strides);
     op.set_attribute(
         "operand_segment_sizes",
-        DenseI32ArrayAttribute::new(
-            mlir_ctx,
-            &[1, if !indices.is_empty() { 1 } else { 0 }, 0, 0],
-        )
-        .into(),
+        DenseI32ArrayAttribute::new(mlir_ctx, &[1, if !indices.is_empty() { 1 } else { 0 }, 0, 0])
+            .into(),
     );
     op
 }

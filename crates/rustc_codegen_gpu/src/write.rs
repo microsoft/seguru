@@ -1,10 +1,7 @@
 use std::process::Command;
 
-use rustc_codegen_ssa_gpu::ModuleCodegen;
-use rustc_codegen_ssa_gpu::{
-    back::write::{CodegenContext, ModuleConfig},
-    CompiledModule,
-};
+use rustc_codegen_ssa_gpu::back::write::{CodegenContext, ModuleConfig};
+use rustc_codegen_ssa_gpu::{CompiledModule, ModuleCodegen};
 use rustc_errors::DiagCtxtHandle;
 
 use crate::backend::{GPUCodeGenModule, GPUCodegenBackend};
@@ -14,9 +11,7 @@ pub(crate) fn mlir_opt(inpath: &str, outpath: &str) -> Result<(), rustc_errors::
     let mut mlir_opt = Command::new("sh");
     let cmd = format!(
         "{} {} {} -o {} ",
-        which::which("mlir-opt")
-            .expect("mlir-opt not found")
-            .display(),
+        which::which("mlir-opt").expect("mlir-opt not found").display(),
         r#"-gpu-lower-to-nvvm-pipeline='opt-level=3 cubin-chip=sm_80 cubin-features=+ptx80'"#,
         inpath,
         outpath,
@@ -47,9 +42,8 @@ pub(crate) fn codegen(
     let mod_name = module.name.clone();
     let module_name = Some(&mod_name[..]);
     let out = if let Some(m) = module.module_llvm.mlir_module {
-        let out = cgcx
-            .output_filenames
-            .temp_path(rustc_session::config::OutputType::Mir, module_name);
+        let out =
+            cgcx.output_filenames.temp_path(rustc_session::config::OutputType::Mir, module_name);
         let out_opt = cgcx
             .output_filenames
             .temp_path(rustc_session::config::OutputType::Assembly, module_name);
@@ -59,14 +53,12 @@ pub(crate) fn codegen(
         let out_bc = cgcx
             .output_filenames
             .temp_path(rustc_session::config::OutputType::Bitcode, module_name);
-        let out_obj = cgcx
-            .output_filenames
-            .temp_path(rustc_session::config::OutputType::Object, module_name);
+        let out_obj =
+            cgcx.output_filenames.temp_path(rustc_session::config::OutputType::Object, module_name);
         let copy = format!("{}-copy", mod_name);
-        let out_obj_private = cgcx.output_filenames.temp_path(
-            rustc_session::config::OutputType::Object,
-            Some(copy.as_str()),
-        );
+        let out_obj_private = cgcx
+            .output_filenames
+            .temp_path(rustc_session::config::OutputType::Object, Some(copy.as_str()));
         log::debug!("write MLIR module to {:?}", out);
 
         if !m.module.as_operation().verify() {
@@ -81,12 +73,7 @@ pub(crate) fn codegen(
         // mlir-opt must use "shell" in order to pass correct arguments.
         mlir_opt(out.to_str().unwrap(), out_opt.to_str().unwrap())?;
 
-        let args = [
-            "-mlir-to-llvmir",
-            "-o",
-            out_ll.to_str().unwrap(),
-            out_opt.to_str().unwrap(),
-        ];
+        let args = ["-mlir-to-llvmir", "-o", out_ll.to_str().unwrap(), out_opt.to_str().unwrap()];
         let mlir_translate = Command::new("mlir-translate")
             .args(args)
             .stdin(std::process::Stdio::piped())

@@ -3,26 +3,26 @@ mod coverage;
 mod debug;
 mod intrinsic;
 
-use crate::mlir::ValueToOpRef;
+use std::collections::HashMap;
+use std::marker::PhantomData;
+use std::ops::Deref;
+
 use log_derive::logfn;
 use melior::dialect::memref as mlir_memref;
 use melior::helpers::BuiltinBlockExt;
 use melior::ir::r#type::{self as mlir_type, MemRefType};
-use rustc_abi::BackendRepr;
-use rustc_codegen_ssa_gpu::mir::operand::{OperandRef, OperandValue};
-use std::collections::HashMap;
-use std::{marker::PhantomData, ops::Deref};
-
 use melior::ir::{
     self as mlir_ir, BlockLike, Location, RegionLike, RegionRef, TypeLike, Value, ValueLike,
 };
+use rustc_abi::BackendRepr;
+use rustc_codegen_ssa_gpu::mir::operand::{OperandRef, OperandValue};
 use rustc_codegen_ssa_gpu::traits::{
     AsmBuilderMethods, BackendTypes, BaseTypeCodegenMethods, BuilderMethods, ConstCodegenMethods,
     LayoutTypeCodegenMethods, StaticBuilderMethods,
 };
 
-use crate::mlir::BlockRefWithTime;
-use crate::{context::GPUCodegenContext, mlir::MLIROpHelpers};
+use crate::context::GPUCodegenContext;
+use crate::mlir::{BlockRefWithTime, MLIROpHelpers, ValueToOpRef};
 
 pub(crate) struct GpuBuilderState<'ml, 'a> {
     pub attrs: Vec<mlir_ir::Attribute<'ml>>,
@@ -32,11 +32,7 @@ pub(crate) struct GpuBuilderState<'ml, 'a> {
 
 impl<'ml, 'a> GpuBuilderState<'ml, 'a> {
     pub fn new() -> Self {
-        Self {
-            attrs: vec![],
-            args: HashMap::new(),
-            inside_gpu_scope: false,
-        }
+        Self { attrs: vec![], args: HashMap::new(), inside_gpu_scope: false }
     }
 }
 
@@ -216,19 +212,11 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
 
     #[allow(dead_code)]
     pub fn inside_gpu_mod(&self) -> bool {
-        if let Some(op) = self.cur_block().parent_operation() {
-            op.is_gpu_func()
-        } else {
-            false
-        }
+        if let Some(op) = self.cur_block().parent_operation() { op.is_gpu_func() } else { false }
     }
 
     pub fn inside_kernel_func(&self) -> bool {
-        if let Some(op) = self.cur_block().parent_operation() {
-            op.is_kernel_func()
-        } else {
-            false
-        }
+        if let Some(op) = self.cur_block().parent_operation() { op.is_kernel_func() } else { false }
     }
 
     fn mlir_load(
@@ -338,10 +326,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         let region: RegionRef<'ml, 'a> = unsafe { llfn.to_ref() }.region(0).unwrap();
         let types = llfn.get_op_operands_types();
         let block: mlir_ir::BlockRef<'ml, 'a> = region.append_block(melior::ir::Block::new(
-            &types
-                .iter()
-                .map(|t| (*t, Location::unknown(cx.mlir_ctx)))
-                .collect::<Vec<_>>(),
+            &types.iter().map(|t| (*t, Location::unknown(cx.mlir_ctx))).collect::<Vec<_>>(),
         ));
         block
         //llvm::LLVMAppendBasicBlockInContext(cx.llcx, llfn, name.as_ptr())
@@ -350,11 +335,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     fn append_sibling_block(&mut self, name: &str) -> Self::BasicBlock {
         log::debug!("append_sibling_block: {:?}", name);
         let sibling_block = melior::ir::Block::new(&[]);
-        self.cur_block()
-            .parent_region()
-            .as_ref()
-            .unwrap()
-            .append_block(sibling_block)
+        self.cur_block().parent_region().as_ref().unwrap().append_block(sibling_block)
     }
 
     fn switch_to_block(&mut self, llbb: Self::BasicBlock) {
@@ -685,11 +666,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
 
     fn from_immediate(&mut self, val: Self::Value) -> Self::Value {
         log::trace!("from_immediate: {:?}", val);
-        if val.r#type() == self.cx().type_i1() {
-            self.zext(val, self.cx().type_i8())
-        } else {
-            val
-        }
+        if val.r#type() == self.cx().type_i1() { self.zext(val, self.cx().type_i8()) } else { val }
     }
 
     fn to_immediate_scalar(&mut self, val: Self::Value, scalar: rustc_abi::Scalar) -> Self::Value {
@@ -753,17 +730,11 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         let val = if place.val.llextra.is_some() {
             OperandValue::Ref(place.val)
         } else if self.cx.is_backend_immediate(place.layout) {
-            let llval = self.load(
-                self.mlir_type(place.layout, true),
-                place.val.llval,
-                place.val.align,
-            );
+            let llval =
+                self.load(self.mlir_type(place.layout, true), place.val.llval, place.val.align);
             OperandValue::Immediate(llval)
         } else if let BackendRepr::ScalarPair(a, b) = place.layout.backend_repr {
-            let b_offset = a
-                .primitive()
-                .size(self)
-                .align_to(b.primitive().align(self).abi);
+            let b_offset = a.primitive().size(self).align_to(b.primitive().align(self).abi);
 
             let mut load = |i, scalar: rustc_abi::Scalar, align| {
                 self.mlir_load(
@@ -781,10 +752,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         } else {
             OperandValue::Ref(place.val)
         };
-        OperandRef {
-            val,
-            layout: place.layout,
-        }
+        OperandRef { val, layout: place.layout }
     }
 
     fn write_operand_repeatedly(
@@ -1174,12 +1142,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         if self.is_unreachable() {
             return cond;
         }
-        self.append_op_res(melior::dialect::arith::select(
-            cond,
-            then_val,
-            else_val,
-            self.cur_loc(),
-        ))
+        self.append_op_res(melior::dialect::arith::select(cond, then_val, else_val, self.cur_loc()))
     }
 
     fn va_arg(&mut self, list: Self::Value, ty: Self::Type) -> Self::Value {
@@ -1320,10 +1283,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         if self.is_unreachable() {
             return llfn;
         }
-        let args = args
-            .iter()
-            .map(|arg| self.use_value(*arg))
-            .collect::<Vec<_>>();
+        let args = args.iter().map(|arg| self.use_value(*arg)).collect::<Vec<_>>();
         let mut closure_ptrs = vec![];
         if let Some(instance) = instance {
             let mut closure_count = 0;
@@ -1339,10 +1299,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         let args = &args;
         let ftype = fn_abi.map(|abi| self.fn_abi_to_fn_type(abi));
         let span = self.cur_span;
-        let op = self
-            .cx
-            .call_op(llfn, args, ftype, &mut self.extra_state, span)
-            .unwrap();
+        let op = self.cx.call_op(llfn, args, ftype, &mut self.extra_state, span).unwrap();
         if let Some(op) = op {
             let op = self.append_op(op);
             if op.result_count() > 0 {
@@ -1353,8 +1310,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
                         let ret: mlir_ir::Value<'ml, 'val> = op.result(i).unwrap().into();
                         ret_vec.push(ret);
                     }
-                    self.op_to_extra_values
-                        .insert(op.location().to_string(), ret_vec);
+                    self.op_to_extra_values.insert(op.location().to_string(), ret_vec);
                 }
                 //self.span_to_type.insert(self.cur_span, ret.r#type());
                 ret

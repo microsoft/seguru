@@ -81,13 +81,7 @@ impl<'tcx, 'ml, 'a> ArgAbiBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
         if self.is_unreachable() {
             return;
         }
-        log::warn!(
-            "store_fn_arg {:?} {} {:?} {:?}",
-            arg_abi,
-            idx,
-            dst,
-            self.cur_span
-        );
+        log::warn!("store_fn_arg {:?} {} {:?} {:?}", arg_abi, idx, dst, self.cur_span);
         fn next<'ml, 'a>(
             bx: &GpuBuilder<'_, 'ml, 'a>,
             idx: &mut usize,
@@ -114,10 +108,9 @@ impl<'tcx, 'ml, 'a> ArgAbiBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
                 )
                 .store(self, dst);
             }
-            PassMode::Cast { .. } | PassMode::Indirect { .. } => panic!(
-                "query hooks should've made this `PassMode` impossible: {:#?}",
-                arg_abi
-            ),
+            PassMode::Cast { .. } | PassMode::Indirect { .. } => {
+                panic!("query hooks should've made this `PassMode` impossible: {:#?}", arg_abi)
+            }
         }
     }
 

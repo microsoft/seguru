@@ -19,10 +19,7 @@ pub fn scope<'env, F, T>(f: F) -> T
 where
     F: for<'scope> FnOnce(&'scope ThreadScope<'scope, 'env>) -> T,
 {
-    let scope = ThreadScope {
-        env: PhantomData,
-        scope: PhantomData,
-    };
+    let scope = ThreadScope { env: PhantomData, scope: PhantomData };
     f(&scope)
 }
 

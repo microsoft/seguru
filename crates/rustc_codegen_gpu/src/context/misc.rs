@@ -1,8 +1,6 @@
 use rustc_codegen_ssa_gpu::traits::MiscCodegenMethods;
-use rustc_middle::{
-    query::Key,
-    ty::layout::{FnAbiOf, HasTyCtxt},
-};
+use rustc_middle::query::Key;
+use rustc_middle::ty::layout::{FnAbiOf, HasTyCtxt};
 
 use super::GPUCodegenContext;
 
@@ -11,10 +9,7 @@ impl<'tcx, 'ml> MiscCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, '_> {
         &self,
     ) -> &std::cell::RefCell<
         rustc_data_structures::fx::FxHashMap<
-            (
-                rustc_middle::ty::Ty<'tcx>,
-                Option<rustc_middle::ty::ExistentialTraitRef<'tcx>>,
-            ),
+            (rustc_middle::ty::Ty<'tcx>, Option<rustc_middle::ty::ExistentialTraitRef<'tcx>>),
             Self::Value,
         >,
     > {

@@ -8,17 +8,17 @@ mod predef;
 mod to_mir_func;
 mod ty;
 
-use rustc_abi::{self, HasDataLayout};
-use rustc_codegen_ssa_gpu::traits::BackendTypes;
+use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::{collections::HashMap, sync::RwLock};
+use std::sync::RwLock;
 
 use melior::ir::{self as mlir_ir, TypeLike};
+use rustc_abi::{self, HasDataLayout};
+use rustc_codegen_ssa_gpu::traits::BackendTypes;
 use rustc_middle::ty::layout::{HasTyCtxt, HasTypingEnv};
 
-use crate::mlir::BlockRefWithTime;
-
 use self::ty::MLIRType;
+use crate::mlir::BlockRefWithTime;
 
 pub(crate) struct GPUCodegenContext<'tcx, 'ml, 'a> {
     pub cgu_name: String,
@@ -87,15 +87,9 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     pub fn get_const_bytes_by_name(&self, name: &str) -> &[u8] {
         let alloc_id = self.const_name_to_allocid.read().unwrap()[name];
         let alloc = self.tcx.global_alloc(alloc_id).unwrap_memory();
-        let bytes = self
-            .tcx
-            .global_alloc(alloc_id)
-            .unwrap_memory()
-            .inner()
-            .get_bytes_unchecked(rustc_const_eval::interpret::alloc_range(
-                rustc_abi::Size::ZERO,
-                alloc.inner().size(),
-            ));
+        let bytes = self.tcx.global_alloc(alloc_id).unwrap_memory().inner().get_bytes_unchecked(
+            rustc_const_eval::interpret::alloc_range(rustc_abi::Size::ZERO, alloc.inner().size()),
+        );
         bytes
     }
 }

@@ -1,12 +1,10 @@
-use melior::ir::AttributeLike;
-use melior::{ir::Attribute, Context};
+use melior::Context;
+use melior::ir::{Attribute, AttributeLike};
 macro_rules! attribute_traits {
     ($name: ident, $is_type: ident, $string: expr) => {
         impl<'c> $name<'c> {
             unsafe fn from_raw(raw: mlir_sys::MlirAttribute) -> Self {
-                Self {
-                    attribute: Attribute::from_raw(raw),
-                }
+                Self { attribute: Attribute::from_raw(raw) }
             }
         }
 
@@ -19,10 +17,7 @@ macro_rules! attribute_traits {
                 if attribute.$is_type() {
                     Ok(unsafe { Self::from_raw(attribute.to_raw()) })
                 } else {
-                    Err(melior::Error::AttributeExpected(
-                        $string,
-                        attribute.to_string(),
-                    ))
+                    Err(melior::Error::AttributeExpected($string, attribute.to_string()))
                 }
             }
         }

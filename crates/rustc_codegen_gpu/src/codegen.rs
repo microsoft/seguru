@@ -1,7 +1,10 @@
-use rustc_codegen_ssa_gpu::{mono_item::MonoItemExt, ModuleCodegen};
+use rustc_codegen_ssa_gpu::ModuleCodegen;
+use rustc_codegen_ssa_gpu::mono_item::MonoItemExt;
 use rustc_span::Symbol;
 
-use crate::{backend::GPUCodeGenModule, builder::GpuBuilder, context::GPUCodegenContext};
+use crate::backend::GPUCodeGenModule;
+use crate::builder::GpuBuilder;
+use crate::context::GPUCodegenContext;
 
 pub(crate) fn module_codegen<'tcx>(
     tcx: rustc_middle::ty::TyCtxt<'tcx>,
@@ -72,9 +75,7 @@ pub(crate) fn module_codegen<'tcx>(
     );
     let module = GPUCodeGenModule {
         llvm_module: Some(llvm_mod),
-        mlir_module: Some(crate::backend::MLIRModule {
-            module: mlir_module,
-        }),
+        mlir_module: Some(crate::backend::MLIRModule { module: mlir_module }),
     };
     let m = ModuleCodegen::new_regular(cgu_name.to_string(), module);
     eprintln!("compile_codegen_unit {}", cgu_name);

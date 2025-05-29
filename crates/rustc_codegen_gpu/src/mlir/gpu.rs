@@ -1,4 +1,5 @@
-use melior::ir::{operation::OperationBuilder, Attribute, Identifier, Location, Operation, Type};
+use melior::ir::operation::OperationBuilder;
+use melior::ir::{Attribute, Identifier, Location, Operation, Type};
 
 pub fn thread_id<'c>(
     ctx: &'c melior::Context,

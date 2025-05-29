@@ -1,8 +1,7 @@
-use rustc_ast::{
-    token::{Token, TokenKind},
-    tokenstream::TokenTree,
-};
-use rustc_hir::{def_id::DefId, Attribute};
+use rustc_ast::token::{Token, TokenKind};
+use rustc_ast::tokenstream::TokenTree;
+use rustc_hir::Attribute;
+use rustc_hir::def_id::DefId;
 use rustc_span::Symbol;
 
 // inspired by rust-gpu's attribute handling

@@ -1,15 +1,14 @@
 use melior::dialect::memref as mlir_memref;
-use melior::ir::{self as mlir_ir, r#type as mlir_type};
-use melior::{helpers::ArithBlockExt, ir::BlockLike};
+use melior::helpers::ArithBlockExt;
+use melior::ir::{self as mlir_ir, BlockLike, r#type as mlir_type};
 use rustc_abi::Size;
 use rustc_codegen_ssa_gpu::traits::{
     BackendTypes, BaseTypeCodegenMethods, ConstCodegenMethods, StaticCodegenMethods,
 };
-use rustc_const_eval::interpret::{alloc_range, GlobalAlloc};
-
-use crate::mlir::ValueToOpRef;
+use rustc_const_eval::interpret::{GlobalAlloc, alloc_range};
 
 use super::GPUCodegenContext;
+use crate::mlir::ValueToOpRef;
 
 fn get_alloc_name(alloc_id: rustc_const_eval::interpret::AllocId) -> String {
     format!("memory_alloc_{:?}", alloc_id.0)
@@ -43,12 +42,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         block: &'a mlir_ir::Block<'ml>,
     ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Value {
         block
-            .const_int(
-                self.mlir_ctx,
-                self.unknown_loc(),
-                i,
-                size_of::<T>() as u32 * 8,
-            )
+            .const_int(self.mlir_ctx, self.unknown_loc(), i, size_of::<T>() as u32 * 8)
             .expect("failed to create const int")
     }
 
@@ -76,9 +70,8 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let ty = self.type_array(self.type_i8(), alloc.inner().len() as u64);
         let ref_ty =
             mlir_type::MemRefType::new(self.type_i8(), &[alloc.inner().len() as i64], None, None);
-        let bytes = alloc
-            .inner()
-            .get_bytes_unchecked(alloc_range(Size::ZERO, alloc.inner().size()));
+        let bytes =
+            alloc.inner().get_bytes_unchecked(alloc_range(Size::ZERO, alloc.inner().size()));
         log::debug!(
             "const_data_memref_from_alloc: {} {} {:?} {}",
             alloc.inner().len(),
@@ -127,10 +120,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let name = get_alloc_name(alloc_id);
         let v = match alloc {
             GlobalAlloc::Memory(alloc) => {
-                self.const_name_to_allocid
-                    .write()
-                    .unwrap()
-                    .insert(name.clone(), alloc_id);
+                self.const_name_to_allocid.write().unwrap().insert(name.clone(), alloc_id);
                 self.const_data_memref_from_alloc(alloc, name.as_str())
             }
             GlobalAlloc::VTable(ty, dyn_ty) => {
@@ -254,11 +244,7 @@ impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
                 let data = int.to_uint(int.size());
 
                 if let rustc_abi::Primitive::Pointer(_) = layout.primitive() {
-                    if data == 0 {
-                        self.const_null(ty)
-                    } else {
-                        self.const_undef(ty)
-                    }
+                    if data == 0 { self.const_null(ty) } else { self.const_undef(ty) }
                 } else {
                     self.mlir_global_const_int_from_type(
                         cv.assert_scalar_int().to_int(int.size()),
@@ -269,10 +255,7 @@ impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
             rustc_const_eval::interpret::Scalar::Ptr(ptr, s) => {
                 let (prov, offset) = ptr.into_parts();
                 let alloc_id = prov.alloc_id();
-                log::trace!(
-                    "scalar_to_backend ptr: {:?}",
-                    self.tcx.global_alloc(alloc_id)
-                );
+                log::trace!("scalar_to_backend ptr: {:?}", self.tcx.global_alloc(alloc_id));
                 self.const_data_memref_from_alloc_id(alloc_id)
             }
         }

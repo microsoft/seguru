@@ -1,24 +1,17 @@
-use melior::ir::{
-    attribute::StringAttribute, r#type::FunctionType, BlockLike, Location, Operation,
-};
+use melior::ir::attribute::StringAttribute;
+use melior::ir::r#type::FunctionType;
+use melior::ir::{BlockLike, Location, Operation};
 use rustc_codegen_ssa_gpu::traits::{LayoutTypeCodegenMethods, MiscCodegenMethods};
 use rustc_hir::def_id::DefId;
-use rustc_middle::{
-    query::Key,
-    ty::{
-        layout::{FnAbiOf, HasTyCtxt},
-        AssocItemContainer, Instance,
-    },
-};
+use rustc_middle::query::Key;
+use rustc_middle::ty::layout::{FnAbiOf, HasTyCtxt};
+use rustc_middle::ty::{AssocItemContainer, Instance};
 use rustc_span::Span;
 
-use crate::{
-    attr::{GpuAttributes, GpuItem},
-    builder::GpuBuilderState,
-    mlir::{MLIRMutOpHelpers, MLIROpHelpers, MLIRVisibility, ValueToOpRef, BUILTIN_SYM},
-};
-
 use super::GPUCodegenContext;
+use crate::attr::{GpuAttributes, GpuItem};
+use crate::builder::GpuBuilderState;
+use crate::mlir::{BUILTIN_SYM, MLIRMutOpHelpers, MLIROpHelpers, MLIRVisibility, ValueToOpRef};
 
 fn is_impl_of_trait_method(
     tcx: &rustc_middle::ty::TyCtxt<'_>,
@@ -36,9 +29,8 @@ fn is_impl_of_trait_method(
     if let Some(assoc_item) = tcx.opt_associated_item(def_id) {
         if assoc_item.container == AssocItemContainer::Impl && assoc_item.name == method_sym {
             // Get the trait ref for the impl (if it's an impl of a trait)
-            if let Some(trait_ref) = tcx
-                .impl_of_method(def_id)
-                .and_then(|impl_def_id| tcx.impl_trait_ref(impl_def_id))
+            if let Some(trait_ref) =
+                tcx.impl_of_method(def_id).and_then(|impl_def_id| tcx.impl_trait_ref(impl_def_id))
             {
                 return trait_ref.skip_binder().def_id == into_iter_trait;
             }
@@ -108,12 +100,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 loc,
             )))
         } else {
-            Ok(Some(melior::dialect::func::call_indirect(
-                fn_ptr_value,
-                args,
-                &return_type,
-                loc,
-            )))
+            Ok(Some(melior::dialect::func::call_indirect(fn_ptr_value, args, &return_type, loc)))
         }
     }
     /// Get the function pointer value for the given instance.
@@ -169,11 +156,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                     self.scalar_pair_element_backend_type(arg.layout, 1, true)
                 }
                 rustc_target::callconv::PassMode::Cast { pad_i32, cast } => todo!(),
-                rustc_target::callconv::PassMode::Indirect {
-                    attrs,
-                    meta_attrs,
-                    on_stack,
-                } => {
+                rustc_target::callconv::PassMode::Indirect { attrs, meta_attrs, on_stack } => {
                     assert!(!on_stack);
                     self.type_memref(self.immediate_backend_type(arg.layout))
                 }
@@ -216,33 +199,21 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 assert!(extra.attrs.len() == 1);
                 assert!(return_types.len() == 1);
                 let dimention = extra.attrs.pop().unwrap();
-                Ok(Some(crate::mlir::gpu::thread_id(
-                    self.mlir_ctx,
-                    dimention,
-                    loc,
-                )))
+                Ok(Some(crate::mlir::gpu::thread_id(self.mlir_ctx, dimention, loc)))
             }
             GpuItem::GlobalThreadId => {
                 let dimention = extra.attrs.pop().unwrap();
-                Ok(Some(crate::mlir::gpu::global_id(
-                    self.mlir_ctx,
-                    dimention,
-                    loc,
-                )))
+                Ok(Some(crate::mlir::gpu::global_id(self.mlir_ctx, dimention, loc)))
             }
             GpuItem::Printf => {
                 assert!(extra.attrs.len() == 1);
                 let Ok(format) = extra.attrs.pop().unwrap().try_into() else {
-                    let err = format!(
-                        "{:?} must take a single StringAttribute as format",
-                        gpu_item
-                    );
+                    let err =
+                        format!("{:?} must take a single StringAttribute as format", gpu_item);
                     self.emit_error(err.clone(), span);
                     return Err(melior::Error::AttributeNotFound(err));
                 };
-                Ok(Some(
-                    melior::dialect::ods::gpu::printf(self.mlir_ctx, args, format, loc).into(),
-                ))
+                Ok(Some(melior::dialect::ods::gpu::printf(self.mlir_ctx, args, format, loc).into()))
             }
             GpuItem::AddStringAttr => {
                 // args must be a const string.

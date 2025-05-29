@@ -1,8 +1,7 @@
 use rustc_codegen_ssa_gpu::traits::PreDefineCodegenMethods;
 
-use crate::mlir::MLIRVisibility;
-
 use super::GPUCodegenContext;
+use crate::mlir::MLIRVisibility;
 
 fn to_mlir_visibility(visibility: rustc_middle::mir::mono::Visibility) -> MLIRVisibility {
     match visibility {

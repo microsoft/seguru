@@ -1,4 +1,4 @@
-use rustc_codegen_ssa::traits::CoverageInfoBuilderMethods;
+use rustc_codegen_ssa_gpu::traits::CoverageInfoBuilderMethods;
 
 use super::GpuBuilder;
 

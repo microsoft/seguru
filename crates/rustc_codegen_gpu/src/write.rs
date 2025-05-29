@@ -1,7 +1,7 @@
 use std::process::Command;
 
-use rustc_codegen_ssa::ModuleCodegen;
-use rustc_codegen_ssa::{
+use rustc_codegen_ssa_gpu::ModuleCodegen;
+use rustc_codegen_ssa_gpu::{
     back::write::{CodegenContext, ModuleConfig},
     CompiledModule,
 };
@@ -43,7 +43,7 @@ pub(crate) fn codegen(
     dcx: DiagCtxtHandle<'_>,
     module: ModuleCodegen<GPUCodeGenModule>,
     _config: &ModuleConfig,
-) -> Result<rustc_codegen_ssa::CompiledModule, rustc_errors::FatalError> {
+) -> Result<rustc_codegen_ssa_gpu::CompiledModule, rustc_errors::FatalError> {
     let mod_name = module.name.clone();
     let module_name = Some(&mod_name[..]);
     let out = if let Some(m) = module.module_llvm.mlir_module {

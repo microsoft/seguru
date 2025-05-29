@@ -1,4 +1,4 @@
-use rustc_codegen_ssa::{mono_item::MonoItemExt, ModuleCodegen};
+use rustc_codegen_ssa_gpu::{mono_item::MonoItemExt, ModuleCodegen};
 use rustc_span::Symbol;
 
 use crate::{backend::GPUCodeGenModule, builder::GpuBuilder, context::GPUCodegenContext};
@@ -63,7 +63,7 @@ pub(crate) fn module_codegen<'tcx>(
             }
         }
     }
-    use crate::rustc_codegen_ssa::traits::ExtraBackendMethods;
+    use crate::rustc_codegen_ssa_gpu::traits::ExtraBackendMethods;
     let llvm_mod = crate::backend::llvm_backend().codegen_allocator(
         tcx,
         cgu_name.as_str(),

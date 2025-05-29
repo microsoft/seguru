@@ -2,7 +2,7 @@ use melior::dialect::memref as mlir_memref;
 use melior::ir::{self as mlir_ir, r#type as mlir_type};
 use melior::{helpers::ArithBlockExt, ir::BlockLike};
 use rustc_abi::Size;
-use rustc_codegen_ssa::traits::{
+use rustc_codegen_ssa_gpu::traits::{
     BackendTypes, BaseTypeCodegenMethods, ConstCodegenMethods, StaticCodegenMethods,
 };
 use rustc_const_eval::interpret::{alloc_range, GlobalAlloc};

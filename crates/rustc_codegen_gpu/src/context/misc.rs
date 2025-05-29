@@ -1,4 +1,4 @@
-use rustc_codegen_ssa::traits::MiscCodegenMethods;
+use rustc_codegen_ssa_gpu::traits::MiscCodegenMethods;
 use rustc_middle::{
     query::Key,
     ty::layout::{FnAbiOf, HasTyCtxt},

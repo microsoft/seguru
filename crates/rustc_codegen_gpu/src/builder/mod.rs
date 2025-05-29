@@ -9,14 +9,14 @@ use melior::dialect::memref as mlir_memref;
 use melior::helpers::BuiltinBlockExt;
 use melior::ir::r#type::{self as mlir_type, MemRefType};
 use rustc_abi::BackendRepr;
-use rustc_codegen_ssa::mir::operand::{OperandRef, OperandValue};
+use rustc_codegen_ssa_gpu::mir::operand::{OperandRef, OperandValue};
 use std::collections::HashMap;
 use std::{marker::PhantomData, ops::Deref};
 
 use melior::ir::{
     self as mlir_ir, BlockLike, Location, RegionLike, RegionRef, TypeLike, Value, ValueLike,
 };
-use rustc_codegen_ssa::traits::{
+use rustc_codegen_ssa_gpu::traits::{
     AsmBuilderMethods, BackendTypes, BaseTypeCodegenMethods, BuilderMethods, ConstCodegenMethods,
     LayoutTypeCodegenMethods, StaticBuilderMethods,
 };
@@ -279,7 +279,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a> AsmBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a
     fn codegen_inline_asm(
         &mut self,
         template: &[rustc_ast::InlineAsmTemplatePiece],
-        operands: &[rustc_codegen_ssa::traits::InlineAsmOperandRef<'tcx, Self>],
+        operands: &[rustc_codegen_ssa_gpu::traits::InlineAsmOperandRef<'tcx, Self>],
         options: rustc_ast::InlineAsmOptions,
         line_spans: &[rustc_span::Span],
         instance: rustc_middle::ty::Instance<'_>,
@@ -399,7 +399,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         then_llbb: Self::BasicBlock,
         else_llbb: Self::BasicBlock,
     ) {
-        use crate::rustc_codegen_ssa::traits::AbiBuilderMethods;
+        use crate::rustc_codegen_ssa_gpu::traits::AbiBuilderMethods;
         if self.is_unreachable() {
             return;
         }
@@ -429,7 +429,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         else_llbb: Self::BasicBlock,
         cases: impl ExactSizeIterator<Item = (u128, Self::BasicBlock)>,
     ) {
-        use crate::rustc_codegen_ssa::traits::AbiBuilderMethods;
+        use crate::rustc_codegen_ssa_gpu::traits::AbiBuilderMethods;
         if self.is_unreachable() {
             return;
         }
@@ -675,7 +675,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
 
     fn checked_binop(
         &mut self,
-        oop: rustc_codegen_ssa::traits::OverflowOp,
+        oop: rustc_codegen_ssa_gpu::traits::OverflowOp,
         ty: rustc_middle::ty::Ty<'_>,
         lhs: Self::Value,
         rhs: Self::Value,
@@ -735,7 +735,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         &mut self,
         ty: Self::Type,
         ptr: Self::Value,
-        order: rustc_codegen_ssa::common::AtomicOrdering,
+        order: rustc_codegen_ssa_gpu::common::AtomicOrdering,
         size: rustc_abi::Size,
     ) -> Self::Value {
         todo!()
@@ -743,8 +743,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
 
     fn load_operand(
         &mut self,
-        place: rustc_codegen_ssa::mir::place::PlaceRef<'tcx, Self::Value>,
-    ) -> rustc_codegen_ssa::mir::operand::OperandRef<'tcx, Self::Value> {
+        place: rustc_codegen_ssa_gpu::mir::place::PlaceRef<'tcx, Self::Value>,
+    ) -> rustc_codegen_ssa_gpu::mir::operand::OperandRef<'tcx, Self::Value> {
         assert!(!self.is_unreachable());
         if place.layout.is_zst() {
             return OperandRef::zero_sized(place.layout);
@@ -789,9 +789,9 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
 
     fn write_operand_repeatedly(
         &mut self,
-        elem: rustc_codegen_ssa::mir::operand::OperandRef<'tcx, Self::Value>,
+        elem: rustc_codegen_ssa_gpu::mir::operand::OperandRef<'tcx, Self::Value>,
         count: u64,
-        dest: rustc_codegen_ssa::mir::place::PlaceRef<'tcx, Self::Value>,
+        dest: rustc_codegen_ssa_gpu::mir::place::PlaceRef<'tcx, Self::Value>,
     ) {
         todo!()
     }
@@ -834,7 +834,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         val: Self::Value,
         ptr: Self::Value,
         align: rustc_abi::Align,
-        flags: rustc_codegen_ssa::MemFlags,
+        flags: rustc_codegen_ssa_gpu::MemFlags,
     ) -> Self::Value {
         if self.is_unreachable() {
             return val;
@@ -846,7 +846,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         &mut self,
         val: Self::Value,
         ptr: Self::Value,
-        order: rustc_codegen_ssa::common::AtomicOrdering,
+        order: rustc_codegen_ssa_gpu::common::AtomicOrdering,
         size: rustc_abi::Size,
     ) {
         todo!()
@@ -1008,7 +1008,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
 
     fn icmp(
         &mut self,
-        op: rustc_codegen_ssa::common::IntPredicate,
+        op: rustc_codegen_ssa_gpu::common::IntPredicate,
         lhs: Self::Value,
         rhs: Self::Value,
     ) -> Self::Value {
@@ -1016,34 +1016,34 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             return lhs;
         }
         let predicate = match op {
-            rustc_codegen_ssa::common::IntPredicate::IntEQ => {
+            rustc_codegen_ssa_gpu::common::IntPredicate::IntEQ => {
                 melior::dialect::arith::CmpiPredicate::Eq
             }
-            rustc_codegen_ssa::common::IntPredicate::IntNE => {
+            rustc_codegen_ssa_gpu::common::IntPredicate::IntNE => {
                 melior::dialect::arith::CmpiPredicate::Ne
             }
-            rustc_codegen_ssa::common::IntPredicate::IntUGT => {
+            rustc_codegen_ssa_gpu::common::IntPredicate::IntUGT => {
                 melior::dialect::arith::CmpiPredicate::Ugt
             }
-            rustc_codegen_ssa::common::IntPredicate::IntUGE => {
+            rustc_codegen_ssa_gpu::common::IntPredicate::IntUGE => {
                 melior::dialect::arith::CmpiPredicate::Uge
             }
-            rustc_codegen_ssa::common::IntPredicate::IntULT => {
+            rustc_codegen_ssa_gpu::common::IntPredicate::IntULT => {
                 melior::dialect::arith::CmpiPredicate::Ult
             }
-            rustc_codegen_ssa::common::IntPredicate::IntULE => {
+            rustc_codegen_ssa_gpu::common::IntPredicate::IntULE => {
                 melior::dialect::arith::CmpiPredicate::Ule
             }
-            rustc_codegen_ssa::common::IntPredicate::IntSGT => {
+            rustc_codegen_ssa_gpu::common::IntPredicate::IntSGT => {
                 melior::dialect::arith::CmpiPredicate::Sgt
             }
-            rustc_codegen_ssa::common::IntPredicate::IntSGE => {
+            rustc_codegen_ssa_gpu::common::IntPredicate::IntSGE => {
                 melior::dialect::arith::CmpiPredicate::Sge
             }
-            rustc_codegen_ssa::common::IntPredicate::IntSLT => {
+            rustc_codegen_ssa_gpu::common::IntPredicate::IntSLT => {
                 melior::dialect::arith::CmpiPredicate::Slt
             }
-            rustc_codegen_ssa::common::IntPredicate::IntSLE => {
+            rustc_codegen_ssa_gpu::common::IntPredicate::IntSLE => {
                 melior::dialect::arith::CmpiPredicate::Sle
             }
         };
@@ -1059,7 +1059,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
 
     fn fcmp(
         &mut self,
-        op: rustc_codegen_ssa::common::RealPredicate,
+        op: rustc_codegen_ssa_gpu::common::RealPredicate,
         lhs: Self::Value,
         rhs: Self::Value,
     ) -> Self::Value {
@@ -1067,52 +1067,52 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             return lhs;
         }
         let predicate = match op {
-            rustc_codegen_ssa::common::RealPredicate::RealPredicateFalse => {
+            rustc_codegen_ssa_gpu::common::RealPredicate::RealPredicateFalse => {
                 melior::dialect::arith::CmpfPredicate::False
             }
-            rustc_codegen_ssa::common::RealPredicate::RealOEQ => {
+            rustc_codegen_ssa_gpu::common::RealPredicate::RealOEQ => {
                 melior::dialect::arith::CmpfPredicate::Oeq
             }
-            rustc_codegen_ssa::common::RealPredicate::RealOGT => {
+            rustc_codegen_ssa_gpu::common::RealPredicate::RealOGT => {
                 melior::dialect::arith::CmpfPredicate::Ogt
             }
-            rustc_codegen_ssa::common::RealPredicate::RealOGE => {
+            rustc_codegen_ssa_gpu::common::RealPredicate::RealOGE => {
                 melior::dialect::arith::CmpfPredicate::Oge
             }
-            rustc_codegen_ssa::common::RealPredicate::RealOLT => {
+            rustc_codegen_ssa_gpu::common::RealPredicate::RealOLT => {
                 melior::dialect::arith::CmpfPredicate::Olt
             }
-            rustc_codegen_ssa::common::RealPredicate::RealOLE => {
+            rustc_codegen_ssa_gpu::common::RealPredicate::RealOLE => {
                 melior::dialect::arith::CmpfPredicate::Ole
             }
-            rustc_codegen_ssa::common::RealPredicate::RealONE => {
+            rustc_codegen_ssa_gpu::common::RealPredicate::RealONE => {
                 melior::dialect::arith::CmpfPredicate::One
             }
-            rustc_codegen_ssa::common::RealPredicate::RealORD => {
+            rustc_codegen_ssa_gpu::common::RealPredicate::RealORD => {
                 melior::dialect::arith::CmpfPredicate::Ord
             }
-            rustc_codegen_ssa::common::RealPredicate::RealUNO => {
+            rustc_codegen_ssa_gpu::common::RealPredicate::RealUNO => {
                 melior::dialect::arith::CmpfPredicate::Uno
             }
-            rustc_codegen_ssa::common::RealPredicate::RealUEQ => {
+            rustc_codegen_ssa_gpu::common::RealPredicate::RealUEQ => {
                 melior::dialect::arith::CmpfPredicate::Ueq
             }
-            rustc_codegen_ssa::common::RealPredicate::RealUGT => {
+            rustc_codegen_ssa_gpu::common::RealPredicate::RealUGT => {
                 melior::dialect::arith::CmpfPredicate::Ugt
             }
-            rustc_codegen_ssa::common::RealPredicate::RealUGE => {
+            rustc_codegen_ssa_gpu::common::RealPredicate::RealUGE => {
                 melior::dialect::arith::CmpfPredicate::Uge
             }
-            rustc_codegen_ssa::common::RealPredicate::RealULT => {
+            rustc_codegen_ssa_gpu::common::RealPredicate::RealULT => {
                 melior::dialect::arith::CmpfPredicate::Ult
             }
-            rustc_codegen_ssa::common::RealPredicate::RealULE => {
+            rustc_codegen_ssa_gpu::common::RealPredicate::RealULE => {
                 melior::dialect::arith::CmpfPredicate::Ule
             }
-            rustc_codegen_ssa::common::RealPredicate::RealUNE => {
+            rustc_codegen_ssa_gpu::common::RealPredicate::RealUNE => {
                 melior::dialect::arith::CmpfPredicate::Une
             }
-            rustc_codegen_ssa::common::RealPredicate::RealPredicateTrue => {
+            rustc_codegen_ssa_gpu::common::RealPredicate::RealPredicateTrue => {
                 melior::dialect::arith::CmpfPredicate::True
             }
         };
@@ -1133,7 +1133,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         src: Self::Value,
         src_align: rustc_abi::Align,
         size: Self::Value,
-        flags: rustc_codegen_ssa::MemFlags,
+        flags: rustc_codegen_ssa_gpu::MemFlags,
     ) {
         if self.is_unreachable() {
             return;
@@ -1149,7 +1149,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         src: Self::Value,
         src_align: rustc_abi::Align,
         size: Self::Value,
-        flags: rustc_codegen_ssa::MemFlags,
+        flags: rustc_codegen_ssa_gpu::MemFlags,
     ) {
         todo!()
     }
@@ -1160,7 +1160,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         fill_byte: Self::Value,
         size: Self::Value,
         align: rustc_abi::Align,
-        flags: rustc_codegen_ssa::MemFlags,
+        flags: rustc_codegen_ssa_gpu::MemFlags,
     ) {
         todo!()
     }
@@ -1270,8 +1270,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         dst: Self::Value,
         cmp: Self::Value,
         src: Self::Value,
-        order: rustc_codegen_ssa::common::AtomicOrdering,
-        failure_order: rustc_codegen_ssa::common::AtomicOrdering,
+        order: rustc_codegen_ssa_gpu::common::AtomicOrdering,
+        failure_order: rustc_codegen_ssa_gpu::common::AtomicOrdering,
         weak: bool,
     ) -> (Self::Value, Self::Value) {
         todo!()
@@ -1279,18 +1279,18 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
 
     fn atomic_rmw(
         &mut self,
-        op: rustc_codegen_ssa::common::AtomicRmwBinOp,
+        op: rustc_codegen_ssa_gpu::common::AtomicRmwBinOp,
         dst: Self::Value,
         src: Self::Value,
-        order: rustc_codegen_ssa::common::AtomicOrdering,
+        order: rustc_codegen_ssa_gpu::common::AtomicOrdering,
     ) -> Self::Value {
         todo!()
     }
 
     fn atomic_fence(
         &mut self,
-        order: rustc_codegen_ssa::common::AtomicOrdering,
-        scope: rustc_codegen_ssa::common::SynchronizationScope,
+        order: rustc_codegen_ssa_gpu::common::AtomicOrdering,
+        scope: rustc_codegen_ssa_gpu::common::SynchronizationScope,
     ) {
         todo!()
     }

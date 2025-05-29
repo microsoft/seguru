@@ -1,4 +1,4 @@
-use rustc_codegen_ssa::traits::PreDefineCodegenMethods;
+use rustc_codegen_ssa_gpu::traits::PreDefineCodegenMethods;
 
 use crate::mlir::MLIRVisibility;
 

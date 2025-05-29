@@ -1,7 +1,7 @@
 use rustc_codegen_llvm::LlvmCodegenBackend;
-use rustc_codegen_ssa::back::lto::{LtoModuleCodegen, ThinModule, ThinShared};
-use rustc_codegen_ssa::traits::{CodegenBackend, ExtraBackendMethods, WriteBackendMethods};
-use rustc_codegen_ssa::{CodegenResults, ModuleCodegen};
+use rustc_codegen_ssa_gpu::back::lto::{LtoModuleCodegen, ThinModule, ThinShared};
+use rustc_codegen_ssa_gpu::traits::{CodegenBackend, ExtraBackendMethods, WriteBackendMethods};
+use rustc_codegen_ssa_gpu::{CodegenResults, ModuleCodegen};
 use rustc_data_structures::fx::FxIndexMap;
 use rustc_middle::dep_graph::{WorkProduct, WorkProductId};
 use rustc_middle::ty::TyCtxt;
@@ -51,9 +51,9 @@ pub struct GPUCodeGenModule {
 
 impl GPUCodegenBackend {
     fn to_llvm_context(
-        cgcx: &rustc_codegen_ssa::back::write::CodegenContext<Self>,
-    ) -> rustc_codegen_ssa::back::write::CodegenContext<LlvmCodegenBackend> {
-        rustc_codegen_ssa::back::write::CodegenContext::<LlvmCodegenBackend> {
+        cgcx: &rustc_codegen_ssa_gpu::back::write::CodegenContext<Self>,
+    ) -> rustc_codegen_ssa_gpu::back::write::CodegenContext<LlvmCodegenBackend> {
+        rustc_codegen_ssa_gpu::back::write::CodegenContext::<LlvmCodegenBackend> {
             prof: cgcx.prof.clone(),
             lto: cgcx.lto.clone(),
             save_temps: cgcx.save_temps,
@@ -88,9 +88,9 @@ impl GPUCodegenBackend {
     }
 
     fn module_code_gen_from_llvm(
-        m: rustc_codegen_ssa::ModuleCodegen<LlvmCodegenModule>,
+        m: rustc_codegen_ssa_gpu::ModuleCodegen<LlvmCodegenModule>,
         mlir_module: Option<MLIRModule>,
-    ) -> rustc_codegen_ssa::ModuleCodegen<GPUCodeGenModule> {
+    ) -> rustc_codegen_ssa_gpu::ModuleCodegen<GPUCodeGenModule> {
         ModuleCodegen {
             module_llvm: GPUCodeGenModule {
                 llvm_module: Some(m.module_llvm),
@@ -103,8 +103,8 @@ impl GPUCodegenBackend {
     }
 
     fn to_llvm_modele_code_gen(
-        m: rustc_codegen_ssa::ModuleCodegen<GPUCodeGenModule>,
-    ) -> rustc_codegen_ssa::ModuleCodegen<LlvmCodegenModule> {
+        m: rustc_codegen_ssa_gpu::ModuleCodegen<GPUCodeGenModule>,
+    ) -> rustc_codegen_ssa_gpu::ModuleCodegen<LlvmCodegenModule> {
         ModuleCodegen::<LlvmCodegenModule> {
             module_llvm: m.module_llvm.llvm_module.unwrap(),
             name: m.name,
@@ -114,8 +114,8 @@ impl GPUCodegenBackend {
     }
 
     fn thin_module_from_llvm(
-        m: rustc_codegen_ssa::back::lto::ThinModule<LlvmCodegenBackend>,
-    ) -> rustc_codegen_ssa::back::lto::ThinModule<GPUCodegenBackend> {
+        m: rustc_codegen_ssa_gpu::back::lto::ThinModule<LlvmCodegenBackend>,
+    ) -> rustc_codegen_ssa_gpu::back::lto::ThinModule<GPUCodegenBackend> {
         let mm: ThinShared<LlvmCodegenBackend> =
             match Arc::<ThinShared<LlvmCodegenBackend>>::try_unwrap(m.shared) {
                 Ok(mm) => mm,
@@ -134,8 +134,8 @@ impl GPUCodegenBackend {
     }
 
     fn to_llvm_thin_module(
-        m: rustc_codegen_ssa::back::lto::ThinModule<GPUCodegenBackend>,
-    ) -> rustc_codegen_ssa::back::lto::ThinModule<LlvmCodegenBackend> {
+        m: rustc_codegen_ssa_gpu::back::lto::ThinModule<GPUCodegenBackend>,
+    ) -> rustc_codegen_ssa_gpu::back::lto::ThinModule<LlvmCodegenBackend> {
         let mm: ThinShared<GPUCodegenBackend> =
             match Arc::<ThinShared<GPUCodegenBackend>>::try_unwrap(m.shared) {
                 Ok(mm) => mm,
@@ -177,12 +177,12 @@ impl WriteBackendMethods for GPUCodegenBackend {
     type ThinBuffer = <LlvmCodegenBackend as WriteBackendMethods>::ThinBuffer;
 
     fn run_link(
-        cgcx: &rustc_codegen_ssa::back::write::CodegenContext<Self>,
+        cgcx: &rustc_codegen_ssa_gpu::back::write::CodegenContext<Self>,
         dcx: rustc_errors::DiagCtxtHandle<'_>,
-        modules: Vec<rustc_codegen_ssa::ModuleCodegen<Self::Module>>,
-    ) -> Result<rustc_codegen_ssa::ModuleCodegen<Self::Module>, rustc_errors::FatalError> {
+        modules: Vec<rustc_codegen_ssa_gpu::ModuleCodegen<Self::Module>>,
+    ) -> Result<rustc_codegen_ssa_gpu::ModuleCodegen<Self::Module>, rustc_errors::FatalError> {
         eprintln!("run_link starts");
-        let cgcx: rustc_codegen_ssa::back::write::CodegenContext<_> =
+        let cgcx: rustc_codegen_ssa_gpu::back::write::CodegenContext<_> =
             GPUCodegenBackend::to_llvm_context(cgcx);
         let mlir_ctx = crate::mlir::create_mlir_ctx();
         let final_m = crate::mlir::new_empty_module(mlir_ctx);
@@ -204,27 +204,27 @@ impl WriteBackendMethods for GPUCodegenBackend {
     }
 
     fn run_fat_lto(
-        cgcx: &rustc_codegen_ssa::back::write::CodegenContext<Self>,
-        modules: Vec<rustc_codegen_ssa::back::write::FatLtoInput<Self>>,
+        cgcx: &rustc_codegen_ssa_gpu::back::write::CodegenContext<Self>,
+        modules: Vec<rustc_codegen_ssa_gpu::back::write::FatLtoInput<Self>>,
         cached_modules: Vec<(
-            rustc_codegen_ssa::back::lto::SerializedModule<Self::ModuleBuffer>,
+            rustc_codegen_ssa_gpu::back::lto::SerializedModule<Self::ModuleBuffer>,
             WorkProduct,
         )>,
-    ) -> Result<rustc_codegen_ssa::back::lto::LtoModuleCodegen<Self>, rustc_errors::FatalError>
+    ) -> Result<rustc_codegen_ssa_gpu::back::lto::LtoModuleCodegen<Self>, rustc_errors::FatalError>
     {
         todo!();
     }
 
     fn run_thin_lto(
-        cgcx: &rustc_codegen_ssa::back::write::CodegenContext<Self>,
+        cgcx: &rustc_codegen_ssa_gpu::back::write::CodegenContext<Self>,
         modules: Vec<(String, Self::ThinBuffer)>,
         cached_modules: Vec<(
-            rustc_codegen_ssa::back::lto::SerializedModule<Self::ModuleBuffer>,
+            rustc_codegen_ssa_gpu::back::lto::SerializedModule<Self::ModuleBuffer>,
             WorkProduct,
         )>,
     ) -> Result<
         (
-            Vec<rustc_codegen_ssa::back::lto::LtoModuleCodegen<Self>>,
+            Vec<rustc_codegen_ssa_gpu::back::lto::LtoModuleCodegen<Self>>,
             Vec<WorkProduct>,
         ),
         rustc_errors::FatalError,
@@ -253,27 +253,27 @@ impl WriteBackendMethods for GPUCodegenBackend {
     }
 
     unsafe fn optimize(
-        cgcx: &rustc_codegen_ssa::back::write::CodegenContext<Self>,
+        cgcx: &rustc_codegen_ssa_gpu::back::write::CodegenContext<Self>,
         dcx: rustc_errors::DiagCtxtHandle<'_>,
-        module: &mut rustc_codegen_ssa::ModuleCodegen<Self::Module>,
-        config: &rustc_codegen_ssa::back::write::ModuleConfig,
+        module: &mut rustc_codegen_ssa_gpu::ModuleCodegen<Self::Module>,
+        config: &rustc_codegen_ssa_gpu::back::write::ModuleConfig,
     ) -> Result<(), rustc_errors::FatalError> {
         eprintln!("optimize starts");
         Ok(())
     }
 
     fn optimize_fat(
-        cgcx: &rustc_codegen_ssa::back::write::CodegenContext<Self>,
-        llmod: &mut rustc_codegen_ssa::ModuleCodegen<Self::Module>,
+        cgcx: &rustc_codegen_ssa_gpu::back::write::CodegenContext<Self>,
+        llmod: &mut rustc_codegen_ssa_gpu::ModuleCodegen<Self::Module>,
     ) -> Result<(), rustc_errors::FatalError> {
         eprintln!("optimize_fat starts");
         Ok(())
     }
 
     unsafe fn optimize_thin(
-        cgcx: &rustc_codegen_ssa::back::write::CodegenContext<Self>,
-        thin: rustc_codegen_ssa::back::lto::ThinModule<Self>,
-    ) -> Result<rustc_codegen_ssa::ModuleCodegen<Self::Module>, rustc_errors::FatalError> {
+        cgcx: &rustc_codegen_ssa_gpu::back::write::CodegenContext<Self>,
+        thin: rustc_codegen_ssa_gpu::back::lto::ThinModule<Self>,
+    ) -> Result<rustc_codegen_ssa_gpu::ModuleCodegen<Self::Module>, rustc_errors::FatalError> {
         eprintln!("optimize_thin starts");
         LlvmCodegenBackend::optimize_thin(
             &GPUCodegenBackend::to_llvm_context(cgcx),
@@ -283,11 +283,11 @@ impl WriteBackendMethods for GPUCodegenBackend {
     }
 
     unsafe fn codegen(
-        cgcx: &rustc_codegen_ssa::back::write::CodegenContext<Self>,
+        cgcx: &rustc_codegen_ssa_gpu::back::write::CodegenContext<Self>,
         dcx: rustc_errors::DiagCtxtHandle<'_>,
-        module: rustc_codegen_ssa::ModuleCodegen<Self::Module>,
-        config: &rustc_codegen_ssa::back::write::ModuleConfig,
-    ) -> Result<rustc_codegen_ssa::CompiledModule, rustc_errors::FatalError> {
+        module: rustc_codegen_ssa_gpu::ModuleCodegen<Self::Module>,
+        config: &rustc_codegen_ssa_gpu::back::write::ModuleConfig,
+    ) -> Result<rustc_codegen_ssa_gpu::CompiledModule, rustc_errors::FatalError> {
         eprintln!("codegen starts");
         let ret = crate::write::codegen(cgcx, dcx, module, config);
         eprintln!("codegen end");
@@ -295,7 +295,7 @@ impl WriteBackendMethods for GPUCodegenBackend {
     }
 
     fn prepare_thin(
-        module: rustc_codegen_ssa::ModuleCodegen<Self::Module>,
+        module: rustc_codegen_ssa_gpu::ModuleCodegen<Self::Module>,
         want_summary: bool,
     ) -> (String, Self::ThinBuffer) {
         eprintln!("prepare_thin starts");
@@ -303,17 +303,17 @@ impl WriteBackendMethods for GPUCodegenBackend {
     }
 
     fn serialize_module(
-        module: rustc_codegen_ssa::ModuleCodegen<Self::Module>,
+        module: rustc_codegen_ssa_gpu::ModuleCodegen<Self::Module>,
     ) -> (String, Self::ModuleBuffer) {
         eprintln!("serialize_module starts");
         LlvmCodegenBackend::serialize_module(Self::to_llvm_modele_code_gen(module))
     }
 
     fn autodiff(
-        cgcx: &rustc_codegen_ssa::back::write::CodegenContext<Self>,
-        module: &rustc_codegen_ssa::ModuleCodegen<Self::Module>,
+        cgcx: &rustc_codegen_ssa_gpu::back::write::CodegenContext<Self>,
+        module: &rustc_codegen_ssa_gpu::ModuleCodegen<Self::Module>,
         diff_fncs: Vec<rustc_ast::expand::autodiff_attrs::AutoDiffItem>,
-        config: &rustc_codegen_ssa::back::write::ModuleConfig,
+        config: &rustc_codegen_ssa_gpu::back::write::ModuleConfig,
     ) -> Result<(), rustc_errors::FatalError> {
         eprintln!("autodiff");
         Ok(())
@@ -341,7 +341,7 @@ impl ExtraBackendMethods for GPUCodegenBackend {
         &self,
         tcx: TyCtxt<'_>,
         cgu_name: Symbol,
-    ) -> (rustc_codegen_ssa::ModuleCodegen<Self::Module>, u64) {
+    ) -> (rustc_codegen_ssa_gpu::ModuleCodegen<Self::Module>, u64) {
         let start_time = std::time::Instant::now();
         //let (llvm_module, cost) = llvm_backend().compile_codegen_unit(tcx, cgu_name);
         let dep_node = tcx.codegen_unit(cgu_name).codegen_dep_node(tcx);
@@ -364,7 +364,7 @@ impl ExtraBackendMethods for GPUCodegenBackend {
         sess: &Session,
         opt_level: rustc_session::config::OptLevel,
         target_features: &[String],
-    ) -> rustc_codegen_ssa::back::write::TargetMachineFactoryFn<Self> {
+    ) -> rustc_codegen_ssa_gpu::back::write::TargetMachineFactoryFn<Self> {
         eprintln!("target_machine_factory");
         llvm_backend().target_machine_factory(sess, opt_level, target_features)
     }
@@ -392,7 +392,7 @@ impl CodegenBackend for GPUCodegenBackend {
         need_metadata_module: bool,
     ) -> Box<dyn std::any::Any> {
         // Provide a dummy implementation or actual logic
-        let x = Box::new(rustc_codegen_ssa::base::codegen_crate(
+        let x = Box::new(rustc_codegen_ssa_gpu::base::codegen_crate(
             GPUCodegenBackend::new(),
             tcx,
             tcx.sess
@@ -416,7 +416,7 @@ impl CodegenBackend for GPUCodegenBackend {
     ) -> (CodegenResults, FxIndexMap<WorkProductId, WorkProduct>) {
         eprintln!("join_codegen");
         let (codegen_results, work_products) = ongoing_codegen
-            .downcast::<rustc_codegen_ssa::back::write::OngoingCodegen<Self>>()
+            .downcast::<rustc_codegen_ssa_gpu::back::write::OngoingCodegen<Self>>()
             .expect("Expected OngoingCodegen, found Box<Any>")
             .join(sess);
         eprintln!("join_codegen");

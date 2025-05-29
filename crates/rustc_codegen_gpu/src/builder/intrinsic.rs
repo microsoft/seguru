@@ -1,4 +1,4 @@
-use rustc_codegen_ssa::traits::IntrinsicCallBuilderMethods;
+use rustc_codegen_ssa_gpu::traits::IntrinsicCallBuilderMethods;
 
 use super::GpuBuilder;
 
@@ -7,7 +7,7 @@ impl<'tcx, 'ml, 'a> IntrinsicCallBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 
         &mut self,
         instance: rustc_middle::ty::Instance<'tcx>,
         fn_abi: &rustc_target::callconv::FnAbi<'tcx, rustc_middle::ty::Ty<'tcx>>,
-        args: &[rustc_codegen_ssa::mir::operand::OperandRef<'tcx, Self::Value>],
+        args: &[rustc_codegen_ssa_gpu::mir::operand::OperandRef<'tcx, Self::Value>],
         llresult: Self::Value,
         span: rustc_span::Span,
     ) -> Result<(), rustc_middle::ty::Instance<'tcx>> {

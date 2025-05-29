@@ -1,4 +1,4 @@
-use rustc_codegen_ssa::traits::DebugInfoCodegenMethods;
+use rustc_codegen_ssa_gpu::traits::DebugInfoCodegenMethods;
 
 use super::GPUCodegenContext;
 
@@ -19,7 +19,7 @@ impl<'tcx, 'ml, 'a> DebugInfoCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'm
         llfn: Self::Function,
         mir: &rustc_middle::mir::Body<'tcx>,
     ) -> Option<
-        rustc_codegen_ssa::mir::debuginfo::FunctionDebugContext<
+        rustc_codegen_ssa_gpu::mir::debuginfo::FunctionDebugContext<
             'tcx,
             Self::DIScope,
             Self::DILocation,
@@ -64,7 +64,7 @@ impl<'tcx, 'ml, 'a> DebugInfoCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'm
         variable_name: rustc_span::Symbol,
         variable_type: rustc_middle::ty::Ty<'tcx>,
         scope_metadata: Self::DIScope,
-        variable_kind: rustc_codegen_ssa::mir::debuginfo::VariableKind,
+        variable_kind: rustc_codegen_ssa_gpu::mir::debuginfo::VariableKind,
         span: rustc_span::Span,
     ) -> Self::DIVariable {
         todo!()

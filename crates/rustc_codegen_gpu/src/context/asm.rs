@@ -1,4 +1,4 @@
-use rustc_codegen_ssa::traits::AsmCodegenMethods;
+use rustc_codegen_ssa_gpu::traits::AsmCodegenMethods;
 
 use super::GPUCodegenContext;
 
@@ -6,7 +6,7 @@ impl<'tcx, 'ml, 'a> AsmCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, 'a>
     fn codegen_global_asm(
         &self,
         template: &[rustc_ast::InlineAsmTemplatePiece],
-        operands: &[rustc_codegen_ssa::traits::GlobalAsmOperandRef<'tcx>],
+        operands: &[rustc_codegen_ssa_gpu::traits::GlobalAsmOperandRef<'tcx>],
         options: rustc_ast::InlineAsmOptions,
         line_spans: &[rustc_span::Span],
     ) {

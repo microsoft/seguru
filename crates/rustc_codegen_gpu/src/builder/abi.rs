@@ -1,6 +1,6 @@
 use melior::ir::BlockLike;
 use rustc_abi::HasDataLayout;
-use rustc_codegen_ssa::traits::{AbiBuilderMethods, ArgAbiBuilderMethods};
+use rustc_codegen_ssa_gpu::traits::{AbiBuilderMethods, ArgAbiBuilderMethods};
 use rustc_middle::ty::layout::{FnAbiOfHelpers, HasTyCtxt, HasTypingEnv, LayoutOfHelpers};
 use rustc_target::callconv::PassMode;
 
@@ -76,7 +76,7 @@ impl<'tcx, 'ml, 'a> ArgAbiBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
         &mut self,
         arg_abi: &rustc_target::callconv::ArgAbi<'tcx, rustc_middle::ty::Ty<'tcx>>,
         idx: &mut usize,
-        dst: rustc_codegen_ssa::mir::place::PlaceRef<'tcx, Self::Value>,
+        dst: rustc_codegen_ssa_gpu::mir::place::PlaceRef<'tcx, Self::Value>,
     ) {
         if self.is_unreachable() {
             return;
@@ -108,7 +108,7 @@ impl<'tcx, 'ml, 'a> ArgAbiBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
                 self.store_arg(arg_abi, next(self, idx), dst);
             }
             PassMode::Pair(..) => {
-                rustc_codegen_ssa::mir::operand::OperandValue::Pair(
+                rustc_codegen_ssa_gpu::mir::operand::OperandValue::Pair(
                     next(self, idx),
                     next(self, idx),
                 )
@@ -125,7 +125,7 @@ impl<'tcx, 'ml, 'a> ArgAbiBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
         &mut self,
         arg_abi: &rustc_target::callconv::ArgAbi<'tcx, rustc_middle::ty::Ty<'tcx>>,
         val: Self::Value,
-        dst: rustc_codegen_ssa::mir::place::PlaceRef<'tcx, Self::Value>,
+        dst: rustc_codegen_ssa_gpu::mir::place::PlaceRef<'tcx, Self::Value>,
     ) {
         if self.is_unreachable() {
             return;
@@ -134,7 +134,7 @@ impl<'tcx, 'ml, 'a> ArgAbiBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
         match arg_abi.mode {
             PassMode::Ignore => {}
             PassMode::Direct(_) | PassMode::Pair(..) => {
-                rustc_codegen_ssa::mir::operand::OperandRef::from_immediate_or_packed_pair(
+                rustc_codegen_ssa_gpu::mir::operand::OperandRef::from_immediate_or_packed_pair(
                     self,
                     val,
                     arg_abi.layout,
@@ -143,7 +143,7 @@ impl<'tcx, 'ml, 'a> ArgAbiBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
                 .store(self, dst);
             }
             PassMode::Cast { .. } | PassMode::Indirect { .. } => {
-                rustc_codegen_ssa::mir::operand::OperandRef::from_immediate_or_packed_pair(
+                rustc_codegen_ssa_gpu::mir::operand::OperandRef::from_immediate_or_packed_pair(
                     self,
                     val,
                     arg_abi.layout,

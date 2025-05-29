@@ -1,7 +1,7 @@
 use melior::ir::{
     attribute::StringAttribute, r#type::FunctionType, BlockLike, Location, Operation,
 };
-use rustc_codegen_ssa::traits::{LayoutTypeCodegenMethods, MiscCodegenMethods};
+use rustc_codegen_ssa_gpu::traits::{LayoutTypeCodegenMethods, MiscCodegenMethods};
 use rustc_hir::def_id::DefId;
 use rustc_middle::{
     query::Key,

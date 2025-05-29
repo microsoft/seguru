@@ -9,7 +9,7 @@ mod to_mir_func;
 mod ty;
 
 use rustc_abi::{self, HasDataLayout};
-use rustc_codegen_ssa::traits::BackendTypes;
+use rustc_codegen_ssa_gpu::traits::BackendTypes;
 use std::marker::PhantomData;
 use std::{collections::HashMap, sync::RwLock};
 

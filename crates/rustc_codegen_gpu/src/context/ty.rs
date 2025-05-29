@@ -1,5 +1,5 @@
 use rustc_abi::{BackendRepr, Primitive};
-use rustc_codegen_ssa::traits::{
+use rustc_codegen_ssa_gpu::traits::{
     BackendTypes, BaseTypeCodegenMethods, DerivedTypeCodegenMethods, LayoutTypeCodegenMethods,
     TypeMembershipCodegenMethods,
 };
@@ -398,19 +398,19 @@ impl<'tcx, 'ml, 'a> BaseTypeCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> 
         ))
     }
 
-    fn type_kind(&self, ty: Self::Type) -> rustc_codegen_ssa::common::TypeKind {
+    fn type_kind(&self, ty: Self::Type) -> rustc_codegen_ssa_gpu::common::TypeKind {
         if ty.is_float() {
-            rustc_codegen_ssa::common::TypeKind::Float
+            rustc_codegen_ssa_gpu::common::TypeKind::Float
         } else if ty.is_integer() {
-            rustc_codegen_ssa::common::TypeKind::Integer
+            rustc_codegen_ssa_gpu::common::TypeKind::Integer
         } else if ty.is_ranked_tensor() {
-            rustc_codegen_ssa::common::TypeKind::Array
+            rustc_codegen_ssa_gpu::common::TypeKind::Array
         } else if ty.is_llvm_pointer_type() {
-            rustc_codegen_ssa::common::TypeKind::Pointer
+            rustc_codegen_ssa_gpu::common::TypeKind::Pointer
         } else if ty.is_function() {
-            rustc_codegen_ssa::common::TypeKind::Function
+            rustc_codegen_ssa_gpu::common::TypeKind::Function
         } else if ty.is_vector() {
-            rustc_codegen_ssa::common::TypeKind::Vector
+            rustc_codegen_ssa_gpu::common::TypeKind::Vector
         } else {
             panic!("Unsupported type: {:?}", ty);
         }

@@ -274,6 +274,10 @@ fn create_elf_raw_dylib_stub(sess: &Session, soname: &str, symbols: &[DllImport]
             sess.target.arch
         ));
     };
+    // TODO: Due to stupid object version stuff, we are OVERWRTING these to fixed values
+    // Just to make it compile :-(
+    let arch = Architecture::X86_64;
+    let sub_arch: Option<()> = None;
     let e_machine = match (arch, sub_arch) {
         (Architecture::Aarch64, None) => elf::EM_AARCH64,
         (Architecture::Aarch64_Ilp32, None) => elf::EM_AARCH64,

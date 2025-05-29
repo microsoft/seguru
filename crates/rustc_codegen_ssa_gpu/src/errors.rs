@@ -343,8 +343,12 @@ impl<G: EmissionGuarantee> Diagnostic<'_, G> for ThorinErrorWrapper {
             thorin::Error::ParseArchiveMember(_) => {
                 build(fluent::codegen_ssa_gpu_thorin_parse_archive_member)
             }
-            thorin::Error::InvalidInputKind => build(fluent::codegen_ssa_gpu_thorin_invalid_input_kind),
-            thorin::Error::DecompressData(_) => build(fluent::codegen_ssa_gpu_thorin_decompress_data),
+            thorin::Error::InvalidInputKind => {
+                build(fluent::codegen_ssa_gpu_thorin_invalid_input_kind)
+            }
+            thorin::Error::DecompressData(_) => {
+                build(fluent::codegen_ssa_gpu_thorin_decompress_data)
+            }
             thorin::Error::NamelessSection(_, offset) => {
                 build(fluent::codegen_ssa_gpu_thorin_section_without_name)
                     .with_arg("offset", format!("0x{offset:08x}"))
@@ -364,8 +368,10 @@ impl<G: EmissionGuarantee> Diagnostic<'_, G> for ThorinErrorWrapper {
                     .with_arg("section", section)
                     .with_arg("offset", format!("0x{offset:08x}"))
             }
-            thorin::Error::MissingDwoName(id) => build(fluent::codegen_ssa_gpu_thorin_missing_dwo_name)
-                .with_arg("id", format!("0x{id:08x}")),
+            thorin::Error::MissingDwoName(id) => {
+                build(fluent::codegen_ssa_gpu_thorin_missing_dwo_name)
+                    .with_arg("id", format!("0x{id:08x}"))
+            }
             thorin::Error::NoCompilationUnits => {
                 build(fluent::codegen_ssa_gpu_thorin_no_compilation_units)
             }
@@ -410,7 +416,9 @@ impl<G: EmissionGuarantee> Diagnostic<'_, G> for ThorinErrorWrapper {
             thorin::Error::RowNotInIndex(_, row) => {
                 build(fluent::codegen_ssa_gpu_thorin_row_not_in_index).with_arg("row", row)
             }
-            thorin::Error::SectionNotInRow => build(fluent::codegen_ssa_gpu_thorin_section_not_in_row),
+            thorin::Error::SectionNotInRow => {
+                build(fluent::codegen_ssa_gpu_thorin_section_not_in_row)
+            }
             thorin::Error::EmptyUnit(unit) => build(fluent::codegen_ssa_gpu_thorin_empty_unit)
                 .with_arg("unit", format!("0x{unit:08x}")),
             thorin::Error::MultipleDebugInfoSection => {
@@ -420,8 +428,10 @@ impl<G: EmissionGuarantee> Diagnostic<'_, G> for ThorinErrorWrapper {
                 build(fluent::codegen_ssa_gpu_thorin_multiple_debug_types_section)
             }
             thorin::Error::NotSplitUnit => build(fluent::codegen_ssa_gpu_thorin_not_split_unit),
-            thorin::Error::DuplicateUnit(unit) => build(fluent::codegen_ssa_gpu_thorin_duplicate_unit)
-                .with_arg("unit", format!("0x{unit:08x}")),
+            thorin::Error::DuplicateUnit(unit) => {
+                build(fluent::codegen_ssa_gpu_thorin_duplicate_unit)
+                    .with_arg("unit", format!("0x{unit:08x}"))
+            }
             thorin::Error::MissingReferencedUnit(unit) => {
                 build(fluent::codegen_ssa_gpu_thorin_missing_referenced_unit)
                     .with_arg("unit", format!("0x{unit:08x}"))
@@ -1294,7 +1304,8 @@ pub struct MissingFeatures;
 
 impl<G: EmissionGuarantee> Diagnostic<'_, G> for TargetFeatureDisableOrEnable<'_> {
     fn into_diag(self, dcx: DiagCtxtHandle<'_>, level: Level) -> Diag<'_, G> {
-        let mut diag = Diag::new(dcx, level, fluent::codegen_ssa_gpu_target_feature_disable_or_enable);
+        let mut diag =
+            Diag::new(dcx, level, fluent::codegen_ssa_gpu_target_feature_disable_or_enable);
         if let Some(span) = self.span {
             diag.span(span);
         };

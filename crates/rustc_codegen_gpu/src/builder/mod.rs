@@ -169,13 +169,16 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             let base_memref: Value<'ml, 'a> = op.result(0).unwrap().into();
             let byte_offset = op.result(1).unwrap().into();
             let element_ty = self.mlir_element_type(base_memref.r#type());
-            let op = crate::mlir::memref::static_reinterpret_cast(
+            let op = crate::mlir::memref::reinterpret_cast(
                 self.cx.mlir_ctx,
                 element_ty,
                 base_memref,
                 &[0],
                 &[],
-                self.static_size_of(element_ty),
+                &[self.static_size_of(element_ty) as i64],
+                &[],
+                &[1],
+                &[],
                 self.cur_loc(),
             );
             log::debug!("base memref: {:?}", val);
@@ -836,9 +839,12 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         if indices.len() != 1 {
             panic!("only supports single index");
         }
+        let size = self.static_size_of(ty);
+        let static_sizes = vec![size as i64; indices.len()];
+        let static_strides = vec![1 as i64; indices.len()];
         let idx = indices[0];
         let mut dynamic = false;
-        for index in indices.iter().skip(1) {
+        for index in indices {
             if index.is_from_op(Some("arith.constant")).is_err() {
                 dynamic = true;
             }
@@ -867,21 +873,17 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
                 .collect::<Vec<_>>();
             (vec![], indices)
         };
-
-        if !dy_indices.is_empty() {
-            unimplemented!("only supports dynamic index");
-        }
         let base_ty = self.mlir_element_type(ptr.r#type());
-        if base_ty != ty {
-            //unimplemented!("only supports same type {} {} at {:?}", base_ty, ty, self.cur_span);
-        }
-        let op = crate::mlir::memref::static_reinterpret_cast(
+        let op = crate::mlir::memref::reinterpret_cast(
             self.mlir_ctx,
             ty,
             ptr,
             &static_indices,
             &dy_indices,
-            self.static_size_of(ty),
+            &static_sizes,
+            &[],
+            &static_strides,
+            &[],
             self.cur_loc(),
         );
         self.append_op_res(op)

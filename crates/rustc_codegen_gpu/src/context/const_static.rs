@@ -189,7 +189,7 @@ impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
     }
 
     fn const_usize(&self, i: u64) -> Self::Value {
-        self.mlir_global_const_int::<usize>(i)
+        self.mlir_global_const_int_from_type(i, self.type_index())
     }
 
     fn const_uint(&self, t: Self::Type, i: u64) -> Self::Value {

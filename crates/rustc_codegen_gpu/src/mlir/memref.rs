@@ -1,51 +1,86 @@
 use melior::Context;
+use melior::dialect::ods::memref as raw_memref;
 use melior::ir::attribute::{DenseI32ArrayAttribute, DenseI64ArrayAttribute};
-use melior::ir::operation::OperationBuilder;
 use melior::ir::r#type::MemRefType;
 use melior::ir::{Location, Operation, Type, TypeLike, Value, ValueLike};
 
 use crate::mlir::attr::StridedLayoutAttribute;
 
-pub fn static_reinterpret_cast<'c>(
+/// A negative value indicating that the stride or offset is dynamic.
+pub fn dynamic_stride_offset() -> i64 {
+    unsafe { mlir_sys::mlirShapedTypeGetDynamicStrideOrOffset() }
+}
+
+pub fn dynamic_size() -> i64 {
+    unsafe { mlir_sys::mlirShapedTypeGetDynamicSize() }
+}
+
+/// Implement reinterpret_cast for MemRef types.
+/// If the offset, size, or stride is dynamic, the operation must set static_offsets, static_sizes,
+/// and static_strides to dynamic_stride_offset() and size = dynamic_size().
+pub fn reinterpret_cast<'c>(
     mlir_ctx: &'c Context,
     ty: Type<'c>,
     ptr: Value<'c, '_>,
     static_indices: &[i64],
     indices: &[Value<'c, '_>],
-    size: usize,
+    static_sizes: &[i64],
+    sizes: &[Value<'c, '_>],
+    static_strides: &[i64],
+    strides: &[Value<'c, '_>],
     location: Location<'c>,
 ) -> Operation<'c> {
-    let dim = vec![1];
+    assert!(static_indices.is_empty() || indices.is_empty());
+    assert!(static_sizes.is_empty() || sizes.is_empty());
+    assert!(static_strides.is_empty() || strides.is_empty());
     let len = static_indices.len() + indices.len();
-    let layout = if static_indices.len() == 1 {
-        Some(StridedLayoutAttribute::new(mlir_ctx, static_indices[0] as _, &[len as _]).into())
+    assert!(len == 1);
+    let dim = vec![1];
+    // -1 indicates that the index is dynamic
+    let static_indices = if static_indices.is_empty() {
+        vec![dynamic_stride_offset(); indices.len()]
     } else {
-        None
+        static_indices.to_vec()
     };
+    let static_strides = if static_strides.is_empty() {
+        vec![dynamic_stride_offset(); indices.len()]
+    } else {
+        static_strides.to_vec()
+    };
+
+    let static_sizes = if static_sizes.is_empty() {
+        vec![dynamic_size(); indices.len()]
+    } else {
+        static_sizes.to_vec()
+    };
+    let layout =
+        Some(StridedLayoutAttribute::new(mlir_ctx, static_indices[0] as _, &static_strides).into());
     let result_ty = MemRefType::new(ty, &dim, layout, None);
 
-    assert!(static_indices.is_empty() || indices.is_empty());
-    let static_sizes = DenseI64ArrayAttribute::new(mlir_ctx, &[size as _]).into();
-    let static_strides = DenseI64ArrayAttribute::new(mlir_ctx, &[1]).into();
-    //log::trace!("indices = {:?}", indices);
-    let mut op = OperationBuilder::new("memref.reinterpret_cast", location)
-        .add_operands(&[ptr])
-        //.add_operands(indices)
-        .add_results(&[result_ty.into()])
-        .build()
-        .expect("valid operation");
-    if !static_indices.is_empty() {
-        op.set_attribute(
-            "static_offsets",
-            DenseI64ArrayAttribute::new(mlir_ctx, static_indices).into(),
-        );
-    }
-    op.set_attribute("static_sizes", static_sizes);
-    op.set_attribute("static_strides", static_strides);
+    let static_sizes = DenseI64ArrayAttribute::new(mlir_ctx, &static_sizes).into();
+    let static_strides = DenseI64ArrayAttribute::new(mlir_ctx, &static_strides).into();
+    let static_offsets = DenseI64ArrayAttribute::new(mlir_ctx, &static_indices).into();
+
+    let mut op: Operation<'c> = raw_memref::reinterpret_cast(
+        mlir_ctx,
+        result_ty.into(),
+        ptr,
+        indices,
+        sizes,
+        strides,
+        static_offsets,
+        static_sizes,
+        static_strides,
+        location,
+    )
+    .into();
     op.set_attribute(
         "operand_segment_sizes",
-        DenseI32ArrayAttribute::new(mlir_ctx, &[1, if !indices.is_empty() { 1 } else { 0 }, 0, 0])
-            .into(),
+        DenseI32ArrayAttribute::new(
+            mlir_ctx,
+            &[1, indices.len() as i32, sizes.len() as i32, strides.len() as i32],
+        )
+        .into(),
     );
     op
 }

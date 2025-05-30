@@ -60,12 +60,12 @@ pub(crate) fn codegen(
             .output_filenames
             .temp_path(rustc_session::config::OutputType::Object, Some(copy.as_str()));
         log::debug!("write MLIR module to {:?}", out);
-
+        let content = m.module.as_operation().to_string();
         if !m.module.as_operation().verify() {
             log::trace!("MLIR module verify failed.");
+            std::fs::write(&out, &content).unwrap();
             Err(rustc_errors::FatalError)?;
         }
-        let content = m.module.as_operation().to_string();
         let content = content.replace("attributes {kernel, ", "kernel attributes {");
 
         std::fs::write(&out, &content).unwrap();

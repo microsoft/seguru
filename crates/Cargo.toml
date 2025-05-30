@@ -5,4 +5,5 @@ members = [
     "gpu",
     "gpu-test",
     "gpu-test-basic",
+    "gpu-test-arith-basic",
 ]

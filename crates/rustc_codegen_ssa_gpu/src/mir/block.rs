@@ -733,9 +733,10 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         }
 
         // Don't codegen the panic block if success if known.
-        if const_cond == Some(expected) {
-            return helper.funclet_br(self, bx, target, mergeable_succ);
-        }
+        // Fuck it let's just return no matter what case it might be!
+        //if const_cond == Some(expected) {
+        return helper.funclet_br(self, bx, target, mergeable_succ);
+        //}
 
         // Because we're branching to a panic block (either a `#[cold]` one
         // or an inlined abort), there's no need to `expect` it.

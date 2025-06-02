@@ -20,6 +20,6 @@ hello: wrapper.cu hello_mlir.o
 	@echo "Generating wrapper..."
 	nvcc -o $@  hello_mlir.o $< -lcuda -lcudart
 
-gpu_basic: wrapper.cu ../crates/target/debug/deps/gpu_basic-*.rcgu.o
+gpu_basic: wrapper.cu ../crates/target/release/deps/gpu_test_arith-*.rcgu.o
 	@echo "Generating wrapper..."
-	nvcc -o $@  ../crates/target/debug/deps/gpu_basic-*.rcgu.o $< -lcuda -lcudart
+	nvcc -o $@  ../crates/target/release/deps/gpu_test_arith-*.rcgu.o $< -lcuda -lcudart

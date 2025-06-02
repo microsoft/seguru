@@ -1017,13 +1017,18 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
                 melior::dialect::arith::CmpiPredicate::Sle
             }
         };
-        let op = melior::dialect::arith::cmpi(
-            self.mlir_ctx,
-            predicate,
-            self.use_value(lhs),
-            self.use_value(rhs),
-            self.cur_loc(),
-        );
+
+        let op = if lhs.r#type().is_index() {
+            melior::dialect::arith::cmpi(
+                self.mlir_ctx,
+                predicate,
+                lhs,
+                self.intcast(rhs, self.type_index(), false),
+                self.cur_loc(),
+            )
+        } else {
+            melior::dialect::arith::cmpi(self.mlir_ctx, predicate, lhs, rhs, self.cur_loc())
+        };
         self.append_op_res(op)
     }
 

@@ -22,4 +22,4 @@ hello: wrapper.cu hello_mlir.o
 
 gpu_basic: wrapper.cu ../crates/target/debug/deps/gpu_basic-*.rcgu.o
 	@echo "Generating wrapper..."
-	nvcc -o $@  /home/ziqiaozhou/rust-gpu/rust-gpu/crates/target/debug/deps/gpu_basic-*.rcgu.o $< -lcuda -lcudart
+	nvcc -o $@  ../crates/target/debug/deps/gpu_basic-*.rcgu.o $< -lcuda -lcudart

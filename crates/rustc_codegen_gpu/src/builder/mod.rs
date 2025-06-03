@@ -840,7 +840,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             panic!("only supports single index");
         }
         let size = self.static_size_of(ty);
-        let static_sizes = vec![size as i64; indices.len()];
+        let static_sizes = vec![1 as i64; indices.len()]; // Force to be 1 since this is a ptr?
         let static_strides = vec![1 as i64; indices.len()];
         let idx = indices[0];
         let mut dynamic = false;
@@ -876,7 +876,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         let base_ty = self.mlir_element_type(ptr.r#type());
         let op = crate::mlir::memref::reinterpret_cast(
             self.mlir_ctx,
-            ty,
+            base_ty,
             ptr,
             &static_indices,
             &dy_indices,

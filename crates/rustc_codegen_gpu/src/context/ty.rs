@@ -138,10 +138,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     // use mlir_type
     fn _ty_to_mlir_type(&self, ty: &rustc_middle::ty::Ty<'tcx>, immediate: bool) -> MLIRType<'ml> {
         match ty.kind() {
-            rustc_middle::ty::TyKind::Str
-            | rustc_middle::ty::TyKind::Slice(_)
-            | rustc_middle::ty::TyKind::RawPtr(..)
-            | rustc_middle::ty::TyKind::Ref(..) => {
+            rustc_middle::ty::TyKind::Str => {
                 let ty = ty.builtin_deref(true).unwrap_or_else(|| panic!("{:?}", ty));
                 let layout = self.layout_of(ty);
                 /*
@@ -153,6 +150,11 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 };
                 ;*/
                 MLIRType::from(self.type_memref(self.type_i8()))
+            }
+            rustc_middle::ty::TyKind::RawPtr(inner_type, _)
+            | rustc_middle::ty::TyKind::Ref(_, inner_type, _)
+            | rustc_middle::ty::TyKind::Slice(inner_type) => {
+                MLIRType::from(self.type_memref(self.ty_to_mlir_type(inner_type, immediate)))
             }
             rustc_middle::ty::TyKind::Closure(id, args) => {
                 let closure_args = args.as_closure();

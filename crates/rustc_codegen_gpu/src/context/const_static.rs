@@ -157,35 +157,35 @@ impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
     }
 
     fn const_i8(&self, i: i8) -> Self::Value {
-        todo!()
+        self.mlir_global_const_int_from_type(i, self.type_index())
     }
 
     fn const_i16(&self, i: i16) -> Self::Value {
-        todo!()
+        self.mlir_global_const_int_from_type(i, self.type_index())
     }
 
     fn const_i32(&self, i: i32) -> Self::Value {
-        todo!()
+        self.mlir_global_const_int_from_type(i, self.type_index())
     }
 
     fn const_int(&self, t: Self::Type, i: i64) -> Self::Value {
-        todo!()
+        self.mlir_global_const_int_from_type(i, t)
     }
 
     fn const_u8(&self, i: u8) -> Self::Value {
-        todo!()
+        self.mlir_global_const_int_from_type(i, self.type_index())
     }
 
     fn const_u32(&self, i: u32) -> Self::Value {
-        todo!()
+        self.mlir_global_const_int_from_type(i, self.type_index())
     }
 
     fn const_u64(&self, i: u64) -> Self::Value {
-        todo!()
+        self.mlir_global_const_int_from_type(i, self.type_index())
     }
 
     fn const_u128(&self, i: u128) -> Self::Value {
-        todo!()
+        self.mlir_global_const_int_from_type(i, self.type_index())
     }
 
     fn const_usize(&self, i: u64) -> Self::Value {

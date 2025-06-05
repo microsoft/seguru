@@ -311,7 +311,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn llbb(&self) -> Self::BasicBlock {
-        todo!()
+        self.cur_block
     }
 
     fn set_span(&mut self, span: rustc_span::Span) {

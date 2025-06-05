@@ -66,6 +66,8 @@ pub trait BuilderMethods<'a, 'tcx>:
     fn cx(&self) -> &Self::CodegenCx;
     fn llbb(&self) -> Self::BasicBlock;
 
+    fn emit_constant(&mut self, val: u64, ty: Self::Type) -> Self::Value;
+
     fn set_span(&mut self, span: Span);
 
     // FIXME(eddyb) replace uses of this with `append_sibling_block`.

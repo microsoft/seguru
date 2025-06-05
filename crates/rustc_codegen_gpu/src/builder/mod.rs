@@ -775,6 +775,10 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         todo!()
     }
 
+    fn emit_constant(&mut self, val: u64, ty: Self::Type) -> Self::Value {
+        self.mlir_const_val_from_type(val, ty, self.cur_block())
+    }
+
     fn store(
         &mut self,
         val: Self::Value,

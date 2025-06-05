@@ -647,11 +647,13 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn not(&mut self, v: Self::Value) -> Self::Value {
-        let op = melior::dialect::arith::cmpi(
-            self.mlir_ctx,
-            melior::dialect::arith::CmpiPredicate::Ne,
+        // So the not here is actually bitwise not per rust documentation
+        // There is no bitwise not in MLIR and therefore it's going to be an
+        // xor to 0xFFFFFFFF which is -1
+
+        let op = melior::dialect::arith::xori(
             v,
-            self.const_value(0, self.type_index()),
+            self.const_value(-1, self.type_index()),
             self.cur_loc(),
         );
         return self.append_op_res(op);

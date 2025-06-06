@@ -166,7 +166,8 @@ impl<'a, 'tcx, V: CodegenObject> OperandRef<'tcx, V> {
                 let BackendRepr::Scalar(scalar) = layout.backend_repr else {
                     bug!("from_const: invalid ByVal layout: {:#?}", layout);
                 };
-                let llval = bx.scalar_to_backend(x, scalar, bx.immediate_backend_type(layout));
+                let llval =
+                    bx.emit_gpu_scalar_to_backend(x, scalar, bx.immediate_backend_type(layout));
                 OperandValue::Immediate(llval)
             }
             ConstValue::ZeroSized => return OperandRef::zero_sized(layout),
@@ -178,7 +179,7 @@ impl<'a, 'tcx, V: CodegenObject> OperandRef<'tcx, V> {
                     Pointer::new(bx.tcx().reserve_and_set_memory_alloc(data).into(), Size::ZERO),
                     &bx.tcx(),
                 );
-                let a_llval = bx.scalar_to_backend(
+                let a_llval = bx.emit_gpu_scalar_to_backend(
                     a,
                     a_scalar,
                     bx.scalar_pair_element_backend_type(layout, 0, true),

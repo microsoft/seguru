@@ -240,6 +240,8 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             );
             return self.append_op_res(op);
         }
+        // ptr is almost always memref<sizexi8>. Must be casted into ty
+        let ptr = self.mlir_cast_memref(ptr, MemRefType::new(ty, &[1], None, None).into());
         self.append_op_res(melior::dialect::memref::load(ptr, indices, self.cur_loc()))
     }
 }

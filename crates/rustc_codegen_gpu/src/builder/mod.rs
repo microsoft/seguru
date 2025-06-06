@@ -1307,12 +1307,16 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         todo!()
     }
 
+    // There are lifetime dialects for LLVM IR. GCC decides to ignore these. We can
+    // skip them for now and may (or may not) add them back later.
     fn lifetime_start(&mut self, ptr: Self::Value, size: rustc_abi::Size) {
-        todo!()
+        //todo!()
+        // Don't care!
     }
 
     fn lifetime_end(&mut self, ptr: Self::Value, size: rustc_abi::Size) {
-        todo!()
+        //todo!()
+        // Don't care!
     }
 
     fn call(

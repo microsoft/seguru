@@ -984,7 +984,12 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
 
     fn inttoptr(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
         assert!(!self.is_unreachable());
-        let int64_val = self.intcast(val, self.type_i64(), false);
+
+        let int64_val = if val.r#type() == self.type_i64() {
+            val
+        } else {
+            self.intcast(val, self.type_i64(), false)
+        };
         let op =
             melior::dialect::ods::llvm::inttoptr(self.mlir_ctx, dest_ty, int64_val, self.cur_loc())
                 .into();

@@ -59,6 +59,8 @@ pub struct FunctionCx<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> {
 
     fn_abi: &'tcx FnAbi<'tcx, Ty<'tcx>>,
 
+    san_dummy: Option<Bx::Value>,
+
     /// When unwinding is initiated, we have to store this personality
     /// value somewhere so that we can load it and re-use it in the
     /// resume instruction. The personality is (afaik) some kind of
@@ -209,6 +211,7 @@ pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
         mir,
         llfn,
         fn_abi,
+        san_dummy: None,
         cx,
         personality_slot: None,
         cached_llbbs,
@@ -281,6 +284,8 @@ pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
             .collect()
     };
     fx.initialize_locals(local_values);
+
+    fx.san_dummy = Some(start_bx.alloca(rustc_abi::Size::from_bytes(8), rustc_abi::Align::EIGHT));
 
     // Apply debuginfo to the newly allocated locals.
     fx.debug_introduce_locals(&mut start_bx, consts_debug_info.unwrap_or_default());

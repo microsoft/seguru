@@ -75,6 +75,8 @@ pub trait BuilderMethods<'a, 'tcx>:
         ty: Self::Type,
     ) -> Self::Value;
 
+    fn emit_llvm_volatile_and_load(&mut self, mask: Self::Value, ptr: Self::Value);
+
     fn set_span(&mut self, span: Span);
 
     // FIXME(eddyb) replace uses of this with `append_sibling_block`.

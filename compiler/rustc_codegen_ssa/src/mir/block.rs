@@ -745,15 +745,14 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 //     oob = index - len;    <- This will be positive if index is OOB
                 //     oob_flag = oob >> 63; <- Use signed shift right. If not OOB we
                 //                              get 0xFF....FF. If OOB we get 0
-                //     dummy = 1 / oob_flag; <- Divided by zero if OOB
+                //     *(dummy & oob_flag);  <- NULL ptr if OOB
                 let index_int = bx.intcast(index, bx.cx().type_i64(), true);
                 let oob = bx.sub(index_int, len);
                 let shift = bx
                     .emit_constant(63, bx.cx().backend_type(bx.cx().layout_of(bx.tcx().types.u64)));
                 let oob_flag = bx.ashr(oob, shift);
-                let one = bx
-                    .emit_constant(1, bx.cx().backend_type(bx.cx().layout_of(bx.tcx().types.u64)));
-                let dummy = bx.sdiv(one, oob_flag);
+
+                bx.emit_llvm_volatile_and_load(oob_flag, self.san_dummy.unwrap());
             }
             _ => {
                 ();

@@ -102,4 +102,23 @@ pub fn global_thread_id() -> usize {
     unimplemented!()
 }
 
+pub struct GpuChunksMut<'a, T: 'a> {
+    _marker: PhantomData<&'a mut T>,
+}
+
+impl<'a, T> Iterator for GpuChunksMut<'a, T> {
+    type Item = &'a mut [T];
+
+    #[gpu_codegen::builtin(gpu.chunk_next)]
+    fn next(&mut self) -> Option<Self::Item> {
+        // This is a placeholder implementation.
+        // In a real implementation, this would return the next chunk of mutable data.
+        unimplemented!()
+    }
+}
+#[gpu_codegen::builtin(gpu.chunks_mut)]
+pub fn gpu_chunk_mut<T>(v: &[T], chunk_size: usize) -> GpuChunksMut<'_, T> {
+    unimplemented!()
+}
+
 /*  TODO: Define shared memory */

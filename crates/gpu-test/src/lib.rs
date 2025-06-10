@@ -48,13 +48,12 @@ fn kernel2(b: &[u8]) -> u32 {
 pub fn test_host(a: &mut [u8; 10], b: &[u8; 10], c: &mut [u8; 10]) {
     a[0] = 1;
     gpu::scope(
-        #[gpu_codegen::device]
         |s| {
-            let mut chunks = c.chunks_mut(1);
+            let mut chunks = gpu::gpu_chunk_mut(c, 1);
             for _ in gpu::grid(4, 1, 1) {
                 for _ in gpu::block(4, 1, 1) {
-                let c = chunks.next().unwrap();
-                s.launch([1, 1, 1], [2, 2, 2], || kernel(a, c));
+                    let c = chunks.next().unwrap();
+                    s.launch([1, 1, 1], [2, 2, 2], || kernel(a, c));
                 }
             }
         },

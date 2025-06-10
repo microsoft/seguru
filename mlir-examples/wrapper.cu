@@ -32,8 +32,6 @@ void dump_ptx_to_file(const char *ptx, const char *filename) {
 int main(int argc, const char **argv) {
   CUdeviceptr d_a, d_b; // u32[array_size]
   uint64_t array_size = 4;
-  uint64_t index_to_copy = 2;
-  uint64_t index_to_copy_size = 8;
   uint64_t fake_array_size = array_size;
 
   if (argc > 2) {
@@ -99,7 +97,7 @@ int main(int argc, const char **argv) {
   cudaDeviceSynchronize();
 
   for (int i = 0; i < 4; i++)
-    printf("[?] b[%ld] = %d %c= a[%ld] = %d\n", i, h_b[i], ((h_b[i] == h_a[i]) ? '=' : '!'), i, h_a[i]);
+    printf("[?] b[%d] = %d %c= a[%d] = %d\n", i, h_b[i], ((h_b[i] == h_a[i]) ? '=' : '!'), i, h_a[i]);
 
   cuModuleUnload(module);
   cuCtxDestroy(ctx);

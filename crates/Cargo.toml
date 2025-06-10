@@ -2,7 +2,9 @@
 members = [
     "rustc_codegen_gpu",
     "rustc_codegen_ssa_gpu",
+    "rustc-gpu",
     "gpu",
+    "gpu-macros",
     "gpu-test",
     "gpu-test-basic",
     "gpu-test-arith-basic",

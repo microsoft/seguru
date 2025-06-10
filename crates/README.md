@@ -86,3 +86,11 @@ RUST_LOG=trace RUSTFLAGS="-Zcodegen-backend=`realpath ../target/release/librustc
 You will find target/debug/deps/gpu-xxx.o and it includes a cubin binary in `gpu_bin_cst` symbol.
 
 The code could be launched by mlir-examples/wrapper.cu.
+
+## Run with external non-GPU crates
+
+For example, a procedure macro lib should be compiled with standard rust codegen instead of by our gpu codegen. Thus, we need to selectively call our codegen only for the crates for GPU. To do that, `rustc-gpu` is used as a rustc wrapper so that we can pass the GPU_CODEGEN and GPU_TARGETS env variables to tell the rustc wrapper that we only use GPU_CODEGEN when the crate is in GPU_TARGETS. For example,
+
+```bash
+GPU_CODEGEN=`realpath ../target/release/librustc_codegen_gpu.so` RUSTC=`realpath ../target/release/rustc-gpu` GPU_TARGETS="gpu-test" cargo build
+```

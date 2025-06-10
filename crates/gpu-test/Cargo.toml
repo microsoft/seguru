@@ -5,5 +5,5 @@ edition = "2021"
 
 [dependencies]
 gpu = {path = "../gpu"}
-
+gpu_macros = {path = "../gpu-macros"}
 [lib]

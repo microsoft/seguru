@@ -42,27 +42,18 @@ fn kernel2(b: &[u8]) -> u32 {
     thread_id_x as u32
 }
 
-#[no_mangle]
-#[gpu_codegen::host]
 /// assume BK * BK == number of threads in a block x axis.
-pub fn host(a: &mut [u8; 10], b: &[u8; 10], c: &mut [u8; 10]) {
+#[no_mangle]
+#[gpu_macros::host]
+pub fn test_host(a: &mut [u8; 10], b: &[u8; 10], c: &mut [u8; 10]) {
     a[0] = 1;
-    gpu::scope(
-        #[gpu_codegen::device]
-        |s| {
-            let mut chunks = c.chunks_mut(1);
-            for _ in gpu::grid(4, 1, 1) {
+    gpu::scope(|s| {
+        let mut chunks = gpu::gpu_chunk_mut(c, 1);
+        for _ in gpu::grid(4, 1, 1) {
+            for _ in gpu::block(4, 1, 1) {
                 let c = chunks.next().unwrap();
                 s.launch([1, 1, 1], [2, 2, 2], || kernel(a, c));
             }
-            // Split data to avoid concurrent write.
-            //for x in gpu::grid(4, 1, 1) {
-            // Split the flattened result into chunks of size `chunk_size` using `chunks_mut`
-            //for y in gpu::block(4, 1, 1) {
-            // Spawn a thread for each chunk
-            //gpu::launch(*x, *y, move || kernel(a));
-            //}
-            //}
-        },
-    ); // Ensure t
+        }
+    });
 }

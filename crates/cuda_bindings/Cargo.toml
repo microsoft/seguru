@@ -1,0 +1,10 @@
+[package]
+name = "cuda_bindings"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+[build-dependencies]
+bindgen = "0.72.0"
+cc = "1.0"

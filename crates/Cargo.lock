@@ -133,6 +133,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "bindgen"
+version = "0.72.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f72209734318d0b619a5e0f5129918b848c416e122a3c4ce054e03cb87b726f"
+dependencies = [
+ "bitflags",
+ "cexpr",
+ "clang-sys",
+ "itertools 0.13.0",
+ "log",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustc-hash",
+ "shlex",
+ "syn 2.0.101",
+]
+
+[[package]]
 name = "bitflags"
 version = "2.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -253,6 +273,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a97769d94ddab943e4510d138150169a2758b5ef3eb191a9ee688de3e23ef7b3"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "cuda_bindings"
+version = "0.1.0"
+dependencies = [
+ "bindgen 0.72.0",
+ "cc",
 ]
 
 [[package]]
@@ -731,7 +759,7 @@ version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8e9348dd263d2680d657635d9dd084cdcd785d7486a41332ffa4c926d5882b54"
 dependencies = [
- "bindgen",
+ "bindgen 0.71.1",
 ]
 
 [[package]]
@@ -1163,7 +1191,7 @@ version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "836472eafcc544aa0167f880c0998d4a77b422d22100186e67fc6daf35cab94c"
 dependencies = [
- "bindgen",
+ "bindgen 0.71.1",
  "cc",
  "paste",
  "thiserror 2.0.12",

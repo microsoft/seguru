@@ -86,3 +86,7 @@ RUST_LOG=trace RUSTFLAGS="-Zcodegen-backend=`realpath ../target/release/librustc
 You will find target/debug/deps/gpu-xxx.o and it includes a cubin binary in `gpu_bin_cst` symbol.
 
 The code could be launched by mlir-examples/wrapper.cu.
+
+## Run with external non-GPU crates
+
+RUST_LOG=trace GPU_CODEGEN=`realpath ../target/release/librustc_codegen_gpu.so` RUSTC=`realpath ../target/release/rustc-gpu` GPU_TARGETS="gpu-test" cargo build

@@ -15,7 +15,7 @@ void check(CUresult err, const char *func, const char *file, int line) {
 }
 #define checkCudaErrors(val) check((val), #val, __FILE__, __LINE__)
 
-#define MAX_PTX_SIZE 5000
+#define MAX_PTX_SIZE 50000
 // Dump a PTX string to a file
 void dump_ptx_to_file(const char *ptx, const char *filename) {
   FILE *f = fopen(filename, "wb");
@@ -29,11 +29,22 @@ void dump_ptx_to_file(const char *ptx, const char *filename) {
   fclose(f);
 }
 
-int main() {
+int main(int argc, const char **argv) {
   CUdeviceptr d_a, d_b; // u32[array_size]
   uint64_t array_size = 4;
   uint64_t index_to_copy = 2;
   uint64_t index_to_copy_size = 8;
+  uint64_t fake_array_size = array_size;
+
+  if (argc > 2) {
+    printf("usage: %s <fake array size>", argv[0]);
+    return -1;
+  }
+  
+
+  if (argc == 2) {
+    fake_array_size = atoi(argv[1]);
+  }
 
   char h_a[4] = { 1, 2, 3, 4 };
   char h_b[4] = { 5, 6, 7, 8 };
@@ -64,22 +75,24 @@ int main() {
   void *args[] = {
     &d_a,
     &d_a,
-    &array_size,
-    &array_size,
-    &array_size,
-    &array_size,
+    &fake_array_size,
+    &fake_array_size,
+    &fake_array_size,
+    &fake_array_size,
     &d_b,
     &d_b,
-    &array_size,
-    &array_size,
-    &array_size,
-    &array_size
+    &fake_array_size,
+    &fake_array_size,
+    &fake_array_size,
+    &fake_array_size
   };
   checkCudaErrors(cuLaunchKernel(kernel, 1, 1, 1, // grid
-                                 4, 1, 1,         //  block
+                                 4, 1, 1,         // block
                                  0,               // shared mem
                                  0,               // stream
                                  args, NULL));
+
+  checkCudaErrors((CUresult)cudaDeviceSynchronize());
 
   checkCudaErrors(cuMemcpyDtoH(h_b, d_b, sizeof(char) * 4));
 

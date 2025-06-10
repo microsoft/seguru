@@ -4,6 +4,5 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-clap = "3.0"
 log = "0.4"
 log4rs  = "1.0"

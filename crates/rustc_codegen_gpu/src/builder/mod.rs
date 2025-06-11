@@ -783,36 +783,6 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         self.mlir_const_val_from_type(val, ty, self.cur_block())
     }
 
-    fn emit_gpu_scalar_to_backend(
-        &self,
-        cv: rustc_const_eval::interpret::Scalar,
-        layout: rustc_abi::Scalar,
-        ty: Self::Type,
-    ) -> Self::Value {
-        match cv {
-            rustc_const_eval::interpret::Scalar::Int(int) => {
-                assert_eq!(int.size(), layout.primitive().size(self));
-                let data = int.to_uint(int.size());
-
-                if let rustc_abi::Primitive::Pointer(_) = layout.primitive() {
-                    if data == 0 { self.const_null(ty) } else { self.const_undef(ty) }
-                } else {
-                    self.mlir_const_val_from_type(
-                        cv.assert_scalar_int().to_int(int.size()),
-                        ty,
-                        self.cur_block(),
-                    )
-                }
-            }
-            rustc_const_eval::interpret::Scalar::Ptr(ptr, s) => {
-                let (prov, offset) = ptr.into_parts();
-                let alloc_id = prov.alloc_id();
-                log::trace!("scalar_to_backend ptr: {:?}", self.tcx.global_alloc(alloc_id));
-                self.const_data_memref_from_alloc_id(alloc_id)
-            }
-        }
-    }
-
     fn store(
         &mut self,
         val: Self::Value,

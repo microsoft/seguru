@@ -68,13 +68,6 @@ pub trait BuilderMethods<'a, 'tcx>:
 
     fn emit_constant(&mut self, val: u64, ty: Self::Type) -> Self::Value;
 
-    fn emit_gpu_scalar_to_backend(
-        &self,
-        cv: rustc_middle::mir::interpret::Scalar,
-        layout: rustc_abi::Scalar,
-        ty: Self::Type,
-    ) -> Self::Value;
-
     fn set_span(&mut self, span: Span);
 
     // FIXME(eddyb) replace uses of this with `append_sibling_block`.

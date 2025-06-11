@@ -205,7 +205,7 @@ pub(crate) fn create_object_file(sess: &Session) -> Option<write::Object<'static
         Endian::Little => Endianness::Little,
         Endian::Big => Endianness::Big,
     };
-    let Some((architecture, sub_architecture)) =
+    let Some((architecture, _sub_architecture)) =
         sess.target.object_architecture(&sess.unstable_target_features)
     else {
         return None;
@@ -214,9 +214,14 @@ pub(crate) fn create_object_file(sess: &Session) -> Option<write::Object<'static
 
     // TODO: Due to stupid object version stuff, we are OVERWRTING these to fixed values
     // Just to make it compile :-(
-    let architecture = object::Architecture::X86_64;
+    let architecture: Architecture = crate::from_i32_to_arch(architecture as i32);
     let sub_architecture = None;
-    let binary_format = object::BinaryFormat::Elf; //sess.target.binary_format.to_object();
+    let binary_format = match binary_format as i32 {
+        x if object::BinaryFormat::Elf as i32 == x => object::BinaryFormat::Elf,
+        x if object::BinaryFormat::Coff as i32 == x => object::BinaryFormat::Coff,
+        x if object::BinaryFormat::Xcoff as i32 == x => object::BinaryFormat::Xcoff,
+        _ => bug!("Unsupported binary format: {:?}", binary_format),
+    };
 
     let mut file = write::Object::new(binary_format, architecture, endianness);
     file.set_sub_architecture(sub_architecture);

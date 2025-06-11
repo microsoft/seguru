@@ -1,5 +1,5 @@
-// A thin wrapper around `Command` in the standard library which allows us to
-// read the arguments that are built up.
+//! A thin wrapper around `Command` in the standard library which allows us to
+//! read the arguments that are built up.
 
 use std::ffi::{OsStr, OsString};
 use std::process::{self, Output};

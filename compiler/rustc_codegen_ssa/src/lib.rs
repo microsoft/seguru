@@ -13,11 +13,14 @@
 #![feature(let_chains)]
 #![feature(negative_impls)]
 #![feature(rustdoc_internals)]
-#![feature(string_from_utf8_lossy_owned)]
 #![feature(trait_alias)]
 #![feature(try_blocks)]
 // tidy-alphabetical-end
 #![feature(rustc_private)]
+
+//! This crate contains codegen code that is used by all codegen backends (LLVM and others).
+//! The backend-agnostic functions of this crate use functions defined in various traits that
+//! have to be implemented by each backend.
 
 extern crate rustc_abi;
 extern crate rustc_arena;
@@ -48,10 +51,70 @@ extern crate thin_vec;
 //#![feature(write_core)]
 extern crate ar_archive_writer;
 extern crate object;
-//extern crate thorin;
-// This crate contains codegen code that is used by all codegen backends (LLVM and others).
-// The backend-agnostic functions of this crate use functions defined in various traits that
-// have to be implemented by each backend.
+
+pub(crate) fn from_i32_to_arch(arch: i32) -> object::Architecture {
+    if arch == object::Architecture::Aarch64 as i32 {
+        object::Architecture::Aarch64
+    } else if arch == object::Architecture::Aarch64_Ilp32 as i32 {
+        object::Architecture::Aarch64_Ilp32
+    } else if arch == object::Architecture::Arm as i32 {
+        object::Architecture::Arm
+    } else if arch == object::Architecture::Avr as i32 {
+        object::Architecture::Avr
+    } else if arch == object::Architecture::Bpf as i32 {
+        object::Architecture::Bpf
+    } else if arch == object::Architecture::Csky as i32 {
+        object::Architecture::Csky
+    } else if arch == object::Architecture::E2K32 as i32 {
+        object::Architecture::E2K32
+    } else if arch == object::Architecture::E2K64 as i32 {
+        object::Architecture::E2K64
+    } else if arch == object::Architecture::I386 as i32 {
+        object::Architecture::I386
+    } else if arch == object::Architecture::X86_64 as i32 {
+        object::Architecture::X86_64
+    } else if arch == object::Architecture::X86_64_X32 as i32 {
+        object::Architecture::X86_64_X32
+    } else if arch == object::Architecture::Hexagon as i32 {
+        object::Architecture::Hexagon
+    } else if arch == object::Architecture::LoongArch64 as i32 {
+        object::Architecture::LoongArch64
+    } else if arch == object::Architecture::M68k as i32 {
+        object::Architecture::M68k
+    } else if arch == object::Architecture::Mips as i32 {
+        object::Architecture::Mips
+    } else if arch == object::Architecture::Mips64 as i32 {
+        object::Architecture::Mips64
+    } else if arch == object::Architecture::Mips64_N32 as i32 {
+        object::Architecture::Mips64_N32
+    } else if arch == object::Architecture::Msp430 as i32 {
+        object::Architecture::Msp430
+    } else if arch == object::Architecture::PowerPc as i32 {
+        object::Architecture::PowerPc
+    } else if arch == object::Architecture::PowerPc64 as i32 {
+        object::Architecture::PowerPc64
+    } else if arch == object::Architecture::Riscv32 as i32 {
+        object::Architecture::Riscv32
+    } else if arch == object::Architecture::Riscv64 as i32 {
+        object::Architecture::Riscv64
+    } else if arch == object::Architecture::S390x as i32 {
+        object::Architecture::S390x
+    } else if arch == object::Architecture::Sbf as i32 {
+        object::Architecture::Sbf
+    } else if arch == object::Architecture::Sharc as i32 {
+        object::Architecture::Sharc
+    } else if arch == object::Architecture::Sparc as i32 {
+        object::Architecture::Sparc
+    } else if arch == object::Architecture::Sparc32Plus as i32 {
+        object::Architecture::Sparc32Plus
+    } else if arch == object::Architecture::Sparc64 as i32 {
+        object::Architecture::Sparc64
+    } else if arch == object::Architecture::Xtensa as i32 {
+        object::Architecture::Xtensa
+    } else {
+        panic!("Unknown architecture: {}", arch);
+    }
+}
 
 use std::collections::BTreeSet;
 use std::io;

@@ -1,4 +1,4 @@
-// Errors emitted by codegen_ssa_gpu
+//! Errors emitted by codegen_ssa
 
 use std::borrow::Cow;
 use std::ffi::OsString;
@@ -21,7 +21,7 @@ use crate::back::command::Command;
 use crate::fluent_generated as fluent;
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_incorrect_cgu_reuse_type)]
+#[diag(codegen_ssa_incorrect_cgu_reuse_type)]
 pub(crate) struct IncorrectCguReuseType<'a> {
     #[primary_span]
     pub span: Span,
@@ -32,18 +32,18 @@ pub(crate) struct IncorrectCguReuseType<'a> {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_cgu_not_recorded)]
+#[diag(codegen_ssa_cgu_not_recorded)]
 pub(crate) struct CguNotRecorded<'a> {
     pub cgu_user_name: &'a str,
     pub cgu_name: &'a str,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_autodiff_without_lto)]
+#[diag(codegen_ssa_autodiff_without_lto)]
 pub struct AutodiffWithoutLto;
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_unknown_reuse_kind)]
+#[diag(codegen_ssa_unknown_reuse_kind)]
 pub(crate) struct UnknownReuseKind {
     #[primary_span]
     pub span: Span,
@@ -51,14 +51,14 @@ pub(crate) struct UnknownReuseKind {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_missing_query_depgraph)]
+#[diag(codegen_ssa_missing_query_depgraph)]
 pub(crate) struct MissingQueryDepGraph {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_malformed_cgu_name)]
+#[diag(codegen_ssa_malformed_cgu_name)]
 pub(crate) struct MalformedCguName {
     #[primary_span]
     pub span: Span,
@@ -67,7 +67,7 @@ pub(crate) struct MalformedCguName {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_no_module_named)]
+#[diag(codegen_ssa_no_module_named)]
 pub(crate) struct NoModuleNamed<'a> {
     #[primary_span]
     pub span: Span,
@@ -77,7 +77,7 @@ pub(crate) struct NoModuleNamed<'a> {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_field_associated_value_expected)]
+#[diag(codegen_ssa_field_associated_value_expected)]
 pub(crate) struct FieldAssociatedValueExpected {
     #[primary_span]
     pub span: Span,
@@ -85,7 +85,7 @@ pub(crate) struct FieldAssociatedValueExpected {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_no_field)]
+#[diag(codegen_ssa_no_field)]
 pub(crate) struct NoField {
     #[primary_span]
     pub span: Span,
@@ -93,98 +93,98 @@ pub(crate) struct NoField {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_lib_def_write_failure)]
+#[diag(codegen_ssa_lib_def_write_failure)]
 pub(crate) struct LibDefWriteFailure {
     pub error: Error,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_version_script_write_failure)]
+#[diag(codegen_ssa_version_script_write_failure)]
 pub(crate) struct VersionScriptWriteFailure {
     pub error: Error,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_symbol_file_write_failure)]
+#[diag(codegen_ssa_symbol_file_write_failure)]
 pub(crate) struct SymbolFileWriteFailure {
     pub error: Error,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_ld64_unimplemented_modifier)]
+#[diag(codegen_ssa_ld64_unimplemented_modifier)]
 pub(crate) struct Ld64UnimplementedModifier;
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_linker_unsupported_modifier)]
+#[diag(codegen_ssa_linker_unsupported_modifier)]
 pub(crate) struct LinkerUnsupportedModifier;
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_L4Bender_exporting_symbols_unimplemented)]
+#[diag(codegen_ssa_L4Bender_exporting_symbols_unimplemented)]
 pub(crate) struct L4BenderExportingSymbolsUnimplemented;
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_no_natvis_directory)]
+#[diag(codegen_ssa_no_natvis_directory)]
 pub(crate) struct NoNatvisDirectory {
     pub error: Error,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_no_saved_object_file)]
+#[diag(codegen_ssa_no_saved_object_file)]
 pub(crate) struct NoSavedObjectFile<'a> {
     pub cgu_name: &'a str,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_requires_rust_abi, code = E0737)]
+#[diag(codegen_ssa_requires_rust_abi, code = E0737)]
 pub(crate) struct RequiresRustAbi {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_null_on_export, code = E0648)]
+#[diag(codegen_ssa_null_on_export, code = E0648)]
 pub(crate) struct NullOnExport {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_unsupported_instruction_set, code = E0779)]
+#[diag(codegen_ssa_unsupported_instruction_set, code = E0779)]
 pub(crate) struct UnsuportedInstructionSet {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_invalid_instruction_set, code = E0779)]
+#[diag(codegen_ssa_invalid_instruction_set, code = E0779)]
 pub(crate) struct InvalidInstructionSet {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_bare_instruction_set, code = E0778)]
+#[diag(codegen_ssa_bare_instruction_set, code = E0778)]
 pub(crate) struct BareInstructionSet {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_multiple_instruction_set, code = E0779)]
+#[diag(codegen_ssa_multiple_instruction_set, code = E0779)]
 pub(crate) struct MultipleInstructionSet {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_expected_name_value_pair)]
+#[diag(codegen_ssa_expected_name_value_pair)]
 pub(crate) struct ExpectedNameValuePair {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_unexpected_parameter_name)]
+#[diag(codegen_ssa_unexpected_parameter_name)]
 pub(crate) struct UnexpectedParameterName {
     #[primary_span]
     #[label]
@@ -194,7 +194,7 @@ pub(crate) struct UnexpectedParameterName {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_invalid_literal_value)]
+#[diag(codegen_ssa_invalid_literal_value)]
 pub(crate) struct InvalidLiteralValue {
     #[primary_span]
     #[label]
@@ -202,7 +202,7 @@ pub(crate) struct InvalidLiteralValue {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_out_of_range_integer)]
+#[diag(codegen_ssa_out_of_range_integer)]
 pub(crate) struct OutOfRangeInteger {
     #[primary_span]
     #[label]
@@ -210,21 +210,21 @@ pub(crate) struct OutOfRangeInteger {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_expected_one_argument, code = E0534)]
+#[diag(codegen_ssa_expected_one_argument, code = E0534)]
 pub(crate) struct ExpectedOneArgument {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_expected_one_argument, code = E0722)]
+#[diag(codegen_ssa_expected_one_argument, code = E0722)]
 pub(crate) struct ExpectedOneArgumentOptimize {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_invalid_argument, code = E0535)]
+#[diag(codegen_ssa_invalid_argument, code = E0535)]
 #[help]
 pub(crate) struct InvalidArgument {
     #[primary_span]
@@ -232,14 +232,14 @@ pub(crate) struct InvalidArgument {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_invalid_argument, code = E0722)]
+#[diag(codegen_ssa_invalid_argument, code = E0722)]
 pub(crate) struct InvalidArgumentOptimize {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_copy_path_buf)]
+#[diag(codegen_ssa_copy_path_buf)]
 pub(crate) struct CopyPathBuf {
     pub source_file: PathBuf,
     pub output_path: PathBuf,
@@ -248,7 +248,7 @@ pub(crate) struct CopyPathBuf {
 
 // Reports Paths using `Debug` implementation rather than Path's `Display` implementation.
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_copy_path)]
+#[diag(codegen_ssa_copy_path)]
 pub struct CopyPath<'a> {
     from: DebugArgPath<'a>,
     to: DebugArgPath<'a>,
@@ -270,38 +270,38 @@ impl IntoDiagArg for DebugArgPath<'_> {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_binary_output_to_tty)]
+#[diag(codegen_ssa_binary_output_to_tty)]
 pub struct BinaryOutputToTty {
     pub shorthand: &'static str,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_ignoring_emit_path)]
+#[diag(codegen_ssa_ignoring_emit_path)]
 pub struct IgnoringEmitPath {
     pub extension: String,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_ignoring_output)]
+#[diag(codegen_ssa_ignoring_output)]
 pub struct IgnoringOutput {
     pub extension: String,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_create_temp_dir)]
+#[diag(codegen_ssa_create_temp_dir)]
 pub(crate) struct CreateTempDir {
     pub error: Error,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_add_native_library)]
+#[diag(codegen_ssa_add_native_library)]
 pub(crate) struct AddNativeLibrary {
     pub library_path: PathBuf,
     pub error: Error,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_multiple_external_func_decl)]
+#[diag(codegen_ssa_multiple_external_func_decl)]
 pub(crate) struct MultipleExternalFuncDecl<'a> {
     #[primary_span]
     pub span: Span,
@@ -311,16 +311,16 @@ pub(crate) struct MultipleExternalFuncDecl<'a> {
 
 #[derive(Diagnostic)]
 pub enum LinkRlibError {
-    #[diag(codegen_ssa_gpu_rlib_missing_format)]
+    #[diag(codegen_ssa_rlib_missing_format)]
     MissingFormat,
 
-    #[diag(codegen_ssa_gpu_rlib_only_rmeta_found)]
+    #[diag(codegen_ssa_rlib_only_rmeta_found)]
     OnlyRmetaFound { crate_name: Symbol },
 
-    #[diag(codegen_ssa_gpu_rlib_not_found)]
+    #[diag(codegen_ssa_rlib_not_found)]
     NotFound { crate_name: Symbol },
 
-    #[diag(codegen_ssa_gpu_rlib_incompatible_dependency_formats)]
+    #[diag(codegen_ssa_rlib_incompatible_dependency_formats)]
     IncompatibleDependencyFormats { ty1: String, ty2: String, list1: String, list2: String },
 }
 
@@ -330,132 +330,122 @@ impl<G: EmissionGuarantee> Diagnostic<'_, G> for ThorinErrorWrapper {
     fn into_diag(self, dcx: DiagCtxtHandle<'_>, level: Level) -> Diag<'_, G> {
         let build = |msg| Diag::new(dcx, level, msg);
         match self.0 {
-            thorin::Error::ReadInput(_) => build(fluent::codegen_ssa_gpu_thorin_read_input_failure),
+            thorin::Error::ReadInput(_) => build(fluent::codegen_ssa_thorin_read_input_failure),
             thorin::Error::ParseFileKind(_) => {
-                build(fluent::codegen_ssa_gpu_thorin_parse_input_file_kind)
+                build(fluent::codegen_ssa_thorin_parse_input_file_kind)
             }
             thorin::Error::ParseObjectFile(_) => {
-                build(fluent::codegen_ssa_gpu_thorin_parse_input_object_file)
+                build(fluent::codegen_ssa_thorin_parse_input_object_file)
             }
             thorin::Error::ParseArchiveFile(_) => {
-                build(fluent::codegen_ssa_gpu_thorin_parse_input_archive_file)
+                build(fluent::codegen_ssa_thorin_parse_input_archive_file)
             }
             thorin::Error::ParseArchiveMember(_) => {
-                build(fluent::codegen_ssa_gpu_thorin_parse_archive_member)
+                build(fluent::codegen_ssa_thorin_parse_archive_member)
             }
-            thorin::Error::InvalidInputKind => {
-                build(fluent::codegen_ssa_gpu_thorin_invalid_input_kind)
-            }
-            thorin::Error::DecompressData(_) => {
-                build(fluent::codegen_ssa_gpu_thorin_decompress_data)
-            }
+            thorin::Error::InvalidInputKind => build(fluent::codegen_ssa_thorin_invalid_input_kind),
+            thorin::Error::DecompressData(_) => build(fluent::codegen_ssa_thorin_decompress_data),
             thorin::Error::NamelessSection(_, offset) => {
-                build(fluent::codegen_ssa_gpu_thorin_section_without_name)
+                build(fluent::codegen_ssa_thorin_section_without_name)
                     .with_arg("offset", format!("0x{offset:08x}"))
             }
             thorin::Error::RelocationWithInvalidSymbol(section, offset) => {
-                build(fluent::codegen_ssa_gpu_thorin_relocation_with_invalid_symbol)
+                build(fluent::codegen_ssa_thorin_relocation_with_invalid_symbol)
                     .with_arg("section", section)
                     .with_arg("offset", format!("0x{offset:08x}"))
             }
             thorin::Error::MultipleRelocations(section, offset) => {
-                build(fluent::codegen_ssa_gpu_thorin_multiple_relocations)
+                build(fluent::codegen_ssa_thorin_multiple_relocations)
                     .with_arg("section", section)
                     .with_arg("offset", format!("0x{offset:08x}"))
             }
             thorin::Error::UnsupportedRelocation(section, offset) => {
-                build(fluent::codegen_ssa_gpu_thorin_unsupported_relocation)
+                build(fluent::codegen_ssa_thorin_unsupported_relocation)
                     .with_arg("section", section)
                     .with_arg("offset", format!("0x{offset:08x}"))
             }
-            thorin::Error::MissingDwoName(id) => {
-                build(fluent::codegen_ssa_gpu_thorin_missing_dwo_name)
-                    .with_arg("id", format!("0x{id:08x}"))
-            }
+            thorin::Error::MissingDwoName(id) => build(fluent::codegen_ssa_thorin_missing_dwo_name)
+                .with_arg("id", format!("0x{id:08x}")),
             thorin::Error::NoCompilationUnits => {
-                build(fluent::codegen_ssa_gpu_thorin_no_compilation_units)
+                build(fluent::codegen_ssa_thorin_no_compilation_units)
             }
-            thorin::Error::NoDie => build(fluent::codegen_ssa_gpu_thorin_no_die),
+            thorin::Error::NoDie => build(fluent::codegen_ssa_thorin_no_die),
             thorin::Error::TopLevelDieNotUnit => {
-                build(fluent::codegen_ssa_gpu_thorin_top_level_die_not_unit)
+                build(fluent::codegen_ssa_thorin_top_level_die_not_unit)
             }
             thorin::Error::MissingRequiredSection(section) => {
-                build(fluent::codegen_ssa_gpu_thorin_missing_required_section)
+                build(fluent::codegen_ssa_thorin_missing_required_section)
                     .with_arg("section", section)
             }
             thorin::Error::ParseUnitAbbreviations(_) => {
-                build(fluent::codegen_ssa_gpu_thorin_parse_unit_abbreviations)
+                build(fluent::codegen_ssa_thorin_parse_unit_abbreviations)
             }
             thorin::Error::ParseUnitAttribute(_) => {
-                build(fluent::codegen_ssa_gpu_thorin_parse_unit_attribute)
+                build(fluent::codegen_ssa_thorin_parse_unit_attribute)
             }
             thorin::Error::ParseUnitHeader(_) => {
-                build(fluent::codegen_ssa_gpu_thorin_parse_unit_header)
+                build(fluent::codegen_ssa_thorin_parse_unit_header)
             }
-            thorin::Error::ParseUnit(_) => build(fluent::codegen_ssa_gpu_thorin_parse_unit),
+            thorin::Error::ParseUnit(_) => build(fluent::codegen_ssa_thorin_parse_unit),
             thorin::Error::IncompatibleIndexVersion(section, format, actual) => {
-                build(fluent::codegen_ssa_gpu_thorin_incompatible_index_version)
+                build(fluent::codegen_ssa_thorin_incompatible_index_version)
                     .with_arg("section", section)
                     .with_arg("actual", actual)
                     .with_arg("format", format)
             }
             thorin::Error::OffsetAtIndex(_, index) => {
-                build(fluent::codegen_ssa_gpu_thorin_offset_at_index).with_arg("index", index)
+                build(fluent::codegen_ssa_thorin_offset_at_index).with_arg("index", index)
             }
             thorin::Error::StrAtOffset(_, offset) => {
-                build(fluent::codegen_ssa_gpu_thorin_str_at_offset)
+                build(fluent::codegen_ssa_thorin_str_at_offset)
                     .with_arg("offset", format!("0x{offset:08x}"))
             }
             thorin::Error::ParseIndex(_, section) => {
-                build(fluent::codegen_ssa_gpu_thorin_parse_index).with_arg("section", section)
+                build(fluent::codegen_ssa_thorin_parse_index).with_arg("section", section)
             }
             thorin::Error::UnitNotInIndex(unit) => {
-                build(fluent::codegen_ssa_gpu_thorin_unit_not_in_index)
+                build(fluent::codegen_ssa_thorin_unit_not_in_index)
                     .with_arg("unit", format!("0x{unit:08x}"))
             }
             thorin::Error::RowNotInIndex(_, row) => {
-                build(fluent::codegen_ssa_gpu_thorin_row_not_in_index).with_arg("row", row)
+                build(fluent::codegen_ssa_thorin_row_not_in_index).with_arg("row", row)
             }
-            thorin::Error::SectionNotInRow => {
-                build(fluent::codegen_ssa_gpu_thorin_section_not_in_row)
-            }
-            thorin::Error::EmptyUnit(unit) => build(fluent::codegen_ssa_gpu_thorin_empty_unit)
+            thorin::Error::SectionNotInRow => build(fluent::codegen_ssa_thorin_section_not_in_row),
+            thorin::Error::EmptyUnit(unit) => build(fluent::codegen_ssa_thorin_empty_unit)
                 .with_arg("unit", format!("0x{unit:08x}")),
             thorin::Error::MultipleDebugInfoSection => {
-                build(fluent::codegen_ssa_gpu_thorin_multiple_debug_info_section)
+                build(fluent::codegen_ssa_thorin_multiple_debug_info_section)
             }
             thorin::Error::MultipleDebugTypesSection => {
-                build(fluent::codegen_ssa_gpu_thorin_multiple_debug_types_section)
+                build(fluent::codegen_ssa_thorin_multiple_debug_types_section)
             }
-            thorin::Error::NotSplitUnit => build(fluent::codegen_ssa_gpu_thorin_not_split_unit),
-            thorin::Error::DuplicateUnit(unit) => {
-                build(fluent::codegen_ssa_gpu_thorin_duplicate_unit)
-                    .with_arg("unit", format!("0x{unit:08x}"))
-            }
+            thorin::Error::NotSplitUnit => build(fluent::codegen_ssa_thorin_not_split_unit),
+            thorin::Error::DuplicateUnit(unit) => build(fluent::codegen_ssa_thorin_duplicate_unit)
+                .with_arg("unit", format!("0x{unit:08x}")),
             thorin::Error::MissingReferencedUnit(unit) => {
-                build(fluent::codegen_ssa_gpu_thorin_missing_referenced_unit)
+                build(fluent::codegen_ssa_thorin_missing_referenced_unit)
                     .with_arg("unit", format!("0x{unit:08x}"))
             }
             thorin::Error::NoOutputObjectCreated => {
-                build(fluent::codegen_ssa_gpu_thorin_not_output_object_created)
+                build(fluent::codegen_ssa_thorin_not_output_object_created)
             }
             thorin::Error::MixedInputEncodings => {
-                build(fluent::codegen_ssa_gpu_thorin_mixed_input_encodings)
+                build(fluent::codegen_ssa_thorin_mixed_input_encodings)
             }
             thorin::Error::Io(e) => {
-                build(fluent::codegen_ssa_gpu_thorin_io).with_arg("error", format!("{e}"))
+                build(fluent::codegen_ssa_thorin_io).with_arg("error", format!("{e}"))
             }
             thorin::Error::ObjectRead(e) => {
-                build(fluent::codegen_ssa_gpu_thorin_object_read).with_arg("error", format!("{e}"))
+                build(fluent::codegen_ssa_thorin_object_read).with_arg("error", format!("{e}"))
             }
             thorin::Error::ObjectWrite(e) => {
-                build(fluent::codegen_ssa_gpu_thorin_object_write).with_arg("error", format!("{e}"))
+                build(fluent::codegen_ssa_thorin_object_write).with_arg("error", format!("{e}"))
             }
             thorin::Error::GimliRead(e) => {
-                build(fluent::codegen_ssa_gpu_thorin_gimli_read).with_arg("error", format!("{e}"))
+                build(fluent::codegen_ssa_thorin_gimli_read).with_arg("error", format!("{e}"))
             }
             thorin::Error::GimliWrite(e) => {
-                build(fluent::codegen_ssa_gpu_thorin_gimli_write).with_arg("error", format!("{e}"))
+                build(fluent::codegen_ssa_thorin_gimli_write).with_arg("error", format!("{e}"))
             }
             _ => unimplemented!("Untranslated thorin error"),
         }
@@ -473,7 +463,7 @@ pub(crate) struct LinkingFailed<'a> {
 
 impl<G: EmissionGuarantee> Diagnostic<'_, G> for LinkingFailed<'_> {
     fn into_diag(mut self, dcx: DiagCtxtHandle<'_>, level: Level) -> Diag<'_, G> {
-        let mut diag = Diag::new(dcx, level, fluent::codegen_ssa_gpu_linking_failed);
+        let mut diag = Diag::new(dcx, level, fluent::codegen_ssa_linking_failed);
         diag.arg("linker_path", format!("{}", self.linker_path.display()));
         diag.arg("exit_status", format!("{}", self.exit_status));
 
@@ -575,11 +565,11 @@ impl<G: EmissionGuarantee> Diagnostic<'_, G> for LinkingFailed<'_> {
         // Trying to match an error from OS linkers
         // which by now we have no way to translate.
         if contains_undefined_ref {
-            diag.note(fluent::codegen_ssa_gpu_extern_funcs_not_found)
-                .note(fluent::codegen_ssa_gpu_specify_libraries_to_link);
+            diag.note(fluent::codegen_ssa_extern_funcs_not_found)
+                .note(fluent::codegen_ssa_specify_libraries_to_link);
 
             if rustc_session::utils::was_invoked_from_cargo() {
-                diag.note(fluent::codegen_ssa_gpu_use_cargo_directive);
+                diag.note(fluent::codegen_ssa_use_cargo_directive);
             }
         }
         diag
@@ -587,27 +577,27 @@ impl<G: EmissionGuarantee> Diagnostic<'_, G> for LinkingFailed<'_> {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_link_exe_unexpected_error)]
+#[diag(codegen_ssa_link_exe_unexpected_error)]
 pub(crate) struct LinkExeUnexpectedError;
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_repair_vs_build_tools)]
+#[diag(codegen_ssa_repair_vs_build_tools)]
 pub(crate) struct RepairVSBuildTools;
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_missing_cpp_build_tool_component)]
+#[diag(codegen_ssa_missing_cpp_build_tool_component)]
 pub(crate) struct MissingCppBuildToolComponent;
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_select_cpp_build_tool_workload)]
+#[diag(codegen_ssa_select_cpp_build_tool_workload)]
 pub(crate) struct SelectCppBuildToolWorkload;
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_visual_studio_not_installed)]
+#[diag(codegen_ssa_visual_studio_not_installed)]
 pub(crate) struct VisualStudioNotInstalled;
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_linker_not_found)]
+#[diag(codegen_ssa_linker_not_found)]
 #[note]
 pub(crate) struct LinkerNotFound {
     pub linker_path: PathBuf,
@@ -615,9 +605,9 @@ pub(crate) struct LinkerNotFound {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_unable_to_exe_linker)]
+#[diag(codegen_ssa_unable_to_exe_linker)]
 #[note]
-#[note(codegen_ssa_gpu_command_note)]
+#[note(codegen_ssa_command_note)]
 pub(crate) struct UnableToExeLinker {
     pub linker_path: PathBuf,
     pub error: Error,
@@ -625,27 +615,27 @@ pub(crate) struct UnableToExeLinker {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_msvc_missing_linker)]
+#[diag(codegen_ssa_msvc_missing_linker)]
 pub(crate) struct MsvcMissingLinker;
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_self_contained_linker_missing)]
+#[diag(codegen_ssa_self_contained_linker_missing)]
 pub(crate) struct SelfContainedLinkerMissing;
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_check_installed_visual_studio)]
+#[diag(codegen_ssa_check_installed_visual_studio)]
 pub(crate) struct CheckInstalledVisualStudio;
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_insufficient_vs_code_product)]
+#[diag(codegen_ssa_insufficient_vs_code_product)]
 pub(crate) struct InsufficientVSCodeProduct;
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_cpu_required)]
+#[diag(codegen_ssa_cpu_required)]
 pub(crate) struct CpuRequired;
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_processing_dymutil_failed)]
+#[diag(codegen_ssa_processing_dymutil_failed)]
 #[note]
 pub(crate) struct ProcessingDymutilFailed {
     pub status: ExitStatus,
@@ -653,13 +643,13 @@ pub(crate) struct ProcessingDymutilFailed {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_unable_to_run_dsymutil)]
+#[diag(codegen_ssa_unable_to_run_dsymutil)]
 pub(crate) struct UnableToRunDsymutil {
     pub error: Error,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_stripping_debug_info_failed)]
+#[diag(codegen_ssa_stripping_debug_info_failed)]
 #[note]
 pub(crate) struct StrippingDebugInfoFailed<'a> {
     pub util: &'a str,
@@ -668,53 +658,53 @@ pub(crate) struct StrippingDebugInfoFailed<'a> {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_unable_to_run)]
+#[diag(codegen_ssa_unable_to_run)]
 pub(crate) struct UnableToRun<'a> {
     pub util: &'a str,
     pub error: Error,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_linker_file_stem)]
+#[diag(codegen_ssa_linker_file_stem)]
 pub(crate) struct LinkerFileStem;
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_static_library_native_artifacts)]
+#[diag(codegen_ssa_static_library_native_artifacts)]
 pub(crate) struct StaticLibraryNativeArtifacts;
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_static_library_native_artifacts_to_file)]
+#[diag(codegen_ssa_static_library_native_artifacts_to_file)]
 pub(crate) struct StaticLibraryNativeArtifactsToFile<'a> {
     pub path: &'a Path,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_link_script_unavailable)]
+#[diag(codegen_ssa_link_script_unavailable)]
 pub(crate) struct LinkScriptUnavailable;
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_link_script_write_failure)]
+#[diag(codegen_ssa_link_script_write_failure)]
 pub(crate) struct LinkScriptWriteFailure {
     pub path: PathBuf,
     pub error: Error,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_failed_to_write)]
+#[diag(codegen_ssa_failed_to_write)]
 pub(crate) struct FailedToWrite {
     pub path: PathBuf,
     pub error: Error,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_unable_to_write_debugger_visualizer)]
+#[diag(codegen_ssa_unable_to_write_debugger_visualizer)]
 pub(crate) struct UnableToWriteDebuggerVisualizer {
     pub path: PathBuf,
     pub error: Error,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_rlib_archive_build_failure)]
+#[diag(codegen_ssa_rlib_archive_build_failure)]
 pub(crate) struct RlibArchiveBuildFailure {
     pub path: PathBuf,
     pub error: Error,
@@ -723,51 +713,64 @@ pub(crate) struct RlibArchiveBuildFailure {
 #[derive(Diagnostic)]
 // Public for rustc_codegen_llvm::back::archive
 pub enum ExtractBundledLibsError<'a> {
-    #[diag(codegen_ssa_gpu_extract_bundled_libs_open_file)]
+    #[diag(codegen_ssa_extract_bundled_libs_open_file)]
     OpenFile { rlib: &'a Path, error: Box<dyn std::error::Error> },
 
-    #[diag(codegen_ssa_gpu_extract_bundled_libs_mmap_file)]
+    #[diag(codegen_ssa_extract_bundled_libs_mmap_file)]
     MmapFile { rlib: &'a Path, error: Box<dyn std::error::Error> },
 
-    #[diag(codegen_ssa_gpu_extract_bundled_libs_parse_archive)]
+    #[diag(codegen_ssa_extract_bundled_libs_parse_archive)]
     ParseArchive { rlib: &'a Path, error: Box<dyn std::error::Error> },
 
-    #[diag(codegen_ssa_gpu_extract_bundled_libs_read_entry)]
+    #[diag(codegen_ssa_extract_bundled_libs_read_entry)]
     ReadEntry { rlib: &'a Path, error: Box<dyn std::error::Error> },
 
-    #[diag(codegen_ssa_gpu_extract_bundled_libs_archive_member)]
+    #[diag(codegen_ssa_extract_bundled_libs_archive_member)]
     ArchiveMember { rlib: &'a Path, error: Box<dyn std::error::Error> },
 
-    #[diag(codegen_ssa_gpu_extract_bundled_libs_convert_name)]
+    #[diag(codegen_ssa_extract_bundled_libs_convert_name)]
     ConvertName { rlib: &'a Path, error: Box<dyn std::error::Error> },
 
-    #[diag(codegen_ssa_gpu_extract_bundled_libs_write_file)]
+    #[diag(codegen_ssa_extract_bundled_libs_write_file)]
     WriteFile { rlib: &'a Path, error: Box<dyn std::error::Error> },
 
-    #[diag(codegen_ssa_gpu_extract_bundled_libs_write_file)]
+    #[diag(codegen_ssa_extract_bundled_libs_write_file)]
     ExtractSection { rlib: &'a Path, error: Box<dyn std::error::Error> },
 }
 
 #[derive(Diagnostic)]
+#[diag(codegen_ssa_unsupported_arch)]
+pub(crate) struct UnsupportedArch<'a> {
+    pub arch: &'a str,
+    pub os: &'a str,
+}
+
+#[derive(Diagnostic)]
 pub(crate) enum AppleDeploymentTarget {
-    #[diag(codegen_ssa_gpu_apple_deployment_target_invalid)]
+    #[diag(codegen_ssa_apple_deployment_target_invalid)]
     Invalid { env_var: &'static str, error: ParseIntError },
-    #[diag(codegen_ssa_gpu_apple_deployment_target_too_low)]
+    #[diag(codegen_ssa_apple_deployment_target_too_low)]
     TooLow { env_var: &'static str, version: String, os_min: String },
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_read_file)]
+pub(crate) enum AppleSdkRootError<'a> {
+    #[diag(codegen_ssa_apple_sdk_error_sdk_path)]
+    SdkPath { sdk_name: &'a str, error: Error },
+}
+
+#[derive(Diagnostic)]
+#[diag(codegen_ssa_read_file)]
 pub(crate) struct ReadFileError {
     pub message: std::io::Error,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_unsupported_link_self_contained)]
+#[diag(codegen_ssa_unsupported_link_self_contained)]
 pub(crate) struct UnsupportedLinkSelfContained;
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_archive_build_failure)]
+#[diag(codegen_ssa_archive_build_failure)]
 // Public for rustc_codegen_llvm::back::archive
 pub struct ArchiveBuildFailure {
     pub path: PathBuf,
@@ -775,21 +778,21 @@ pub struct ArchiveBuildFailure {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_unknown_archive_kind)]
+#[diag(codegen_ssa_unknown_archive_kind)]
 // Public for rustc_codegen_llvm::back::archive
 pub struct UnknownArchiveKind<'a> {
     pub kind: &'a str,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_expected_used_symbol)]
+#[diag(codegen_ssa_expected_used_symbol)]
 pub(crate) struct ExpectedUsedSymbol {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_multiple_main_functions)]
+#[diag(codegen_ssa_multiple_main_functions)]
 #[help]
 pub(crate) struct MultipleMainFunctions {
     #[primary_span]
@@ -797,43 +800,43 @@ pub(crate) struct MultipleMainFunctions {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_metadata_object_file_write)]
+#[diag(codegen_ssa_metadata_object_file_write)]
 pub(crate) struct MetadataObjectFileWrite {
     pub error: Error,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_invalid_windows_subsystem)]
+#[diag(codegen_ssa_invalid_windows_subsystem)]
 pub(crate) struct InvalidWindowsSubsystem {
     pub subsystem: Symbol,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_shuffle_indices_evaluation)]
+#[diag(codegen_ssa_shuffle_indices_evaluation)]
 pub(crate) struct ShuffleIndicesEvaluation {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_missing_memory_ordering)]
+#[diag(codegen_ssa_missing_memory_ordering)]
 pub(crate) struct MissingMemoryOrdering;
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_unknown_atomic_ordering)]
+#[diag(codegen_ssa_unknown_atomic_ordering)]
 pub(crate) struct UnknownAtomicOrdering;
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_atomic_compare_exchange)]
+#[diag(codegen_ssa_atomic_compare_exchange)]
 pub(crate) struct AtomicCompareExchange;
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_unknown_atomic_operation)]
+#[diag(codegen_ssa_unknown_atomic_operation)]
 pub(crate) struct UnknownAtomicOperation;
 
 #[derive(Diagnostic)]
 pub enum InvalidMonomorphization<'tcx> {
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_basic_integer_type, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_basic_integer_type, code = E0511)]
     BasicIntegerType {
         #[primary_span]
         span: Span,
@@ -841,7 +844,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ty: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_basic_float_type, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_basic_float_type, code = E0511)]
     BasicFloatType {
         #[primary_span]
         span: Span,
@@ -849,14 +852,14 @@ pub enum InvalidMonomorphization<'tcx> {
         ty: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_float_to_int_unchecked, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_float_to_int_unchecked, code = E0511)]
     FloatToIntUnchecked {
         #[primary_span]
         span: Span,
         ty: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_floating_point_vector, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_floating_point_vector, code = E0511)]
     FloatingPointVector {
         #[primary_span]
         span: Span,
@@ -865,7 +868,7 @@ pub enum InvalidMonomorphization<'tcx> {
         in_ty: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_floating_point_type, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_floating_point_type, code = E0511)]
     FloatingPointType {
         #[primary_span]
         span: Span,
@@ -873,14 +876,14 @@ pub enum InvalidMonomorphization<'tcx> {
         in_ty: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_unrecognized_intrinsic, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_unrecognized_intrinsic, code = E0511)]
     UnrecognizedIntrinsic {
         #[primary_span]
         span: Span,
         name: Symbol,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_simd_argument, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_simd_argument, code = E0511)]
     SimdArgument {
         #[primary_span]
         span: Span,
@@ -888,7 +891,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ty: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_simd_input, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_simd_input, code = E0511)]
     SimdInput {
         #[primary_span]
         span: Span,
@@ -896,7 +899,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ty: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_simd_first, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_simd_first, code = E0511)]
     SimdFirst {
         #[primary_span]
         span: Span,
@@ -904,7 +907,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ty: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_simd_second, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_simd_second, code = E0511)]
     SimdSecond {
         #[primary_span]
         span: Span,
@@ -912,7 +915,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ty: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_simd_third, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_simd_third, code = E0511)]
     SimdThird {
         #[primary_span]
         span: Span,
@@ -920,7 +923,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ty: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_simd_return, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_simd_return, code = E0511)]
     SimdReturn {
         #[primary_span]
         span: Span,
@@ -928,7 +931,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ty: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_invalid_bitmask, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_invalid_bitmask, code = E0511)]
     InvalidBitmask {
         #[primary_span]
         span: Span,
@@ -938,7 +941,7 @@ pub enum InvalidMonomorphization<'tcx> {
         expected_bytes: u64,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_return_length_input_type, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_return_length_input_type, code = E0511)]
     ReturnLengthInputType {
         #[primary_span]
         span: Span,
@@ -949,7 +952,7 @@ pub enum InvalidMonomorphization<'tcx> {
         out_len: u64,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_second_argument_length, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_second_argument_length, code = E0511)]
     SecondArgumentLength {
         #[primary_span]
         span: Span,
@@ -960,7 +963,7 @@ pub enum InvalidMonomorphization<'tcx> {
         out_len: u64,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_third_argument_length, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_third_argument_length, code = E0511)]
     ThirdArgumentLength {
         #[primary_span]
         span: Span,
@@ -971,7 +974,7 @@ pub enum InvalidMonomorphization<'tcx> {
         out_len: u64,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_return_integer_type, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_return_integer_type, code = E0511)]
     ReturnIntegerType {
         #[primary_span]
         span: Span,
@@ -980,7 +983,7 @@ pub enum InvalidMonomorphization<'tcx> {
         out_ty: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_simd_shuffle, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_simd_shuffle, code = E0511)]
     SimdShuffle {
         #[primary_span]
         span: Span,
@@ -988,7 +991,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ty: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_return_length, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_return_length, code = E0511)]
     ReturnLength {
         #[primary_span]
         span: Span,
@@ -998,7 +1001,7 @@ pub enum InvalidMonomorphization<'tcx> {
         out_len: u64,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_return_element, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_return_element, code = E0511)]
     ReturnElement {
         #[primary_span]
         span: Span,
@@ -1009,7 +1012,7 @@ pub enum InvalidMonomorphization<'tcx> {
         out_ty: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_simd_index_out_of_bounds, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_simd_index_out_of_bounds, code = E0511)]
     SimdIndexOutOfBounds {
         #[primary_span]
         span: Span,
@@ -1018,7 +1021,7 @@ pub enum InvalidMonomorphization<'tcx> {
         total_len: u128,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_inserted_type, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_inserted_type, code = E0511)]
     InsertedType {
         #[primary_span]
         span: Span,
@@ -1028,7 +1031,7 @@ pub enum InvalidMonomorphization<'tcx> {
         out_ty: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_return_type, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_return_type, code = E0511)]
     ReturnType {
         #[primary_span]
         span: Span,
@@ -1038,7 +1041,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ret_ty: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_expected_return_type, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_expected_return_type, code = E0511)]
     ExpectedReturnType {
         #[primary_span]
         span: Span,
@@ -1047,7 +1050,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ret_ty: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_mismatched_lengths, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_mismatched_lengths, code = E0511)]
     MismatchedLengths {
         #[primary_span]
         span: Span,
@@ -1056,7 +1059,7 @@ pub enum InvalidMonomorphization<'tcx> {
         v_len: u64,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_mask_type, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_mask_type, code = E0511)]
     #[note]
     MaskType {
         #[primary_span]
@@ -1065,7 +1068,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ty: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_vector_argument, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_vector_argument, code = E0511)]
     VectorArgument {
         #[primary_span]
         span: Span,
@@ -1074,7 +1077,7 @@ pub enum InvalidMonomorphization<'tcx> {
         in_elem: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_cannot_return, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_cannot_return, code = E0511)]
     CannotReturn {
         #[primary_span]
         span: Span,
@@ -1084,7 +1087,7 @@ pub enum InvalidMonomorphization<'tcx> {
         expected_bytes: u64,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_expected_element_type, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_expected_element_type, code = E0511)]
     ExpectedElementType {
         #[primary_span]
         span: Span,
@@ -1096,7 +1099,7 @@ pub enum InvalidMonomorphization<'tcx> {
         mutability: ExpectedPointerMutability,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_third_arg_element_type, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_third_arg_element_type, code = E0511)]
     ThirdArgElementType {
         #[primary_span]
         span: Span,
@@ -1105,7 +1108,7 @@ pub enum InvalidMonomorphization<'tcx> {
         third_arg: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_unsupported_symbol_of_size, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_unsupported_symbol_of_size, code = E0511)]
     UnsupportedSymbolOfSize {
         #[primary_span]
         span: Span,
@@ -1117,7 +1120,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ret_ty: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_unsupported_symbol, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_unsupported_symbol, code = E0511)]
     UnsupportedSymbol {
         #[primary_span]
         span: Span,
@@ -1128,7 +1131,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ret_ty: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_cast_wide_pointer, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_cast_wide_pointer, code = E0511)]
     CastWidePointer {
         #[primary_span]
         span: Span,
@@ -1136,7 +1139,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ty: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_expected_pointer, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_expected_pointer, code = E0511)]
     ExpectedPointer {
         #[primary_span]
         span: Span,
@@ -1144,7 +1147,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ty: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_expected_usize, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_expected_usize, code = E0511)]
     ExpectedUsize {
         #[primary_span]
         span: Span,
@@ -1152,7 +1155,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ty: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_unsupported_cast, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_unsupported_cast, code = E0511)]
     UnsupportedCast {
         #[primary_span]
         span: Span,
@@ -1163,7 +1166,7 @@ pub enum InvalidMonomorphization<'tcx> {
         out_elem: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_unsupported_operation, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_unsupported_operation, code = E0511)]
     UnsupportedOperation {
         #[primary_span]
         span: Span,
@@ -1172,7 +1175,7 @@ pub enum InvalidMonomorphization<'tcx> {
         in_elem: Ty<'tcx>,
     },
 
-    #[diag(codegen_ssa_gpu_invalid_monomorphization_expected_vector_element_type, code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_expected_vector_element_type, code = E0511)]
     ExpectedVectorElementType {
         #[primary_span]
         span: Span,
@@ -1197,7 +1200,7 @@ impl IntoDiagArg for ExpectedPointerMutability {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_invalid_no_sanitize)]
+#[diag(codegen_ssa_invalid_no_sanitize)]
 #[note]
 pub(crate) struct InvalidNoSanitize {
     #[primary_span]
@@ -1205,7 +1208,7 @@ pub(crate) struct InvalidNoSanitize {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_invalid_link_ordinal_nargs)]
+#[diag(codegen_ssa_invalid_link_ordinal_nargs)]
 #[note]
 pub(crate) struct InvalidLinkOrdinalNargs {
     #[primary_span]
@@ -1213,7 +1216,7 @@ pub(crate) struct InvalidLinkOrdinalNargs {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_illegal_link_ordinal_format)]
+#[diag(codegen_ssa_illegal_link_ordinal_format)]
 #[note]
 pub(crate) struct InvalidLinkOrdinalFormat {
     #[primary_span]
@@ -1221,17 +1224,17 @@ pub(crate) struct InvalidLinkOrdinalFormat {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_target_feature_safe_trait)]
+#[diag(codegen_ssa_target_feature_safe_trait)]
 pub(crate) struct TargetFeatureSafeTrait {
     #[primary_span]
     #[label]
     pub span: Span,
-    #[label(codegen_ssa_gpu_label_def)]
+    #[label(codegen_ssa_label_def)]
     pub def: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_forbidden_target_feature_attr)]
+#[diag(codegen_ssa_forbidden_target_feature_attr)]
 pub struct ForbiddenTargetFeatureAttr<'a> {
     #[primary_span]
     pub span: Span,
@@ -1240,7 +1243,7 @@ pub struct ForbiddenTargetFeatureAttr<'a> {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_failed_to_get_layout)]
+#[diag(codegen_ssa_failed_to_get_layout)]
 pub struct FailedToGetLayout<'tcx> {
     #[primary_span]
     pub span: Span,
@@ -1249,7 +1252,7 @@ pub struct FailedToGetLayout<'tcx> {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_dlltool_fail_import_library)]
+#[diag(codegen_ssa_dlltool_fail_import_library)]
 pub(crate) struct DlltoolFailImportLibrary<'a> {
     pub dlltool_path: Cow<'a, str>,
     pub dlltool_args: String,
@@ -1258,26 +1261,26 @@ pub(crate) struct DlltoolFailImportLibrary<'a> {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_error_writing_def_file)]
+#[diag(codegen_ssa_error_writing_def_file)]
 pub(crate) struct ErrorWritingDEFFile {
     pub error: std::io::Error,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_error_calling_dlltool)]
+#[diag(codegen_ssa_error_calling_dlltool)]
 pub(crate) struct ErrorCallingDllTool<'a> {
     pub dlltool_path: Cow<'a, str>,
     pub error: std::io::Error,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_error_creating_remark_dir)]
+#[diag(codegen_ssa_error_creating_remark_dir)]
 pub(crate) struct ErrorCreatingRemarkDir {
     pub error: std::io::Error,
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_compiler_builtins_cannot_call)]
+#[diag(codegen_ssa_compiler_builtins_cannot_call)]
 pub struct CompilerBuiltinsCannotCall {
     pub caller: String,
     pub callee: String,
@@ -1286,7 +1289,7 @@ pub struct CompilerBuiltinsCannotCall {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_error_creating_import_library)]
+#[diag(codegen_ssa_error_creating_import_library)]
 pub(crate) struct ErrorCreatingImportLibrary<'a> {
     pub lib_name: &'a str,
     pub error: String,
@@ -1299,13 +1302,12 @@ pub struct TargetFeatureDisableOrEnable<'a> {
 }
 
 #[derive(Subdiagnostic)]
-#[help(codegen_ssa_gpu_missing_features)]
+#[help(codegen_ssa_missing_features)]
 pub struct MissingFeatures;
 
 impl<G: EmissionGuarantee> Diagnostic<'_, G> for TargetFeatureDisableOrEnable<'_> {
     fn into_diag(self, dcx: DiagCtxtHandle<'_>, level: Level) -> Diag<'_, G> {
-        let mut diag =
-            Diag::new(dcx, level, fluent::codegen_ssa_gpu_target_feature_disable_or_enable);
+        let mut diag = Diag::new(dcx, level, fluent::codegen_ssa_target_feature_disable_or_enable);
         if let Some(span) = self.span {
             diag.span(span);
         };
@@ -1318,11 +1320,11 @@ impl<G: EmissionGuarantee> Diagnostic<'_, G> for TargetFeatureDisableOrEnable<'_
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_gpu_aix_strip_not_used)]
+#[diag(codegen_ssa_aix_strip_not_used)]
 pub(crate) struct AixStripNotUsed;
 
 #[derive(LintDiagnostic)]
-#[diag(codegen_ssa_gpu_mixed_export_name_and_no_mangle)]
+#[diag(codegen_ssa_mixed_export_name_and_no_mangle)]
 pub(crate) struct MixedExportNameAndNoMangle {
     #[label]
     pub no_mangle: Span,
@@ -1331,27 +1333,4 @@ pub(crate) struct MixedExportNameAndNoMangle {
     pub export_name: Span,
     #[suggestion(style = "verbose", code = "", applicability = "machine-applicable")]
     pub removal_span: Span,
-}
-
-#[derive(Diagnostic, Debug)]
-pub(crate) enum XcrunError {
-    #[diag(codegen_ssa_gpu_xcrun_failed_invoking)]
-    FailedInvoking { sdk_name: &'static str, command_formatted: String, error: std::io::Error },
-
-    #[diag(codegen_ssa_gpu_xcrun_unsuccessful)]
-    #[note]
-    Unsuccessful {
-        sdk_name: &'static str,
-        command_formatted: String,
-        stdout: String,
-        stderr: String,
-    },
-}
-
-#[derive(Diagnostic, Debug)]
-#[diag(codegen_ssa_gpu_xcrun_sdk_path_warning)]
-#[note]
-pub(crate) struct XcrunSdkPathWarning {
-    pub sdk_name: &'static str,
-    pub stderr: String,
 }

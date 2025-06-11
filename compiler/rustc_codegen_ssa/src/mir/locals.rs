@@ -1,6 +1,6 @@
-// Locals are in a private module as updating `LocalRef::Operand` has to
-// be careful wrt to subtyping. To deal with this we only allow updates by using
-// `FunctionCx::overwrite_local` which handles it automatically.
+//! Locals are in a private module as updating `LocalRef::Operand` has to
+//! be careful wrt to subtyping. To deal with this we only allow updates by using
+//! `FunctionCx::overwrite_local` which handles it automatically.
 
 use std::ops::{Index, IndexMut};
 

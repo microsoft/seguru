@@ -1,4 +1,4 @@
-// Computing the size and alignment of a value.
+//! Computing the size and alignment of a value.
 
 use rustc_abi::WrappingRange;
 use rustc_hir::LangItem;

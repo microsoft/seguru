@@ -1,5 +1,5 @@
-// An analysis to determine which locals require allocas and
-// which do not.
+//! An analysis to determine which locals require allocas and
+//! which do not.
 
 use rustc_data_structures::graph::dominators::Dominators;
 use rustc_index::bit_set::DenseBitSet;

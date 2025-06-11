@@ -385,7 +385,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         then_llbb: Self::BasicBlock,
         else_llbb: Self::BasicBlock,
     ) {
-        use crate::rustc_codegen_ssa_gpu::traits::AbiBuilderMethods;
+        use rustc_codegen_ssa_gpu::traits::AbiBuilderMethods;
         if self.is_unreachable() {
             return;
         }
@@ -415,7 +415,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         else_llbb: Self::BasicBlock,
         cases: impl ExactSizeIterator<Item = (u128, Self::BasicBlock)>,
     ) {
-        use crate::rustc_codegen_ssa_gpu::traits::AbiBuilderMethods;
+        use rustc_codegen_ssa_gpu::traits::AbiBuilderMethods;
         if self.is_unreachable() {
             return;
         }

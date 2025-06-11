@@ -1,27 +1,27 @@
-// This pass is only used for UNIT TESTS related to incremental
-// compilation. It tests whether a particular `.o` file will be re-used
-// from a previous compilation or whether it must be regenerated.
-//
-// The user adds annotations to the crate of the following form:
-//
-// ```
-// # #![feature(rustc_attrs)]
-// # #![allow(internal_features)]
-// #![rustc_partition_reused(module="spike", cfg="rpass2")]
-// #![rustc_partition_codegened(module="spike-x", cfg="rpass2")]
-// ```
-//
-// The first indicates (in the cfg `rpass2`) that `spike.o` will be
-// reused, the second that `spike-x.o` will be recreated. If these
-// annotations are inaccurate, errors are reported.
-//
-// The reason that we use `cfg=...` and not `#[cfg_attr]` is so that
-// the HIR doesn't change as a result of the annotations, which might
-// perturb the reuse results.
-//
-// `#![rustc_expected_cgu_reuse(module="spike", cfg="rpass2", kind="post-lto")]`
-// allows for doing a more fine-grained check to see if pre- or post-lto data
-// was re-used.
+//! This pass is only used for UNIT TESTS related to incremental
+//! compilation. It tests whether a particular `.o` file will be re-used
+//! from a previous compilation or whether it must be regenerated.
+//!
+//! The user adds annotations to the crate of the following form:
+//!
+//! ```
+//! # #![feature(rustc_attrs)]
+//! # #![allow(internal_features)]
+//! #![rustc_partition_reused(module="spike", cfg="rpass2")]
+//! #![rustc_partition_codegened(module="spike-x", cfg="rpass2")]
+//! ```
+//!
+//! The first indicates (in the cfg `rpass2`) that `spike.o` will be
+//! reused, the second that `spike-x.o` will be recreated. If these
+//! annotations are inaccurate, errors are reported.
+//!
+//! The reason that we use `cfg=...` and not `#[cfg_attr]` is so that
+//! the HIR doesn't change as a result of the annotations, which might
+//! perturb the reuse results.
+//!
+//! `#![rustc_expected_cgu_reuse(module="spike", cfg="rpass2", kind="post-lto")]`
+//! allows for doing a more fine-grained check to see if pre- or post-lto data
+//! was re-used.
 
 use std::borrow::Cow;
 use std::fmt;

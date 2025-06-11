@@ -7,7 +7,7 @@ edition = "2021"
 #rustc_abi = { path = "../../../rust/compiler/rustc_abi" }
 #rustc_ast = { path = "../../../rust/compiler/rustc_ast" }
 #rustc_codegen_llvm = { path = "../rustc_codegen_llvm" }
-rustc_codegen_ssa_gpu = { path = "../rustc_codegen_ssa_gpu" }
+rustc_codegen_ssa_gpu = { package = "rustc_codegen_ssa", path = "../../compiler/rustc_codegen_ssa" }
 #rustc_const_eval = { path = "../../../rust/compiler/rustc_const_eval" }
 #rustc_data_structures = { path = "../../../rust/compiler/rustc_data_structures" }
 #rustc_errors = { path = "../../../rust/compiler/rustc_errors" }

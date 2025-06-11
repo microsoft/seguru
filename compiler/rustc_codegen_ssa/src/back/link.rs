@@ -649,7 +649,7 @@ fn link_dwarf_object(sess: &Session, cg_results: &CodegenResults, executable_out
 }
 
 #[derive(LintDiagnostic)]
-#[diag(codegen_ssa_gpu_linker_output)]
+#[diag(codegen_ssa_linker_output)]
 /// Translating this is kind of useless. We don't pass translation flags to the linker, so we'd just
 /// end up with inconsistent languages within the same diagnostic.
 struct LinkerOutput {
@@ -2011,12 +2011,6 @@ fn add_linked_symbol_object(
         file.set_mangling(object::write::Mangling::None);
     }
 
-    if file.format() == object::BinaryFormat::MachO {
-        // Divide up the sections into sub-sections via symbols for dead code stripping.
-        // Without this flag, unused `#[no_mangle]` or `#[used]` cannot be discard on MachO targets.
-        file.set_subsections_via_symbols();
-    }
-
     // ld64 requires a relocation to load undefined symbols, see below.
     // Not strictly needed if linking with lld, but might as well do it there too.
     let ld64_section_helper = if file.format() == object::BinaryFormat::MachO {
@@ -3207,7 +3201,9 @@ fn add_apple_link_args(cmd: &mut dyn Linker, sess: &Session, flavor: LinkerFlavo
 }
 
 fn add_apple_sdk(cmd: &mut dyn Linker, sess: &Session, flavor: LinkerFlavor) -> Option<PathBuf> {
+    let arch = &sess.target.arch;
     let os = &sess.target.os;
+    let llvm_target = &sess.target.llvm_target;
     if sess.target.vendor != "apple"
         || !matches!(os.as_ref(), "ios" | "tvos" | "watchos" | "visionos" | "macos")
         || !matches!(flavor, LinkerFlavor::Darwin(..))
@@ -3219,7 +3215,37 @@ fn add_apple_sdk(cmd: &mut dyn Linker, sess: &Session, flavor: LinkerFlavor) -> 
         return None;
     }
 
-    let sdk_root = sess.time("get_apple_sdk_root", || get_apple_sdk_root(sess))?;
+    let sdk_name = match (arch.as_ref(), os.as_ref()) {
+        ("aarch64", "tvos") if llvm_target.ends_with("-simulator") => "appletvsimulator",
+        ("aarch64", "tvos") => "appletvos",
+        ("x86_64", "tvos") => "appletvsimulator",
+        ("arm", "ios") => "iphoneos",
+        ("aarch64", "ios") if llvm_target.contains("macabi") => "macosx",
+        ("aarch64", "ios") if llvm_target.ends_with("-simulator") => "iphonesimulator",
+        ("aarch64", "ios") => "iphoneos",
+        ("x86", "ios") => "iphonesimulator",
+        ("x86_64", "ios") if llvm_target.contains("macabi") => "macosx",
+        ("x86_64", "ios") => "iphonesimulator",
+        ("x86_64", "watchos") => "watchsimulator",
+        ("arm64_32", "watchos") => "watchos",
+        ("aarch64", "watchos") if llvm_target.ends_with("-simulator") => "watchsimulator",
+        ("aarch64", "watchos") => "watchos",
+        ("aarch64", "visionos") if llvm_target.ends_with("-simulator") => "xrsimulator",
+        ("aarch64", "visionos") => "xros",
+        ("arm", "watchos") => "watchos",
+        (_, "macos") => "macosx",
+        _ => {
+            sess.dcx().emit_err(errors::UnsupportedArch { arch, os });
+            return None;
+        }
+    };
+    let sdk_root = match get_apple_sdk_root(sdk_name) {
+        Ok(s) => s,
+        Err(e) => {
+            sess.dcx().emit_err(e);
+            return None;
+        }
+    };
 
     match flavor {
         LinkerFlavor::Darwin(Cc::Yes, _) => {
@@ -3229,32 +3255,28 @@ fn add_apple_sdk(cmd: &mut dyn Linker, sess: &Session, flavor: LinkerFlavor) -> 
             // This is admittedly a bit strange, as on most targets
             // `-isysroot` only applies to include header files, but on Apple
             // targets this also applies to libraries and frameworks.
-            cmd.cc_arg("-isysroot");
-            cmd.cc_arg(&sdk_root);
+            cmd.cc_args(&["-isysroot", &sdk_root]);
         }
         LinkerFlavor::Darwin(Cc::No, _) => {
-            cmd.link_arg("-syslibroot");
-            cmd.link_arg(&sdk_root);
+            cmd.link_args(&["-syslibroot", &sdk_root]);
         }
         _ => unreachable!(),
     }
 
-    Some(sdk_root)
+    Some(sdk_root.into())
 }
 
-fn get_apple_sdk_root(sess: &Session) -> Option<PathBuf> {
+fn get_apple_sdk_root(sdk_name: &str) -> Result<String, errors::AppleSdkRootError<'_>> {
+    // Following what clang does
+    // (https://github.com/llvm/llvm-project/blob/
+    // 296a80102a9b72c3eda80558fb78a3ed8849b341/clang/lib/Driver/ToolChains/Darwin.cpp#L1661-L1678)
+    // to allow the SDK path to be set. (For clang, xcrun sets
+    // SDKROOT; for rustc, the user or build system can set it, or we
+    // can fall back to checking for xcrun on PATH.)
     if let Ok(sdkroot) = env::var("SDKROOT") {
-        let p = PathBuf::from(&sdkroot);
-
-        // Ignore invalid SDKs, similar to what clang does:
-        // https://github.com/llvm/llvm-project/blob/llvmorg-19.1.6/clang/lib/Driver/ToolChains/Darwin.cpp#L2212-L2229
-        //
-        // NOTE: Things are complicated here by the fact that `rustc` can be run by Cargo to compile
-        // build scripts and proc-macros for the host, and thus we need to ignore SDKROOT if it's
-        // clearly set for the wrong platform.
-        //
-        // FIXME(madsmtm): Make this more robust (maybe read `SDKSettings.json` like Clang does?).
-        match &*apple::sdk_name(&sess.target).to_lowercase() {
+        let p = Path::new(&sdkroot);
+        match sdk_name {
+            // Ignore `SDKROOT` if it's clearly set for the wrong platform.
             "appletvos"
                 if sdkroot.contains("TVSimulator.platform")
                     || sdkroot.contains("MacOSX.platform") => {}
@@ -3281,11 +3303,26 @@ fn get_apple_sdk_root(sess: &Session) -> Option<PathBuf> {
                 if sdkroot.contains("XROS.platform") || sdkroot.contains("MacOSX.platform") => {}
             // Ignore `SDKROOT` if it's not a valid path.
             _ if !p.is_absolute() || p == Path::new("/") || !p.exists() => {}
-            _ => return Some(p),
+            _ => return Ok(sdkroot),
         }
     }
+    let res =
+        Command::new("xcrun").arg("--show-sdk-path").arg("-sdk").arg(sdk_name).output().and_then(
+            |output| {
+                if output.status.success() {
+                    Ok(String::from_utf8(output.stdout).unwrap())
+                } else {
+                    let error = String::from_utf8(output.stderr);
+                    let error = format!("process exit with error: {}", error.unwrap());
+                    Err(io::Error::new(io::ErrorKind::Other, &error[..]))
+                }
+            },
+        );
 
-    apple::get_sdk_root(sess)
+    match res {
+        Ok(output) => Ok(output.trim().to_string()),
+        Err(error) => Err(errors::AppleSdkRootError::SdkPath { sdk_name, error }),
+    }
 }
 
 /// When using the linker flavors opting in to `lld`, add the necessary paths and arguments to

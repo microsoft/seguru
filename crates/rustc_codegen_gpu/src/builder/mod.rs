@@ -813,38 +813,6 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         }
     }
 
-    fn emit_llvm_volatile_and_load(&mut self, mask: Self::Value, ptr: Self::Value) {
-        // Only used by the bound check stuff
-        let raw_ptr_op = melior::dialect::ods::memref::extract_aligned_pointer_as_index(
-            self.mlir_ctx,
-            self.type_index(),
-            ptr,
-            self.cur_loc(),
-        )
-        .into();
-        let raw_ptr = self.append_op_res(raw_ptr_op);
-
-        // And Ptr
-        let llvm_raw_ptr_int = self.intcast(raw_ptr, self.type_i64(), false);
-        let llvm_raw_ptr_and = self.and(llvm_raw_ptr_int, mask);
-
-        // Ptr to LLVM
-        let llvm_ptr = self.inttoptr(llvm_raw_ptr_and, self.type_ptr());
-
-        // LLVM store with volatile
-        let llvm_store_op = melior::dialect::llvm::load(
-            self.mlir_ctx,
-            llvm_ptr,
-            self.type_i8(),
-            self.cur_loc(),
-            melior::dialect::llvm::LoadStoreOptions::new()
-                .volatile(true)
-                .align(Some(self.align_to_attr(rustc_abi::Align::EIGHT))),
-        );
-
-        self.append_op(llvm_store_op);
-    }
-
     fn store(
         &mut self,
         val: Self::Value,

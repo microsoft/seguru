@@ -735,31 +735,6 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         // Don't codegen the panic block if success if known.
         // Fuck it let's just return no matter what case it might be!
         //if const_cond == Some(expected) {
-        match msg {
-            AssertKind::BoundsCheck { len, index } => {
-                let len = self.codegen_operand(bx, len).immediate();
-                let index = self.codegen_operand(bx, index).immediate();
-
-                // Now add our SFI to it. Basically our SFI does the following thing
-                // to get the OOB flag:
-                //     oob = index - len;    <- This will be positive if index is OOB
-                //     oob_flag = oob >> 63; <- Use signed shift right. If not OOB we
-                //                              get 0xFF....FF. If OOB we get 0
-                //     dummy = 1 / oob_flag; <- Divided by zero if OOB
-                let index_int = bx.intcast(index, bx.cx().type_i64(), true);
-                let oob = bx.sub(index_int, len);
-                let shift = bx
-                    .emit_constant(63, bx.cx().backend_type(bx.cx().layout_of(bx.tcx().types.u64)));
-                let oob_flag = bx.ashr(oob, shift);
-                let one = bx
-                    .emit_constant(1, bx.cx().backend_type(bx.cx().layout_of(bx.tcx().types.u64)));
-                let dummy = bx.sdiv(one, oob_flag);
-            }
-            _ => {
-                ();
-            }
-        };
-
         return helper.funclet_br(self, bx, target, mergeable_succ);
         //}
 

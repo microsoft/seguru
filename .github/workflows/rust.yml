@@ -46,8 +46,8 @@ jobs:
 
       - name: Clippy
         working-directory: crates
-        run: cargo clippy
+        run: cargo clippy --workspace --exclude cuda_bindings
 
       - name: Build
         working-directory: crates
-        run: cargo build
+        run: cargo build --workspace --exclude cuda_bindings

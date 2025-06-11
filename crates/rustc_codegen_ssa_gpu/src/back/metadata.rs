@@ -212,12 +212,6 @@ pub(crate) fn create_object_file(sess: &Session) -> Option<write::Object<'static
     };
     let binary_format = sess.target.binary_format.to_object();
 
-    // TODO: Due to stupid object version stuff, we are OVERWRTING these to fixed values
-    // Just to make it compile :-(
-    let architecture = object::Architecture::X86_64;
-    let sub_architecture = None;
-    let binary_format = object::BinaryFormat::Elf; //sess.target.binary_format.to_object();
-
     let mut file = write::Object::new(binary_format, architecture, endianness);
     file.set_sub_architecture(sub_architecture);
     if sess.target.is_like_osx {

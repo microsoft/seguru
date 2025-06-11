@@ -214,7 +214,8 @@ pub(super) fn create_raw_dylib_elf_stub_shared_objects<'a>(
 /// It exports all the provided symbols, but is otherwise empty.
 fn create_elf_raw_dylib_stub(sess: &Session, soname: &str, symbols: &[DllImport]) -> Vec<u8> {
     use object::write::elf as write;
-    use object::{Architecture, elf};
+    use object::elf;
+    //use object::Architecture;
 
     let mut stub_buf = Vec::new();
 
@@ -274,40 +275,36 @@ fn create_elf_raw_dylib_stub(sess: &Session, soname: &str, symbols: &[DllImport]
             sess.target.arch
         ));
     };
-    // TODO: Due to stupid object version stuff, we are OVERWRTING these to fixed values
-    // Just to make it compile :-(
-    let arch = Architecture::X86_64;
-    let sub_arch: Option<()> = None;
     let e_machine = match (arch, sub_arch) {
-        (Architecture::Aarch64, None) => elf::EM_AARCH64,
-        (Architecture::Aarch64_Ilp32, None) => elf::EM_AARCH64,
-        (Architecture::Arm, None) => elf::EM_ARM,
-        (Architecture::Avr, None) => elf::EM_AVR,
-        (Architecture::Bpf, None) => elf::EM_BPF,
-        (Architecture::Csky, None) => elf::EM_CSKY,
-        (Architecture::E2K32, None) => elf::EM_MCST_ELBRUS,
-        (Architecture::E2K64, None) => elf::EM_MCST_ELBRUS,
-        (Architecture::I386, None) => elf::EM_386,
-        (Architecture::X86_64, None) => elf::EM_X86_64,
-        (Architecture::X86_64_X32, None) => elf::EM_X86_64,
-        (Architecture::Hexagon, None) => elf::EM_HEXAGON,
-        (Architecture::LoongArch64, None) => elf::EM_LOONGARCH,
-        (Architecture::M68k, None) => elf::EM_68K,
-        (Architecture::Mips, None) => elf::EM_MIPS,
-        (Architecture::Mips64, None) => elf::EM_MIPS,
-        (Architecture::Mips64_N32, None) => elf::EM_MIPS,
-        (Architecture::Msp430, None) => elf::EM_MSP430,
-        (Architecture::PowerPc, None) => elf::EM_PPC,
-        (Architecture::PowerPc64, None) => elf::EM_PPC64,
-        (Architecture::Riscv32, None) => elf::EM_RISCV,
-        (Architecture::Riscv64, None) => elf::EM_RISCV,
-        (Architecture::S390x, None) => elf::EM_S390,
-        (Architecture::Sbf, None) => elf::EM_SBF,
-        (Architecture::Sharc, None) => elf::EM_SHARC,
-        (Architecture::Sparc, None) => elf::EM_SPARC,
-        (Architecture::Sparc32Plus, None) => elf::EM_SPARC32PLUS,
-        (Architecture::Sparc64, None) => elf::EM_SPARCV9,
-        (Architecture::Xtensa, None) => elf::EM_XTENSA,
+        (object::Architecture::Aarch64, None) => elf::EM_AARCH64,
+        (object::Architecture::Aarch64_Ilp32, None) => elf::EM_AARCH64,
+        (object::Architecture::Arm, None) => elf::EM_ARM,
+        (object::Architecture::Avr, None) => elf::EM_AVR,
+        (object::Architecture::Bpf, None) => elf::EM_BPF,
+        (object::Architecture::Csky, None) => elf::EM_CSKY,
+        (object::Architecture::E2K32, None) => elf::EM_MCST_ELBRUS,
+        (object::Architecture::E2K64, None) => elf::EM_MCST_ELBRUS,
+        (object::Architecture::I386, None) => elf::EM_386,
+        (object::Architecture::X86_64, None) => elf::EM_X86_64,
+        (object::Architecture::X86_64_X32, None) => elf::EM_X86_64,
+        (object::Architecture::Hexagon, None) => elf::EM_HEXAGON,
+        (object::Architecture::LoongArch64, None) => elf::EM_LOONGARCH,
+        (object::Architecture::M68k, None) => elf::EM_68K,
+        (object::Architecture::Mips, None) => elf::EM_MIPS,
+        (object::Architecture::Mips64, None) => elf::EM_MIPS,
+        (object::Architecture::Mips64_N32, None) => elf::EM_MIPS,
+        (object::Architecture::Msp430, None) => elf::EM_MSP430,
+        (object::Architecture::PowerPc, None) => elf::EM_PPC,
+        (object::Architecture::PowerPc64, None) => elf::EM_PPC64,
+        (object::Architecture::Riscv32, None) => elf::EM_RISCV,
+        (object::Architecture::Riscv64, None) => elf::EM_RISCV,
+        (object::Architecture::S390x, None) => elf::EM_S390,
+        (object::Architecture::Sbf, None) => elf::EM_SBF,
+        (object::Architecture::Sharc, None) => elf::EM_SHARC,
+        (object::Architecture::Sparc, None) => elf::EM_SPARC,
+        (object::Architecture::Sparc32Plus, None) => elf::EM_SPARC32PLUS,
+        (object::Architecture::Sparc64, None) => elf::EM_SPARCV9,
+        (object::Architecture::Xtensa, None) => elf::EM_XTENSA,
         _ => {
             sess.dcx().fatal(format!(
                 "raw-dylib is not supported for the architecture `{}`",

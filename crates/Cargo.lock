@@ -1002,12 +1002,12 @@ dependencies = [
  "melior",
  "melior-macro",
  "mlir-sys",
- "rustc_codegen_ssa_gpu",
+ "rustc_codegen_ssa",
  "which",
 ]
 
 [[package]]
-name = "rustc_codegen_ssa_gpu"
+name = "rustc_codegen_ssa"
 version = "0.0.0"
 dependencies = [
  "arrayvec",

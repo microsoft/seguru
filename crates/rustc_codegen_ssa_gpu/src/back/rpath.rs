@@ -58,20 +58,36 @@ fn get_rpaths(config: &RPathConfig<'_>) -> Vec<OsString> {
 }
 
 fn get_rpaths_relative_to_output(config: &RPathConfig<'_>) -> Vec<OsString> {
-    config.libs.iter().map(|a| get_rpath_relative_to_output(config, a)).collect()
+    config
+        .libs
+        .iter()
+        .map(|a| get_rpath_relative_to_output(config, a))
+        .collect()
 }
 
 fn get_rpath_relative_to_output(config: &RPathConfig<'_>, lib: &Path) -> OsString {
     // Mac doesn't appear to support $ORIGIN
-    let prefix = if config.is_like_osx { "@loader_path" } else { "$ORIGIN" };
+    let prefix = if config.is_like_osx {
+        "@loader_path"
+    } else {
+        "$ORIGIN"
+    };
 
     // Strip filenames
     let lib = lib.parent().unwrap();
     let output = config.out_filename.parent().unwrap();
 
     // If output or lib is empty, just assume it locates in current path
-    let lib = if lib == Path::new("") { Path::new(".") } else { lib };
-    let output = if output == Path::new("") { Path::new(".") } else { output };
+    let lib = if lib == Path::new("") {
+        Path::new(".")
+    } else {
+        lib
+    };
+    let output = if output == Path::new("") {
+        Path::new(".")
+    } else {
+        output
+    };
 
     let lib = try_canonicalize(lib).unwrap();
     let output = try_canonicalize(output).unwrap();

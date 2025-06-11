@@ -377,7 +377,10 @@ pub trait BuilderMethods<'a, 'tcx>:
         let (float_ty, int_ty) = if self.cx().type_kind(dest_ty) == TypeKind::Vector
             && self.cx().type_kind(in_ty) == TypeKind::Vector
         {
-            (self.cx().element_type(in_ty), self.cx().element_type(dest_ty))
+            (
+                self.cx().element_type(in_ty),
+                self.cx().element_type(dest_ty),
+            )
         } else {
             (in_ty, dest_ty)
         };
@@ -388,10 +391,18 @@ pub trait BuilderMethods<'a, 'tcx>:
         assert_eq!(self.cx().type_kind(int_ty), TypeKind::Integer);
 
         if let Some(false) = self.cx().sess().opts.unstable_opts.saturating_float_casts {
-            return if signed { self.fptosi(x, dest_ty) } else { self.fptoui(x, dest_ty) };
+            return if signed {
+                self.fptosi(x, dest_ty)
+            } else {
+                self.fptoui(x, dest_ty)
+            };
         }
 
-        if signed { self.fptosi_sat(x, dest_ty) } else { self.fptoui_sat(x, dest_ty) }
+        if signed {
+            self.fptosi_sat(x, dest_ty)
+        } else {
+            self.fptoui_sat(x, dest_ty)
+        }
     }
 
     fn icmp(&mut self, op: IntPredicate, lhs: Self::Value, rhs: Self::Value) -> Self::Value;
@@ -459,8 +470,14 @@ pub trait BuilderMethods<'a, 'tcx>:
         flags: MemFlags,
     ) {
         assert!(layout.is_sized(), "cannot typed-copy an unsigned type");
-        assert!(src.llextra.is_none(), "cannot directly copy from unsized values");
-        assert!(dst.llextra.is_none(), "cannot directly copy into unsized values");
+        assert!(
+            src.llextra.is_none(),
+            "cannot directly copy from unsized values"
+        );
+        assert!(
+            dst.llextra.is_none(),
+            "cannot directly copy into unsized values"
+        );
         if flags.contains(MemFlags::NONTEMPORAL) {
             // HACK(nox): This is inefficient but there is no nontemporal memcpy.
             let ty = self.backend_type(layout);
@@ -470,7 +487,8 @@ pub trait BuilderMethods<'a, 'tcx>:
             // If we're not optimizing, the aliasing information from `memcpy`
             // isn't useful, so just load-store the value for smaller code.
             let temp = self.load_operand(src.with_type(layout));
-            temp.val.store_with_flags(self, dst.with_type(layout), flags);
+            temp.val
+                .store_with_flags(self, dst.with_type(layout), flags);
         } else if !layout.is_zst() {
             let bytes = self.const_usize(layout.size.bytes());
             self.memcpy(dst.llval, dst.align, src.llval, src.align, bytes, flags);

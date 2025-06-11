@@ -35,7 +35,11 @@ impl<V: CodegenObject> PlaceValue<V> {
     ///
     /// Sets `llextra` to `None`.
     pub fn new_sized(llval: V, align: Align) -> PlaceValue<V> {
-        PlaceValue { llval, llextra: None, align }
+        PlaceValue {
+            llval,
+            llextra: None,
+            align,
+        }
     }
 
     /// Allocates a stack slot in the function for a value
@@ -115,7 +119,10 @@ impl<'a, 'tcx, V: CodegenObject> PlaceRef<'tcx, V> {
         size: Size,
         layout: TyAndLayout<'tcx>,
     ) -> Self {
-        assert!(layout.is_sized(), "tried to statically allocate unsized place");
+        assert!(
+            layout.is_sized(),
+            "tried to statically allocate unsized place"
+        );
         PlaceValue::alloca(bx, size, layout.align.abi).with_type(layout)
     }
 
@@ -126,7 +133,10 @@ impl<'a, 'tcx, V: CodegenObject> PlaceRef<'tcx, V> {
         bx: &mut Bx,
         layout: TyAndLayout<'tcx>,
     ) -> Self {
-        assert!(layout.is_unsized(), "tried to allocate indirect place for sized values");
+        assert!(
+            layout.is_unsized(),
+            "tried to allocate indirect place for sized values"
+        );
         let ptr_ty = Ty::new_mut_ptr(bx.cx().tcx(), layout.ty);
         let ptr_layout = bx.cx().layout_of(ptr_ty);
         Self::alloca(bx, ptr_layout)
@@ -167,7 +177,11 @@ impl<'a, 'tcx, V: CodegenObject> PlaceRef<'tcx, V> {
             };
             let val = PlaceValue {
                 llval,
-                llextra: if bx.cx().tcx().type_has_metadata(field.ty, bx.cx().typing_env()) {
+                llextra: if bx
+                    .cx()
+                    .tcx()
+                    .type_has_metadata(field.ty, bx.cx().typing_env())
+                {
                     self.val.llextra
                 } else {
                     None
@@ -227,8 +241,11 @@ impl<'a, 'tcx, V: CodegenObject> PlaceRef<'tcx, V> {
 
         // Adjust pointer.
         let ptr = bx.inbounds_ptradd(self.val.llval, offset);
-        let val =
-            PlaceValue { llval: ptr, llextra: self.val.llextra, align: effective_field_align };
+        let val = PlaceValue {
+            llval: ptr,
+            llextra: self.val.llextra,
+            align: effective_field_align,
+        };
         val.with_type(field)
     }
 
@@ -239,7 +256,11 @@ impl<'a, 'tcx, V: CodegenObject> PlaceRef<'tcx, V> {
         bx: &mut Bx,
         variant_index: VariantIdx,
     ) {
-        if self.layout.for_variant(bx.cx(), variant_index).is_uninhabited() {
+        if self
+            .layout
+            .for_variant(bx.cx(), variant_index)
+            .is_uninhabited()
+        {
             // We play it safe by using a well-defined `abort`, but we could go for immediate UB
             // if that turns out to be helpful.
             bx.abort();
@@ -249,10 +270,18 @@ impl<'a, 'tcx, V: CodegenObject> PlaceRef<'tcx, V> {
             Variants::Empty => unreachable!("we already handled uninhabited types"),
             Variants::Single { index } => assert_eq!(index, variant_index),
 
-            Variants::Multiple { tag_encoding: TagEncoding::Direct, tag_field, .. } => {
+            Variants::Multiple {
+                tag_encoding: TagEncoding::Direct,
+                tag_field,
+                ..
+            } => {
                 let ptr = self.project_field(bx, tag_field);
-                let to =
-                    self.layout.ty.discriminant_for_variant(bx.tcx(), variant_index).unwrap().val;
+                let to = self
+                    .layout
+                    .ty
+                    .discriminant_for_variant(bx.tcx(), variant_index)
+                    .unwrap()
+                    .val;
                 bx.store_to_place(
                     bx.cx().const_uint_big(bx.cx().backend_type(ptr.layout), to),
                     ptr.val,
@@ -260,7 +289,11 @@ impl<'a, 'tcx, V: CodegenObject> PlaceRef<'tcx, V> {
             }
             Variants::Multiple {
                 tag_encoding:
-                    TagEncoding::Niche { untagged_variant, ref niche_variants, niche_start },
+                    TagEncoding::Niche {
+                        untagged_variant,
+                        ref niche_variants,
+                        niche_start,
+                    },
                 tag_field,
                 ..
             } => {
@@ -356,7 +389,10 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                     base = 1;
                     let cg_base = self.codegen_consume(
                         bx,
-                        mir::PlaceRef { projection: &place_ref.projection[..0], ..place_ref },
+                        mir::PlaceRef {
+                            projection: &place_ref.projection[..0],
+                            ..place_ref
+                        },
                     );
                     cg_base.deref(bx.cx())
                 } else {
@@ -391,11 +427,19 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                     let llindex = index.immediate();
                     cg_base.project_index(bx, llindex)
                 }
-                mir::ProjectionElem::ConstantIndex { offset, from_end: false, min_length: _ } => {
+                mir::ProjectionElem::ConstantIndex {
+                    offset,
+                    from_end: false,
+                    min_length: _,
+                } => {
                     let lloffset = bx.cx().const_usize(offset);
                     cg_base.project_index(bx, lloffset)
                 }
-                mir::ProjectionElem::ConstantIndex { offset, from_end: true, min_length: _ } => {
+                mir::ProjectionElem::ConstantIndex {
+                    offset,
+                    from_end: true,
+                    min_length: _,
+                } => {
                     let lloffset = bx.cx().const_usize(offset);
                     let lllen = cg_base.len(bx.cx());
                     let llindex = bx.sub(lllen, lloffset);
@@ -403,8 +447,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 }
                 mir::ProjectionElem::Subslice { from, to, from_end } => {
                     let mut subslice = cg_base.project_index(bx, bx.cx().const_usize(from));
-                    let projected_ty =
-                        PlaceTy::from_ty(cg_base.layout.ty).projection_ty(tcx, *elem).ty;
+                    let projected_ty = PlaceTy::from_ty(cg_base.layout.ty)
+                        .projection_ty(tcx, *elem)
+                        .ty;
                     subslice.layout = bx.cx().layout_of(self.monomorphize(projected_ty));
 
                     if subslice.layout.is_unsized() {

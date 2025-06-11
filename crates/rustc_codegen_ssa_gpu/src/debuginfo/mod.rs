@@ -50,7 +50,10 @@ pub fn wants_c_like_enum_debuginfo<'tcx>(
 /// Extract the type with which we want to describe the tag of the given enum or coroutine.
 pub fn tag_base_type<'tcx>(tcx: TyCtxt<'tcx>, enum_type_and_layout: TyAndLayout<'tcx>) -> Ty<'tcx> {
     tag_base_type_opt(tcx, enum_type_and_layout).unwrap_or_else(|| {
-        bug!("tag_base_type() called for enum without tag: {:?}", enum_type_and_layout)
+        bug!(
+            "tag_base_type() called for enum without tag: {:?}",
+            enum_type_and_layout
+        )
     })
 }
 
@@ -68,7 +71,11 @@ fn tag_base_type_opt<'tcx>(
         // A single-variant or no-variant enum has no discriminant.
         Variants::Single { .. } | Variants::Empty => None,
 
-        Variants::Multiple { tag_encoding: TagEncoding::Niche { .. }, tag, .. } => {
+        Variants::Multiple {
+            tag_encoding: TagEncoding::Niche { .. },
+            tag,
+            ..
+        } => {
             // Niche tags are always normalized to unsized integers of the correct size.
             Some(
                 match tag.primitive() {
@@ -88,7 +95,11 @@ fn tag_base_type_opt<'tcx>(
             )
         }
 
-        Variants::Multiple { tag_encoding: TagEncoding::Direct, tag, .. } => {
+        Variants::Multiple {
+            tag_encoding: TagEncoding::Direct,
+            tag,
+            ..
+        } => {
             // Direct tags preserve the sign.
             Some(tag.primitive().to_ty(tcx))
         }

@@ -61,7 +61,9 @@ impl<'a, 'tcx: 'a> MonoItemExt<'a, 'tcx> for MonoItem<'tcx> {
                                         // compilation is guaranteed to fail if execution
                                         // hits this path. So an empty string instead of
                                         // a stringified constant value will suffice.
-                                        GlobalAsmOperandRef::Const { string: String::new() }
+                                        GlobalAsmOperandRef::Const {
+                                            string: String::new(),
+                                        }
                                     }
                                     Err(ErrorHandled::TooGeneric(_)) => {
                                         span_bug!(
@@ -95,7 +97,10 @@ impl<'a, 'tcx: 'a> MonoItemExt<'a, 'tcx> for MonoItem<'tcx> {
 
                     cx.codegen_global_asm(asm.template, &operands, asm.options, asm.line_spans);
                 } else {
-                    span_bug!(item.span, "Mismatch between hir::Item type and MonoItem type")
+                    span_bug!(
+                        item.span,
+                        "Mismatch between hir::Item type and MonoItem type"
+                    )
                 }
             }
             MonoItem::Fn(instance) => {

@@ -102,10 +102,13 @@ pub(super) fn add_data_and_relocation(
         file.section_mut(section).append_data(&[], 16);
     } else {
         // Elsewhere, the section alignment is the same as the pointer width.
-        file.section_mut(section).append_data(&[], target.pointer_width as u64);
+        file.section_mut(section)
+            .append_data(&[], target.pointer_width as u64);
     }
 
-    let offset = file.section_mut(section).append_data(data, data.len() as u64);
+    let offset = file
+        .section_mut(section)
+        .append_data(data, data.len() as u64);
 
     let flags = if authenticated_pointer {
         object::write::RelocationFlags::MachO {
@@ -129,7 +132,15 @@ pub(super) fn add_data_and_relocation(
         }
     };
 
-    file.add_relocation(section, object::write::Relocation { offset, addend: 0, symbol, flags })?;
+    file.add_relocation(
+        section,
+        object::write::Relocation {
+            offset,
+            addend: 0,
+            symbol,
+            flags,
+        },
+    )?;
 
     Ok(())
 }
@@ -242,7 +253,8 @@ pub fn deployment_target(sess: &Session) -> OSVersion {
                 version.max(min)
             }
             Err(error) => {
-                sess.dcx().emit_err(AppleDeploymentTarget::Invalid { env_var, error });
+                sess.dcx()
+                    .emit_err(AppleDeploymentTarget::Invalid { env_var, error });
                 min
             }
         }
@@ -285,7 +297,8 @@ pub(super) fn get_sdk_root(sess: &Session) -> Option<PathBuf> {
         Ok((path, stderr)) => {
             // Emit extra stderr, such as if `-verbose` was passed, or if `xcrun` emitted a warning.
             if !stderr.is_empty() {
-                sess.dcx().emit_warn(XcrunSdkPathWarning { sdk_name, stderr });
+                sess.dcx()
+                    .emit_warn(XcrunSdkPathWarning { sdk_name, stderr });
             }
             Some(path)
         }
@@ -296,7 +309,11 @@ pub(super) fn get_sdk_root(sess: &Session) -> Option<PathBuf> {
             if let Some(developer_dir) = xcode_select_developer_dir() {
                 diag.arg("developer_dir", &developer_dir);
                 diag.note(fluent::codegen_ssa_gpu_xcrun_found_developer_dir);
-                if developer_dir.as_os_str().to_string_lossy().contains("CommandLineTools") {
+                if developer_dir
+                    .as_os_str()
+                    .to_string_lossy()
+                    .contains("CommandLineTools")
+                {
                     if sdk_name != "MacOSX" {
                         diag.help(fluent::codegen_ssa_gpu_xcrun_command_line_tools_insufficient);
                     }
@@ -370,7 +387,9 @@ fn xcrun_show_sdk_path(
     } else {
         // Output both stdout and stderr, since shims of `xcrun` (such as the one provided by
         // nixpkgs), do not always use stderr for errors.
-        let stdout = String::from_utf8_lossy_owned(output.stdout).trim().to_string();
+        let stdout = String::from_utf8_lossy_owned(output.stdout)
+            .trim()
+            .to_string();
         Err(XcrunError::Unsuccessful {
             sdk_name,
             command_formatted: format!("{cmd:?}"),

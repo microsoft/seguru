@@ -31,10 +31,16 @@ pub(crate) fn codegen_naked_asm<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
         bug!("#[naked] functions should always terminate with an asm! block")
     };
 
-    let operands: Vec<_> =
-        operands.iter().map(|op| inline_to_global_operand::<Bx>(cx, instance, op)).collect();
+    let operands: Vec<_> = operands
+        .iter()
+        .map(|op| inline_to_global_operand::<Bx>(cx, instance, op))
+        .collect();
 
-    let item_data = cx.codegen_unit().items().get(&MonoItem::Fn(instance)).unwrap();
+    let item_data = cx
+        .codegen_unit()
+        .items()
+        .get(&MonoItem::Fn(instance))
+        .unwrap();
     let name = cx.mangled_name(instance);
     let fn_abi = cx.fn_abi_of_instance(instance, ty::List::empty());
     let (begin, end) = prefix_and_suffix(cx.tcx(), instance, &name, item_data, fn_abi);
@@ -125,8 +131,9 @@ fn prefix_and_suffix<'tcx>(
     // the alignment from a `#[repr(align(<n>))]` is used if it specifies a higher alignment.
     // if no alignment is specified, an alignment of 4 bytes is used.
     let min_function_alignment = tcx.sess.opts.unstable_opts.min_function_alignment;
-    let align_bytes =
-        Ord::max(min_function_alignment, attrs.alignment).map(|a| a.bytes()).unwrap_or(4);
+    let align_bytes = Ord::max(min_function_alignment, attrs.alignment)
+        .map(|a| a.bytes())
+        .unwrap_or(4);
 
     // In particular, `.arm` can also be written `.code 32` and `.thumb` as `.code 16`.
     let (arch_prefix, arch_suffix) = if is_arm {

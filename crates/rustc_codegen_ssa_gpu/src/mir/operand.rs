@@ -108,7 +108,11 @@ impl<V: CodegenObject> OperandValue<V> {
     /// This is the inverse of [`PlaceValue::address`].
     pub(crate) fn deref(self, align: Align) -> PlaceValue<V> {
         let (llval, llextra) = self.pointer_parts();
-        PlaceValue { llval, llextra, align }
+        PlaceValue {
+            llval,
+            llextra,
+            align,
+        }
     }
 
     pub(crate) fn is_expected_variant_for_type<'tcx, Cx: LayoutTypeCodegenMethods<'tcx>>(
@@ -151,7 +155,10 @@ impl<V: CodegenObject> fmt::Debug for OperandRef<'_, V> {
 impl<'a, 'tcx, V: CodegenObject> OperandRef<'tcx, V> {
     pub fn zero_sized(layout: TyAndLayout<'tcx>) -> OperandRef<'tcx, V> {
         assert!(layout.is_zst());
-        OperandRef { val: OperandValue::ZeroSized, layout }
+        OperandRef {
+            val: OperandValue::ZeroSized,
+            layout,
+        }
     }
 
     pub(crate) fn from_const<Bx: BuilderMethods<'a, 'tcx, Value = V>>(
@@ -175,7 +182,10 @@ impl<'a, 'tcx, V: CodegenObject> OperandRef<'tcx, V> {
                     bug!("from_const: invalid ScalarPair layout: {:#?}", layout);
                 };
                 let a = Scalar::from_pointer(
-                    Pointer::new(bx.tcx().reserve_and_set_memory_alloc(data).into(), Size::ZERO),
+                    Pointer::new(
+                        bx.tcx().reserve_and_set_memory_alloc(data).into(),
+                        Size::ZERO,
+                    ),
                     &bx.tcx(),
                 );
                 let a_llval = bx.scalar_to_backend(
@@ -224,9 +234,15 @@ impl<'a, 'tcx, V: CodegenObject> OperandRef<'tcx, V> {
         match layout.backend_repr {
             BackendRepr::Scalar(s @ abi::Scalar::Initialized { .. }) => {
                 let size = s.size(bx);
-                assert_eq!(size, layout.size, "abi::Scalar size does not match layout size");
+                assert_eq!(
+                    size, layout.size,
+                    "abi::Scalar size does not match layout size"
+                );
                 let val = read_scalar(offset, size, s, bx.immediate_backend_type(layout));
-                OperandRef { val: OperandValue::Immediate(val), layout }
+                OperandRef {
+                    val: OperandValue::Immediate(val),
+                    layout,
+                }
             }
             BackendRepr::ScalarPair(
                 a @ abi::Scalar::Initialized { .. },
@@ -247,7 +263,10 @@ impl<'a, 'tcx, V: CodegenObject> OperandRef<'tcx, V> {
                     b,
                     bx.scalar_pair_element_backend_type(layout, 1, true),
                 );
-                OperandRef { val: OperandValue::Pair(a_val, b_val), layout }
+                OperandRef {
+                    val: OperandValue::Pair(a_val, b_val),
+                    layout,
+                }
             }
             _ if layout.is_zst() => OperandRef::zero_sized(layout),
             _ => {
@@ -305,7 +324,10 @@ impl<'a, 'tcx, V: CodegenObject> OperandRef<'tcx, V> {
     ) -> V {
         if let OperandValue::Pair(a, b) = self.val {
             let llty = bx.cx().immediate_backend_type(self.layout);
-            debug!("Operand::immediate_or_packed_pair: packing {:?} into {:?}", self, llty);
+            debug!(
+                "Operand::immediate_or_packed_pair: packing {:?} into {:?}",
+                self, llty
+            );
             // Reconstruct the immediate aggregate.
             let mut llpair = bx.cx().const_poison(llty);
             llpair = bx.insert_value(llpair, a, 0);
@@ -323,7 +345,10 @@ impl<'a, 'tcx, V: CodegenObject> OperandRef<'tcx, V> {
         layout: TyAndLayout<'tcx>,
     ) -> Self {
         let val = if let BackendRepr::ScalarPair(..) = layout.backend_repr {
-            debug!("Operand::from_immediate_or_packed_pair: unpacking {:?} @ {:?}", llval, layout);
+            debug!(
+                "Operand::from_immediate_or_packed_pair: unpacking {:?} @ {:?}",
+                llval, layout
+            );
 
             // Deconstruct the immediate aggregate.
             let a_llval = bx.extract_value(llval, 0);
@@ -365,12 +390,13 @@ impl<'a, 'tcx, V: CodegenObject> OperandRef<'tcx, V> {
             OperandValue::ZeroSized
         } else if field.size == self.layout.size {
             assert_eq!(offset.bytes(), 0);
-            fx.codegen_transmute_operand(bx, *self, field).unwrap_or_else(|| {
-                bug!(
-                    "Expected `codegen_transmute_operand` to handle equal-size \
+            fx.codegen_transmute_operand(bx, *self, field)
+                .unwrap_or_else(|| {
+                    bug!(
+                        "Expected `codegen_transmute_operand` to handle equal-size \
                       field {i:?} projection from {self:?} to {field:?}"
-                )
-            })
+                    )
+                })
         } else {
             let (in_scalar, imm) = match (self.val, self.layout.backend_repr) {
                 // Extract a scalar component from a pair.
@@ -386,7 +412,11 @@ impl<'a, 'tcx, V: CodegenObject> OperandRef<'tcx, V> {
                 }
 
                 _ => {
-                    span_bug!(fx.mir.span, "OperandRef::extract_field({:?}): not applicable", self)
+                    span_bug!(
+                        fx.mir.span,
+                        "OperandRef::extract_field({:?}): not applicable",
+                        self
+                    )
                 }
             };
             OperandValue::Immediate(match field.backend_repr {
@@ -452,9 +482,12 @@ impl<'a, 'tcx, V: CodegenObject> OperandRef<'tcx, V> {
                     };
                 return bx.cx().const_uint_big(cast_to, discr_val);
             }
-            Variants::Multiple { tag, ref tag_encoding, tag_field, .. } => {
-                (tag, tag_encoding, tag_field)
-            }
+            Variants::Multiple {
+                tag,
+                ref tag_encoding,
+                tag_field,
+                ..
+            } => (tag, tag_encoding, tag_field),
         };
 
         // Read the tag/niche-encoded discriminant from memory.
@@ -483,7 +516,11 @@ impl<'a, 'tcx, V: CodegenObject> OperandRef<'tcx, V> {
                 };
                 bx.intcast(tag_imm, cast_to, signed)
             }
-            TagEncoding::Niche { untagged_variant, ref niche_variants, niche_start } => {
+            TagEncoding::Niche {
+                untagged_variant,
+                ref niche_variants,
+                niche_start,
+            } => {
                 // Cast to an integer so we don't have to treat a pointer as a
                 // special case.
                 let (tag, tag_llty) = match tag_scalar.primitive() {
@@ -524,8 +561,9 @@ impl<'a, 'tcx, V: CodegenObject> OperandRef<'tcx, V> {
                     // }
                     let niche_start = bx.cx().const_uint_big(tag_llty, niche_start);
                     let is_niche = bx.icmp(IntPredicate::IntEQ, tag, niche_start);
-                    let tagged_discr =
-                        bx.cx().const_uint(cast_to, niche_variants.start().as_u32() as u64);
+                    let tagged_discr = bx
+                        .cx()
+                        .const_uint(cast_to, niche_variants.start().as_u32() as u64);
                     (is_niche, tagged_discr, 0)
                 } else {
                     // The special cases don't apply, so we'll have to go with
@@ -549,7 +587,8 @@ impl<'a, 'tcx, V: CodegenObject> OperandRef<'tcx, V> {
                 let discr = bx.select(
                     is_niche,
                     tagged_discr,
-                    bx.cx().const_uint(cast_to, untagged_variant.as_u32() as u64),
+                    bx.cx()
+                        .const_uint(cast_to, untagged_variant.as_u32() as u64),
                 );
 
                 // In principle we could insert assumes on the possible range of `discr`, but
@@ -584,7 +623,10 @@ impl<'a, 'tcx, V: CodegenObject> OperandValue<V> {
             OperandValue::Pair(bx.const_poison(ibty0), bx.const_poison(ibty1))
         } else {
             let ptr = bx.cx().type_ptr();
-            OperandValue::Ref(PlaceValue::new_sized(bx.const_poison(ptr), layout.align.abi))
+            OperandValue::Ref(PlaceValue::new_sized(
+                bx.const_poison(ptr),
+                layout.align.abi,
+            ))
         }
     }
 
@@ -633,7 +675,10 @@ impl<'a, 'tcx, V: CodegenObject> OperandValue<V> {
                 // zero-sized value is through `undef`/`poison`, and the store itself is useless.
             }
             OperandValue::Ref(val) => {
-                assert!(dest.layout.is_sized(), "cannot directly store unsized values");
+                assert!(
+                    dest.layout.is_sized(),
+                    "cannot directly store unsized values"
+                );
                 if val.llextra.is_some() {
                     bug!("cannot directly store unsized values");
                 }
@@ -645,7 +690,10 @@ impl<'a, 'tcx, V: CodegenObject> OperandValue<V> {
             }
             OperandValue::Pair(a, b) => {
                 let BackendRepr::ScalarPair(a_scalar, b_scalar) = dest.layout.backend_repr else {
-                    bug!("store_with_flags: invalid ScalarPair layout: {:#?}", dest.layout);
+                    bug!(
+                        "store_with_flags: invalid ScalarPair layout: {:#?}",
+                        dest.layout
+                    );
                 };
                 let b_offset = a_scalar.size(bx).align_to(b_scalar.align(bx).abi);
 
@@ -666,7 +714,10 @@ impl<'a, 'tcx, V: CodegenObject> OperandValue<V> {
         bx: &mut Bx,
         indirect_dest: PlaceRef<'tcx, V>,
     ) {
-        debug!("OperandRef::store_unsized: operand={:?}, indirect_dest={:?}", self, indirect_dest);
+        debug!(
+            "OperandRef::store_unsized: operand={:?}, indirect_dest={:?}",
+            self, indirect_dest
+        );
         // `indirect_dest` must have `*mut T` type. We extract `T` out of it.
         let unsized_ty = indirect_dest
             .layout
@@ -674,7 +725,11 @@ impl<'a, 'tcx, V: CodegenObject> OperandValue<V> {
             .builtin_deref(true)
             .unwrap_or_else(|| bug!("indirect_dest has non-pointer type: {:?}", indirect_dest));
 
-        let OperandValue::Ref(PlaceValue { llval: llptr, llextra: Some(llextra), .. }) = self
+        let OperandValue::Ref(PlaceValue {
+            llval: llptr,
+            llextra: Some(llextra),
+            ..
+        }) = self
         else {
             bug!("store_unsized called with a sized value (or with an extern type)")
         };

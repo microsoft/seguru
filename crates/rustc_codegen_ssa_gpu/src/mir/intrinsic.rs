@@ -25,7 +25,11 @@ fn copy_intrinsic<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
     let size = layout.size;
     let align = layout.align.abi;
     let size = bx.mul(bx.const_usize(size.bytes()), count);
-    let flags = if volatile { MemFlags::VOLATILE } else { MemFlags::empty() };
+    let flags = if volatile {
+        MemFlags::VOLATILE
+    } else {
+        MemFlags::empty()
+    };
     if allow_overlap {
         bx.memmove(dst, align, src, align, size, flags);
     } else {
@@ -45,7 +49,11 @@ fn memset_intrinsic<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
     let size = layout.size;
     let align = layout.align.abi;
     let size = bx.mul(bx.const_usize(size.bytes()), count);
-    let flags = if volatile { MemFlags::VOLATILE } else { MemFlags::empty() };
+    let flags = if volatile {
+        MemFlags::VOLATILE
+    } else {
+        MemFlags::empty()
+    };
     bx.memset(dst, val, size, align, flags);
 }
 
@@ -66,7 +74,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         };
 
         let sig = callee_ty.fn_sig(bx.tcx());
-        let sig = bx.tcx().normalize_erasing_late_bound_regions(bx.typing_env(), sig);
+        let sig = bx
+            .tcx()
+            .normalize_erasing_late_bound_regions(bx.typing_env(), sig);
         let arg_tys = sig.inputs();
         let ret_ty = sig.output();
         let name = bx.tcx().item_name(def_id);
@@ -131,7 +141,13 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                     // Size is always <= isize::MAX.
                     sym::vtable_size => {
                         let size_bound = bx.data_layout().ptr_sized_integer().signed_max() as u128;
-                        bx.range_metadata(value, WrappingRange { start: 0, end: size_bound });
+                        bx.range_metadata(
+                            value,
+                            WrappingRange {
+                                start: 0,
+                                end: size_bound,
+                            },
+                        );
                     }
                     // Alignment is always nonzero.
                     sym::vtable_align => {
@@ -146,7 +162,10 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             | sym::type_id
             | sym::type_name
             | sym::variant_count => {
-                let value = bx.tcx().const_eval_instance(bx.typing_env(), instance, span).unwrap();
+                let value = bx
+                    .tcx()
+                    .const_eval_instance(bx.typing_env(), instance, span)
+                    .unwrap();
                 OperandRef::from_const(bx, value, ret_ty).immediate_or_packed_pair(bx)
             }
             sym::arith_offset => {
@@ -241,11 +260,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                         }
                     }
                     None => {
-                        bx.tcx().dcx().emit_err(InvalidMonomorphization::BasicIntegerType {
-                            span,
-                            name,
-                            ty,
-                        });
+                        bx.tcx()
+                            .dcx()
+                            .emit_err(InvalidMonomorphization::BasicIntegerType { span, name, ty });
                         return Ok(());
                     }
                 }
@@ -261,11 +278,13 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                         _ => bug!(),
                     },
                     None => {
-                        bx.tcx().dcx().emit_err(InvalidMonomorphization::BasicFloatType {
-                            span,
-                            name,
-                            ty: arg_tys[0],
-                        });
+                        bx.tcx()
+                            .dcx()
+                            .emit_err(InvalidMonomorphization::BasicFloatType {
+                                span,
+                                name,
+                                ty: arg_tys[0],
+                            });
                         return Ok(());
                     }
                 }
@@ -294,28 +313,34 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                     _ => bug!(),
                 },
                 None => {
-                    bx.tcx().dcx().emit_err(InvalidMonomorphization::BasicFloatType {
-                        span,
-                        name,
-                        ty: arg_tys[0],
-                    });
+                    bx.tcx()
+                        .dcx()
+                        .emit_err(InvalidMonomorphization::BasicFloatType {
+                            span,
+                            name,
+                            ty: arg_tys[0],
+                        });
                     return Ok(());
                 }
             },
 
             sym::float_to_int_unchecked => {
                 if float_type_width(arg_tys[0]).is_none() {
-                    bx.tcx().dcx().emit_err(InvalidMonomorphization::FloatToIntUnchecked {
-                        span,
-                        ty: arg_tys[0],
-                    });
+                    bx.tcx()
+                        .dcx()
+                        .emit_err(InvalidMonomorphization::FloatToIntUnchecked {
+                            span,
+                            ty: arg_tys[0],
+                        });
                     return Ok(());
                 }
                 let Some((_width, signed)) = int_type_width_signed(ret_ty, bx.tcx()) else {
-                    bx.tcx().dcx().emit_err(InvalidMonomorphization::FloatToIntUnchecked {
-                        span,
-                        ty: ret_ty,
-                    });
+                    bx.tcx()
+                        .dcx()
+                        .emit_err(InvalidMonomorphization::FloatToIntUnchecked {
+                            span,
+                            ty: ret_ty,
+                        });
                     return Ok(());
                 };
                 if signed {
@@ -346,11 +371,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 };
 
                 let invalid_monomorphization = |ty| {
-                    bx.tcx().dcx().emit_err(InvalidMonomorphization::BasicIntegerType {
-                        span,
-                        name,
-                        ty,
-                    });
+                    bx.tcx()
+                        .dcx()
+                        .emit_err(InvalidMonomorphization::BasicIntegerType { span, name, ty });
                 };
 
                 match instruction {
@@ -552,12 +575,16 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
 // stuffs.
 fn int_type_width_signed(ty: Ty<'_>, tcx: TyCtxt<'_>) -> Option<(u64, bool)> {
     match ty.kind() {
-        ty::Int(t) => {
-            Some((t.bit_width().unwrap_or(u64::from(tcx.sess.target.pointer_width)), true))
-        }
-        ty::Uint(t) => {
-            Some((t.bit_width().unwrap_or(u64::from(tcx.sess.target.pointer_width)), false))
-        }
+        ty::Int(t) => Some((
+            t.bit_width()
+                .unwrap_or(u64::from(tcx.sess.target.pointer_width)),
+            true,
+        )),
+        ty::Uint(t) => Some((
+            t.bit_width()
+                .unwrap_or(u64::from(tcx.sess.target.pointer_width)),
+            false,
+        )),
         _ => None,
     }
 }

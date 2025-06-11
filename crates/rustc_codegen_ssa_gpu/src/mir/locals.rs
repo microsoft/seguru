@@ -1,6 +1,6 @@
-// Locals are in a private module as updating `LocalRef::Operand` has to
-// be careful wrt to subtyping. To deal with this we only allow updates by using
-// `FunctionCx::overwrite_local` which handles it automatically.
+//! Locals are in a private module as updating `LocalRef::Operand` has to
+//! be careful wrt to subtyping. To deal with this we only allow updates by using
+//! `FunctionCx::overwrite_local` which handles it automatically.
 
 use std::ops::{Index, IndexMut};
 
@@ -29,7 +29,9 @@ impl<'tcx, V, Idx: ?Sized> !IndexMut<Idx> for Locals<'tcx, V> {}
 
 impl<'tcx, V> Locals<'tcx, V> {
     pub(super) fn empty() -> Locals<'tcx, V> {
-        Locals { values: IndexVec::default() }
+        Locals {
+            values: IndexVec::default(),
+        }
     }
 
     pub(super) fn indices(&self) -> impl DoubleEndedIterator<Item = mir::Local> + Clone + 'tcx {

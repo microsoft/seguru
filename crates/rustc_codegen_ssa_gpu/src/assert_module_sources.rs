@@ -1,27 +1,27 @@
-// This pass is only used for UNIT TESTS related to incremental
-// compilation. It tests whether a particular `.o` file will be re-used
-// from a previous compilation or whether it must be regenerated.
-//
-// The user adds annotations to the crate of the following form:
-//
-// ```
-// # #![feature(rustc_attrs)]
-// # #![allow(internal_features)]
-// #![rustc_partition_reused(module="spike", cfg="rpass2")]
-// #![rustc_partition_codegened(module="spike-x", cfg="rpass2")]
-// ```
-//
-// The first indicates (in the cfg `rpass2`) that `spike.o` will be
-// reused, the second that `spike-x.o` will be recreated. If these
-// annotations are inaccurate, errors are reported.
-//
-// The reason that we use `cfg=...` and not `#[cfg_attr]` is so that
-// the HIR doesn't change as a result of the annotations, which might
-// perturb the reuse results.
-//
-// `#![rustc_expected_cgu_reuse(module="spike", cfg="rpass2", kind="post-lto")]`
-// allows for doing a more fine-grained check to see if pre- or post-lto data
-// was re-used.
+//! This pass is only used for UNIT TESTS related to incremental
+//! compilation. It tests whether a particular `.o` file will be re-used
+//! from a previous compilation or whether it must be regenerated.
+//!
+//! The user adds annotations to the crate of the following form:
+//!
+//! ```
+//! # #![feature(rustc_attrs)]
+//! # #![allow(internal_features)]
+//! #![rustc_partition_reused(module="spike", cfg="rpass2")]
+//! #![rustc_partition_codegened(module="spike-x", cfg="rpass2")]
+//! ```
+//!
+//! The first indicates (in the cfg `rpass2`) that `spike.o` will be
+//! reused, the second that `spike-x.o` will be recreated. If these
+//! annotations are inaccurate, errors are reported.
+//!
+//! The reason that we use `cfg=...` and not `#[cfg_attr]` is so that
+//! the HIR doesn't change as a result of the annotations, which might
+//! perturb the reuse results.
+//!
+//! `#![rustc_expected_cgu_reuse(module="spike", cfg="rpass2", kind="post-lto")]`
+//! allows for doing a more fine-grained check to see if pre- or post-lto data
+//! was re-used.
 
 use std::borrow::Cow;
 use std::fmt;
@@ -92,9 +92,10 @@ impl<'tcx> AssertModuleSource<'tcx> {
                 sym::post_dash_lto => (CguReuse::PostLto, ComparisonKind::Exact),
                 sym::any => (CguReuse::PreLto, ComparisonKind::AtLeast),
                 other => {
-                    self.tcx
-                        .dcx()
-                        .emit_fatal(errors::UnknownReuseKind { span: attr.span(), kind: other });
+                    self.tcx.dcx().emit_fatal(errors::UnknownReuseKind {
+                        span: attr.span(),
+                        kind: other,
+                    });
                 }
             }
         } else {
@@ -102,7 +103,9 @@ impl<'tcx> AssertModuleSource<'tcx> {
         };
 
         if !self.tcx.sess.opts.unstable_opts.query_dep_graph {
-            self.tcx.dcx().emit_fatal(errors::MissingQueryDepGraph { span: attr.span() });
+            self.tcx
+                .dcx()
+                .emit_fatal(errors::MissingQueryDepGraph { span: attr.span() });
         }
 
         if !self.check_config(attr) {
@@ -139,11 +142,18 @@ impl<'tcx> AssertModuleSource<'tcx> {
         let cgu_name =
             cgu_name_builder.build_cgu_name(LOCAL_CRATE, cgu_path_components, cgu_special_suffix);
 
-        debug!("mapping '{}' to cgu name '{}'", self.field(attr, sym::module), cgu_name);
+        debug!(
+            "mapping '{}' to cgu name '{}'",
+            self.field(attr, sym::module),
+            cgu_name
+        );
 
         if !self.available_cgus.contains(&cgu_name) {
-            let cgu_names: Vec<&str> =
-                self.available_cgus.items().map(|cgu| cgu.as_str()).into_sorted_stable_ord();
+            let cgu_names: Vec<&str> = self
+                .available_cgus
+                .items()
+                .map(|cgu| cgu.as_str())
+                .into_sorted_stable_ord();
             self.tcx.dcx().emit_err(errors::NoModuleNamed {
                 span: attr.span(),
                 user_path,
@@ -167,15 +177,20 @@ impl<'tcx> AssertModuleSource<'tcx> {
                 if let Some(value) = item.value_str() {
                     return value;
                 } else {
-                    self.tcx.dcx().emit_fatal(errors::FieldAssociatedValueExpected {
-                        span: item.span(),
-                        name,
-                    });
+                    self.tcx
+                        .dcx()
+                        .emit_fatal(errors::FieldAssociatedValueExpected {
+                            span: item.span(),
+                            name,
+                        });
                 }
             }
         }
 
-        self.tcx.dcx().emit_fatal(errors::NoField { span: attr.span(), name });
+        self.tcx.dcx().emit_fatal(errors::NoField {
+            span: attr.span(),
+            name,
+        });
     }
 
     /// Scan for a `cfg="foo"` attribute and check whether we have a
@@ -233,8 +248,10 @@ pub struct CguReuseTracker {
 
 impl CguReuseTracker {
     fn new() -> CguReuseTracker {
-        let data =
-            TrackerData { actual_reuse: Default::default(), expected_reuse: Default::default() };
+        let data = TrackerData {
+            actual_reuse: Default::default(),
+            expected_reuse: Default::default(),
+        };
 
         CguReuseTracker { data: Some(data) }
     }
@@ -265,7 +282,12 @@ impl CguReuseTracker {
 
             data.expected_reuse.insert(
                 cgu_name.to_string(),
-                (cgu_user_name.to_string(), error_span, expected_reuse, comparison_kind),
+                (
+                    cgu_user_name.to_string(),
+                    error_span,
+                    expected_reuse,
+                    comparison_kind,
+                ),
             );
         }
     }
@@ -294,7 +316,10 @@ impl CguReuseTracker {
                         });
                     }
                 } else {
-                    sess.dcx().emit_fatal(errors::CguNotRecorded { cgu_user_name, cgu_name });
+                    sess.dcx().emit_fatal(errors::CguNotRecorded {
+                        cgu_user_name,
+                        cgu_name,
+                    });
                 }
             }
         }

@@ -1,4 +1,4 @@
-// Computing the size and alignment of a value.
+//! Computing the size and alignment of a value.
 
 use rustc_abi::WrappingRange;
 use rustc_hir::LangItem;
@@ -17,7 +17,10 @@ pub fn size_and_align_of_dst<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
     info: Option<Bx::Value>,
 ) -> (Bx::Value, Bx::Value) {
     let layout = bx.layout_of(t);
-    trace!("size_and_align_of_dst(ty={}, info={:?}): layout: {:?}", t, info, layout);
+    trace!(
+        "size_and_align_of_dst(ty={}, info={:?}): layout: {:?}",
+        t, info, layout
+    );
     if layout.is_sized() {
         let size = bx.const_usize(layout.size.bytes());
         let align = bx.const_usize(layout.align.abi.bytes());
@@ -34,7 +37,13 @@ pub fn size_and_align_of_dst<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
 
             // Size is always <= isize::MAX.
             let size_bound = bx.data_layout().ptr_sized_integer().signed_max() as u128;
-            bx.range_metadata(size, WrappingRange { start: 0, end: size_bound });
+            bx.range_metadata(
+                size,
+                WrappingRange {
+                    start: 0,
+                    end: size_bound,
+                },
+            );
             // Alignment is always nonzero.
             bx.range_metadata(align, WrappingRange { start: 1, end: !0 });
 

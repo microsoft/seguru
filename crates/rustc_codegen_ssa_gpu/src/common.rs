@@ -126,7 +126,11 @@ pub(crate) fn build_langcall<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
     let tcx = bx.tcx();
     let def_id = tcx.require_lang_item(li, span);
     let instance = ty::Instance::mono(tcx, def_id);
-    (bx.fn_abi_of_instance(instance, ty::List::empty()), bx.get_fn_addr(instance), instance)
+    (
+        bx.fn_abi_of_instance(instance, ty::List::empty()),
+        bx.get_fn_addr(instance),
+        instance,
+    )
 }
 
 pub(crate) fn shift_mask_val<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
@@ -147,11 +151,18 @@ pub(crate) fn shift_mask_val<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
             }
         }
         TypeKind::Vector => {
-            let mask =
-                shift_mask_val(bx, bx.element_type(llty), bx.element_type(mask_llty), invert);
+            let mask = shift_mask_val(
+                bx,
+                bx.element_type(llty),
+                bx.element_type(mask_llty),
+                invert,
+            );
             bx.vector_splat(bx.vector_length(mask_llty), mask)
         }
-        _ => bug!("shift_mask_val: expected Integer or Vector, found {:?}", kind),
+        _ => bug!(
+            "shift_mask_val: expected Integer or Vector, found {:?}",
+            kind
+        ),
     }
 }
 
@@ -162,7 +173,11 @@ pub fn asm_const_to_str<'tcx>(
     ty_and_layout: TyAndLayout<'tcx>,
 ) -> String {
     let mir::ConstValue::Scalar(scalar) = const_value else {
-        span_bug!(sp, "expected Scalar for promoted asm const, but got {:#?}", const_value)
+        span_bug!(
+            sp,
+            "expected Scalar for promoted asm const, but got {:#?}",
+            const_value
+        )
     };
     let value = scalar.assert_scalar_int().to_bits(ty_and_layout.size);
     match ty_and_layout.ty.kind() {

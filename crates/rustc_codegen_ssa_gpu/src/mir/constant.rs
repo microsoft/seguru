@@ -57,7 +57,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             other => span_bug!(constant.span, "{other:#?}"),
         };
         let uv = self.monomorphize(uv);
-        self.cx.tcx().const_eval_resolve_for_typeck(self.cx.typing_env(), uv, constant.span)
+        self.cx
+            .tcx()
+            .const_eval_resolve_for_typeck(self.cx.typing_env(), uv, constant.span)
     }
 
     /// process constant containing SIMD shuffle indices & constant vectors
@@ -98,7 +100,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 bx.const_vector(&values)
             })
             .unwrap_or_else(|| {
-                bx.tcx().dcx().emit_err(errors::ShuffleIndicesEvaluation { span: constant.span });
+                bx.tcx().dcx().emit_err(errors::ShuffleIndicesEvaluation {
+                    span: constant.span,
+                });
                 // We've errored, so we don't have to produce working code.
                 let llty = bx.backend_type(bx.layout_of(ty));
                 bx.const_undef(llty)

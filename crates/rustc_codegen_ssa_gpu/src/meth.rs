@@ -135,11 +135,18 @@ pub(crate) fn load_vtable<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
 ) -> Bx::Value {
     let ptr_align = bx.data_layout().pointer_align.abi;
 
-    if bx.cx().sess().opts.unstable_opts.virtual_function_elimination
+    if bx
+        .cx()
+        .sess()
+        .opts
+        .unstable_opts
+        .virtual_function_elimination
         && bx.cx().sess().lto() == Lto::Fat
     {
         if let Some(trait_ref) = dyn_trait_in_self(bx.tcx(), ty) {
-            let typeid = bx.typeid_metadata(typeid_for_trait_ref(bx.tcx(), trait_ref)).unwrap();
+            let typeid = bx
+                .typeid_metadata(typeid_for_trait_ref(bx.tcx(), trait_ref))
+                .unwrap();
             let func = bx.type_checked_load(llvtable, vtable_byte_offset, typeid);
             return func;
         } else if nonnull {

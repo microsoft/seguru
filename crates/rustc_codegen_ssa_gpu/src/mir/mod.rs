@@ -177,7 +177,12 @@ pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
     let fn_abi = cx.fn_abi_of_instance(instance, ty::List::empty());
     debug!("fn_abi: {:?}", fn_abi);
 
-    if cx.tcx().codegen_fn_attrs(instance.def_id()).flags.contains(CodegenFnAttrFlags::NAKED) {
+    if cx
+        .tcx()
+        .codegen_fn_attrs(instance.def_id())
+        .flags
+        .contains(CodegenFnAttrFlags::NAKED)
+    {
         crate::mir::naked_asm::codegen_naked_asm::<Bx>(cx, &mir, instance);
         return;
     }
@@ -188,7 +193,11 @@ pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
     let mut start_bx = Bx::build(cx, start_llbb);
 
     if mir.basic_blocks.iter().any(|bb| {
-        bb.is_cleanup || matches!(bb.terminator().unwind(), Some(mir::UnwindAction::Terminate(_)))
+        bb.is_cleanup
+            || matches!(
+                bb.terminator().unwind(),
+                Some(mir::UnwindAction::Terminate(_))
+            )
     }) {
         start_bx.set_personality_fn(cx.eh_personality());
     }
@@ -196,13 +205,17 @@ pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
     let cleanup_kinds =
         base::wants_new_eh_instructions(cx.tcx().sess).then(|| analyze::cleanup_kinds(mir));
 
-    let cached_llbbs: IndexVec<mir::BasicBlock, CachedLlbb<Bx::BasicBlock>> =
-        mir.basic_blocks
-            .indices()
-            .map(|bb| {
-                if bb == mir::START_BLOCK { CachedLlbb::Some(start_llbb) } else { CachedLlbb::None }
-            })
-            .collect();
+    let cached_llbbs: IndexVec<mir::BasicBlock, CachedLlbb<Bx::BasicBlock>> = mir
+        .basic_blocks
+        .indices()
+        .map(|bb| {
+            if bb == mir::START_BLOCK {
+                CachedLlbb::Some(start_llbb)
+            } else {
+                CachedLlbb::None
+            }
+        })
+        .collect();
 
     let mut fx = FunctionCx {
         instance,
@@ -419,7 +432,11 @@ fn arg_local_refs<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
 
             match arg.mode {
                 // Sized indirect arguments
-                PassMode::Indirect { attrs, meta_attrs: None, on_stack: _ } => {
+                PassMode::Indirect {
+                    attrs,
+                    meta_attrs: None,
+                    on_stack: _,
+                } => {
                     // Don't copy an indirect argument to an alloca, the caller already put it
                     // in a temporary alloca and gave it up.
                     // FIXME: lifetimes
@@ -438,7 +455,11 @@ fn arg_local_refs<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
                     }
                 }
                 // Unsized indirect qrguments
-                PassMode::Indirect { attrs: _, meta_attrs: Some(_), on_stack: _ } => {
+                PassMode::Indirect {
+                    attrs: _,
+                    meta_attrs: Some(_),
+                    on_stack: _,
+                } => {
                     // As the storage for the indirect argument lives during
                     // the whole function call, we just copy the wide pointer.
                     let llarg = bx.get_param(llarg_idx);
@@ -477,7 +498,10 @@ fn arg_local_refs<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
         let arg = fx.fn_abi.args.last().unwrap();
         match arg.mode {
             PassMode::Direct(_) => (),
-            _ => bug!("caller location must be PassMode::Direct, found {:?}", arg.mode),
+            _ => bug!(
+                "caller location must be PassMode::Direct, found {:?}",
+                arg.mode
+            ),
         }
 
         fx.caller_location = Some(OperandRef {

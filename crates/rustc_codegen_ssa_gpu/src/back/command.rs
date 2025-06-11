@@ -1,5 +1,5 @@
-// A thin wrapper around `Command` in the standard library which allows us to
-// read the arguments that are built up.
+//! A thin wrapper around `Command` in the standard library which allows us to
+//! read the arguments that are built up.
 
 use std::ffi::{OsStr, OsString};
 use std::process::{self, Output};
@@ -152,7 +152,9 @@ impl Command {
             let args_size = self.args.iter().fold(0usize, |acc, a| {
                 let arg = a.as_encoded_bytes().len();
                 let nul = 1;
-                acc.saturating_add(arg).saturating_add(nul).saturating_add(ptr_size)
+                acc.saturating_add(arg)
+                    .saturating_add(nul)
+                    .saturating_add(ptr_size)
             });
             // key + `=` + value + \0 + pointer
             let envs_size = self.env.iter().fold(0usize, |acc, (k, v)| {
@@ -197,10 +199,9 @@ impl Command {
         // [2]: https://devblogs.microsoft.com/oldnewthing/?p=41553
         #[cfg(windows)]
         {
-            let estimated_command_line_len = self
-                .args
-                .iter()
-                .fold(0usize, |acc, a| acc.saturating_add(a.as_encoded_bytes().len()));
+            let estimated_command_line_len = self.args.iter().fold(0usize, |acc, a| {
+                acc.saturating_add(a.as_encoded_bytes().len())
+            });
             return estimated_command_line_len > 1024 * 6;
         }
     }

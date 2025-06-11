@@ -41,8 +41,12 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                     self.codegen_rvalue(bx, cg_dest, rvalue);
                 }
             }
-            mir::StatementKind::SetDiscriminant { box ref place, variant_index } => {
-                self.codegen_place(bx, place.as_ref()).codegen_set_discr(bx, variant_index);
+            mir::StatementKind::SetDiscriminant {
+                box ref place,
+                variant_index,
+            } => {
+                self.codegen_place(bx, place.as_ref())
+                    .codegen_set_discr(bx, variant_index);
             }
             mir::StatementKind::Deinit(..) => {
                 // For now, don't codegen this to anything. In the future it may be worth
@@ -71,7 +75,11 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 bx.assume(op_val.immediate());
             }
             mir::StatementKind::Intrinsic(box NonDivergingIntrinsic::CopyNonOverlapping(
-                mir::CopyNonOverlapping { ref count, ref src, ref dst },
+                mir::CopyNonOverlapping {
+                    ref count,
+                    ref src,
+                    ref dst,
+                },
             )) => {
                 let dst_val = self.codegen_operand(bx, dst);
                 let src_val = self.codegen_operand(bx, src);

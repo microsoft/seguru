@@ -1,4 +1,4 @@
-// Type Names for Debug Info.
+//! Type Names for Debug Info.
 
 // Notes on targeting MSVC:
 // In general, MSVC's debugger attempts to parse all arguments as C++ expressions,
@@ -258,8 +258,11 @@ fn push_debuginfo_type_name<'tcx>(
                 let projection_bounds: SmallVec<[_; 4]> = trait_data
                     .projection_bounds()
                     .map(|bound| {
-                        let ExistentialProjection { def_id: item_def_id, term, .. } =
-                            tcx.instantiate_bound_regions_with_erased(bound);
+                        let ExistentialProjection {
+                            def_id: item_def_id,
+                            term,
+                            ..
+                        } = tcx.instantiate_bound_regions_with_erased(bound);
                         // FIXME(associated_const_equality): allow for consts here
                         (item_def_id, term.expect_type())
                     })
@@ -416,8 +419,9 @@ fn push_debuginfo_type_name<'tcx>(
             // In the case of cpp-like debuginfo, the name additionally gets wrapped inside of
             // an artificial `enum2$<>` type, as defined in msvc_enum_fallback().
             if cpp_like_debuginfo && t.is_coroutine() {
-                let ty_and_layout =
-                    tcx.layout_of(ty::TypingEnv::fully_monomorphized().as_query_input(t)).unwrap();
+                let ty_and_layout = tcx
+                    .layout_of(ty::TypingEnv::fully_monomorphized().as_query_input(t))
+                    .unwrap();
                 msvc_enum_fallback(
                     tcx,
                     ty_and_layout,
@@ -556,7 +560,15 @@ pub fn compute_debuginfo_vtable_name<'tcx>(
 pub fn push_item_name(tcx: TyCtxt<'_>, def_id: DefId, qualified: bool, output: &mut String) {
     let def_key = tcx.def_key(def_id);
     if qualified && let Some(parent) = def_key.parent {
-        push_item_name(tcx, DefId { krate: def_id.krate, index: parent }, true, output);
+        push_item_name(
+            tcx,
+            DefId {
+                krate: def_id.krate,
+                index: parent,
+            },
+            true,
+            output,
+        );
         output.push_str("::");
     }
 
@@ -637,7 +649,10 @@ fn push_generic_params_internal<'tcx>(
     output: &mut String,
     visited: &mut FxHashSet<Ty<'tcx>>,
 ) -> bool {
-    assert_eq!(args, tcx.normalize_erasing_regions(ty::TypingEnv::fully_monomorphized(), args));
+    assert_eq!(
+        args,
+        tcx.normalize_erasing_regions(ty::TypingEnv::fully_monomorphized(), args)
+    );
     let mut args = args.non_erasable_generics().peekable();
     if args.peek().is_none() {
         return false;
@@ -686,7 +701,9 @@ fn push_const_param<'tcx>(tcx: TyCtxt<'tcx>, ct: ty::Const<'tcx>, output: &mut S
                     write!(output, "{val}")
                 }
                 ty::Bool => {
-                    let val = cv.try_to_bool().expect("expected monomorphic const in codegen");
+                    let val = cv
+                        .try_to_bool()
+                        .expect("expected monomorphic const in codegen");
                     write!(output, "{val}")
                 }
                 _ => {
@@ -739,7 +756,10 @@ fn push_closure_or_coroutine_name<'tcx>(
     let coroutine_kind = tcx.coroutine_kind(def_id);
 
     if qualified {
-        let parent_def_id = DefId { index: def_key.parent.unwrap(), ..def_id };
+        let parent_def_id = DefId {
+            index: def_key.parent.unwrap(),
+            ..def_id
+        };
         push_item_name(tcx, parent_def_id, true, output);
         output.push_str("::");
     }
@@ -781,7 +801,10 @@ fn push_close_angle_bracket(cpp_like_debuginfo: bool, output: &mut String) {
 }
 
 fn pop_close_angle_bracket(output: &mut String) {
-    assert!(output.ends_with('>'), "'output' does not end with '>': {output}");
+    assert!(
+        output.ends_with('>'),
+        "'output' does not end with '>': {output}"
+    );
     output.pop();
     if output.ends_with(' ') {
         output.pop();

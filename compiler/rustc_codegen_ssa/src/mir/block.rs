@@ -732,35 +732,40 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             const_cond = Some(expected);
         }
 
+        // Generate our SFI only if the code runs on GPU
+        if self.is_gpu {
+            match msg {
+                AssertKind::BoundsCheck { len, index } => {
+                    let len = self.codegen_operand(bx, len).immediate();
+                    let index = self.codegen_operand(bx, index).immediate();
+
+                    // Now add our SFI to it. Basically our SFI does the following thing
+                    // to get the OOB flag:
+                    //     oob = index - len;    <- This will be positive if index is OOB
+                    //     oob_flag = oob >> 63; <- Use signed shift right. If not OOB we
+                    //                              get 0xFF....FF. If OOB we get 0
+                    //     *(dummy & oob_flag);  <- NULL ptr if OOB
+                    let index_int = bx.intcast(index, bx.cx().type_i64(), true);
+                    let oob = bx.sub(index_int, len);
+                    let shift = bx.emit_constant(
+                        63,
+                        bx.cx().backend_type(bx.cx().layout_of(bx.tcx().types.u64)),
+                    );
+                    let oob_flag = bx.ashr(oob, shift);
+
+                    bx.emit_llvm_volatile_and_load(oob_flag, self.san_dummy.unwrap());
+                }
+                _ => {
+                    ();
+                }
+            };
+            return helper.funclet_br(self, bx, target, mergeable_succ);
+        }
+
         // Don't codegen the panic block if success if known.
-        // Fuck it let's just return no matter what case it might be!
-        //if const_cond == Some(expected) {
-        match msg {
-            AssertKind::BoundsCheck { len, index } => {
-                let len = self.codegen_operand(bx, len).immediate();
-                let index = self.codegen_operand(bx, index).immediate();
-
-                // Now add our SFI to it. Basically our SFI does the following thing
-                // to get the OOB flag:
-                //     oob = index - len;    <- This will be positive if index is OOB
-                //     oob_flag = oob >> 63; <- Use signed shift right. If not OOB we
-                //                              get 0xFF....FF. If OOB we get 0
-                //     *(dummy & oob_flag);  <- NULL ptr if OOB
-                let index_int = bx.intcast(index, bx.cx().type_i64(), true);
-                let oob = bx.sub(index_int, len);
-                let shift = bx
-                    .emit_constant(63, bx.cx().backend_type(bx.cx().layout_of(bx.tcx().types.u64)));
-                let oob_flag = bx.ashr(oob, shift);
-
-                bx.emit_llvm_volatile_and_load(oob_flag, self.san_dummy.unwrap());
-            }
-            _ => {
-                ();
-            }
-        };
-
-        return helper.funclet_br(self, bx, target, mergeable_succ);
-        //}
+        if const_cond == Some(expected) {
+            return helper.funclet_br(self, bx, target, mergeable_succ);
+        }
 
         // Because we're branching to a panic block (either a `#[cold]` one
         // or an inlined abort), there's no need to `expect` it.

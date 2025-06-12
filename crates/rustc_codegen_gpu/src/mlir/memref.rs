@@ -18,6 +18,7 @@ pub fn dynamic_size() -> i64 {
 /// Implement reinterpret_cast for MemRef types.
 /// If the offset, size, or stride is dynamic, the operation must set static_offsets, static_sizes,
 /// and static_strides to dynamic_stride_offset() and size = dynamic_size().
+#[allow(clippy::too_many_arguments)]
 pub fn reinterpret_cast<'c>(
     mlir_ctx: &'c Context,
     ty: Type<'c>,

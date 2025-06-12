@@ -36,29 +36,12 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             .expect("failed to create const int")
     }
 
-    fn mlir_const_int<T>(
-        &self,
-        i: impl std::fmt::Display,
-        block: &'a mlir_ir::Block<'ml>,
-    ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Value {
-        block
-            .const_int(self.mlir_ctx, self.unknown_loc(), i, size_of::<T>() as u32 * 8)
-            .expect("failed to create const int")
-    }
-
     fn mlir_global_const_int_from_type(
         &self,
         i: impl std::fmt::Display,
         typ: <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type,
     ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Value {
         self.mlir_const_val_from_type(i, typ, self.mlir_body(false))
-    }
-
-    fn mlir_global_const_int<T>(
-        &self,
-        i: impl std::fmt::Display,
-    ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Value {
-        self.mlir_const_int::<T>(i, self.mlir_body(false))
     }
 
     pub(crate) fn const_data_memref_from_alloc(

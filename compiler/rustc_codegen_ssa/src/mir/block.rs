@@ -732,6 +732,11 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             const_cond = Some(expected);
         }
 
+        // Don't codegen the panic block if success if known.
+        if const_cond == Some(expected) {
+            return helper.funclet_br(self, bx, target, mergeable_succ);
+        }
+
         // Generate our SFI only if the code runs on GPU
         if self.is_gpu {
             match msg {
@@ -759,11 +764,6 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                     ();
                 }
             };
-            return helper.funclet_br(self, bx, target, mergeable_succ);
-        }
-
-        // Don't codegen the panic block if success if known.
-        if const_cond == Some(expected) {
             return helper.funclet_br(self, bx, target, mergeable_succ);
         }
 

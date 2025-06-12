@@ -17,6 +17,14 @@ impl<'tcx, 'ml> MiscCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, '_> {
     }
 
     fn get_fn(&self, instance: rustc_middle::ty::Instance<'tcx>) -> Self::Function {
+        let (ret, _) = self.get_fn_with_gpu_indicator(instance);
+        ret
+    }
+
+    fn get_fn_with_gpu_indicator(
+        &self,
+        instance: rustc_middle::ty::Instance<'tcx>,
+    ) -> (Self::Function, bool) {
         let tcx = self.tcx();
         let mlir_ctx = self.mlir_ctx;
         let sym = tcx.symbol_name(instance).name;
@@ -24,7 +32,8 @@ impl<'tcx, 'ml> MiscCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, '_> {
         log::trace!("[{}]:get_fn({:?}) => {}", self.cgu_name, instance, sym);
         let location = self.to_mlir_loc(instance.def.default_span(tcx));
         let fn_abi = self.fn_abi_of_instance(instance, rustc_middle::ty::List::empty());
-        self.to_mir_func_decl(instance, crate::mlir::MLIRVisibility::Private)
+        let gpu_attrs = self.get_gpu_attrs(def_id);
+        (self.to_mir_func_decl(instance, crate::mlir::MLIRVisibility::Private), gpu_attrs.kernel)
     }
 
     fn get_fn_addr(&self, instance: rustc_middle::ty::Instance<'tcx>) -> Self::Value {

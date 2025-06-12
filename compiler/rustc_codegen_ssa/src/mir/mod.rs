@@ -49,6 +49,8 @@ type PerLocalVarDebugInfoIndexVec<'tcx, V> =
 pub struct FunctionCx<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> {
     instance: Instance<'tcx>,
 
+    is_gpu: bool,
+
     mir: &'tcx mir::Body<'tcx>,
 
     debug_context: Option<FunctionDebugContext<'tcx, Bx::DIScope, Bx::DILocation>>,
@@ -172,7 +174,7 @@ pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
 ) {
     assert!(!instance.args.has_infer());
 
-    let llfn = cx.get_fn(instance);
+    let (llfn, is_gpu) = cx.get_fn_with_gpu_indicator(instance);
 
     let mir = cx.tcx().instance_mir(instance.def);
 
@@ -208,6 +210,7 @@ pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
 
     let mut fx = FunctionCx {
         instance,
+        is_gpu,
         mir,
         llfn,
         fn_abi,

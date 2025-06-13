@@ -30,3 +30,8 @@ fn run_codegen_tests(src: PathBuf, mode: &str) {
 fn test_codegen_backend_output() {
     run_codegen_tests(PathBuf::from("tests/codegen"), "codegen");
 }
+
+#[test]
+fn test_codegen_backend_output_fails() {
+    run_codegen_tests(PathBuf::from("tests/codegen_fails"), "compile-fail");
+}

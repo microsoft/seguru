@@ -46,10 +46,9 @@ impl<'tcx, 'ml, 'a> std::fmt::Debug for GPUCodegenContext<'tcx, 'ml, 'a> {
 }
 
 impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
+    #[inline(always)]
     pub fn emit_error(&self, msg: String, span: rustc_span::Span) {
-        let mut diag = self.tcx.sess.dcx().struct_err(msg);
-        diag.span(span);
-        diag.emit();
+        self.tcx.sess.dcx().span_fatal(span, msg);
     }
 
     pub fn new(

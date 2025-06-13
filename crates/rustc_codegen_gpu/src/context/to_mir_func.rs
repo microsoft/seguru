@@ -344,6 +344,12 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             )
             .into()
         } else {
+            if ftype.result_count() != 0 {
+                self.emit_error(
+                    "GPU kernel entry function must not return a value".to_string(),
+                    span,
+                );
+            }
             let gpu_op = melior::dialect::ods::gpu::func(
                 mlir_ctx,
                 melior::ir::Region::new(),

@@ -157,8 +157,10 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 }
                 rustc_target::callconv::PassMode::Cast { pad_i32, cast } => todo!(),
                 rustc_target::callconv::PassMode::Indirect { attrs, meta_attrs, on_stack } => {
-                    assert!(!on_stack);
-                    self.type_memref(self.immediate_backend_type(arg.layout))
+                    use crate::rustc_middle::ty::layout::LayoutOf;
+                    let ptr_ty = rustc_middle::ty::Ty::new_mut_ptr(self.tcx, arg.layout.ty);
+                    let ptr_layout = self.layout_of(ptr_ty);
+                    self.mlir_type(ptr_layout, false)
                 }
             };
             args.append(&mut self.expand_type(mlir_arg));

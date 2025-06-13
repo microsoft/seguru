@@ -40,24 +40,6 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         }
     }
 
-    fn primitive_or_tensor_to_memref(
-        &self,
-        ty: MLIRType<'ml>,
-    ) -> Option<(MLIRType<'ml>, Vec<i64>)> {
-        let mut rank = vec![];
-        if ty.is_ranked_tensor() {
-            let tensor_ty = mlir_type::RankedTensorType::try_from(ty).unwrap();
-            for i in 0..tensor_ty.rank() {
-                rank.push(tensor_ty.dim_size(i).unwrap() as i64);
-            }
-            Some((tensor_ty.element(), rank))
-        } else if ty.is_integer() || ty.is_float() {
-            Some((ty, vec![1]))
-        } else {
-            None
-        }
-    }
-
     fn type_empty(&self) -> MLIRType<'ml> {
         MLIRType::from(mlir_type::Type::none(self.mlir_ctx))
     }
@@ -68,10 +50,17 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         MLIRType::from(mlir_type::TupleType::new(self.mlir_ctx, types))
     }
 
-    pub(crate) fn type_memref(&self, ty: MLIRType<'ml>) -> MLIRType<'ml> {
-        let (eletype, rank) =
-            self.primitive_or_tensor_to_memref(ty).expect("Failed to convert to memref");
-        MLIRType::from(mlir_type::MemRefType::new(eletype, &rank, None, None))
+    pub(crate) fn type_memref(&self, eletype: MLIRType<'ml>, dim: &[i64]) -> MLIRType<'ml> {
+        MLIRType::from(mlir_type::MemRefType::new(eletype, dim, None, None))
+    }
+
+    pub(crate) fn type_1d_dynamic_memref(&self, eletype: MLIRType<'ml>) -> MLIRType<'ml> {
+        MLIRType::from(mlir_type::MemRefType::new(
+            eletype,
+            &[crate::mlir::memref::dynamic_size()],
+            None,
+            None,
+        ))
     }
 
     pub(crate) fn type_index(&self) -> MLIRType<'ml> {
@@ -126,120 +115,58 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         }
     }
 
-    pub fn ty_to_mlir_type(
+    fn arbitrary_mlir_type(
+        &self,
+        layout: &rustc_middle::ty::layout::TyAndLayout<'tcx>,
+        immediate: bool,
+    ) -> MLIRType<'ml> {
+        // This is used for types that are not directly supported by the backend,
+        // such as `dyn Trait` or `impl Trait`.
+        // We use a tuple type to represent these types.
+        let mut mlir_types = vec![];
+        let field_count = layout.fields.count();
+        let mut offset = rustc_abi::Size::ZERO;
+        for i in layout.fields.index_by_increasing_offset() {
+            let field = layout.field(self, i);
+
+            let target_offset = layout.fields.offset(i);
+            let padding_size = target_offset - offset;
+
+            if padding_size != rustc_abi::Size::ZERO {
+                // Add padding
+                mlir_types.push(self.type_array(self.type_i8(), padding_size.bytes()));
+            }
+            mlir_types.push(self.mlir_type(field, immediate));
+            offset = target_offset + field.size;
+        }
+        self.type_tuple(&mlir_types)
+    }
+
+    fn pointer_to_mlir_type(
         &self,
         ty: &rustc_middle::ty::Ty<'tcx>,
         immediate: bool,
     ) -> MLIRType<'ml> {
-        let layout = self.layout_of(*ty);
-        self.mlir_type(layout, immediate)
-    }
-
-    // use mlir_type
-    fn _ty_to_mlir_type(&self, ty: &rustc_middle::ty::Ty<'tcx>, immediate: bool) -> MLIRType<'ml> {
         match ty.kind() {
             rustc_middle::ty::TyKind::Str => {
                 let ty = ty.builtin_deref(true).unwrap_or_else(|| panic!("{:?}", ty));
                 let layout = self.layout_of(ty);
-                /*
-                let deref_type = self.mlir_type(layout, immediate);
-                let (primi_ty, rank) = if let Some((ty, rank)) = self.tensor_to_memref(deref_type) {
-                    (ty, rank)
-                } else {
-                    (deref_type, vec![1i64])
-                };
-                ;*/
-                MLIRType::from(self.type_memref(self.type_i8()))
+                self.type_1d_dynamic_memref(self.type_i8())
             }
             rustc_middle::ty::TyKind::RawPtr(inner_type, _)
             | rustc_middle::ty::TyKind::Ref(_, inner_type, _)
             | rustc_middle::ty::TyKind::Slice(inner_type) => {
-                MLIRType::from(self.type_memref(self.ty_to_mlir_type(inner_type, immediate)))
-            }
-            rustc_middle::ty::TyKind::Closure(id, args) => {
-                let closure_args = args.as_closure();
-                let mut mlir_args = vec![];
-                // A closure is represented as a tuple of the upvars
-                /*mlir_args.append(&mut self.expand_type(
-                    self.ty_to_mlir_type(&closure_args.sig_as_fn_ptr_ty(), immediate),
-                ));*/
-                mlir_args.append(&mut self.expand_type(
-                    self.ty_to_mlir_type(&closure_args.tupled_upvars_ty(), immediate),
-                ));
-
-                //let ret = self.ty_to_mlir_type(&sig.output(), immediate);
-                self.type_tuple(&mlir_args)
-            }
-            rustc_middle::ty::TyKind::Bool => todo!(),
-            rustc_middle::ty::TyKind::Char => todo!(),
-            rustc_middle::ty::TyKind::Int(int_ty) => todo!(),
-            rustc_middle::ty::TyKind::Uint(uint_ty) => todo!(),
-            rustc_middle::ty::TyKind::Float(float_ty) => todo!(),
-            rustc_middle::ty::TyKind::Adt(adt, subst) => {
-                dbg!(adt);
-                let field_to_ty = |field: &rustc_middle::ty::FieldDef| {
-                    let field_ty = field.ty(self.tcx, subst);
-                    let layout = self.layout_of(field_ty);
-                    if layout.is_zst() { None } else { Some(self.mlir_type(layout, immediate)) }
-                };
-                match adt.adt_kind() {
-                    rustc_middle::ty::AdtKind::Struct => {
-                        let mut mlir_types = vec![self.type_i32()];
-                        for field in adt.all_fields() {
-                            if let Some(ty) = field_to_ty(field) {
-                                mlir_types.push(ty)
-                            }
-                        }
-                        self.type_tuple(&mlir_types)
-                    }
-                    rustc_middle::ty::AdtKind::Union => todo!(),
-                    rustc_middle::ty::AdtKind::Enum => {
-                        // Enum is represented as a tuple (type_kind, typ1, typ2, ...)
-                        let mut mlir_types = vec![self.type_i32()];
-                        for variant in adt.variants() {
-                            for field in &variant.fields {
-                                if let Some(ty) = field_to_ty(field) {
-                                    mlir_types.push(ty)
-                                }
-                            }
-                        }
-                        self.type_tuple(&mlir_types)
-                    }
+                let layout = self.layout_of(*inner_type);
+                let bytes = layout.size.bytes() as i64;
+                if bytes == 0 {
+                    self.type_1d_dynamic_memref(self.type_i8())
+                } else {
+                    self.type_memref(self.type_i8(), &[bytes])
                 }
             }
-            rustc_middle::ty::TyKind::Foreign(_) => todo!(),
-            rustc_middle::ty::TyKind::Array(e, len) => match len.kind() {
-                rustc_middle::ty::ConstKind::Value(valtree) => {
-                    if let Some(len) = valtree.try_to_target_usize(self.tcx) {
-                        let elayout = self.layout_of(*e);
-                        self.type_array(self.mlir_type(elayout, immediate), len)
-                    } else {
-                        unimplemented!()
-                    }
-                }
-                _ => unimplemented!(),
-            },
-            rustc_middle::ty::TyKind::Pat(_, _) => todo!(),
-            rustc_middle::ty::TyKind::FnDef(_, _) => todo!(),
-            rustc_middle::ty::TyKind::FnPtr(binder, fn_header) => {
-                log::trace!("FnPtr {:?} {:?}", binder, fn_header);
-                self.type_ptr()
+            _ => {
+                panic!("Unsupported pointer type: {:?}", ty);
             }
-            rustc_middle::ty::TyKind::UnsafeBinder(unsafe_binder_inner) => todo!(),
-            rustc_middle::ty::TyKind::Dynamic(_, _, dyn_kind) => todo!(),
-            rustc_middle::ty::TyKind::CoroutineClosure(_, _) => todo!(),
-            rustc_middle::ty::TyKind::Coroutine(_, _) => todo!(),
-            rustc_middle::ty::TyKind::CoroutineWitness(_, _) => todo!(),
-            rustc_middle::ty::TyKind::Never => todo!(),
-            rustc_middle::ty::TyKind::Tuple(t) => self.type_tuple(
-                &t.iter().map(|arg| self.ty_to_mlir_type(&arg, immediate)).collect::<Vec<_>>(),
-            ),
-            rustc_middle::ty::TyKind::Alias(alias_ty_kind, alias_ty) => todo!(),
-            rustc_middle::ty::TyKind::Param(_) => todo!(),
-            rustc_middle::ty::TyKind::Bound(debruijn_index, _) => todo!(),
-            rustc_middle::ty::TyKind::Placeholder(_) => todo!(),
-            rustc_middle::ty::TyKind::Infer(infer_ty) => todo!(),
-            rustc_middle::ty::TyKind::Error(_) => todo!(),
         }
     }
 
@@ -256,10 +183,13 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             Primitive::Int(i, _signed) => self.type_from_integer(i),
             Primitive::Float(f) => self.type_from_float(f),
             Primitive::Pointer(a) => {
-                let Some(ptr_ty) = ptr_ty else {
-                    panic!();
-                };
-                self._ty_to_mlir_type(ptr_ty, immediate)
+                if let Some(ptr_ty) = ptr_ty {
+                    let ty = self.pointer_to_mlir_type(ptr_ty, immediate);
+                    assert!(ty.is_mem_ref());
+                    ty
+                } else {
+                    self.type_1d_dynamic_memref(self.type_i8())
+                }
             }
         }
     }
@@ -294,7 +224,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 }
                 rustc_abi::FieldsShape::Arbitrary { offsets, memory_index } => {
                     dbg!(layout.ty);
-                    self._ty_to_mlir_type(&layout.ty, immediate)
+                    self.arbitrary_mlir_type(&layout, immediate)
                 }
             },
             _ => {
@@ -461,27 +391,6 @@ impl<'tcx, 'ml, 'a> LayoutTypeCodegenMethods<'tcx> for GPUCodegenContext<'tcx, '
             panic!("TyAndLayout::scalar_pair_element_llty({:?}): not applicable", self);
         };
         let scalar: rustc_abi::Scalar = [a, b][index];
-        let pair_typs = match layout.ty.kind() {
-            rustc_middle::ty::TyKind::Slice(ty) => [Some(ty), None],
-            rustc_middle::ty::TyKind::Ref(_, ty, _) => [Some(&layout.ty), None],
-            rustc_middle::ty::TyKind::Adt(adt, subst) => {
-                let path = self.tcx.def_path_str(adt.did());
-                let subst1 = subst[1];
-                let subtyp1 = subst1.as_type();
-                let pair_typs: [Option<&rustc_middle::ty::Ty<'_>>; 2] =
-                    [Some(subtyp1.as_ref().unwrap()), None];
-                if path == "core::slice::Iter" {
-                    log::trace!("slice::Iter");
-                }
-                let mlir_ty = self._ty_to_mlir_type(&layout.ty, immediate);
-                let mlir_tuple = mlir_type::TupleType::try_from(mlir_ty).unwrap();
-                return self.use_raw_type(mlir_tuple.r#type(index).unwrap());
-            }
-            _ => {
-                todo!("{:?}", layout.ty.kind());
-            }
-        };
-        let ty = pair_typs[index];
-        self.scalar_mlir_type(&scalar, ty, immediate)
+        self.scalar_mlir_type(&scalar, None, immediate)
     }
 }

@@ -34,7 +34,5 @@ impl<'tcx, 'ml, 'a> DebugInfoBuilderMethods for GpuBuilder<'tcx, 'ml, 'a> {
         todo!()
     }
 
-    fn set_var_name(&mut self, value: Self::Value, name: &str) {
-        todo!()
-    }
+    fn set_var_name(&mut self, value: Self::Value, name: &str) {}
 }

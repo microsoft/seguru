@@ -1035,8 +1035,17 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     fn intcast(&mut self, val: Self::Value, dest_ty: Self::Type, is_signed: bool) -> Self::Value {
         assert!(!self.is_unreachable());
         let src_ty = val.r#type();
-        //assert!(dest_ty.is_integer());
-        let op = melior::dialect::arith::index_cast(val, dest_ty, self.cur_loc());
+        if src_ty == dest_ty {
+            return val;
+        }
+        let op = if src_ty.is_index() || dest_ty.is_index() {
+            // If either is index, we need to use index_cast
+            melior::dialect::arith::index_cast(val, dest_ty, self.cur_loc())
+        } else if !is_signed {
+            melior::dialect::arith::extui(val, dest_ty, self.cur_loc())
+        } else {
+            melior::dialect::arith::extsi(val, dest_ty, self.cur_loc())
+        };
         self.append_op_res(op)
     }
 

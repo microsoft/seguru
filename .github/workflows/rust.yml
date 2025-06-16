@@ -46,7 +46,7 @@ jobs:
 
       - name: Clippy
         working-directory: crates
-        run: cargo clippy --workspace --exclude cuda_bindings
+        run: cargo clippy --workspace --exclude cuda_bindings -- -D warnings -C panic=abort
 
       - name: Build
         working-directory: crates

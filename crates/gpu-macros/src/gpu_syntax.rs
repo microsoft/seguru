@@ -47,7 +47,7 @@ impl GpuFunctionRewriter {
     fn get_gpu_loop_expr_mut(&self, expr: &mut syn::Expr, path_str: &str) -> Option<Span> {
         if let Expr::ForLoop(fl) = expr {
             if let Expr::Call(syn::ExprCall { func, .. }) = fl.expr.as_ref() {
-                if let Some(true) = expr_path_matches(&func, path_str) {
+                if let Some(true) = expr_path_matches(func, path_str) {
                     return Some(fl.span());
                 }
             }

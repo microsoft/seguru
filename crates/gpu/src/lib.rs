@@ -117,7 +117,7 @@ impl<'a, T> Iterator for GpuChunksMut<'a, T> {
     }
 }
 #[gpu_codegen::builtin(gpu.chunks_mut)]
-pub fn gpu_chunk_mut<T>(v: &[T], chunk_size: usize) -> GpuChunksMut<'_, T> {
+pub fn gpu_chunk_mut<T>(_v: &[T], _chunk_size: usize) -> GpuChunksMut<'_, T> {
     unimplemented!()
 }
 

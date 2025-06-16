@@ -1392,7 +1392,9 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             }
         }
         let args = &args;
-        let ftype = fn_abi.map(|abi| self.fn_abi_to_fn_type(abi));
+        let ftype = fn_abi.map(|abi| {
+            self.fn_abi_to_fn_type(abi).unwrap_or_else(|e| self.emit_error(e, self.cur_span))
+        });
         let span = self.cur_span;
         let op = self.cx.call_op(llfn, args, ftype, &mut self.extra_state, span).unwrap();
         if let Some(op) = op {

@@ -20,6 +20,8 @@ use rustc_middle::ty::layout::{HasTyCtxt, HasTypingEnv};
 use self::ty::MLIRType;
 use crate::mlir::BlockRefWithTime;
 
+type CodegenGPUError = String;
+
 pub(crate) struct GPUCodegenContext<'tcx, 'ml, 'a> {
     pub cgu_name: String,
     pub mlir_ctx: &'ml melior::Context,
@@ -47,8 +49,8 @@ impl<'tcx, 'ml, 'a> std::fmt::Debug for GPUCodegenContext<'tcx, 'ml, 'a> {
 
 impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     #[inline(always)]
-    pub fn emit_error(&self, msg: String, span: rustc_span::Span) {
-        self.tcx.sess.dcx().span_fatal(span, msg);
+    pub fn emit_error(&self, msg: String, span: rustc_span::Span) -> ! {
+        self.tcx.sess.dcx().span_fatal(span, msg)
     }
 
     pub fn new(

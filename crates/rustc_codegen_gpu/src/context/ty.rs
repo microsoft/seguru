@@ -139,6 +139,13 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             mlir_types.push(self.mlir_type(field, immediate));
             offset = target_offset + field.size;
         }
+        if mlir_types.len() > 1 {
+            use crate::rustc_middle::query::Key;
+            self.emit_error(
+                "Does not support tuple with more than 1 elements".into(),
+                self.tcx.def_span(layout.ty.def_id_for_ty_in_cycle().unwrap()),
+            )
+        }
         self.type_tuple(&mlir_types)
     }
 
@@ -348,7 +355,11 @@ impl<'tcx, 'ml, 'a> LayoutTypeCodegenMethods<'tcx> for GPUCodegenContext<'tcx, '
         &self,
         fn_abi: &rustc_target::callconv::FnAbi<'tcx, rustc_middle::ty::Ty<'tcx>>,
     ) -> Self::Type {
-        self.fn_abi_to_fn_type(fn_abi).into()
+        self.fn_abi_to_fn_type(fn_abi)
+            .unwrap_or_else(|msg| {
+                panic!();
+            })
+            .into()
     }
 
     fn fn_ptr_backend_type(

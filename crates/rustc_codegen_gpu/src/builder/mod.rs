@@ -198,6 +198,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
     }
 
     fn append_op_res(&self, op: mlir_ir::Operation<'ml>) -> mlir_ir::Value<'ml, 'a> {
+        log::trace!("append_op_res: {:?}", op);
         self.cur_block().append_op_result(op).unwrap()
     }
 

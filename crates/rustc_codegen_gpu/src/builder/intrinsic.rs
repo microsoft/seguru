@@ -23,7 +23,7 @@ impl<'tcx, 'ml, 'a> IntrinsicCallBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 
     }
 
     fn expect(&mut self, cond: Self::Value, expected: bool) -> Self::Value {
-        todo!()
+        cond
     }
 
     fn type_test(&mut self, pointer: Self::Value, typeid: Self::Metadata) -> Self::Value {

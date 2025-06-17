@@ -232,6 +232,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             }
             GpuItem::IntoIter => todo!(),
             GpuItem::IterNext => todo!(),
+            GpuItem::Subslice | GpuItem::SubsliceMut => todo!(),
         }
     }
 
@@ -454,11 +455,15 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             dummy: PhantomData,
             span_to_type: HashMap::new(),
             op_to_extra_values: HashMap::new(),
-            san_dummy: None
+            san_dummy: None,
         }
     }
 
-    fn build_with_san_dummy(cx: &'a Self::CodegenCx, llbb: Self::BasicBlock, san_dummy: Self::Value) -> Self {
+    fn build_with_san_dummy(
+        cx: &'a Self::CodegenCx,
+        llbb: Self::BasicBlock,
+        san_dummy: Self::Value,
+    ) -> Self {
         Self {
             cx,
             cur_block: llbb,
@@ -467,7 +472,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             dummy: PhantomData,
             span_to_type: HashMap::new(),
             op_to_extra_values: HashMap::new(),
-            san_dummy: Some(san_dummy)
+            san_dummy: Some(san_dummy),
         }
     }
 

@@ -25,6 +25,8 @@ pub enum GpuItem {
     Launch,
     IntoIter,
     IterNext,
+    Subslice,
+    SubsliceMut,
 }
 
 impl TryFrom<&str> for GpuItem {
@@ -40,6 +42,8 @@ impl TryFrom<&str> for GpuItem {
             "add_mlir_string_attr" => GpuItem::AddStringAttr,
             "gpu.into_iter" => GpuItem::IntoIter,
             "gpu.next" => GpuItem::IterNext,
+            "gpu.subslice" => GpuItem::Subslice,
+            "gpu.subslice_mut" => GpuItem::SubsliceMut,
             _ => return Err(()),
         };
         Ok(ret)
@@ -61,6 +65,8 @@ impl From<GpuItem> for &'static str {
             GpuItem::Launch => "gpu.launch",
             GpuItem::IntoIter => "gpu.into_iter",
             GpuItem::IterNext => "gpu.next",
+            GpuItem::Subslice => "gpu.subslice",
+            GpuItem::SubsliceMut => "gpu.subslice_mut",
         }
     }
 }

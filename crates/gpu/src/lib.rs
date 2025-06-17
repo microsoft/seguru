@@ -121,4 +121,16 @@ pub fn gpu_chunk_mut<T>(_v: &[T], _chunk_size: usize) -> GpuChunksMut<'_, T> {
     unimplemented!()
 }
 
+#[inline(never)]
+#[gpu_codegen::builtin(gpu.subslice)]
+pub fn subslice<T>(_original: &[T], _offset: usize, _window: usize) -> &[T] {
+    unimplemented!()
+}
+
+#[inline(never)]
+#[gpu_codegen::builtin(gpu.subslice_mut)]
+pub fn subslice_mut<T>(_original: &mut [T], _offset: usize, _window: usize) -> &mut [T] {
+    unimplemented!()
+}
+
 /*  TODO: Define shared memory */

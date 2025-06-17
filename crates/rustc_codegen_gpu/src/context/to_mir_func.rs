@@ -1,4 +1,3 @@
-use melior::ir::attribute::StringAttribute;
 use melior::ir::r#type::FunctionType;
 use melior::ir::{BlockLike, Location, Operation};
 use rustc_codegen_ssa_gpu::traits::{LayoutTypeCodegenMethods, MiscCodegenMethods};
@@ -6,13 +5,11 @@ use rustc_hir::def_id::DefId;
 use rustc_middle::query::Key;
 use rustc_middle::ty::layout::{FnAbiOf, HasTyCtxt};
 use rustc_middle::ty::{AssocItemContainer, Instance};
-use rustc_span::Span;
 
 use super::GPUCodegenContext;
 use crate::attr::{GpuAttributes, GpuItem};
-use crate::builder::GpuBuilderState;
 use crate::context::CodegenGPUError;
-use crate::mlir::{BUILTIN_SYM, MLIRMutOpHelpers, MLIROpHelpers, MLIRVisibility, ValueToOpRef};
+use crate::mlir::{MLIRMutOpHelpers, MLIROpHelpers, MLIRVisibility};
 
 fn is_impl_of_trait_method(
     tcx: &rustc_middle::ty::TyCtxt<'_>,
@@ -58,52 +55,6 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         melior::dialect::func::r#return(ret, loc)
     }
 
-    pub fn call_op(
-        &self,
-        fn_ptr_value: melior::ir::Value<'ml, 'a>,
-        args: &[melior::ir::Value<'ml, 'a>],
-        ftype: Option<FunctionType<'ml>>,
-        extra: &mut crate::builder::GpuBuilderState<'ml, 'a>,
-        span: Span,
-    ) -> Result<Option<melior::ir::Operation<'ml>>, melior::Error> {
-        let mut return_type = vec![];
-        let fn_sym_ptr = fn_ptr_value.to_func_sym();
-        let builtin_sym = fn_ptr_value.get_op_attr::<StringAttribute>(BUILTIN_SYM);
-        if let Some(ftype) = ftype {
-            for i in 0..ftype.result_count() {
-                return_type.push(ftype.result(i).unwrap());
-            }
-        } else {
-            panic!("")
-        }
-        let loc = self.to_mlir_loc(span);
-        if let Ok(builtin_sym) = builtin_sym {
-            log::trace!("call_op fn_sym_ptr: {:?}", builtin_sym.value());
-            if let Ok(gpu_item) = GpuItem::try_from(builtin_sym.value()) {
-                return self.call_gpu_builtin_operation(
-                    gpu_item,
-                    fn_ptr_value,
-                    args,
-                    &return_type,
-                    extra,
-                    span,
-                );
-            } else {
-                panic!();
-            }
-        }
-        if let Ok(fn_sym_ptr) = fn_sym_ptr {
-            Ok(Some(melior::dialect::func::call(
-                self.mlir_ctx,
-                fn_sym_ptr,
-                args,
-                &return_type,
-                loc,
-            )))
-        } else {
-            Ok(Some(melior::dialect::func::call_indirect(fn_ptr_value, args, &return_type, loc)))
-        }
-    }
     /// Get the function pointer value for the given instance.
     pub fn to_mir_func_const(
         &self,
@@ -194,106 +145,6 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         }
         let ftype: FunctionType<'ml> = FunctionType::new(self.mlir_ctx, &args, &ret);
         Ok(ftype)
-    }
-
-    fn call_gpu_builtin_operation(
-        &self,
-        gpu_item: GpuItem,
-        fn_ptr_value: melior::ir::Value<'ml, 'a>,
-        args: &[melior::ir::Value<'ml, 'a>],
-        return_types: &[melior::ir::Type<'ml>],
-        extra: &mut GpuBuilderState<'ml, 'a>,
-        span: Span,
-    ) -> Result<Option<melior::ir::Operation<'ml>>, melior::Error> {
-        let loc = self.to_mlir_loc(span);
-        match gpu_item {
-            GpuItem::ThreadId => {
-                // attrs must be parsed from #gpu<dim(x)>
-                assert!(extra.attrs.len() == 1);
-                assert!(return_types.len() == 1);
-                let dimention = extra.attrs.pop().unwrap();
-                Ok(Some(crate::mlir::gpu::thread_id(self.mlir_ctx, dimention, loc)))
-            }
-            GpuItem::GlobalThreadId => {
-                let dimention = extra.attrs.pop().unwrap();
-                Ok(Some(crate::mlir::gpu::global_id(self.mlir_ctx, dimention, loc)))
-            }
-            GpuItem::Printf => {
-                assert!(extra.attrs.len() == 1);
-                let Ok(format) = extra.attrs.pop().unwrap().try_into() else {
-                    let err =
-                        format!("{:?} must take a single StringAttribute as format", gpu_item);
-                    self.emit_error(err.clone(), span);
-                };
-                Ok(Some(melior::dialect::ods::gpu::printf(self.mlir_ctx, args, format, loc).into()))
-            }
-            GpuItem::AddStringAttr => {
-                // args must be a const string.
-                let arg = args[0];
-                let err_msg =
-                    || format!("{:?} must take valid string as MLIR attritutes", gpu_item);
-                let name = arg.to_get_global_name();
-                if name.is_err() {
-                    self.emit_error(err_msg(), span);
-                }
-                let global_name = name.unwrap().value().to_string();
-                let bytes = self.get_const_bytes_by_name(global_name.as_str());
-                if let Ok(bytes) = std::str::from_utf8(bytes) {
-                    let attr = melior::ir::Attribute::parse(self.mlir_ctx, bytes).unwrap();
-                    extra.attrs.push(attr);
-                } else {
-                    self.emit_error(err_msg(), span);
-                }
-                Ok(None)
-            }
-            GpuItem::Scope => {
-                log::trace!("gpu.scope args: {:?}", args);
-                extra.inside_gpu_scope = true;
-                Ok(Some(melior::dialect::func::call(
-                    self.mlir_ctx,
-                    fn_ptr_value.to_func_sym().unwrap(),
-                    args,
-                    return_types,
-                    loc,
-                )))
-            }
-            GpuItem::Grid => {
-                log::trace!("gpu.grid args: {:?}", args);
-                extra.args.insert(gpu_item, args.to_vec());
-                Ok(Some(melior::dialect::func::call(
-                    self.mlir_ctx,
-                    fn_ptr_value.to_func_sym().unwrap(),
-                    args,
-                    return_types,
-                    loc,
-                )))
-            }
-            GpuItem::Block => {
-                log::trace!("gpu.block args: {:?}", args);
-                extra.args.insert(gpu_item, args.to_vec());
-                Ok(Some(melior::dialect::func::call(
-                    self.mlir_ctx,
-                    fn_ptr_value.to_func_sym().unwrap(),
-                    args,
-                    return_types,
-                    loc,
-                )))
-            }
-            GpuItem::Launch => {
-                log::trace!("gpu.launch args: {:?}", args);
-                extra.args.insert(gpu_item, args.to_vec());
-                /*let op = melior::ir::operation::OperationBuilder::new(
-                    "gpu.launch",
-                    self.to_mlir_loc(span),
-                )
-                .add_results(return_types)
-                .build()
-                .unwrap();*/
-                Ok(None)
-            }
-            GpuItem::IntoIter => todo!(),
-            GpuItem::IterNext => todo!(),
-        }
     }
 
     pub fn get_gpu_attrs(&self, def_id: rustc_hir::def_id::DefId) -> GpuAttributes {

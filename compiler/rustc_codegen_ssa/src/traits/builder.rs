@@ -63,10 +63,18 @@ pub trait BuilderMethods<'a, 'tcx>:
 
     fn build(cx: &'a Self::CodegenCx, llbb: Self::BasicBlock) -> Self;
 
+    fn build_with_san_dummy(
+        cx: &'a Self::CodegenCx,
+        llbb: Self::BasicBlock,
+        san_dummy: Self::Value,
+    ) -> Self;
+
     fn cx(&self) -> &Self::CodegenCx;
     fn llbb(&self) -> Self::BasicBlock;
 
     fn emit_constant(&mut self, val: u64, ty: Self::Type) -> Self::Value;
+
+    fn alloca_san_dummy(&mut self) -> Self::Value;
 
     fn emit_gpu_scalar_to_backend(
         &self,

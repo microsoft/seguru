@@ -175,17 +175,26 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     fn scalar_mlir_type(
         &self,
         scalar: &rustc_abi::Scalar,
-        ptr_ty: Option<&rustc_middle::ty::Ty<'tcx>>,
+        ty: Option<&rustc_middle::ty::Ty<'tcx>>,
         immediate: bool,
     ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type {
         if immediate && scalar.is_bool() {
             return self.type_i1();
         }
+        if let Some(ty) = ty {
+            match ty.kind() {
+                rustc_middle::ty::TyKind::Int(rustc_middle::ty::IntTy::Isize)
+                | rustc_middle::ty::TyKind::Uint(rustc_middle::ty::UintTy::Usize) => {
+                    return self.type_index();
+                }
+                _ => {}
+            }
+        }
         match scalar.primitive() {
             Primitive::Int(i, _signed) => self.type_from_integer(i),
             Primitive::Float(f) => self.type_from_float(f),
             Primitive::Pointer(a) => {
-                if let Some(ptr_ty) = ptr_ty {
+                if let Some(ptr_ty) = ty {
                     let ty = self.pointer_to_mlir_type(ptr_ty, immediate);
                     assert!(ty.is_mem_ref());
                     ty

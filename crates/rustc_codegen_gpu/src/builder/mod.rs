@@ -46,6 +46,7 @@ pub(crate) struct GpuBuilder<'tcx, 'ml, 'a> {
     pub span_to_type: HashMap<rustc_span::Span, mlir_type::Type<'ml>>,
     pub op_to_extra_values: HashMap<String, Vec<mlir_ir::Value<'ml, 'a>>>,
     pub extra_state: GpuBuilderState<'ml, 'a>,
+    san_dummy: Option<mlir_ir::Value<'ml, 'a>>,
     dummy: PhantomData<&'a mlir_ir::operation::Operation<'ml>>,
 }
 
@@ -453,6 +454,20 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             dummy: PhantomData,
             span_to_type: HashMap::new(),
             op_to_extra_values: HashMap::new(),
+            san_dummy: None
+        }
+    }
+
+    fn build_with_san_dummy(cx: &'a Self::CodegenCx, llbb: Self::BasicBlock, san_dummy: Self::Value) -> Self {
+        Self {
+            cx,
+            cur_block: llbb,
+            cur_span: rustc_span::DUMMY_SP,
+            extra_state: GpuBuilderState::new(),
+            dummy: PhantomData,
+            span_to_type: HashMap::new(),
+            op_to_extra_values: HashMap::new(),
+            san_dummy: Some(san_dummy)
         }
     }
 
@@ -828,6 +843,12 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
 
     fn to_immediate_scalar(&mut self, val: Self::Value, scalar: rustc_abi::Scalar) -> Self::Value {
         log::trace!("to_immediate_scalar: {:?} {:?}", val, scalar);
+        val
+    }
+
+    fn alloca_san_dummy(&mut self) -> Self::Value {
+        let val = self.alloca(rustc_abi::Size::from_bytes(8), rustc_abi::Align::EIGHT);
+        self.san_dummy = Some(val);
         val
     }
 

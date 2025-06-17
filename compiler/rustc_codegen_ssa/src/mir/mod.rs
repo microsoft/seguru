@@ -288,7 +288,7 @@ pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
     };
     fx.initialize_locals(local_values);
 
-    fx.san_dummy = Some(start_bx.alloca(rustc_abi::Size::from_bytes(8), rustc_abi::Align::EIGHT));
+    fx.san_dummy = Some(start_bx.alloca_san_dummy());
 
     // Apply debuginfo to the newly allocated locals.
     fx.debug_introduce_locals(&mut start_bx, consts_debug_info.unwrap_or_default());

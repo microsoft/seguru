@@ -87,7 +87,8 @@ impl<'a, 'tcx> TerminatorCodegenHelper<'tcx> {
             debug!("llbb_with_cleanup: creating cleanup trampoline for {:?}", target);
             let name = &format!("{:?}_cleanup_trampoline_{:?}", self.bb, target);
             let trampoline_llbb = Bx::append_block(fx.cx, fx.llfn, name);
-            let mut trampoline_bx = Bx::build(fx.cx, trampoline_llbb);
+            let mut trampoline_bx =
+                Bx::build_with_san_dummy(fx.cx, trampoline_llbb, fx.san_dummy.unwrap());
             trampoline_bx.cleanup_ret(self.funclet(fx).unwrap(), Some(lltarget));
             trampoline_llbb
         } else {
@@ -1313,7 +1314,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             Some(llbb) => llbb,
             None => return,
         };
-        let bx = &mut Bx::build(self.cx, llbb);
+        let bx = &mut Bx::build_with_san_dummy(self.cx, llbb, self.san_dummy.unwrap());
         let mir = self.mir;
 
         // MIR basic blocks stop at any function call. This may not be the case
@@ -1353,7 +1354,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             Some(llbb) => llbb,
             None => return,
         };
-        let bx = &mut Bx::build(self.cx, llbb);
+        let bx = &mut Bx::build_with_san_dummy(self.cx, llbb, self.san_dummy.unwrap());
         debug!("codegen_block_as_unreachable({:?})", bb);
         bx.unreachable();
     }
@@ -1713,14 +1714,16 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         let llbb = self.llbb(bb);
         if base::wants_new_eh_instructions(self.cx.sess()) {
             let cleanup_bb = Bx::append_block(self.cx, self.llfn, &format!("funclet_{bb:?}"));
-            let mut cleanup_bx = Bx::build(self.cx, cleanup_bb);
+            let mut cleanup_bx =
+                Bx::build_with_san_dummy(self.cx, cleanup_bb, self.san_dummy.unwrap());
             let funclet = cleanup_bx.cleanup_pad(None, &[]);
             cleanup_bx.br(llbb);
             self.funclets[bb] = Some(funclet);
             cleanup_bb
         } else {
             let cleanup_llbb = Bx::append_block(self.cx, self.llfn, "cleanup");
-            let mut cleanup_bx = Bx::build(self.cx, cleanup_llbb);
+            let mut cleanup_bx =
+                Bx::build_with_san_dummy(self.cx, cleanup_llbb, self.san_dummy.unwrap());
 
             let llpersonality = self.cx.eh_personality();
             let (exn0, exn1) = cleanup_bx.cleanup_landing_pad(llpersonality);
@@ -1737,7 +1740,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
     fn unreachable_block(&mut self) -> Bx::BasicBlock {
         self.unreachable_block.unwrap_or_else(|| {
             let llbb = Bx::append_block(self.cx, self.llfn, "unreachable");
-            let mut bx = Bx::build(self.cx, llbb);
+            let mut bx = Bx::build_with_san_dummy(self.cx, llbb, self.san_dummy.unwrap());
             bx.unreachable();
             self.unreachable_block = Some(llbb);
             llbb
@@ -1787,10 +1790,10 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             llbb = Bx::append_block(self.cx, self.llfn, "cs_terminate");
             let cp_llbb = Bx::append_block(self.cx, self.llfn, "cp_terminate");
 
-            let mut cs_bx = Bx::build(self.cx, llbb);
+            let mut cs_bx = Bx::build_with_san_dummy(self.cx, llbb, self.san_dummy.unwrap());
             let cs = cs_bx.catch_switch(None, None, &[cp_llbb]);
 
-            bx = Bx::build(self.cx, cp_llbb);
+            bx = Bx::build_with_san_dummy(self.cx, cp_llbb, self.san_dummy.unwrap());
             let null =
                 bx.const_null(bx.type_ptr_ext(bx.cx().data_layout().instruction_address_space));
 
@@ -1818,7 +1821,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             funclet = Some(bx.catch_pad(cs, args));
         } else {
             llbb = Bx::append_block(self.cx, self.llfn, "terminate");
-            bx = Bx::build(self.cx, llbb);
+            bx = Bx::build_with_san_dummy(self.cx, llbb, self.san_dummy.unwrap());
 
             let llpersonality = self.cx.eh_personality();
             bx.filter_landing_pad(llpersonality);

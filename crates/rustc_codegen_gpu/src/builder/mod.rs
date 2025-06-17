@@ -18,7 +18,7 @@ use rustc_abi::BackendRepr;
 use rustc_codegen_ssa_gpu::mir::operand::{OperandRef, OperandValue};
 use rustc_codegen_ssa_gpu::traits::{
     AsmBuilderMethods, BackendTypes, BaseTypeCodegenMethods, BuilderMethods, ConstCodegenMethods,
-    LayoutTypeCodegenMethods, StaticBuilderMethods,
+    LayoutTypeCodegenMethods, OverflowOp, StaticBuilderMethods,
 };
 
 use crate::context::GPUCodegenContext;
@@ -671,7 +671,14 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         lhs: Self::Value,
         rhs: Self::Value,
     ) -> (Self::Value, Self::Value) {
-        todo!()
+        log::warn!("Incomplete checked_binop: {:?} {:?} {:?}", oop, lhs, rhs);
+        // TODO: Build op with set_overflow_flags
+        let ret = match oop {
+            OverflowOp::Add => self.add(lhs, rhs),
+            OverflowOp::Sub => self.sub(lhs, rhs),
+            OverflowOp::Mul => self.mul(lhs, rhs),
+        };
+        (ret, self.const_value(0, self.type_i1()))
     }
 
     fn from_immediate(&mut self, val: Self::Value) -> Self::Value {

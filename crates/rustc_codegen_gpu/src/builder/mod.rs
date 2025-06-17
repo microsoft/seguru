@@ -540,7 +540,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         // TODO: Currently casting rhs to lhs. A better way is to see who's longer...
         let rhs_casted = self.intcast(rhs, lhs.r#type(), false);
         let op = melior::dialect::arith::muli(lhs, rhs_casted, self.cur_loc());
-        return self.append_op_res(op);
+        self.append_op_res(op)
     }
 
     fn fmul(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {

@@ -12,10 +12,10 @@ pub fn kernel_arith(a: &[u8], b: &mut [u8]) {
 #[gpu_codegen::kernel]
 pub fn kernel_arith_wrapper(a: &[u8], a_window: usize, b: &mut [u8], b_window: usize) {
     gpu::add_mlir_string_attr("#gpu<dim x>");
-    let c = gpu::thread_id() as usize;
+    let c = gpu::thread_id();
 
     let a_local: &[u8];
-    let mut b_local: &mut [u8];
+    let b_local: &mut [u8];
 
     unsafe {
         // a_local = &a[(c * a_window)..(c * a_window + a_window)] as &[u8];

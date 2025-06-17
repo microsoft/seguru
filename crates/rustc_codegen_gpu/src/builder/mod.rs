@@ -944,24 +944,29 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
                     }
                 })
                 .collect::<Vec<_>>();
-            (vec![], indices)
+            (vec![crate::mlir::memref::dynamic_stride_offset(); indices.len()], indices)
         };
+
         let base_ty = self.mlir_element_type(ptr.r#type());
-        let op = crate::mlir::memref::reinterpret_cast(
-            self.mlir_ctx,
+        let memref_ty: MemRefType<'ml> = MemRefType::new(
             base_ty,
+            &[1],
+            Some(melior::ir::Attribute::parse(self.mlir_ctx, "strided<[1], offset: ?>").unwrap()),
+            None,
+        );
+        let op = mlir_memref::subview(
+            self.mlir_ctx,
             ptr,
-            &static_indices,
             &dy_indices,
+            &[],
+            &[],
+            &static_indices,
             &static_sizes,
-            &[],
             &static_strides,
-            &[],
+            memref_ty,
             self.cur_loc(),
         );
         self.append_op_res(op)
-        //let op = self.append_op(mlir_memref::cast(ptr, result_ty, self.cur_loc()));
-        //op.result(0).unwrap().into()
     }
 
     fn trunc(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {

@@ -1037,6 +1037,9 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         assert!(!self.is_unreachable());
         let src_ty = val.r#type();
         //assert!(dest_ty.is_integer());
+        if src_ty == dest_ty {
+            return val;
+        }
         let op = melior::dialect::arith::index_cast(val, dest_ty, self.cur_loc());
         self.append_op_res(op)
     }

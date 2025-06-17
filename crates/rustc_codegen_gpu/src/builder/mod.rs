@@ -1053,6 +1053,9 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         if src_ty == dest_ty {
             return val;
         }
+        if let Some(const_val) = crate::mlir::mlir_val_to_const_int(val) {
+            return self.const_value(const_val, dest_ty);
+        }
         let op = if src_ty.is_index() || dest_ty.is_index() {
             // If either is index, we need to use index_cast
             melior::dialect::arith::index_cast(val, dest_ty, self.cur_loc())

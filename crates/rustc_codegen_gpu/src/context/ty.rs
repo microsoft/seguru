@@ -54,13 +54,8 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         MLIRType::from(mlir_type::MemRefType::new(eletype, dim, None, None))
     }
 
-    pub(crate) fn type_1d_dynamic_memref(&self, eletype: MLIRType<'ml>) -> MLIRType<'ml> {
-        MLIRType::from(mlir_type::MemRefType::new(
-            eletype,
-            &[crate::mlir::memref::dynamic_size()],
-            None,
-            None,
-        ))
+    pub(crate) fn type_memref_single(&self, eletype: MLIRType<'ml>) -> MLIRType<'ml> {
+        self.type_memref(eletype, &[1])
     }
 
     pub(crate) fn type_index(&self) -> MLIRType<'ml> {
@@ -158,7 +153,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             rustc_middle::ty::TyKind::Str => {
                 let ty = ty.builtin_deref(true).unwrap_or_else(|| panic!("{:?}", ty));
                 let layout = self.layout_of(ty);
-                self.type_1d_dynamic_memref(self.type_i8())
+                self.type_memref_single(self.type_i8())
             }
             rustc_middle::ty::TyKind::RawPtr(inner_type, _)
             | rustc_middle::ty::TyKind::Ref(_, inner_type, _)
@@ -166,7 +161,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 let layout = self.layout_of(*inner_type);
                 let bytes = layout.size.bytes() as i64;
                 if bytes == 0 {
-                    self.type_1d_dynamic_memref(self.type_i8())
+                    self.type_memref_single(self.type_i8())
                 } else {
                     self.type_memref(self.type_i8(), &[bytes])
                 }
@@ -195,7 +190,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                     assert!(ty.is_mem_ref());
                     ty
                 } else {
-                    self.type_1d_dynamic_memref(self.type_i8())
+                    self.type_memref_single(self.type_i8())
                 }
             }
         }

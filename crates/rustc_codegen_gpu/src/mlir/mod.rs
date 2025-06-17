@@ -300,3 +300,18 @@ pub(crate) fn generate_test_module<'a>(loc: Loc) -> Module<'a> {
     assert!(module.as_operation().verify());
     module
 }
+
+pub(crate) fn mlir_val_to_const_int<'ml, 'a>(value: melior::ir::Value<'ml, 'a>) -> Option<u128> {
+    if let Ok(op) = value.is_from_op(Some("arith.constant")) {
+        let op = melior::dialect::ods::arith::ConstantOperation::try_from(op).unwrap();
+        let s = op.value().unwrap().to_string();
+        if s.contains("false") {
+            return Some(0);
+        } else if s.contains("true") {
+            return Some(1);
+        }
+        Some(s.split_once(":").unwrap().0.trim().parse().unwrap())
+    } else {
+        None
+    }
+}

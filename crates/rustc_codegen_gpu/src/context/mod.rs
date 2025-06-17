@@ -1,6 +1,6 @@
 mod abi;
 mod asm;
-mod const_static;
+pub mod const_static;
 mod coverage;
 mod debug;
 mod misc;

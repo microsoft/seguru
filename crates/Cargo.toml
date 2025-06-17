@@ -7,5 +7,6 @@ members = [
     "gpu-test",
     "gpu-test-basic",
     "gpu-test-arith-basic",
+    "manual-test-gpu-arith",
     "cuda_bindings",
 ]

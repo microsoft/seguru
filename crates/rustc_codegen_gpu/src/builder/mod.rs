@@ -198,6 +198,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
     }
 
     fn append_op_res(&self, op: mlir_ir::Operation<'ml>) -> mlir_ir::Value<'ml, 'a> {
+        log::trace!("append_op_res: {:?}", op);
         self.cur_block().append_op_result(op).unwrap()
     }
 
@@ -241,7 +242,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             return self.append_op_res(op);
         }
         // ptr is almost always memref<sizexi8>. Must be casted into ty
-        let ptr = self.mlir_cast_memref(ptr, MemRefType::new(ty, &[1], None, None).into());
+        // let ptr = self.mlir_cast_memref(ptr, MemRefType::new(ty, &[1], None, None).into());
         self.append_op_res(melior::dialect::memref::load(ptr, indices, self.cur_loc()))
     }
 }
@@ -536,8 +537,10 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn mul(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        let op = melior::dialect::arith::muli(lhs, rhs, self.cur_loc());
-        self.append_op_res(op)
+        // TODO: Currently casting rhs to lhs. A better way is to see who's longer...
+        let rhs_casted = self.intcast(rhs, lhs.r#type(), false);
+        let op = melior::dialect::arith::muli(lhs, rhs_casted, self.cur_loc());
+        return self.append_op_res(op);
     }
 
     fn fmul(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
@@ -941,24 +944,29 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
                     }
                 })
                 .collect::<Vec<_>>();
-            (vec![], indices)
+            (vec![crate::mlir::memref::dynamic_stride_offset(); indices.len()], indices)
         };
+
         let base_ty = self.mlir_element_type(ptr.r#type());
-        let op = crate::mlir::memref::reinterpret_cast(
-            self.mlir_ctx,
+        let memref_ty: MemRefType<'ml> = MemRefType::new(
             base_ty,
+            &[1],
+            Some(melior::ir::Attribute::parse(self.mlir_ctx, "strided<[1], offset: ?>").unwrap()),
+            None,
+        );
+        let op = mlir_memref::subview(
+            self.mlir_ctx,
             ptr,
-            &static_indices,
             &dy_indices,
+            &[],
+            &[],
+            &static_indices,
             &static_sizes,
-            &[],
             &static_strides,
-            &[],
+            memref_ty,
             self.cur_loc(),
         );
         self.append_op_res(op)
-        //let op = self.append_op(mlir_memref::cast(ptr, result_ty, self.cur_loc()));
-        //op.result(0).unwrap().into()
     }
 
     fn trunc(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {

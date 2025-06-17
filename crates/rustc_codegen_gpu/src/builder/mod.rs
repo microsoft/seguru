@@ -25,6 +25,7 @@ use rustc_span::Span;
 
 use crate::attr::GpuItem;
 use crate::context::GPUCodegenContext;
+use crate::mlir::memref::{extract_strided_metadata, extract_strided_metadata_results};
 use crate::mlir::{BUILTIN_SYM, BlockRefWithTime, MLIROpHelpers, ValueToOpRef};
 
 pub(crate) struct GpuBuilderState<'ml, 'a> {
@@ -300,58 +301,35 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         if indices.len() != 1 {
             panic!("only supports single index");
         }
-        let size = self.static_size_of(ty);
-        let static_sizes = vec![1_i64; indices.len()]; // Force to be 1 since this is a ptr?
-        let static_strides = vec![1_i64; indices.len()];
-        let idx = indices[0];
-        let mut dynamic = false;
-        for index in indices {
-            if index.is_from_op(Some("arith.constant")).is_err() {
-                dynamic = true;
-            }
-        }
-        let (static_indices, dy_indices) = if !dynamic {
-            (
-                indices
-                    .iter()
-                    .map(|v| self.const_to_opt_uint(*v).unwrap() as i64)
-                    .collect::<Vec<_>>(),
-                vec![],
-            )
-        } else {
-            let indices = indices
-                .iter()
-                .map(|v| {
-                    if v.r#type().is_integer() {
-                        let v = self.use_value(*v);
-                        self.intcast(v, self.type_index(), false)
-                    } else if v.r#type().is_index() {
-                        self.use_value(*v)
-                    } else {
-                        panic!("Must be int or index type");
-                    }
-                })
-                .collect::<Vec<_>>();
-            (vec![crate::mlir::memref::dynamic_stride_offset(); indices.len()], indices)
-        };
 
         let base_ty = self.mlir_element_type(ptr.r#type());
-        let memref_ty: MemRefType<'ml> = MemRefType::new(
-            base_ty,
-            &[1],
-            Some(melior::ir::Attribute::parse(self.mlir_ctx, "strided<[1], offset: ?>").unwrap()),
-            None,
-        );
-        mlir_memref::subview(
+        let indices = indices
+            .iter()
+            .map(|v| {
+                if v.r#type().is_integer() || v.r#type().is_index() {
+                    let v = self.use_value(*v);
+                    self.intcast(v, self.type_index(), false).into()
+                } else {
+                    panic!("Must be int or index type");
+                }
+            })
+            .collect::<Vec<_>>();
+        let ptr = if ty != base_ty {
+            let size = self.static_size_of(ty);
+            let base_size = self.static_size_of(base_ty);
+            assert!(size % base_size == 0);
+            let target_memref_ty = self.type_memref(ty, &[1]);
+            self.mlir_memref_view(ptr, target_memref_ty, None)
+        } else {
+            ptr
+        };
+        crate::mlir::memref::subview(
             self.mlir_ctx,
+            ty,
             ptr,
-            &dy_indices,
-            &[],
-            &[],
-            &static_indices,
-            &static_sizes,
-            &static_strides,
-            memref_ty,
+            &indices,
+            &[1.into()],
+            &[1.into()],
             self.cur_loc(),
         )
     }
@@ -416,50 +394,61 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         }
     }
 
-    pub fn mlir_cast_memref(
-        &self,
+    pub fn mlir_memref_view(
+        &mut self,
         val: melior::ir::Value<'ml, 'a>,
         dst_ty: melior::ir::Type<'ml>,
+        byte_offset: Option<Value<'ml, 'a>>,
     ) -> Value<'ml, 'a> {
-        assert!(val.r#type().is_mem_ref());
-        assert!(dst_ty.is_mem_ref());
         let ty = val.r#type();
+        assert!(ty.is_mem_ref());
+        assert!(dst_ty.is_mem_ref());
+        if dst_ty == ty {
+            return val;
+        }
         let memref_ty: MemRefType<'ml> = ty.try_into().expect("expected memref type");
         let layout = crate::mlir::attr::StridedLayoutAttribute::try_from(memref_ty.layout());
         let base_memref = val;
-        log::debug!("mlir_cast_memref layout: {:?}", layout);
-        let (base_memref, byte_offset) = if layout.is_ok() && layout.unwrap().get_offset() != 0 {
-            let op = crate::mlir::memref::extract_strided_metadata(
-                self.cx.mlir_ctx,
-                val,
-                self.cur_loc(),
-            );
-            let op = self.append_op(op.into());
-            let base_memref: Value<'ml, 'a> = op.result(0).unwrap().into();
-            let byte_offset = op.result(1).unwrap().into();
-            let element_ty = self.mlir_element_type(base_memref.r#type());
-            let op = crate::mlir::memref::reinterpret_cast(
-                self.cx.mlir_ctx,
-                element_ty,
-                base_memref,
-                &[0],
-                &[],
-                &[self.static_size_of(element_ty) as i64],
-                &[],
-                &[1],
-                &[],
-                self.cur_loc(),
-            );
-            log::debug!("base memref: {:?}", val);
-            (self.append_op_res(op), byte_offset)
+        let (base_memref, base_byte_offset) = match layout {
+            Ok(layout) if layout.get_offset() != 0 => {
+                // view cannot work on offset !=0;
+                log::warn!("mlir_memref_view with offset != 0 casting {} to {}", val, dst_ty);
+                let op = extract_strided_metadata(self.cx.mlir_ctx, val, self.cur_loc());
+                let op = self.append_op(op.into());
+                let results = extract_strided_metadata_results(memref_ty, op);
+                let element_ty = self.mlir_element_type(ty);
+                assert!(element_ty == self.type_i8());
+
+                // The results.base_memref is memref<i8>,
+                // but we need 1d memref<sizexi8> to use view
+                // ensures this is 1d memref.
+                assert!(results.sizes.len() == 1);
+                let op = crate::mlir::memref::reinterpret_cast(
+                    self.cx.mlir_ctx,
+                    element_ty,
+                    results.base_memref,
+                    &[0.into()],
+                    &results.sizes,
+                    &results.strides,
+                    self.cur_loc(),
+                );
+                log::debug!("base memref: {:?}", val);
+                (self.append_op_res(op), results.byte_offset)
+            }
+            _ => (val, self.const_value(0, self.type_index())),
+        };
+
+        // If byte_offset is None, we use the base_byte_offset + byte_offset
+        let byte_offset = if let Some(byte_offset) = byte_offset {
+            self.add(byte_offset, base_byte_offset)
         } else {
-            (val, self.const_value(0, self.type_index()))
+            base_byte_offset
         };
         let op = melior::dialect::memref::view(
             self.cx.mlir_ctx,
             base_memref,
             byte_offset,
-            &[],
+            &[], // No dynamic sizes
             dst_ty.try_into().unwrap(),
             self.cur_loc(),
         );
@@ -1015,6 +1004,12 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn load(&mut self, ty: Self::Type, ptr: Self::Value, align: rustc_abi::Align) -> Self::Value {
+        // ptr is almost always memref<sizexi8>. Must be casted into memref<ty>
+        let ptr = if ty != self.mlir_element_type(ptr.r#type()) {
+            self.mlir_memref_view(ptr, self.type_memref(ty, &[1]), None)
+        } else {
+            ptr
+        };
         self.mlir_load(ty, ptr, &[self.const_value(0, self.type_index())], align)
     }
 
@@ -1051,6 +1046,20 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             let b_offset = a.primitive().size(self).align_to(b.primitive().align(self).abi);
 
             let mut load = |i, scalar: rustc_abi::Scalar, align| {
+                let base_ty = self.scalar_pair_element_backend_type(place.layout, i, false);
+                let ptr = place.val.llval;
+                let ptr = if base_ty != self.mlir_element_type(ptr.r#type()) {
+                    self.emit_error(
+                        format!(
+                            "Scalar pair element type mismatch: expected {}, got {}",
+                            base_ty,
+                            ptr.r#type()
+                        ),
+                        self.cur_span,
+                    );
+                } else {
+                    ptr
+                };
                 self.mlir_load(
                     self.scalar_pair_element_backend_type(place.layout, i, false),
                     place.val.llval,
@@ -1167,7 +1176,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         let target_memref_ty = MemRefType::new(val.r#type(), &[1], None, None);
         let ptr = if self.mlir_element_type(ptr.r#type()) != val.r#type() {
             dbg!("Implicit cast {} {}", ptr.r#type(), val.r#type());
-            self.mlir_cast_memref(ptr, target_memref_ty.into())
+            self.mlir_memref_view(ptr, target_memref_ty.into(), None)
         } else {
             ptr
         };

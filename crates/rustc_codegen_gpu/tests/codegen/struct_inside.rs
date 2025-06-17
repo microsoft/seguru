@@ -18,3 +18,4 @@ pub fn assign_with_struct(b: &mut u32) {
 
 // CHECK: @gpu_bin_cst = internal constant
 // PTX_CHECK: .visible .entry assign_with_struct
+// PTX_CHECK: st.global.u32

@@ -2,7 +2,6 @@
 #![register_tool(gpu_codegen)]
 #![no_std]
 
-
 #[gpu_codegen::device]
 #[inline(always)]
 pub fn kernel_arith(a: &[u8], b: &mut [u8]) {
@@ -14,7 +13,7 @@ pub fn kernel_arith(a: &[u8], b: &mut [u8]) {
 pub fn kernel_arith_wrapper(a: &[u8], a_window: usize, b: &mut [u8], b_window: usize) {
     gpu::add_mlir_string_attr("#gpu<dim x>");
     let c = gpu::thread_id() as usize;
-    
+
     let a_local: &[u8];
     let mut b_local: &mut [u8];
 
@@ -28,7 +27,6 @@ pub fn kernel_arith_wrapper(a: &[u8], a_window: usize, b: &mut [u8], b_window: u
         //a_local = &*core::intrinsics::aggregate_raw_ptr::<?Sized, *const u8, usize>(a_slice_start, a_window);
         a_local = core::slice::from_raw_parts(a_slice_start, a_window);
 
-        
         let b_raw_ptr = b.as_mut_ptr();
         let b_slice_start = b_raw_ptr.add(c * b_window);
         //b_local = &mut *core::intrinsics::aggregate_raw_ptr(b_slice_start, b_window);
@@ -37,5 +35,3 @@ pub fn kernel_arith_wrapper(a: &[u8], a_window: usize, b: &mut [u8], b_window: u
 
     kernel_arith(a_local, b_local);
 }
-
-

@@ -97,7 +97,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         args: &[melior::ir::Value<'ml, 'a>],
         ftype: Option<FunctionType<'ml>>,
         span: Span,
-    ) -> Result<Option<melior::ir::Operation<'ml>>, melior::Error> {
+    ) -> Result<Option<melior::ir::OperationRef<'ml, 'a>>, melior::Error> {
         let mut return_type = vec![];
         let fn_sym_ptr = fn_ptr_value.to_func_sym();
         let builtin_sym = fn_ptr_value.get_op_attr::<StringAttribute>(BUILTIN_SYM);
@@ -124,15 +124,22 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             }
         }
         if let Ok(fn_sym_ptr) = fn_sym_ptr {
-            Ok(Some(melior::dialect::func::call(
+            let op_ref = self.append_op(melior::dialect::func::call(
                 self.mlir_ctx,
                 fn_sym_ptr,
                 args,
                 &return_type,
                 loc,
-            )))
+            ));
+            Ok(Some(op_ref))
         } else {
-            Ok(Some(melior::dialect::func::call_indirect(fn_ptr_value, args, &return_type, loc)))
+            let op_ref = self.append_op(melior::dialect::func::call_indirect(
+                fn_ptr_value,
+                args,
+                &return_type,
+                loc,
+            ));
+            Ok(Some(op_ref))
         }
     }
 
@@ -143,7 +150,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         args: &[melior::ir::Value<'ml, 'a>],
         return_types: &[melior::ir::Type<'ml>],
         span: Span,
-    ) -> Result<Option<melior::ir::Operation<'ml>>, melior::Error> {
+    ) -> Result<Option<melior::ir::OperationRef<'ml, 'a>>, melior::Error> {
         let loc = self.to_mlir_loc(span);
         match gpu_item {
             GpuItem::ThreadId => {
@@ -151,11 +158,15 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 assert!(self.extra_state.attrs.len() == 1);
                 assert!(return_types.len() == 1);
                 let dimention = self.extra_state.attrs.pop().unwrap();
-                Ok(Some(crate::mlir::gpu::thread_id(self.mlir_ctx, dimention, loc)))
+                let op_ref =
+                    self.append_op(crate::mlir::gpu::thread_id(self.mlir_ctx, dimention, loc));
+                Ok(Some(op_ref))
             }
             GpuItem::GlobalThreadId => {
                 let dimention = self.extra_state.attrs.pop().unwrap();
-                Ok(Some(crate::mlir::gpu::global_id(self.mlir_ctx, dimention, loc)))
+                let op_ref =
+                    self.append_op(crate::mlir::gpu::global_id(self.mlir_ctx, dimention, loc));
+                Ok(Some(op_ref))
             }
             GpuItem::Printf => {
                 assert!(self.extra_state.attrs.len() == 1);
@@ -164,7 +175,10 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                         format!("{:?} must take a single StringAttribute as format", gpu_item);
                     self.emit_error(err.clone(), span);
                 };
-                Ok(Some(melior::dialect::ods::gpu::printf(self.mlir_ctx, args, format, loc).into()))
+                let op_ref = self.append_op(
+                    melior::dialect::ods::gpu::printf(self.mlir_ctx, args, format, loc).into(),
+                );
+                Ok(Some(op_ref))
             }
             GpuItem::AddStringAttr => {
                 // args must be a const string.
@@ -188,35 +202,38 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             GpuItem::Scope => {
                 log::trace!("gpu.scope args: {:?}", args);
                 self.extra_state.inside_gpu_scope = true;
-                Ok(Some(melior::dialect::func::call(
+                let op_ref = self.append_op(melior::dialect::func::call(
                     self.mlir_ctx,
                     fn_ptr_value.to_func_sym().unwrap(),
                     args,
                     return_types,
                     loc,
-                )))
+                ));
+                Ok(Some(op_ref))
             }
             GpuItem::Grid => {
                 log::trace!("gpu.grid args: {:?}", args);
                 self.extra_state.args.insert(gpu_item, args.to_vec());
-                Ok(Some(melior::dialect::func::call(
+                let op_ref = self.append_op(melior::dialect::func::call(
                     self.mlir_ctx,
                     fn_ptr_value.to_func_sym().unwrap(),
                     args,
                     return_types,
                     loc,
-                )))
+                ));
+                Ok(Some(op_ref))
             }
             GpuItem::Block => {
                 log::trace!("gpu.block args: {:?}", args);
                 self.extra_state.args.insert(gpu_item, args.to_vec());
-                Ok(Some(melior::dialect::func::call(
+                let op_ref = self.append_op(melior::dialect::func::call(
                     self.mlir_ctx,
                     fn_ptr_value.to_func_sym().unwrap(),
                     args,
                     return_types,
                     loc,
-                )))
+                ));
+                Ok(Some(op_ref))
             }
             GpuItem::Launch => {
                 log::trace!("gpu.launch args: {:?}", args);
@@ -1589,7 +1606,6 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         let span = self.cur_span;
         let op = self.call_op(llfn, args, ftype, span).unwrap();
         if let Some(op) = op {
-            let op = self.append_op(op);
             if op.result_count() > 0 {
                 let ret: mlir_ir::Value<'ml, 'val> = op.result(0).unwrap().into();
                 if op.result_count() > 1 {

@@ -768,7 +768,9 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn sub(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        let op = melior::dialect::arith::subi(lhs, rhs, self.cur_loc());
+        // TODO: Currently casting rhs to lhs. A better way is to see who's longer...
+        let rhs_casted = self.intcast(rhs, lhs.r#type(), false);
+        let op = melior::dialect::arith::subi(lhs, rhs_casted, self.cur_loc());
         self.append_op_res(op)
     }
 
@@ -870,12 +872,14 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn ashr(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        let op = melior::dialect::arith::shrsi(lhs, rhs, self.cur_loc());
+        let rhs_casted = self.intcast(rhs, lhs.r#type(), false);
+        let op = melior::dialect::arith::shrsi(lhs, rhs_casted, self.cur_loc());
         self.append_op_res(op)
     }
 
     fn and(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        let op = melior::dialect::arith::andi(lhs, rhs, self.cur_loc());
+        let rhs_casted = self.intcast(rhs, lhs.r#type(), false);
+        let op = melior::dialect::arith::andi(lhs, rhs_casted, self.cur_loc());
         self.append_op_res(op)
     }
 

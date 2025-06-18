@@ -1128,7 +1128,6 @@ version = "0.1.0"
 dependencies = [
  "compiletest_rs",
  "env_logger",
- "gpu",
  "log",
  "log-derive",
  "melior",

@@ -17,19 +17,43 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
+      - name: Cache LLVM toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            /home/linuxbrew/.linuxbrew
+          key: cache-tool-${{ runner.os }}
+          restore-keys: |
+            cache-tool-${{ runner.os }}
+      
+      - name: Add NVIDIA package repository
+        run: |
+          sudo wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i cuda-keyring_1.1-1_all.deb
+          sudo apt update
+
+      - name: Install Minimal CUDA Toolkit
+        run: |
+          sudo apt install -y cuda-nvcc-12-9 cuda-cuobjdump-12-9 # Or adjust version as needed
+          echo "PATH=/usr/local/cuda/bin:${PATH}" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+      
+      - name: Confirm cuda tool
+        run: |
+          nvcc --version
+          ptxas --version
+          cuobjdump --version
+
+
       - name: Install rust toolchain
         run: rustup toolchain install --profile minimal
 
       - name: Add rust components
         run: rustup component add --toolchain nightly-2025-03-28-x86_64-unknown-linux-gnu rustfmt rust-src clippy
 
-      - name: Format
-        working-directory: crates
-        run: cargo fmt --all -- --check
-
       - name: Dep
         run: |
-          /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          test -x /home/linuxbrew/.linuxbrew/bin/brew || /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
           /home/linuxbrew/.linuxbrew/bin/brew install llvm@20
 
       - name: Set up LLVM environment
@@ -44,6 +68,10 @@ jobs:
           which llvm-config
           llvm-config --version
 
+      - name: Format
+        working-directory: crates
+        run: cargo fmt --all -- --check
+
       - name: Clippy
         working-directory: crates
         run: cargo clippy --workspace --exclude cuda_bindings -- -D warnings -C panic=abort
@@ -51,3 +79,7 @@ jobs:
       - name: Build
         working-directory: crates
         run: cargo build --workspace --exclude cuda_bindings
+
+      - name: Run tests
+        working-directory: crates/rustc_codegen_gpu
+        run: cargo test

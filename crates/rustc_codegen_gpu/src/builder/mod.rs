@@ -253,6 +253,71 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         }
     }
 
+    fn inbounds_gep_op(
+        &mut self,
+        ty: <GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::Type,
+        ptr: melior::ir::Value<'ml, 'a>,
+        indices: &[melior::ir::Value<'ml, 'a>],
+    ) -> mlir_ir::Operation<'ml> {
+        if indices.len() != 1 {
+            panic!("only supports single index");
+        }
+        let size = self.static_size_of(ty);
+        let static_sizes = vec![1_i64; indices.len()]; // Force to be 1 since this is a ptr?
+        let static_strides = vec![1_i64; indices.len()];
+        let idx = indices[0];
+        let mut dynamic = false;
+        for index in indices {
+            if index.is_from_op(Some("arith.constant")).is_err() {
+                dynamic = true;
+            }
+        }
+        let (static_indices, dy_indices) = if !dynamic {
+            (
+                indices
+                    .iter()
+                    .map(|v| self.const_to_opt_uint(*v).unwrap() as i64)
+                    .collect::<Vec<_>>(),
+                vec![],
+            )
+        } else {
+            let indices = indices
+                .iter()
+                .map(|v| {
+                    if v.r#type().is_integer() {
+                        let v = self.use_value(*v);
+                        self.intcast(v, self.type_index(), false)
+                    } else if v.r#type().is_index() {
+                        self.use_value(*v)
+                    } else {
+                        panic!("Must be int or index type");
+                    }
+                })
+                .collect::<Vec<_>>();
+            (vec![crate::mlir::memref::dynamic_stride_offset(); indices.len()], indices)
+        };
+
+        let base_ty = self.mlir_element_type(ptr.r#type());
+        let memref_ty: MemRefType<'ml> = MemRefType::new(
+            base_ty,
+            &[1],
+            Some(melior::ir::Attribute::parse(self.mlir_ctx, "strided<[1], offset: ?>").unwrap()),
+            None,
+        );
+        mlir_memref::subview(
+            self.mlir_ctx,
+            ptr,
+            &dy_indices,
+            &[],
+            &[],
+            &static_indices,
+            &static_sizes,
+            &static_strides,
+            memref_ty,
+            self.cur_loc(),
+        )
+    }
+
     /*fn size_of(&self, ty: mlir_ir::Type<'_>) -> melior::ir::Value<'ml, 'a> {
             if ty.is_integer() {
                 self.const_value(self.cx.mlir_integer_width(ty) / 8, self.type_index())
@@ -1106,63 +1171,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         if self.is_unreachable() {
             return ptr;
         }
-        if indices.len() != 1 {
-            panic!("only supports single index");
-        }
-        let size = self.static_size_of(ty);
-        let static_sizes = vec![1_i64; indices.len()]; // Force to be 1 since this is a ptr?
-        let static_strides = vec![1_i64; indices.len()];
-        let idx = indices[0];
-        let mut dynamic = false;
-        for index in indices {
-            if index.is_from_op(Some("arith.constant")).is_err() {
-                dynamic = true;
-            }
-        }
-        let (static_indices, dy_indices) = if !dynamic {
-            (
-                indices
-                    .iter()
-                    .map(|v| self.const_to_opt_uint(*v).unwrap() as i64)
-                    .collect::<Vec<_>>(),
-                vec![],
-            )
-        } else {
-            let indices = indices
-                .iter()
-                .map(|v| {
-                    if v.r#type().is_integer() {
-                        let v = self.use_value(*v);
-                        self.intcast(v, self.type_index(), false)
-                    } else if v.r#type().is_index() {
-                        self.use_value(*v)
-                    } else {
-                        panic!("Must be int or index type");
-                    }
-                })
-                .collect::<Vec<_>>();
-            (vec![crate::mlir::memref::dynamic_stride_offset(); indices.len()], indices)
-        };
-
-        let base_ty = self.mlir_element_type(ptr.r#type());
-        let memref_ty: MemRefType<'ml> = MemRefType::new(
-            base_ty,
-            &[1],
-            Some(melior::ir::Attribute::parse(self.mlir_ctx, "strided<[1], offset: ?>").unwrap()),
-            None,
-        );
-        let op = mlir_memref::subview(
-            self.mlir_ctx,
-            ptr,
-            &dy_indices,
-            &[],
-            &[],
-            &static_indices,
-            &static_sizes,
-            &static_strides,
-            memref_ty,
-            self.cur_loc(),
-        );
+        let op = self.inbounds_gep_op(ty, ptr, indices);
         self.append_op_res(op)
     }
 

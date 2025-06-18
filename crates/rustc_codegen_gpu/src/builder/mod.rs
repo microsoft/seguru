@@ -249,7 +249,45 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             }
             GpuItem::IntoIter => todo!(),
             GpuItem::IterNext => todo!(),
-            GpuItem::Subslice | GpuItem::SubsliceMut => todo!(),
+            GpuItem::Subslice | GpuItem::SubsliceMut => {
+                log::trace!("gpu.subslice(_mut) args: {:?}", args);
+                // args[0]: original:      memref<1xi8>
+                // args[1]: original_size: i64
+                // args[2]: offset:        index
+                // args[3]: window:        i64
+
+                // Note that there is no actual difference between the subslice and a
+                // subslice_mut at the MLIR level
+
+                let original = args[0];
+                let original_size = args[1];
+                let offset = args[2];
+                let window = args[3];
+
+                // 1. Bound check: offset + window <= original_size
+                //    a.k.a. offset + window - 1 < original size
+                //    The subslice must fit within the range of the original buffer
+                let index_int_upper = self.add(window, offset);
+                let one = self.mlir_const_val_from_type(1, self.type_i64(), self.cur_block());
+                let index_int = self.sub(index_int_upper, one);
+                let oob = self.sub(index_int, original_size);
+                let shift = self.emit_constant(63, self.type_i64());
+                let oob_flag = self.ashr(oob, shift);
+
+                self.emit_llvm_volatile_and_load(oob_flag, self.san_dummy.unwrap());
+
+                // 2. Build the subslice: Done by transforming memref<1xi8> into the
+                //    strided form using subview. Shortcut to use inbounds_gep
+                let indices = vec![offset; 1];
+                let subview_op = self.inbounds_gep_op(self.type_i8(), original, &indices);
+                let op_ref = self.append_op(subview_op);
+
+                // 3. Build the 'pair' of memref and i64
+                let res = op_ref.result(0).unwrap().into();
+                self.op_to_extra_values.insert(op_ref.location().to_string(), vec![res, window]);
+
+                Ok(Some(op_ref))
+            }
         }
     }
 

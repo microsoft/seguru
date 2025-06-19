@@ -20,8 +20,10 @@ fn run_codegen_tests(src: PathBuf, mode: &str) {
 
     // 👇 Point to your shared backend library
     let backend_path = target_dir.join("librustc_codegen_gpu.so");
-    config.target_rustcflags =
-        Some(format!("-Zcodegen-backend={} --crate-type=lib", backend_path.display()));
+    config.target_rustcflags = Some(format!(
+        "-C opt-level=3 -Zcodegen-backend={} --crate-type=lib",
+        backend_path.display()
+    ));
     println!("config.target_rustcflags: {}", config.target_rustcflags.as_ref().unwrap());
     compiletest::run_tests(&config);
 }

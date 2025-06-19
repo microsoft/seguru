@@ -83,17 +83,37 @@ extern "C" int gpu_destroy(void)
 	return 0;
 }
 
-extern "C" unsigned long long gpu_memalloc(size_t size)
+extern "C" void *gpu_memalloc(size_t size)
 {
 	CUresult err;
-	unsigned long long ret = 0;
+	void *ret = 0;
 
-	err = checkCuErrors(cuMemAlloc(&ret, size));
+	err = checkCuErrors(cuMemAlloc((CUdeviceptr *)&ret, size));
 	if (err != CUDA_SUCCESS) {
-		return 0;
+		return NULL;
 	}
 
 	return ret;
+}
+
+extern "C" int gpu_memcpy(void *dst, void *src, size_t size, uint8_t h_to_d)
+{
+	CUresult err;
+
+	if (h_to_d) {
+		err = checkCuErrors(cuMemcpyHtoD((CUdeviceptr)dst, src, size));
+		if (err != CUDA_SUCCESS) {
+			return (int)err;
+		}
+	}
+	else {
+		err = checkCuErrors(cuMemcpyDtoH(dst, (CUdeviceptr)src, size));
+		if (err != CUDA_SUCCESS) {
+			return (int)err;
+		}
+	}
+
+	return 0;
 }
 
 extern "C" int gpu_free(unsigned long long ptr)

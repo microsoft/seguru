@@ -1,4 +1,5 @@
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -6,6 +7,7 @@ extern "C" {
 
 int gpu_init(void);
 void *gpu_memalloc(size_t size);
+int gpu_memcpy(void *dst, void *src, size_t size, uint8_t h_to_d);
 int gpu_free(void *ptr);
 int gpu_device_sync(void);
 int gpu_load_module(void);

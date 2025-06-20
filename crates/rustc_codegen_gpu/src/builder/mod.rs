@@ -532,6 +532,15 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         // let ptr = self.mlir_cast_memref(ptr, MemRefType::new(ty, &[1], None, None).into());
         self.append_op_res(melior::dialect::memref::load(ptr, indices, self.cur_loc()))
     }
+
+    fn get_params(&mut self) -> Vec<mlir_ir::Value<'ml, 'a>> {
+        let mut ret = vec![];
+        for i in 0..self.cur_block().argument_count() {
+            let val = self.cur_block().argument(i).unwrap().into();
+            ret.push(val);
+        }
+        ret
+    }
 }
 
 impl<'tcx, 'ml, 'a> BackendTypes for GpuBuilder<'tcx, 'ml, 'a> {
@@ -681,7 +690,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         if self.is_unreachable() {
             return;
         }
-        let op = melior::dialect::cf::br(&dest, &[], self.cur_loc());
+        let op = melior::dialect::cf::br(&dest, &self.get_params(), self.cur_loc());
         self.append_op(op);
     }
 
@@ -691,25 +700,16 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         then_llbb: Self::BasicBlock,
         else_llbb: Self::BasicBlock,
     ) {
-        use rustc_codegen_ssa_gpu::traits::AbiBuilderMethods;
         if self.is_unreachable() {
             return;
-        }
-        let mut then_llbb_args = vec![];
-        for i in 0..then_llbb.argument_count() {
-            then_llbb_args.push(self.get_param(i));
-        }
-        let mut else_llbb_args = vec![];
-        for i in 0..else_llbb.argument_count() {
-            else_llbb_args.push(self.get_param(i));
         }
         let op = melior::dialect::cf::cond_br(
             self.mlir_ctx,
             cond,
             &then_llbb,
             &else_llbb,
-            &then_llbb_args,
-            &else_llbb_args,
+            &self.get_params(),
+            &self.get_params(),
             self.cur_loc(),
         );
         self.append_op(op);

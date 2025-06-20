@@ -100,11 +100,15 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         span: Span,
     ) -> Result<Option<melior::ir::OperationRef<'ml, 'a>>, melior::Error> {
         let mut return_type = vec![];
+        let mut input_types = vec![];
         let fn_sym_ptr = fn_ptr_value.to_func_sym();
         let builtin_sym = fn_ptr_value.get_op_attr::<StringAttribute>(BUILTIN_SYM);
         if let Some(ftype) = ftype {
             for i in 0..ftype.result_count() {
                 return_type.push(ftype.result(i).unwrap());
+            }
+            for i in 0..ftype.input_count() {
+                input_types.push(ftype.input(i).unwrap());
             }
         } else {
             panic!("")
@@ -124,6 +128,11 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 panic!();
             }
         }
+        let mut next_itype = input_types.iter();
+        let args = &args
+            .iter()
+            .map(|v| self.use_value_as_ty(*v, *(next_itype.next().unwrap())))
+            .collect::<Vec<_>>();
         if let Ok(fn_sym_ptr) = fn_sym_ptr {
             let op_ref = self.append_op(melior::dialect::func::call(
                 self.mlir_ctx,
@@ -391,6 +400,26 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             op.result(0).unwrap().into()
         } else {
             val
+        }
+    }
+
+    // If the value is memref, use view to convert it to a memref offset = 0.
+    fn use_value_as_ty(
+        &mut self,
+        val: melior::ir::Value<'ml, 'a>,
+        dst_ty: melior::ir::Type<'ml>,
+    ) -> melior::ir::Value<'ml, 'a> {
+        let val = self.use_value(val);
+        let ty = val.r#type();
+        if ty == dst_ty {
+            val
+        } else if ty.is_mem_ref() && dst_ty.is_mem_ref() {
+            self.mlir_memref_view(val, dst_ty, None)
+        } else if ty.is_index() || dst_ty.is_index() {
+            assert!(ty.is_integer() || dst_ty.is_integer());
+            self.intcast(val, dst_ty, false)
+        } else {
+            panic!("Cannot use value {:?} as type {:?}", val, dst_ty);
         }
     }
 

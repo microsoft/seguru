@@ -92,6 +92,10 @@ pub fn dynamic_size() -> i64 {
     unsafe { mlir_sys::mlirShapedTypeGetDynamicSize() }
 }
 
+pub(crate) fn default_memref_layout<'c>(mlir_ctx: &'c Context) -> Attribute<'c> {
+    StridedLayoutAttribute::new(mlir_ctx, 0, &[1]).into()
+}
+
 /// Implement reinterpret_cast for MemRef types.
 pub fn reinterpret_cast<'c, 'a>(
     mlir_ctx: &'c Context,

@@ -51,7 +51,12 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     }
 
     pub(crate) fn type_memref(&self, eletype: MLIRType<'ml>, dim: &[i64]) -> MLIRType<'ml> {
-        MLIRType::from(mlir_type::MemRefType::new(eletype, dim, None, None))
+        MLIRType::from(mlir_type::MemRefType::new(
+            eletype,
+            dim,
+            Some(crate::mlir::memref::default_memref_layout(self.mlir_ctx)),
+            None,
+        ))
     }
 
     pub(crate) fn type_memref_single(&self, eletype: MLIRType<'ml>) -> MLIRType<'ml> {

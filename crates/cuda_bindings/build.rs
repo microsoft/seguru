@@ -7,6 +7,7 @@ fn main() {
     // Generate bindings
     // Tell cargo to invalidate the built crate whenever the wrapper changes
     println!("cargo:rerun-if-changed=libcuda_bindings/lib.h");
+    println!("cargo:rerun-if-changed=libcuda_bindings/lib.cu");
     let bindings = bindgen::Builder::default()
         // The input header we would like to generate bindings for.
         .header("libcuda_bindings/lib.h")
@@ -26,5 +27,8 @@ fn main() {
         .cuda(true)
         .cudart("static")
         .file("libcuda_bindings/lib.cu")
-        .compile("libcuda_bindings.a");
+        .shared_flag(true)
+        .compile("cuda_bindings");
+
+    println!("cargo:rustc-link-lib=cuda_bindings");
 }

@@ -17,7 +17,7 @@ int gpu_launch_kernel(const char *func_name,
 		      unsigned int gridDimZ, unsigned int blockDimX,
 		      unsigned int blockDimY, unsigned int blockDimZ,
 		      unsigned int sharedMemBytes,
-		      void **kernelParams, void **extra);
+		      void *kernelParams, void *extra);
 
 #ifdef __cplusplus
 }

@@ -240,7 +240,7 @@ unsafe extern "C" {
         blockDimY: ::std::os::raw::c_uint,
         blockDimZ: ::std::os::raw::c_uint,
         sharedMemBytes: ::std::os::raw::c_uint,
-        kernelParams: *mut *mut ::std::os::raw::c_void,
-        extra: *mut *mut ::std::os::raw::c_void,
+        kernelParams: *mut ::std::os::raw::c_void,
+        extra: *mut ::std::os::raw::c_void,
     ) -> ::std::os::raw::c_int;
 }

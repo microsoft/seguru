@@ -177,7 +177,7 @@ extern "C" int gpu_launch_kernel(const char *func_name,
 				 unsigned int gridDimZ, unsigned int blockDimX,
 				 unsigned int blockDimY, unsigned int blockDimZ,
 				 unsigned int sharedMemBytes,
-				 void **kernelParams, void **extra)
+				 void *kernelParams, void *extra)
 {
 	CUresult err;
 	CUfunction kernel;
@@ -191,7 +191,7 @@ extern "C" int gpu_launch_kernel(const char *func_name,
 					   blockDimX, blockDimY, blockDimZ,
 					   sharedMemBytes,
 					   0, /* CUstream */
-					   kernelParams, extra));
+					   (void **)kernelParams, (void **)extra));
 	if (err != CUDA_SUCCESS) {
 		return (int)err;
 	}

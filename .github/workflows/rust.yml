@@ -81,7 +81,7 @@ jobs:
 
       - name: Build
         working-directory: crates
-        run: cargo build --workspace --exclude cuda_bindings
+        run: cargo build --workspace --exclude cuda_bindings --exclude manual-test-host-arith
 
       - name: Run tests
         working-directory: crates/rustc_codegen_gpu

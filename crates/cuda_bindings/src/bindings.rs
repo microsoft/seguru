@@ -213,7 +213,7 @@ unsafe extern "C" {
 unsafe extern "C" {
     pub fn gpu_memcpy(
         dst: *mut ::std::os::raw::c_void,
-        src: *mut ::std::os::raw::c_void,
+        src: *const ::std::os::raw::c_void,
         size: usize,
         h_to_d: u8,
     ) -> ::std::os::raw::c_int;

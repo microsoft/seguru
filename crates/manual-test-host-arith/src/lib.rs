@@ -99,7 +99,7 @@ fn main() -> ExitCode {
 
     // Allocate the two host-side arrays
     // TODO: Make h_a non-mutable
-    let h_a: &mut [u8] = &mut [1, 2, 3, 4];
+    let h_a: &[u8] = &[1, 2, 3, 4];
     let h_b: &mut [u8] = &mut [5, 6, 7, 8];
 
     // Allocate the two device-side arrays and build them into slices
@@ -118,7 +118,7 @@ fn main() -> ExitCode {
     unsafe {
         if cuda_bindings::gpu_memcpy(
             d_a_ptr as *mut ::std::os::raw::c_void,
-            h_a.as_mut_ptr() as *mut ::std::os::raw::c_void,
+            h_a.as_ptr() as *const ::std::os::raw::c_void,
             len * std::mem::size_of::<u8>(),
             cuda_bindings::GPU_MEMCPY_H2D,
         ) != 0
@@ -129,7 +129,7 @@ fn main() -> ExitCode {
 
         if cuda_bindings::gpu_memcpy(
             d_b_ptr as *mut ::std::os::raw::c_void,
-            h_b.as_mut_ptr() as *mut ::std::os::raw::c_void,
+            h_b.as_ptr() as *const ::std::os::raw::c_void,
             len * std::mem::size_of::<u8>(),
             cuda_bindings::GPU_MEMCPY_H2D,
         ) != 0
@@ -149,7 +149,7 @@ fn main() -> ExitCode {
     unsafe {
         if cuda_bindings::gpu_memcpy(
             h_b.as_mut_ptr() as *mut ::std::os::raw::c_void,
-            d_b_ptr as *mut ::std::os::raw::c_void,
+            d_b_ptr as *const ::std::os::raw::c_void,
             len * std::mem::size_of::<u8>(),
             cuda_bindings::GPU_MEMCPY_D2H,
         ) != 0

@@ -96,7 +96,7 @@ extern "C" void *gpu_memalloc(size_t size)
 	return ret;
 }
 
-extern "C" int gpu_memcpy(void *dst, void *src, size_t size, uint8_t h_to_d)
+extern "C" int gpu_memcpy(void *dst, const void *src, size_t size, uint8_t h_to_d)
 {
 	CUresult err;
 

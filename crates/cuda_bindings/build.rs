@@ -27,6 +27,7 @@ fn main() {
         .cuda(true)
         .cudart("static")
         .file("libcuda_bindings/lib.cu")
+        .flag("-Wno-deprecated-gpu-targets")
         .shared_flag(true)
         .compile("cuda_bindings");
 

@@ -1,4 +1,5 @@
 use rustc_codegen_ssa_gpu::traits::PreDefineCodegenMethods;
+use tracing::trace;
 
 use super::GPUCodegenContext;
 use crate::mlir::MLIRVisibility;
@@ -28,7 +29,7 @@ impl<'tcx, 'ml, 'a> PreDefineCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'm
         visibility: rustc_middle::mir::mono::Visibility,
         symbol_name: &str,
     ) {
-        log::trace!(
+        trace!(
             "Predefining function with name `{}` with linkage `{:?}` and attributes `{:?} {:?}`",
             symbol_name,
             linkage,

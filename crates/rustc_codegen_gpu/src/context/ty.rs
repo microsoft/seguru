@@ -5,6 +5,7 @@ use rustc_codegen_ssa_gpu::traits::{
     TypeMembershipCodegenMethods,
 };
 use rustc_middle::ty::layout::LayoutOf;
+use tracing::debug;
 
 use super::GPUCodegenContext;
 
@@ -108,7 +109,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 closure_substs,
                 rustc_middle::ty::ClosureKind::FnOnce,
             );
-            log::debug!("Closure def_id: {:?}", closure_def_id);
+            debug!("Closure def_id: {:?}", closure_def_id);
             Some(closure_inst)
         } else {
             None

@@ -1,4 +1,5 @@
 use rustc_codegen_ssa_gpu::traits::CoverageInfoBuilderMethods;
+use tracing::trace;
 
 use super::GPUCodegenContext;
 
@@ -8,6 +9,6 @@ impl<'tcx, 'ml, 'a> CoverageInfoBuilderMethods<'tcx> for GPUCodegenContext<'tcx,
         instance: rustc_middle::ty::Instance<'tcx>,
         kind: &rustc_middle::mir::coverage::CoverageKind,
     ) {
-        log::trace!("add_coverage {:?} {:?}", instance, kind);
+        trace!("add_coverage {:?} {:?}", instance, kind);
     }
 }

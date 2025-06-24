@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::ops::Deref;
 
-use log_derive::logfn;
 use melior::dialect::memref as mlir_memref;
 use melior::helpers::BuiltinBlockExt;
 use melior::ir::attribute::StringAttribute;
@@ -22,6 +21,7 @@ use rustc_codegen_ssa_gpu::traits::{
     LayoutTypeCodegenMethods, OverflowOp, StaticBuilderMethods,
 };
 use rustc_span::Span;
+use tracing::{debug, trace, warn};
 
 use crate::attr::GpuItem;
 use crate::context::GPUCodegenContext;
@@ -115,7 +115,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         }
         let loc = self.to_mlir_loc(span);
         if let Ok(builtin_sym) = builtin_sym {
-            log::trace!("call_op fn_sym_ptr: {:?}", builtin_sym.value());
+            trace!("call_op fn_sym_ptr: {:?}", builtin_sym.value());
             if let Ok(gpu_item) = GpuItem::try_from(builtin_sym.value()) {
                 return self.call_gpu_builtin_operation(
                     gpu_item,
@@ -210,7 +210,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 Ok(None)
             }
             GpuItem::Scope => {
-                log::trace!("gpu.scope args: {:?}", args);
+                trace!("gpu.scope args: {:?}", args);
                 self.extra_state.inside_gpu_scope = true;
                 let op_ref = self.append_op(melior::dialect::func::call(
                     self.mlir_ctx,
@@ -222,7 +222,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 Ok(Some(op_ref))
             }
             GpuItem::Grid => {
-                log::trace!("gpu.grid args: {:?}", args);
+                trace!("gpu.grid args: {:?}", args);
                 self.extra_state.args.insert(gpu_item, args.to_vec());
                 let op_ref = self.append_op(melior::dialect::func::call(
                     self.mlir_ctx,
@@ -234,7 +234,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 Ok(Some(op_ref))
             }
             GpuItem::Block => {
-                log::trace!("gpu.block args: {:?}", args);
+                trace!("gpu.block args: {:?}", args);
                 self.extra_state.args.insert(gpu_item, args.to_vec());
                 let op_ref = self.append_op(melior::dialect::func::call(
                     self.mlir_ctx,
@@ -246,7 +246,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 Ok(Some(op_ref))
             }
             GpuItem::Launch => {
-                log::trace!("gpu.launch args: {:?}", args);
+                trace!("gpu.launch args: {:?}", args);
                 self.extra_state.args.insert(gpu_item, args.to_vec());
                 /*let op = melior::ir::operation::OperationBuilder::new(
                     "gpu.launch",
@@ -260,7 +260,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             GpuItem::IntoIter => todo!(),
             GpuItem::IterNext => todo!(),
             GpuItem::Subslice | GpuItem::SubsliceMut => {
-                log::trace!("gpu.subslice(_mut) args: {:?}", args);
+                trace!("gpu.subslice(_mut) args: {:?}", args);
                 // args[0]: original:      memref<1xi8>
                 // args[1]: original_size: i64
                 // args[2]: offset:        index
@@ -441,7 +441,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         let (base_memref, base_byte_offset) = match layout {
             Ok(layout) if layout.get_offset() != 0 => {
                 // view cannot work on offset !=0;
-                log::warn!("mlir_memref_view with offset != 0 casting {} to {}", val, dst_ty);
+                warn!("mlir_memref_view with offset != 0 casting {} to {}", val, dst_ty);
                 let op = extract_strided_metadata(self.cx.mlir_ctx, val, self.cur_loc());
                 let op = self.append_op(op.into());
                 let results = extract_strided_metadata_results(memref_ty, op);
@@ -461,7 +461,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                     &results.strides,
                     self.cur_loc(),
                 );
-                log::debug!("base memref: {:?}", val);
+                debug!("base memref: {:?}", val);
                 (self.append_op_res(op), results.byte_offset)
             }
             _ => (val, self.const_value(0, self.type_index())),
@@ -485,7 +485,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
     }
 
     fn append_op_res(&self, op: mlir_ir::Operation<'ml>) -> mlir_ir::Value<'ml, 'a> {
-        log::trace!("append_op_res: {:?}", op);
+        trace!("append_op_res: {:?}", op);
         self.cur_block().append_op_result(op).unwrap()
     }
 
@@ -494,7 +494,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
     }
 
     fn append_op(&self, op: mlir_ir::Operation<'ml>) -> mlir_ir::OperationRef<'ml, 'a> {
-        log::trace!("append_op: {:?}", op);
+        trace!("append_op: {:?}", op);
         if self.is_unreachable() {
             panic!("Cannot append operation to unreachable block");
         }
@@ -633,7 +633,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
 
     fn set_span(&mut self, span: rustc_span::Span) {
         self.cur_span = span;
-        log::debug!("set span {:?}", span);
+        debug!("set span {:?}", span);
     }
 
     fn append_block(
@@ -641,7 +641,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         llfn: mlir_ir::operation::OperationRef<'ml, 'a>,
         name: &str,
     ) -> Self::BasicBlock {
-        log::debug!("append_block: {:?}", name);
+        debug!("append_block: {:?}", name);
         let name = rustc_data_structures::small_c_str::SmallCStr::new(name);
         let region: RegionRef<'ml, 'a> = unsafe { llfn.to_ref() }.region(0).unwrap();
         let types = llfn.get_op_operands_types();
@@ -653,7 +653,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn append_sibling_block(&mut self, name: &str) -> Self::BasicBlock {
-        log::debug!("append_sibling_block: {:?}", name);
+        debug!("append_sibling_block: {:?}", name);
         let sibling_block = melior::ir::Block::new(&[]);
         self.cur_block().parent_region().as_ref().unwrap().append_block(sibling_block)
     }
@@ -980,7 +980,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         lhs: Self::Value,
         rhs: Self::Value,
     ) -> (Self::Value, Self::Value) {
-        log::warn!("Incomplete checked_binop: {:?} {:?} {:?}", oop, lhs, rhs);
+        warn!("Incomplete checked_binop: {:?} {:?} {:?}", oop, lhs, rhs);
         // TODO: Build op with set_overflow_flags
         let ret = match oop {
             OverflowOp::Add => self.add(lhs, rhs),
@@ -991,12 +991,12 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn from_immediate(&mut self, val: Self::Value) -> Self::Value {
-        log::trace!("from_immediate: {:?}", val);
+        trace!("from_immediate: {:?}", val);
         if val.r#type() == self.cx().type_i1() { self.zext(val, self.cx().type_i8()) } else { val }
     }
 
     fn to_immediate_scalar(&mut self, val: Self::Value, scalar: rustc_abi::Scalar) -> Self::Value {
-        log::trace!("to_immediate_scalar: {:?} {:?}", val, scalar);
+        trace!("to_immediate_scalar: {:?} {:?}", val, scalar);
         val
     }
 
@@ -1026,7 +1026,6 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         self.append_op_res(op)
     }
 
-    #[logfn(TRACE)]
     fn dynamic_alloca(&mut self, size: Self::Value, align: rustc_abi::Align) -> Self::Value {
         // add dynamic_size in memref::alloca
         todo!();
@@ -1152,7 +1151,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             rustc_const_eval::interpret::Scalar::Ptr(ptr, s) => {
                 let (prov, offset) = ptr.into_parts();
                 let alloc_id = prov.alloc_id();
-                log::trace!("scalar_to_backend ptr: {:?}", self.tcx.global_alloc(alloc_id));
+                trace!("scalar_to_backend ptr: {:?}", self.tcx.global_alloc(alloc_id));
                 self.const_data_memref_from_alloc_id(alloc_id)
             }
         }

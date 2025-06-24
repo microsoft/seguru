@@ -6,6 +6,7 @@ use rustc_codegen_ssa_gpu::traits::{
     BackendTypes, BaseTypeCodegenMethods, ConstCodegenMethods, StaticCodegenMethods,
 };
 use rustc_const_eval::interpret::{GlobalAlloc, alloc_range};
+use tracing::{debug, trace};
 
 use super::GPUCodegenContext;
 
@@ -44,7 +45,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             mlir_type::MemRefType::new(self.type_i8(), &[alloc.inner().len() as i64], None, None);
         let bytes =
             alloc.inner().get_bytes_unchecked(alloc_range(Size::ZERO, alloc.inner().size()));
-        log::debug!(
+        debug!(
             "const_data_memref_from_alloc: {} {} {:?} {}",
             alloc.inner().len(),
             alloc.inner().size().bytes(),
@@ -107,7 +108,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             _ => todo!(),
         };
         self.const_alloc.write().unwrap().insert(alloc_id, v);
-        log::trace!("const_data_memref_from_alloc_id: {:?}", v);
+        trace!("const_data_memref_from_alloc_id: {:?}", v);
         v
     }
 }
@@ -227,7 +228,7 @@ impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
             rustc_const_eval::interpret::Scalar::Ptr(ptr, s) => {
                 let (prov, offset) = ptr.into_parts();
                 let alloc_id = prov.alloc_id();
-                log::trace!("scalar_to_backend ptr: {:?}", self.tcx.global_alloc(alloc_id));
+                trace!("scalar_to_backend ptr: {:?}", self.tcx.global_alloc(alloc_id));
                 self.const_data_memref_from_alloc_id(alloc_id)
             }
         }

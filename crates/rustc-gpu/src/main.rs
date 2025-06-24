@@ -1,10 +1,7 @@
 use std::env;
 use std::process::{Command, exit};
 
-use log::{LevelFilter, debug};
-use log4rs::append::file::FileAppender;
-use log4rs::config::{Appender, Config, Root};
-use log4rs::encode::pattern::PatternEncoder;
+use tracing::debug;
 
 fn get_value(args: &[String], param: &str) -> Option<String> {
     let mut iter = args.iter();
@@ -17,17 +14,8 @@ fn get_value(args: &[String], param: &str) -> Option<String> {
 }
 
 fn main() -> std::io::Result<()> {
-    let logfile = FileAppender::builder()
-        .encoder(Box::new(PatternEncoder::new("{l} - {m}\n")))
-        .build("gpu_rustc.log")
-        .unwrap();
-
-    let config = Config::builder()
-        .appender(Appender::builder().build("logfile", Box::new(logfile)))
-        .build(Root::builder().appender("logfile").build(LevelFilter::Debug))
-        .unwrap();
-
-    log4rs::init_config(config).unwrap();
+    let log_file = std::fs::File::options().append(true).open("gpu_rustc.log")?;
+    tracing_subscriber::fmt().with_writer(std::sync::Mutex::new(log_file)).init();
     // crate1,crate2,..
     let gpu_target_str = env::var("GPU_TARGETS").unwrap_or_default();
 

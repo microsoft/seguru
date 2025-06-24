@@ -3,6 +3,7 @@ use rustc_abi::HasDataLayout;
 use rustc_codegen_ssa_gpu::traits::{AbiBuilderMethods, ArgAbiBuilderMethods};
 use rustc_middle::ty::layout::{FnAbiOfHelpers, HasTyCtxt, HasTypingEnv, LayoutOfHelpers};
 use rustc_target::callconv::PassMode;
+use tracing::{trace, warn};
 
 use super::GpuBuilder;
 
@@ -56,9 +57,9 @@ impl<'tcx, 'ml, 'a> FnAbiOfHelpers<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
 
 impl<'tcx, 'ml, 'a> AbiBuilderMethods for GpuBuilder<'tcx, 'ml, 'a> {
     fn get_param(&mut self, index: usize) -> Self::Value {
-        log::trace!("get_param({})", index);
+        trace!("get_param({})", index);
         if index >= self.cur_block.argument_count() {
-            log::warn!("{}", self.cx.mlir_module.as_operation());
+            warn!("{}", self.cx.mlir_module.as_operation());
             panic!(
                 "{:?} get_param({}) out of bounds at {:?}",
                 self.cur_block.parent_operation(),
@@ -81,7 +82,7 @@ impl<'tcx, 'ml, 'a> ArgAbiBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
         if self.is_unreachable() {
             return;
         }
-        log::warn!("store_fn_arg {:?} {} {:?} {:?}", arg_abi, idx, dst, self.cur_span);
+        warn!("store_fn_arg {:?} {} {:?} {:?}", arg_abi, idx, dst, self.cur_span);
         fn next<'ml, 'a>(
             bx: &GpuBuilder<'_, 'ml, 'a>,
             idx: &mut usize,
@@ -123,7 +124,7 @@ impl<'tcx, 'ml, 'a> ArgAbiBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
         if self.is_unreachable() {
             return;
         }
-        log::warn!("store_arg {:?} {} {:?}", arg_abi.mode, val, dst);
+        warn!("store_arg {:?} {} {:?}", arg_abi.mode, val, dst);
         match arg_abi.mode {
             PassMode::Ignore => {}
             PassMode::Direct(_) | PassMode::Pair(..) => {

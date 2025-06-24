@@ -3,6 +3,7 @@ use std::process::Command;
 use rustc_codegen_ssa_gpu::back::write::{CodegenContext, ModuleConfig};
 use rustc_codegen_ssa_gpu::{CompiledModule, ModuleCodegen};
 use rustc_errors::DiagCtxtHandle;
+use tracing::{debug, trace};
 
 use crate::backend::{GPUCodeGenModule, GPUCodegenBackend};
 
@@ -59,17 +60,17 @@ pub(crate) fn codegen(
         let out_obj_private = cgcx
             .output_filenames
             .temp_path(rustc_session::config::OutputType::Object, Some(copy.as_str()));
-        log::debug!("write MLIR module to {:?}", out);
+        debug!("write MLIR module to {:?}", out);
         let content = m.module.as_operation().to_string();
         if !m.module.as_operation().verify() {
-            log::trace!("MLIR module verify failed.");
+            trace!("MLIR module verify failed.");
             std::fs::write(&out, &content).unwrap();
             Err(rustc_errors::FatalError)?;
         }
         let content = content.replace("attributes {kernel, ", "kernel attributes {");
 
         std::fs::write(&out, &content).unwrap();
-        log::debug!("[Done]write MLIR module to {:?}", out);
+        debug!("[Done]write MLIR module to {:?}", out);
         // mlir-opt must use "shell" in order to pass correct arguments.
         mlir_opt(out.to_str().unwrap(), out_opt.to_str().unwrap())?;
 
@@ -119,7 +120,7 @@ pub(crate) fn codegen(
         if !status.success() {
             panic!("objcopy failed with status: {:?}", output.status);
         }
-        log::trace!("copy MLIR obj to {:?}", out_obj);
+        trace!("copy MLIR obj to {:?}", out_obj);
         Some(out_obj_private)
     } else {
         None

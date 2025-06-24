@@ -25,7 +25,6 @@ impl<'tcx, 'ml, 'a> DebugInfoCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'm
             Self::DILocation,
         >,
     > {
-        log::trace!("create_function_debug_context");
         None
     }
 

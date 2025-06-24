@@ -5,6 +5,7 @@ use rustc_hir::def_id::DefId;
 use rustc_middle::query::Key;
 use rustc_middle::ty::layout::{FnAbiOf, HasTyCtxt};
 use rustc_middle::ty::{AssocItemContainer, Instance};
+use tracing::{trace, warn};
 
 use super::GPUCodegenContext;
 use crate::attr::{GpuAttributes, GpuItem};
@@ -115,7 +116,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 }
                 rustc_target::callconv::PassMode::Indirect { attrs, meta_attrs, on_stack } => {
                     return Err("Does not support fn abi indirect".to_string());
-                    /*log::debug!("indirect arg: {:?} attrs: {:?} meta_attrs: {:?} on_stack: {}",
+                    /*debug!("indirect arg: {:?} attrs: {:?} meta_attrs: {:?} on_stack: {}",
                         arg.layout, attrs, meta_attrs, on_stack
                     );
                     use crate::rustc_middle::ty::layout::LayoutOf;
@@ -141,7 +142,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             ret.append(&mut t);
         }
         if args.is_empty() && ret.is_empty() {
-            log::warn!("function has no args and no ret");
+            warn!("function has no args and no ret");
         }
         let ftype: FunctionType<'ml> = FunctionType::new(self.mlir_ctx, &args, &ret);
         Ok(ftype)
@@ -235,7 +236,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let in_gpu_mod = gpu_attrs.kernel || gpu_attrs.device;
         operation.set_op_visible(self.mlir_ctx, visibility);
         let body = self.mlir_body(in_gpu_mod);
-        log::trace!("append operation to block {} {:?}", operation, fn_sym);
+        trace!("append operation to block {} {:?}", operation, fn_sym);
         let op = body.append_operation(operation);
         self.fn_db.write().unwrap().insert(sym, op);
         op

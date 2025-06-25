@@ -94,3 +94,8 @@ For example, a procedure macro lib should be compiled with standard rust codegen
 ```bash
 GPU_CODEGEN=`realpath ../target/release/librustc_codegen_gpu.so` RUSTC=`realpath ../target/release/rustc-gpu` GPU_TARGETS="gpu-test" cargo build
 ```
+
+To run with the manual-test-gpu-arith, use the following:
+```bash
+RUST_LOG=trace GPU_CODEGEN=`realpath ../target/debug/librustc_codegen_gpu.so` RUSTC=`realpath ../target/debug/rustc-gpu` GPU_TARGETS="manual-test-gpu-arith" REAL_LIBRARY_PATH_VAR="$LD_LIBRARY_PATH" RUSTFLAGS="--emit mir" cargo build --release
+```

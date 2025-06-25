@@ -487,6 +487,7 @@ name = "manual-test-gpu-arith"
 version = "0.1.0"
 dependencies = [
  "gpu",
+ "gpu_macros",
 ]
 
 [[package]]

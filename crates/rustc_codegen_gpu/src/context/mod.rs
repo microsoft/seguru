@@ -24,6 +24,7 @@ type CodegenGPUError = String;
 
 pub(crate) struct GPUCodegenContext<'tcx, 'ml, 'a> {
     pub cgu_name: String,
+    pub cgu: &'tcx rustc_middle::mir::mono::CodegenUnit<'tcx>,
     pub mlir_ctx: &'ml melior::Context,
     pub mlir_module: &'ml melior::ir::Module<'ml>,
     pub mlir_body: HashMap<String, melior::ir::BlockRef<'ml, 'ml>>,
@@ -55,6 +56,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
 
     pub fn new(
         cgu_name: String,
+        cgu: &'tcx rustc_middle::mir::mono::CodegenUnit<'tcx>,
         tcx: rustc_middle::ty::TyCtxt<'tcx>,
         mlir_ctx: &'ml melior::Context,
         mlir_module: &'ml melior::ir::Module<'ml>,
@@ -63,6 +65,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let location = melior::ir::Location::unknown(mlir_ctx);
         Self {
             cgu_name,
+            cgu,
             mlir_ctx,
             tcx,
             mlir_module,

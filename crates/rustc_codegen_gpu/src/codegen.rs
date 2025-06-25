@@ -22,6 +22,7 @@ pub(crate) fn module_codegen<'tcx>(
     {
         let cx: GPUCodegenContext<'_, '_, '_> = crate::context::GPUCodegenContext::new(
             cgu_name.as_str().to_string(),
+            cgu,
             tcx,
             mlir_ctx,
             &mlir_module,

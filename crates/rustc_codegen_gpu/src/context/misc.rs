@@ -53,7 +53,7 @@ impl<'tcx, 'ml> MiscCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, '_> {
     }
 
     fn codegen_unit(&self) -> &'tcx rustc_middle::mir::mono::CodegenUnit<'tcx> {
-        todo!()
+        self.cgu
     }
 
     fn set_frame_pointer_type(&self, llfn: Self::Function) {

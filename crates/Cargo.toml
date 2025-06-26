@@ -4,8 +4,6 @@ members = [
     "rustc-gpu",
     "gpu",
     "gpu-macros",
-    "gpu-test",
-    "gpu-test-basic",
     "gpu-test-arith-basic",
     "manual-test-gpu-arith",
     "manual-test-host-arith",

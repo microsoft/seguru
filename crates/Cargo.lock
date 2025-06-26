@@ -355,21 +355,6 @@ name = "gpu"
 version = "0.1.0"
 
 [[package]]
-name = "gpu-basic"
-version = "0.1.0"
-dependencies = [
- "gpu",
-]
-
-[[package]]
-name = "gpu-test"
-version = "0.1.0"
-dependencies = [
- "gpu",
- "gpu_macros",
-]
-
-[[package]]
 name = "gpu-test-arith"
 version = "0.1.0"
 dependencies = [

@@ -2,10 +2,12 @@
 #![feature(register_tool)]
 #![register_tool(gpu_codegen)]
 
+mod dim;
 mod print;
 
 use core::marker::PhantomData;
 
+pub use dim::{DimType, block_dim, global_id, grid_dim, thread_id};
 pub use print::{PushPrintfArg, printf};
 
 /// This is motivated by thread::scope in Rust std lib.
@@ -80,27 +82,11 @@ pub fn sync() {
     unimplemented!()
 }
 
-pub enum DimType {
-    X,
-    Y,
-    Z,
-}
-
 /// Add a string attribute to the MLIR module.
 #[gpu_codegen::builtin(add_mlir_string_attr)]
 #[gpu_codegen::device]
 #[inline(never)]
 pub fn add_mlir_string_attr(_: &'static str) -> usize {
-    unimplemented!()
-}
-
-#[gpu_codegen::builtin(gpu.thread_id)]
-pub fn thread_id() -> usize {
-    unimplemented!()
-}
-
-#[gpu_codegen::builtin(gpu.global_thread_id)]
-pub fn global_thread_id() -> usize {
     unimplemented!()
 }
 

@@ -16,14 +16,7 @@ fn kernel_create_wrapper(func: &mut syn::ItemFn, span: Span) -> syn::ItemFn {
     let mut stmts = vec![
         syn::parse(
             quote! {
-                gpu::add_mlir_string_attr("#gpu<dim x>");
-            }
-            .into(),
-        )
-        .expect("Failed to parse input as a statement 1"),
-        syn::parse(
-            quote! {
-                let __c = gpu::thread_id();
+                let __c = gpu::thread_id(gpu::DimType::X);
             }
             .into(),
         )

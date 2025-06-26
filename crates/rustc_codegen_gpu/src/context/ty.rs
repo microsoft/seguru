@@ -211,6 +211,18 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         }
         if let Some(ty) = ty {
             match ty.kind() {
+                rustc_middle::ty::TyKind::Adt(def, substs) => {
+                    // Ensure we translate struct field of usize to type_index
+                    if def.is_struct() || def.is_union() {
+                        let fields = def.non_enum_variant().fields.as_slice();
+                        assert!(fields.len() <= 1);
+                        if fields.len() == 1 {
+                            let field_ty =
+                                self.tcx.type_of(fields.iter().next().unwrap().did).skip_binder();
+                            return self.scalar_mlir_type(scalar, Some(&field_ty), immediate);
+                        }
+                    }
+                }
                 rustc_middle::ty::TyKind::Int(rustc_middle::ty::IntTy::Isize)
                 | rustc_middle::ty::TyKind::Uint(rustc_middle::ty::UintTy::Usize) => {
                     return self.type_index();

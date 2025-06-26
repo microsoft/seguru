@@ -7,7 +7,7 @@ mod print;
 
 use core::marker::PhantomData;
 
-pub use dim::{DimType, block_dim, global_id, grid_dim, thread_id};
+pub use dim::{DimType, GpuChunkIdx, block_dim, global_id, grid_dim, thread_id};
 pub use print::{PushPrintfArg, printf};
 
 /// This is motivated by thread::scope in Rust std lib.

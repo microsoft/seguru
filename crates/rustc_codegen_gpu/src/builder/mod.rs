@@ -179,6 +179,22 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                     self.append_op(crate::mlir::gpu::global_id(self.mlir_ctx, dimention, loc));
                 Ok(Some(op_ref))
             }
+            GpuItem::BlockDim => {
+                // attrs must be parsed from #gpu<dim(x)>
+                assert!(self.extra_state.attrs.len() == 1);
+                let dimention = self.extra_state.attrs.pop().unwrap();
+                let op_ref =
+                    self.append_op(crate::mlir::gpu::block_dim(self.mlir_ctx, dimention, loc));
+                Ok(Some(op_ref))
+            }
+            GpuItem::GridDim => {
+                // attrs must be parsed from #gpu<dim(x)>
+                assert!(self.extra_state.attrs.len() == 1);
+                let dimention = self.extra_state.attrs.pop().unwrap();
+                let op_ref =
+                    self.append_op(crate::mlir::gpu::grid_dim(self.mlir_ctx, dimention, loc));
+                Ok(Some(op_ref))
+            }
             GpuItem::Printf => {
                 // printf function should starts with a format passed by add_mlir_string_attr
                 // args can be passed to printf as a list of values.

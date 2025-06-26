@@ -17,6 +17,8 @@ pub(crate) struct GpuAttributes {
 pub enum GpuItem {
     ThreadId,
     GlobalThreadId,
+    BlockDim,
+    GridDim,
     Printf,
     AddStringAttr,
     Scope,
@@ -34,6 +36,8 @@ impl TryFrom<&str> for GpuItem {
         let ret = match s {
             "gpu.thread_id" => GpuItem::ThreadId,
             "gpu.global_thread_id" => GpuItem::GlobalThreadId,
+            "gpu.block_dim" => GpuItem::BlockDim,
+            "gpu.grid_dim" => GpuItem::GridDim,
             "gpu.printf" => GpuItem::Printf,
             "gpu.scope" => GpuItem::Scope,
             "gpu.block" => GpuItem::Block,
@@ -57,6 +61,8 @@ impl From<GpuItem> for &'static str {
         match item {
             GpuItem::ThreadId => "gpu.thread_id",
             GpuItem::GlobalThreadId => "gpu.global_thread_id",
+            GpuItem::BlockDim => "gpu.block_dim",
+            GpuItem::GridDim => "gpu.grid_dim",
             GpuItem::Printf => "gpu.printf",
             GpuItem::AddStringAttr => "add_mlir_string_attr",
             GpuItem::Scope => "gpu.scope",

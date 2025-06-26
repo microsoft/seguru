@@ -18,7 +18,7 @@ rustc_codegen_ssa_gpu = { package = "rustc_codegen_ssa", path = "../../compiler/
 #rustc_span = { path = "../../../rust/compiler/rustc_span" }
 #rustc_target = { path = "../../../rust/compiler/rustc_target" }
 #rustc_type_ir = { path = "../../../rust/compiler/rustc_type_ir" }
-melior = { version = "0.24.0", features = ["helpers"]}
+melior = { version = "0.25.0", features = ["helpers"]}
 melior-macro = { version = "0.17.0"}
 mlir-sys = "0.5.0"
 tracing = "0.1"
@@ -32,8 +32,14 @@ crate-type = ["dylib"]
 name = "filecheck"
 path = "tests/bin/filecheck.rs"
 
+[[bin]]
+name = "rustc-gpu"
+path = "../rustc-gpu/src/main.rs"
+
 [dev-dependencies]
 compiletest_rs = "0.9.0"
+gpu_macros = {path = "../gpu-macros"}
+gpu = {path = "../gpu"}
 
 [package.metadata.rust-analyzer]
 rustc_private = true

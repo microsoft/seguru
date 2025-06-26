@@ -1,6 +1,7 @@
 use melior::Context;
 use melior::dialect::ods::memref as raw_memref;
 use melior::ir::attribute::{DenseI32ArrayAttribute, DenseI64ArrayAttribute};
+use melior::ir::operation::OperationMutLike;
 use melior::ir::r#type::MemRefType;
 use melior::ir::{Attribute, Location, Operation, Type, TypeLike, Value, ValueLike};
 

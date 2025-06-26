@@ -179,6 +179,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "comrak"
+version = "0.39.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5c834ca54c5a20588b358f34d1533b4b498ddb5fd979cec6b22d0e8867a2449"
+dependencies = [
+ "caseless",
+ "entities",
+ "memchr",
+ "slug",
+ "typed-arena",
+ "unicode_categories",
+]
+
+[[package]]
 name = "convert_case"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -500,11 +514,11 @@ dependencies = [
 
 [[package]]
 name = "melior"
-version = "0.24.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9aca5ac86daa449d239072a0211f40c414280ce4fdb5d9209cdab5cefff2d549"
+checksum = "849459b46a3754be7d0d21b85a866a2a057c0e0a3b8096d8615d21e61e0479ab"
 dependencies = [
- "melior-macro",
+ "melior-macro 0.18.0",
  "mlir-sys",
 ]
 
@@ -514,7 +528,23 @@ version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "afac20108bb83b5601046e66d7238d71a234a93d2b11aa5fb9e1dfc4f6c175e1"
 dependencies = [
- "comrak",
+ "comrak 0.37.0",
+ "convert_case",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "syn",
+ "tblgen",
+ "unindent",
+]
+
+[[package]]
+name = "melior-macro"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d62bfbdc193acc4ee577b027ef9be3a4f8c383bc4388e76f618d021f49ef4330"
+dependencies = [
+ "comrak 0.39.0",
  "convert_case",
  "proc-macro2",
  "quote",
@@ -734,8 +764,10 @@ name = "rustc_codegen_gpu"
 version = "0.1.0"
 dependencies = [
  "compiletest_rs",
+ "gpu",
+ "gpu_macros",
  "melior",
- "melior-macro",
+ "melior-macro 0.17.0",
  "mlir-sys",
  "rustc_codegen_ssa",
  "tracing",

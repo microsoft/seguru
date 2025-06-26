@@ -10,6 +10,7 @@ use std::ops::Deref;
 use melior::dialect::memref as mlir_memref;
 use melior::helpers::BuiltinBlockExt;
 use melior::ir::attribute::StringAttribute;
+use melior::ir::operation::OperationLike;
 use melior::ir::r#type::{self as mlir_type, FunctionType, MemRefType};
 use melior::ir::{
     self as mlir_ir, BlockLike, Location, RegionLike, RegionRef, TypeLike, Value, ValueLike,

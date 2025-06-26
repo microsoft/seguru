@@ -8,7 +8,7 @@ use melior::dialect::ods::gpu::{GPUFuncOperation, GPUModuleOperation};
 use melior::dialect::ods::memref::GetGlobalOperation;
 use melior::dialect::{DialectRegistry, arith, func};
 use melior::ir::attribute::{FlatSymbolRefAttribute, StringAttribute, TypeAttribute};
-use melior::ir::operation::OperationResult;
+use melior::ir::operation::{OperationLike, OperationMutLike, OperationResult};
 use melior::ir::r#type::FunctionType;
 use melior::ir::*;
 use melior::utility::register_all_dialects;

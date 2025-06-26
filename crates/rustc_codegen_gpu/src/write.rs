@@ -1,5 +1,6 @@
 use std::process::Command;
 
+use melior::ir::operation::OperationLike;
 use rustc_codegen_ssa_gpu::back::write::{CodegenContext, ModuleConfig};
 use rustc_codegen_ssa_gpu::{CompiledModule, ModuleCodegen};
 use rustc_errors::DiagCtxtHandle;

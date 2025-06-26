@@ -1,3 +1,4 @@
+use melior::ir::operation::OperationMutLike;
 use melior::ir::r#type::FunctionType;
 use melior::ir::{BlockLike, Location, Operation};
 use rustc_codegen_ssa_gpu::traits::{LayoutTypeCodegenMethods, MiscCodegenMethods};

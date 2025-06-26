@@ -1,7 +1,12 @@
 #![feature(negative_impls)]
 #![feature(register_tool)]
 #![register_tool(gpu_codegen)]
+
+mod print;
+
 use core::marker::PhantomData;
+
+pub use print::{PushPrintfArg, printf};
 
 /// This is motivated by thread::scope in Rust std lib.
 pub struct Scope<'scope, 'env: 'scope> {
@@ -83,12 +88,9 @@ pub enum DimType {
 
 /// Add a string attribute to the MLIR module.
 #[gpu_codegen::builtin(add_mlir_string_attr)]
+#[gpu_codegen::device]
+#[inline(never)]
 pub fn add_mlir_string_attr(_: &'static str) -> usize {
-    unimplemented!()
-}
-
-#[gpu_codegen::builtin(gpu.printf)]
-pub fn printf() -> usize {
     unimplemented!()
 }
 

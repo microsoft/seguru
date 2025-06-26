@@ -179,7 +179,20 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 Ok(Some(op_ref))
             }
             GpuItem::Printf => {
+                // printf function should starts with a format passed by add_mlir_string_attr
+                // args can be passed to printf as a list of values.
+                // printf ends with an empty printf
                 assert!(self.extra_state.attrs.len() == 1);
+                if let std::collections::hash_map::Entry::Vacant(e) =
+                    self.extra_state.args.entry(gpu_item)
+                {
+                    e.insert(args.to_vec());
+                } else {
+                    self.extra_state.args.get_mut(&gpu_item).unwrap().extend(args);
+                }
+                if !args.is_empty() {
+                    return Ok(None);
+                }
                 let Ok(format) = self.extra_state.attrs.pop().unwrap().try_into() else {
                     let err =
                         format!("{:?} must take a single StringAttribute as format", gpu_item);

@@ -14,8 +14,8 @@ fn get_value(args: &[String], param: &str) -> Option<String> {
 }
 
 fn main() -> std::io::Result<()> {
-    let log_file = std::fs::File::options().append(true).open("gpu_rustc.log")?;
-    tracing_subscriber::fmt().with_writer(std::sync::Mutex::new(log_file)).init();
+    // let log_file = std::fs::File::options().append(true).open("gpu_rustc.log")?;
+    // tracing_subscriber::fmt().with_writer(std::sync::Mutex::new(log_file)).init();
     // crate1,crate2,..
     let gpu_target_str = env::var("GPU_TARGETS").unwrap_or_default();
 

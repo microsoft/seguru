@@ -722,7 +722,11 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         if self.is_unreachable() {
             return;
         }
-        let op = melior::dialect::cf::br(&dest, &self.get_params(), self.cur_loc());
+        let op = melior::dialect::cf::br(
+            &dest,
+            &self.get_params()[0..dest.argument_count()],
+            self.cur_loc(),
+        );
         self.append_op(op);
     }
 
@@ -740,8 +744,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             cond,
             &then_llbb,
             &else_llbb,
-            &self.get_params(),
-            &self.get_params(),
+            &self.get_params()[0..then_llbb.argument_count()],
+            &self.get_params()[0..else_llbb.argument_count()],
             self.cur_loc(),
         );
         self.append_op(op);
@@ -758,6 +762,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             return;
         }
 
+        let v = self.intcast(v, self.type_i64(), false);
         // Build the default case
         let mut else_llbb_args = vec![];
         for i in 0..else_llbb.argument_count() {
@@ -825,6 +830,10 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         if self.is_unreachable() {
             return;
         }
+        let block = self.append_sibling_block("unreachable");
+        self.br(block);
+        let cur = self.cur_block;
+        self.switch_to_block(block);
         let op = melior::dialect::cf::assert(
             self.mlir_ctx,
             self.const_value(0, self.type_i1()),
@@ -832,7 +841,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             self.cur_loc(),
         );
         self.append_op(op);
-        self.ret_void();
+        self.br(self.cur_block);
+        self.switch_to_block(cur);
     }
 
     fn add(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {

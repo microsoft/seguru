@@ -51,13 +51,29 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         MLIRType::from(mlir_type::TupleType::new(self.mlir_ctx, types))
     }
 
-    pub(crate) fn type_memref(&self, eletype: MLIRType<'ml>, dim: &[i64]) -> MLIRType<'ml> {
+    /// Safety:
+    ///   This is safe if eletype is not a memref type.
+    ///   MemRef is not 8bytes and so we should be careful when using creating MemRef<nxMemRef<..>>.
+    pub(crate) unsafe fn _type_memref(&self, eletype: MLIRType<'ml>, dim: &[i64]) -> MLIRType<'ml> {
         MLIRType::from(mlir_type::MemRefType::new(
             eletype,
             dim,
             Some(crate::mlir::memref::default_memref_layout(self.mlir_ctx)),
             None,
         ))
+    }
+
+    pub(crate) fn type_memref(&self, eletype: MLIRType<'ml>, dim: &[i64]) -> MLIRType<'ml> {
+        if eletype.is_mem_ref() {
+            // type_memref should be treated as 8bytes instead of the real memref type (>40bytes)
+            return unsafe {
+                self._type_memref(
+                    self.type_i8(),
+                    dim.iter().map(|&d| d * 8).collect::<Vec<_>>().as_slice(),
+                )
+            };
+        }
+        unsafe { self._type_memref(eletype, dim) }
     }
 
     pub(crate) fn type_memref_single(&self, eletype: MLIRType<'ml>) -> MLIRType<'ml> {
@@ -74,6 +90,12 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
 
     pub(crate) fn type_tensor(&self, ty: MLIRType<'ml>, len: u64) -> MLIRType<'ml> {
         MLIRType::from(mlir_type::RankedTensorType::new(&[len], ty, None))
+    }
+
+    pub(crate) fn type_llvm_ptr(&self) -> MLIRType<'ml> {
+        // This is a pointer to the LLVM dialect, which is used for LLVM intrinsics.
+        // We use the `llvm.ptr` type from the LLVM dialect.
+        MLIRType::from(melior::dialect::llvm::r#type::pointer(self.mlir_ctx, 0))
     }
 
     pub(crate) fn expand_type(&self, ty: MLIRType<'ml>) -> Vec<MLIRType<'ml>> {
@@ -329,7 +351,7 @@ impl<'tcx, 'ml, 'a> BaseTypeCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> 
     }
 
     fn type_ptr_ext(&self, address_space: rustc_abi::AddressSpace) -> Self::Type {
-        MLIRType::from(melior::dialect::llvm::r#type::pointer(self.mlir_ctx, address_space.0))
+        self.type_memref_single(self.type_i8())
     }
 
     fn type_kind(&self, ty: Self::Type) -> rustc_codegen_ssa_gpu::common::TypeKind {

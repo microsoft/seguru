@@ -515,6 +515,24 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         self.cur_block().append_operation(op)
     }
 
+    fn inttollvmptr(
+        &mut self,
+        val: mlir_ir::Value<'ml, 'a>,
+        dest_ty: <GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::Type,
+    ) -> mlir_ir::Value<'ml, 'a> {
+        assert!(!self.is_unreachable());
+
+        let int64_val = if val.r#type() == self.type_i64() {
+            val
+        } else {
+            self.intcast(val, self.type_i64(), false)
+        };
+        let op =
+            melior::dialect::ods::llvm::inttoptr(self.mlir_ctx, dest_ty, int64_val, self.cur_loc())
+                .into();
+        self.append_op_res(op)
+    }
+
     #[allow(dead_code)]
     pub fn inside_gpu_mod(&self) -> bool {
         if let Some(op) = self.cur_block().parent_operation() { op.is_gpu_func() } else { false }
@@ -1046,13 +1064,22 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn load(&mut self, ty: Self::Type, ptr: Self::Value, align: rustc_abi::Align) -> Self::Value {
+        // If the type is memref, we need to load the address (See store).
+        let load_ty = if ty.is_mem_ref() { self.type_index() } else { ty };
         // ptr is almost always memref<sizexi8>. Must be casted into memref<ty>
-        let ptr = if ty != self.mlir_element_type(ptr.r#type()) {
-            self.mlir_memref_view(ptr, self.type_memref(ty, &[1]), None)
+        let ptr = if load_ty != self.mlir_element_type(ptr.r#type()) {
+            self.mlir_memref_view(ptr, self.type_memref(load_ty, &[1]), None)
         } else {
             ptr
         };
-        self.mlir_load(ty, ptr, &[self.const_value(0, self.type_index())], align)
+        let mut loaded =
+            self.mlir_load(load_ty, ptr, &[self.const_value(0, self.type_index())], align);
+
+        // If the type is memref, we need to cast the address to the correct type.
+        if ty.is_mem_ref() {
+            loaded = self.inttoptr(loaded, ty);
+        }
+        loaded
     }
 
     fn volatile_load(&mut self, ty: Self::Type, ptr: Self::Value) -> Self::Value {
@@ -1090,24 +1117,17 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             let mut load = |i, scalar: rustc_abi::Scalar, align| {
                 let base_ty = self.scalar_pair_element_backend_type(place.layout, i, false);
                 let ptr = place.val.llval;
-                let ptr = if base_ty != self.mlir_element_type(ptr.r#type()) {
-                    self.emit_error(
-                        format!(
-                            "Scalar pair element type mismatch: expected {}, got {}",
-                            base_ty,
-                            ptr.r#type()
-                        ),
-                        self.cur_span,
-                    );
+                let offset = if i == 0 {
+                    None
+                } else {
+                    Some(self.const_value(b_offset.bytes(), self.type_index()))
+                };
+                let ptr = if i > 0 || (base_ty != self.mlir_element_type(ptr.r#type())) {
+                    self.mlir_memref_view(ptr, self.type_memref(base_ty, &[1]), offset)
                 } else {
                     ptr
                 };
-                self.mlir_load(
-                    self.scalar_pair_element_backend_type(place.layout, i, false),
-                    place.val.llval,
-                    &[self.const_usize(b_offset.bytes())],
-                    align,
-                )
+                self.load(self.scalar_pair_element_backend_type(place.layout, i, false), ptr, align)
             };
 
             OperandValue::Pair(
@@ -1187,7 +1207,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         let llvm_raw_ptr_and = self.and(llvm_raw_ptr_int, mask);
 
         // Ptr to LLVM
-        let llvm_ptr = self.inttoptr(llvm_raw_ptr_and, self.type_ptr());
+        let llvm_ptr = self.inttollvmptr(llvm_raw_ptr_and, self.type_llvm_ptr());
 
         // LLVM store with volatile
         let llvm_store_op = melior::dialect::llvm::load(
@@ -1212,19 +1232,28 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         if self.is_unreachable() {
             return val;
         }
-        let val = self.use_value(val);
+        let val_ty = val.r#type();
+        let ptr_ty = ptr.r#type();
+        let mut val = self.use_value(val);
+
+        // If the type is memref, we get the address and store it as 8-byte data
+        // This is because Rust always treat Ref/Pointer as 8bytes while MemRef size > 24 bytes
+        let store_ty = if val_ty.is_mem_ref() {
+            val = self.ptrtoint(val, self.type_index());
+            self.type_index()
+        } else {
+            val_ty
+        };
         let const_idx = self.const_value(0, self.type_index());
-        let memref_ty = MemRefType::try_from(ptr.r#type()).unwrap();
-        let target_memref_ty = MemRefType::new(val.r#type(), &[1], None, None);
-        let ptr = if self.mlir_element_type(ptr.r#type()) != val.r#type() {
-            dbg!("Implicit cast {} {}", ptr.r#type(), val.r#type());
+        let memref_ty = MemRefType::try_from(ptr_ty).unwrap();
+        let target_memref_ty = MemRefType::new(store_ty, &[1], None, None);
+        let ptr = if self.mlir_element_type(ptr_ty) != store_ty {
+            dbg!("Implicit cast {} {}", ptr_ty, store_ty);
             self.mlir_memref_view(ptr, target_memref_ty.into(), None)
         } else {
             ptr
         };
-        let op = mlir_memref::store(val, ptr, &[const_idx], self.cur_loc());
-        self.append_op(op);
-        // TODO(check): memref::store op does not return a value.
+        self.append_op(mlir_memref::store(val, ptr, &[const_idx], self.cur_loc()));
         val
     }
 
@@ -1269,10 +1298,19 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn trunc(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
-        assert!(!self.is_unreachable());
-        let op =
-            melior::dialect::ods::llvm::trunc(self.mlir_ctx, dest_ty, val, self.cur_loc()).into();
-        self.append_op_res(op)
+        let src_ty = val.r#type();
+        let val = if src_ty.is_index() { self.intcast(val, self.type_i128(), false) } else { val };
+        let src_ty = val.r#type();
+        if dest_ty.is_integer() && src_ty.is_integer() {
+            self.append_op_res(melior::dialect::arith::trunci(val, dest_ty, self.cur_loc()))
+        } else if dest_ty.is_float() && src_ty.is_float() {
+            self.append_op_res(
+                melior::dialect::ods::arith::truncf(self.mlir_ctx, dest_ty, val, self.cur_loc())
+                    .into(),
+            )
+        } else {
+            self.emit_error(format!("Unsupported trunc: {} to {}", src_ty, dest_ty), self.cur_span);
+        }
     }
 
     fn sext(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
@@ -1314,25 +1352,37 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn ptrtoint(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
-        assert!(!self.is_unreachable());
-        self.append_op_res(
-            melior::dialect::ods::llvm::ptrtoint(self.mlir_ctx, dest_ty, val, self.cur_loc())
-                .into(),
-        )
+        if val == self.const_null(val.r#type()) {
+            return self.const_value(0, dest_ty);
+        }
+        let ret = self.append_op_res(
+            melior::dialect::ods::memref::extract_aligned_pointer_as_index(
+                self.mlir_ctx,
+                self.type_index(),
+                val,
+                self.cur_loc(),
+            )
+            .into(),
+        );
+        self.intcast(ret, dest_ty, false)
     }
 
     fn inttoptr(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
-        assert!(!self.is_unreachable());
-
-        let int64_val = if val.r#type() == self.type_i64() {
-            val
-        } else {
-            self.intcast(val, self.type_i64(), false)
-        };
-        let op =
-            melior::dialect::ods::llvm::inttoptr(self.mlir_ctx, dest_ty, int64_val, self.cur_loc())
-                .into();
-        self.append_op_res(op)
+        let align = rustc_abi::Align::from_bytes(8).unwrap();
+        let base_memref = self.alloca(rustc_abi::Size::from_bytes(64), align);
+        let zero = self.const_value(0, self.type_index());
+        let one = self.const_value(1, self.type_index());
+        let two = self.const_value(2, self.type_index());
+        let ptr = self.inbounds_gep(self.type_i64(), base_memref, &[zero]);
+        let val = self.intcast(val, self.type_i64(), false);
+        self.store(val, ptr, align);
+        let ptr = self.inbounds_gep(self.type_i64(), base_memref, &[one]);
+        self.store(val, ptr, align);
+        let ptr = self.inbounds_gep(self.type_i64(), base_memref, &[two]);
+        self.store(self.const_value(0, self.type_i64()), ptr, align);
+        let casted_base_memref =
+            self.mlir_memref_view(base_memref, unsafe { self._type_memref(dest_ty, &[1]) }, None);
+        self.mlir_load(dest_ty, casted_base_memref, &[zero], align)
     }
 
     fn bitcast(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {

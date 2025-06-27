@@ -89,27 +89,23 @@ fn kernel_launch_wrapper(a: &[u8], a_window: usize, b: &mut [u8], b_window: usiz
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
-    let len: usize = 4;
+    let mut len: usize = 4;
     let window: usize = 1;
-    let mut fake_len = len;
 
     if args.len() >= 2 {
-        // Take fake length here
-        fake_len = i32::from_str(&args[1]).unwrap() as usize;
-        println!("{}: faking length as {}", args[0], fake_len);
+        // Take length here
+        len = i32::from_str(&args[1]).unwrap() as usize;
+        println!("{}: length set to {}", args[0], len);
     }
 
-    // Temporary workaround. cuda_bindings should offer safe wrapper for these
-    unsafe {
-        if cuda_bindings::gpu_init() != 0 {
-            eprintln!("{}: failed to initialise gpu", args[0]);
-            return ExitCode::from(1);
-        }
+    if cuda_bindings::init() != 0 {
+        eprintln!("{}: failed to initialise gpu", args[0]);
+        return ExitCode::from(1);
+    }
 
-        if cuda_bindings::gpu_load_module() != 0 {
-            eprintln!("{}: failed to load module", args[0]);
-            return ExitCode::from(1);
-        }
+    if cuda_bindings::load_module() != 0 {
+        eprintln!("{}: failed to load module", args[0]);
+        return ExitCode::from(1);
     }
 
     // Allocate the two host-side arrays
@@ -120,38 +116,42 @@ fn main() -> ExitCode {
     // Allocate the two device-side arrays and build them into slices
     let d_a;
     let d_b;
-    let d_a_ptr;
-    let d_b_ptr;
-    unsafe {
-        d_a_ptr = cuda_bindings::gpu_memalloc(len * std::mem::size_of::<u8>()) as *mut u8;
-        d_b_ptr = cuda_bindings::gpu_memalloc(len * std::mem::size_of::<u8>()) as *mut u8;
-        d_a = std::slice::from_raw_parts_mut(d_a_ptr, fake_len);
-        d_b = std::slice::from_raw_parts_mut(d_b_ptr, fake_len);
+
+    if let Some(dev_slice) = cuda_bindings::memalloc::<u8>(len * std::mem::size_of::<u8>()) {
+        d_a = dev_slice;
+    } else {
+        eprintln!("{}: failed to allocate d_a", args[0]);
+        return ExitCode::from(1);
+    }
+
+    if let Some(dev_slice) = cuda_bindings::memalloc::<u8>(len * std::mem::size_of::<u8>()) {
+        d_b = dev_slice;
+    } else {
+        eprintln!("{}: failed to allocate d_a", args[0]);
+        return ExitCode::from(1);
     }
 
     // Copy host to device
-    unsafe {
-        if cuda_bindings::gpu_memcpy(
-            d_a_ptr as *mut ::std::os::raw::c_void,
-            h_a.as_ptr() as *const ::std::os::raw::c_void,
-            len * std::mem::size_of::<u8>(),
-            cuda_bindings::GPU_MEMCPY_H2D,
-        ) != 0
-        {
-            eprintln!("{}: failed to copy a", args[0]);
-            return ExitCode::from(1);
-        }
+    if cuda_bindings::memcpy(
+        d_a,
+        h_a,
+        len * std::mem::size_of::<u8>(),
+        cuda_bindings::GPU_MEMCPY_H2D,
+    ) != 0
+    {
+        eprintln!("{}: failed to copy a", args[0]);
+        return ExitCode::from(1);
+    }
 
-        if cuda_bindings::gpu_memcpy(
-            d_b_ptr as *mut ::std::os::raw::c_void,
-            h_b.as_ptr() as *const ::std::os::raw::c_void,
-            len * std::mem::size_of::<u8>(),
-            cuda_bindings::GPU_MEMCPY_H2D,
-        ) != 0
-        {
-            eprintln!("{}: failed to copy b", args[0]);
-            return ExitCode::from(1);
-        }
+    if cuda_bindings::memcpy(
+        d_b,
+        h_b,
+        len * std::mem::size_of::<u8>(),
+        cuda_bindings::GPU_MEMCPY_H2D,
+    ) != 0
+    {
+        eprintln!("{}: failed to copy b", args[0]);
+        return ExitCode::from(1);
     }
 
     // Now do the kernel
@@ -161,17 +161,15 @@ fn main() -> ExitCode {
     }
 
     // Copy back from device
-    unsafe {
-        if cuda_bindings::gpu_memcpy(
-            h_b.as_mut_ptr() as *mut ::std::os::raw::c_void,
-            d_b_ptr as *const ::std::os::raw::c_void,
-            len * std::mem::size_of::<u8>(),
-            cuda_bindings::GPU_MEMCPY_D2H,
-        ) != 0
-        {
-            eprintln!("{}: failed to copy b back", args[0]);
-            return ExitCode::from(1);
-        }
+    if cuda_bindings::memcpy(
+        h_b,
+        d_b,
+        len * std::mem::size_of::<u8>(),
+        cuda_bindings::GPU_MEMCPY_D2H,
+    ) != 0
+    {
+        eprintln!("{}: failed to copy b back", args[0]);
+        return ExitCode::from(1);
     }
 
     for (i, bi) in h_b.iter().enumerate().take(len) {

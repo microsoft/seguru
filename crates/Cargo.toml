@@ -7,5 +7,6 @@ members = [
     "gpu-test-arith-basic",
     "manual-test-gpu-arith",
     "manual-test-host-arith",
+    "mlir-compile",
     "cuda_bindings",
 ]

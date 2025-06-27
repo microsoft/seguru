@@ -1,6 +1,6 @@
 use std::process::Command;
 
-use melior::ir::operation::OperationLike;
+use melior::ir::operation::{OperationLike, OperationMutLike, OperationRefMut};
 use rustc_codegen_ssa_gpu::back::write::{CodegenContext, ModuleConfig};
 use rustc_codegen_ssa_gpu::{CompiledModule, ModuleCodegen};
 use rustc_errors::DiagCtxtHandle;
@@ -43,7 +43,7 @@ pub(crate) fn codegen(
 ) -> Result<rustc_codegen_ssa_gpu::CompiledModule, rustc_errors::FatalError> {
     let mod_name = module.name.clone();
     let module_name = Some(&mod_name[..]);
-    let out = if let Some(m) = module.module_llvm.mlir_module {
+    let out = if let Some(mut m) = module.module_llvm.mlir_module {
         let out =
             cgcx.output_filenames.temp_path(rustc_session::config::OutputType::Mir, module_name);
         let out_opt = cgcx
@@ -62,7 +62,13 @@ pub(crate) fn codegen(
             .output_filenames
             .temp_path(rustc_session::config::OutputType::Object, Some(copy.as_str()));
         debug!("write MLIR module to {:?}", out);
-        let content = m.module.as_operation().to_string();
+        let mut op = m.module.as_operation_mut();
+        crate::mlir::visit::visit_ops_recursively(&mut op, &|op: &mut OperationRefMut<'_, '_>| {
+            if op.attribute("to_remove").is_ok() {
+                op.remove_from_parent();
+            }
+        });
+        let content = op.to_string();
         if !m.module.as_operation().verify() {
             trace!("MLIR module verify failed.");
             std::fs::write(&out, &content).unwrap();

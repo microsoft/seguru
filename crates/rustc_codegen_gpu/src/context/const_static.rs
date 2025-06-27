@@ -114,7 +114,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
 }
 impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
     fn const_null(&self, t: Self::Type) -> Self::Value {
-        todo!()
+        self.const_int(self.type_i64(), 0)
     }
 
     fn const_undef(&self, t: Self::Type) -> Self::Value {
@@ -122,7 +122,10 @@ impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
     }
 
     fn const_poison(&self, t: Self::Type) -> Self::Value {
-        todo!()
+        let op =
+            crate::mlir::poison::const_poison(self.mlir_ctx, self.type_i64(), self.unknown_loc());
+        let op = self.mlir_body(true).append_operation(op);
+        op.result(0).unwrap().into()
     }
 
     fn const_bool(&self, val: bool) -> Self::Value {

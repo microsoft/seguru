@@ -194,6 +194,17 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                     self.type_memref(self.type_i8(), &[bytes])
                 }
             }
+            rustc_middle::ty::TyKind::Closure(_, _) => {
+                let layout = self.layout_of(*ty);
+                let bytes = layout.size.bytes() as i64;
+                if bytes == 0 {
+                    // Closure takes zero arguments
+                    self.type_memref_single(self.type_i8())
+                } else {
+                    // Closure takes some arguments via pointer.
+                    self.type_memref(self.type_i8(), &[bytes])
+                }
+            }
             _ => {
                 panic!("Unsupported pointer type: {:?}", ty);
             }

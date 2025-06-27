@@ -1,6 +1,8 @@
 pub(crate) mod attr;
 pub(crate) mod gpu;
 pub(crate) mod memref;
+pub(crate) mod poison;
+pub(crate) mod visit;
 
 use melior::Context;
 use melior::dialect::ods::func::FuncOperation;

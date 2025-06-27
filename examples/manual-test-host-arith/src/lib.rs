@@ -2,6 +2,21 @@ use std::env;
 use std::process::ExitCode;
 use std::str::FromStr;
 
+mod internal {
+    /// Manually inserted function to test the host side API matches the GPU side API.
+    /// This should be generated automatically by the macro.
+    /// This is needed in order to force the compiler to link the GPU code.
+    #[allow(dead_code)]
+    fn dummy_api_checker_kernel_launch_wrapper(
+        a: &[u8],
+        a_window: usize,
+        b: &mut [u8],
+        b_window: usize,
+    ) {
+        manual_test_gpu_arith::kernel_arith_wrapper(a, a_window, b, b_window);
+    }
+}
+
 // This wrapper should be generated automatically. Note that it should have known the
 // kernel function's name!
 fn kernel_launch_wrapper(a: &[u8], a_window: usize, b: &mut [u8], b_window: usize) -> i32 {

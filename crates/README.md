@@ -79,23 +79,35 @@ export LD_LIBRARY_PATH=`realpath ../../llvm-install/lib`:$LD_LIBRARY_PATH
 Compile your GPU code.
 
 ```bash
-cd crates/gpu-test-basic
-RUST_LOG=trace RUSTFLAGS="-Zcodegen-backend=`realpath ../target/release/librustc_codegen_gpu.so`" cargo build
+cd examples/gpu-test-basic
+RUST_LOG=trace RUSTFLAGS="-Zcodegen-backend=`realpath ../../crates/target/debug/librustc_codegen_gpu.so`" cargo build
 ```
 
 You will find target/debug/deps/gpu-xxx.o and it includes a cubin binary in `gpu_bin_cst` symbol.
 
 The code could be launched by mlir-examples/wrapper.cu.
 
-## Run with external non-GPU crates
+### Run with external non-GPU crates
 
 For example, a procedure macro lib should be compiled with standard rust codegen instead of by our gpu codegen. Thus, we need to selectively call our codegen only for the crates for GPU. To do that, `rustc-gpu` is used as a rustc wrapper so that we can pass the GPU_CODEGEN and GPU_TARGETS env variables to tell the rustc wrapper that we only use GPU_CODEGEN when the crate is in GPU_TARGETS. For example,
 
 ```bash
-GPU_CODEGEN=`realpath ../target/release/librustc_codegen_gpu.so` RUSTC=`realpath ../target/release/rustc-gpu` GPU_TARGETS="gpu-test" cargo build
+GPU_CODEGEN=`realpath ../../crates/target/debug/librustc_codegen_gpu.so` RUSTC=`realpath ../../crates/target/debug/rustc-gpu` GPU_TARGETS="gpu-test" cargo build
 ```
 
-To run with the manual-test-gpu-arith, use the following:
+### Tests
+
+Small examples could be found in `rustc_codegen_gpu/tests/codegen/*.rs`.
+
+`cargo test` for rustc_codegen_gpu will compile them and check both LLVM IR and PTX codes. The generated outputs are under `target/$profile/tests/codegen/`
+
+
+### Examples
+
+Complicated examples are located under `examples/`
+
+To run those examples, directly run `cargo build`. With our .cargo/config.toml, it is equivalent to
+
 ```bash
-RUST_LOG=trace GPU_CODEGEN=`realpath ../target/debug/librustc_codegen_gpu.so` RUSTC=`realpath ../target/debug/rustc-gpu` GPU_TARGETS="manual-test-gpu-arith" REAL_LIBRARY_PATH_VAR="$LD_LIBRARY_PATH" RUSTFLAGS="--emit mir" cargo build --release
+RUST_LOG=trace GPU_CODEGEN=`realpath ../../crates/target/debug/librustc_codegen_gpu.so` RUSTC=`realpath ../../crates/target/debug/rustc-gpu` GPU_TARGETS="manual-test-gpu-arith,gpu-test-arith-basic" RUSTFLAGS="--emit mir" cargo build --release
 ```

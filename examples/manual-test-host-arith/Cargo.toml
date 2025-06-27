@@ -7,5 +7,5 @@ edition = "2021"
 crate-type = ["bin"]
 
 [dependencies]
-cuda_bindings = {path = "../cuda_bindings"}
+cuda_bindings = {path = "../../crates/cuda_bindings"}
 manual-test-gpu-arith = {path = "../manual-test-gpu-arith"}

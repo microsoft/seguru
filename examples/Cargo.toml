@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "manual-test-gpu-arith",
+    "gpu-test-arith-basic",
+    "manual-test-host-arith"
+]

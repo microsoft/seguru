@@ -75,14 +75,27 @@ jobs:
         working-directory: crates
         run: cargo fmt --all -- --check
 
+      - name: Format examples
+        working-directory: examples
+        run: cargo fmt --all -- --check
+
       - name: Clippy
         working-directory: crates
         run: cargo clippy --workspace --exclude cuda_bindings -- -D warnings -C panic=abort
 
+      - name: Clippy examples
+        working-directory: examples
+        run: RUSTC=rustc cargo clippy -- -D warnings -C panic=abort
+
       - name: Build
         working-directory: crates
-        run: cargo build --workspace --exclude cuda_bindings --exclude manual-test-host-arith
+        run: cargo build --workspace --exclude cuda_bindings
 
       - name: Run tests
         working-directory: crates/rustc_codegen_gpu
         run: cargo test
+
+      - name: Run examples
+        working-directory: examples
+        run: |
+          cargo build

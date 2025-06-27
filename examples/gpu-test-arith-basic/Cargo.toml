@@ -1,0 +1,7 @@
+[package]
+name = "gpu-test-arith-basic"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gpu = {path = "../../crates/gpu"}

@@ -26,7 +26,7 @@ pub struct GpuChunksMut<'a, T: 'a> {
 // Assume T::index(i) function is injective
 impl<'a, T> GpuChunksMut<'a, T> {
     #[inline(never)]
-    #[gpu_codegen::builtin(gpu.chunk_next)]
+    #[gpu_codegen::builtin(gpu.next)]
     #[gpu_codegen::device]
     pub fn next(&self) -> &'a mut [T] {
         unimplemented!()

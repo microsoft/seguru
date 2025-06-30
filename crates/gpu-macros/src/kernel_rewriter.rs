@@ -119,13 +119,13 @@ pub(crate) fn rewrite(_: TokenStream, input: TokenStream) -> TokenStream {
 
     let mut wrapper_stream = proc_macro2::TokenStream::new();
 
-    fun.attrs.clear();
-    fun.attrs.push(syn::parse_quote! {#[gpu_codegen::device]});
-    fun.attrs.push(syn::parse_quote! {#[unsafe(no_mangle)]});
-    fun.attrs.push(syn::parse_quote! {#[inline(always)]});
-
     // The newly generated function uses the same span as the attributes
-    let wrapper_fun = kernel_create_wrapper(&mut fun, fun_span);
+    let mut wrapper_fun = kernel_create_wrapper(&mut fun, fun_span);
+
+    // Add proper device/kernel attributes to function signature and all closures inside the body.
+    crate::gpu_syntax::basic_rewrite_device(&mut fun);
+    crate::gpu_syntax::basic_rewrite_kernel_entry(&mut wrapper_fun);
+
     wrapper_fun.to_tokens(&mut wrapper_stream);
 
     fun.to_tokens(&mut wrapper_stream);

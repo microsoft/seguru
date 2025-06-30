@@ -29,6 +29,8 @@ fn main() -> std::io::Result<()> {
     debug!("gpu_targets = {:#?}, crate  = {:#?}", gpu_targets, crate_name);
     if let Some(crate_name) = crate_name {
         if gpu_targets.contains(&crate_name) {
+            args.push("-Zcrate-attr=feature(register_tool)".to_string());
+            args.push("-Zcrate-attr=register_tool(gpu_codegen)".to_string());
             args.push(format!("-Zcodegen-backend={}", codegen_path));
         }
     }

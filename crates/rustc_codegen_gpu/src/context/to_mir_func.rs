@@ -4,7 +4,7 @@ use melior::ir::{BlockLike, Location, Operation};
 use rustc_codegen_ssa_gpu::traits::{LayoutTypeCodegenMethods, MiscCodegenMethods};
 use rustc_hir::def_id::DefId;
 use rustc_middle::query::Key;
-use rustc_middle::ty::layout::{FnAbiOf, HasTyCtxt};
+use rustc_middle::ty::layout::{FnAbiOf, HasTyCtxt, LayoutOf};
 use rustc_middle::ty::{AssocItemContainer, Instance};
 use tracing::{trace, warn};
 
@@ -93,6 +93,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     pub fn fn_abi_to_inputs(
         &self,
         abi: &rustc_target::callconv::FnAbi<'tcx, rustc_middle::ty::Ty<'tcx>>,
+        is_kernel_entry: bool,
     ) -> Result<Vec<melior::ir::Type<'ml>>, CodegenGPUError> {
         let mut args = vec![];
         //let mut closures = vec![];
@@ -116,14 +117,16 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                     ));
                 }
                 rustc_target::callconv::PassMode::Indirect { attrs, meta_attrs, on_stack } => {
-                    return Err("Does not support fn abi indirect".to_string());
-                    /*debug!("indirect arg: {:?} attrs: {:?} meta_attrs: {:?} on_stack: {}",
+                    if is_kernel_entry {
+                        return Err("Kernel entry does not support fn abi indirect".to_string());
+                    }
+                    warn!(
+                        "indirect arg: {:?} attrs: {:?} meta_attrs: {:?} on_stack: {}",
                         arg.layout, attrs, meta_attrs, on_stack
                     );
-                    use crate::rustc_middle::ty::layout::LayoutOf;
                     let ptr_ty = rustc_middle::ty::Ty::new_mut_ptr(self.tcx, arg.layout.ty);
                     let ptr_layout = self.layout_of(ptr_ty);
-                    self.mlir_type(ptr_layout, false)*/
+                    self.mlir_type(ptr_layout, false)
                 }
             };
             args.append(&mut self.expand_type(mlir_arg));
@@ -134,13 +137,36 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     pub fn fn_abi_to_fn_type(
         &self,
         abi: &rustc_target::callconv::FnAbi<'tcx, rustc_middle::ty::Ty<'tcx>>,
+        is_kernel_entry: bool,
     ) -> Result<FunctionType<'ml>, CodegenGPUError> {
-        let args = self.fn_abi_to_inputs(abi)?;
+        let mut args = self.fn_abi_to_inputs(abi, is_kernel_entry)?;
         let mut ret = vec![];
         if !abi.ret.layout.is_zst() {
-            let t = self.mlir_type(abi.ret.layout, false);
-            let mut t = self.expand_type(t);
-            ret.append(&mut t);
+            match abi.ret.mode {
+                rustc_target::callconv::PassMode::Indirect { .. } => {
+                    if is_kernel_entry {
+                        return Err(
+                            "Kernel entry does not support fn abi indirect return".to_string()
+                        );
+                    }
+                    let ptr_ty = rustc_middle::ty::Ty::new_mut_ptr(self.tcx, abi.ret.layout.ty);
+                    let ptr_layout = self.layout_of(ptr_ty);
+                    // Indirect return type becomes an arguments to function.
+                    args.insert(0, self.mlir_type(ptr_layout, false));
+                }
+                rustc_target::callconv::PassMode::Direct(_)
+                | rustc_target::callconv::PassMode::Pair(..) => {
+                    let t = self.mlir_type(abi.ret.layout, false);
+                    let mut t = self.expand_type(t);
+                    ret.append(&mut t);
+                }
+                rustc_target::callconv::PassMode::Ignore => {
+                    warn!("Function return is ignored: {:?}", abi.ret.layout);
+                }
+                rustc_target::callconv::PassMode::Cast { .. } => {
+                    panic!("Function return is cast: {:?} for {:?}", abi.ret.layout, abi.ret.mode);
+                }
+            }
         }
         if args.is_empty() && ret.is_empty() {
             warn!("function has no args and no ret");
@@ -175,7 +201,9 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let location: melior::ir::Location<'ml> = self.to_mlir_loc(span);
         let fn_sym = melior::ir::attribute::StringAttribute::new(mlir_ctx, sym.as_str());
         let fn_abi = self.fn_abi_of_instance(instance, rustc_middle::ty::List::empty());
-        let ftype = self.fn_abi_to_fn_type(fn_abi).unwrap_or_else(|e| self.emit_error(e, span));
+        let ftype = self
+            .fn_abi_to_fn_type(fn_abi, gpu_attrs.kernel)
+            .unwrap_or_else(|e| self.emit_error(e, span));
         if is_impl_of_trait_method(
             &tcx,
             def_id,

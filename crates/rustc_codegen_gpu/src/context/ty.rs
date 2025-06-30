@@ -430,7 +430,7 @@ impl<'tcx, 'ml, 'a> LayoutTypeCodegenMethods<'tcx> for GPUCodegenContext<'tcx, '
         &self,
         fn_abi: &rustc_target::callconv::FnAbi<'tcx, rustc_middle::ty::Ty<'tcx>>,
     ) -> Self::Type {
-        self.fn_abi_to_fn_type(fn_abi)
+        self.fn_abi_to_fn_type(fn_abi, false)
             .unwrap_or_else(|msg| {
                 panic!();
             })

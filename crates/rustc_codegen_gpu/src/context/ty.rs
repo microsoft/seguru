@@ -47,7 +47,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
 
     /// Note: Tuple is an abstract type in MLIR,
     /// so we need to use self.expand_type to get the real types.
-    pub(crate) fn type_tuple(&self, types: &[MLIRType<'ml>]) -> MLIRType<'ml> {
+    fn type_tuple(&self, types: &[MLIRType<'ml>]) -> MLIRType<'ml> {
         MLIRType::from(mlir_type::TupleType::new(self.mlir_ctx, types))
     }
 
@@ -159,17 +159,23 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 // Add padding
                 mlir_types.push(self.type_array(self.type_i8(), padding_size.bytes()));
             }
+            if field.size.bytes() == 0 {
+                // Skip zero-sized types
+                continue;
+            }
             mlir_types.push(self.mlir_type(field, immediate));
             offset = target_offset + field.size;
         }
-        if mlir_types.len() > 1 {
-            use crate::rustc_middle::query::Key;
+        match mlir_types.len() {
+            0 => self.type_empty(),
+            1 => mlir_types[0],
+            _ => self.type_tuple(&mlir_types),
+            /*use crate::rustc_middle::query::Key;
             self.emit_error(
                 "Does not support tuple with more than 1 elements".into(),
                 self.tcx.def_span(layout.ty.def_id_for_ty_in_cycle().unwrap()),
-            )
+            )*/
         }
-        self.type_tuple(&mlir_types)
     }
 
     fn pointer_to_mlir_type(
@@ -226,10 +232,24 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                     // Ensure we translate struct field of usize to type_index
                     if def.is_struct() || def.is_union() {
                         let fields = def.non_enum_variant().fields.as_slice();
-                        assert!(fields.len() <= 1);
-                        if fields.len() == 1 {
+                        let mut valid_fields = vec![];
+                        for f in fields {
+                            let ty = self.tcx.type_of(f.did).skip_binder();
+                            let layout = self.layout_of(ty);
+                            if layout.is_zst() {
+                                continue; // Skip zero-sized types
+                            }
+                            valid_fields.push(f);
+                        }
+                        if valid_fields.len() > 1 {
+                            panic!(
+                                "Unsupported struct with more than 1 field: {:?} in {:?}",
+                                def, ty
+                            );
+                        }
+                        if valid_fields.len() == 1 {
                             let field_ty =
-                                self.tcx.type_of(fields.iter().next().unwrap().did).skip_binder();
+                                self.tcx.type_of(valid_fields.first().unwrap().did).skip_binder();
                             return self.scalar_mlir_type(scalar, Some(&field_ty), immediate);
                         }
                     }

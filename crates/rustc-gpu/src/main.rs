@@ -28,10 +28,19 @@ fn main() -> std::io::Result<()> {
     let crate_name = get_value(&args, "--crate-name");
     debug!("gpu_targets = {:#?}, crate  = {:#?}", gpu_targets, crate_name);
     if let Some(crate_name) = crate_name {
+        args.push("--cfg".to_string());
+        args.push("gpu_codegen".to_string());
         if gpu_targets.contains(&crate_name) {
-            args.push("-Zcrate-attr=feature(register_tool)".to_string());
-            args.push("-Zcrate-attr=register_tool(gpu_codegen)".to_string());
-            args.push(format!("-Zcodegen-backend={}", codegen_path));
+            let extra_args = vec![
+                "-Zcrate-attr=feature(register_tool)".into(),
+                "-Zcrate-attr=register_tool(gpu_codegen)".into(),
+                format!("-Zcodegen-backend={}", codegen_path),
+            ];
+            for arg in extra_args {
+                if !args.contains(&arg) {
+                    args.push(arg);
+                }
+            }
         }
     }
     run_rustc(&args, &rust_flags)?;

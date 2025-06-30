@@ -38,6 +38,7 @@ impl VisitMut for GpuFunctionRewriter {
             // If we are inside a host function, we need to ensure it has the #[gpu_codegen::host] attribute
             if !f.attrs.iter().any(|a| a.path().is_ident("gpu_codegen::kernel")) {
                 f.attrs.push(parse_quote!(#[gpu_codegen::kernel]));
+                f.attrs.push(parse_quote!(#[unsafe(no_mangle)]));
             }
         } else if self.is_device {
             // If we are inside a device function, we need to ensure it has the #[gpu_codegen::device] attribute
@@ -62,7 +63,11 @@ pub(crate) fn rewrite_gpu_code(
     _: TokenStream,
     input: TokenStream,
     is_kernel_entry: bool,
+    is_gpu_code: bool,
 ) -> TokenStream {
+    if !is_gpu_code {
+        return input; // If not GPU code, return the original input
+    }
     let mut fun = syn::parse_macro_input!(input as syn::ItemFn);
     if is_kernel_entry {
         basic_rewrite_kernel_entry(&mut fun);

@@ -10,3 +10,6 @@ quote = "1.0"
 
 [lib]
 proc-macro = true
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(gpu_codegen)'] }

@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 gpu = {path = "../../crates/gpu"}
+gpu_macros = { path = "../../crates/gpu-macros" }

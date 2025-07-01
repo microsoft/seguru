@@ -43,7 +43,7 @@ fn run_codegen_tests(src: PathBuf, mode: &str) {
         build_base: target_dir.join(src.as_os_str()),
         llvm_filecheck: Some(target_dir.join("filecheck")),
         target_rustcflags: Some(format!(
-            "-C opt-level=3 -Zcodegen-backend={} --crate-type=lib --extern gpu_macros={} --extern gpu={}",
+            "-C opt-level=3 -Zcodegen-backend={} --crate-type=lib --extern gpu_macros={} --extern gpu={} --cfg gpu_codegen",
             backend_path.display(),
             gpu_macros_path.display(),
             gpu_path.display()

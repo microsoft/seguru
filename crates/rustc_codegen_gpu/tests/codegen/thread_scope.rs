@@ -15,10 +15,16 @@ fn kernel(a: &[u8], b: &mut u8) {
 #[no_mangle]
 pub fn kernel_arith(a: &[u8], b: &mut [u8], window: usize) {
     let chunks: gpu::GpuChunksMut<'_, u8> = gpu::gpu_chunk_mut(b, window, gpu::GpuChunkIdx::new());
-    gpu::scope(|_| {
-        let c = chunks.next();
+    gpu::scope(|s| {
+        let c = chunks.next(s);
         kernel(a, &mut c[0]);
-    })
+    });
+
+    let chunks: gpu::GpuChunksMut<'_, u8> = gpu::gpu_chunk_mut(b, 2, gpu::GpuChunkIdx::new());
+    gpu::scope(|s| {
+        let c = chunks.next(s);
+        kernel(a, &mut c[0]);
+    });
 }
 
 // CHECK: @gpu_bin_cst = internal constant

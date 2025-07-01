@@ -28,7 +28,10 @@ impl<'a, T> GpuChunksMut<'a, T> {
     #[inline(never)]
     #[gpu_codegen::builtin(gpu.next)]
     #[gpu_codegen::device]
-    pub fn next(&self) -> &'a mut [T] {
+    pub fn next<'scope, 'env>(
+        &self,
+        _thread_scope: &'scope ThreadScope<'scope, 'env>,
+    ) -> &'scope mut [T] {
         unimplemented!()
     }
 }

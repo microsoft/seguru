@@ -9,7 +9,7 @@ pub struct X<'a> {
 
 #[no_mangle]
 #[gpu_codegen::kernel]
-pub fn assign(a: &X<'_>, b: &mut i32) {
+pub unsafe fn assign(a: &X<'_>, b: &mut i32) {
     *b = a.a[0] as _;
 }
 

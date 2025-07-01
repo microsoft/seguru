@@ -5,7 +5,7 @@
 
 #[no_mangle]
 #[gpu_codegen::kernel]
-pub fn bound_check(a: &mut [u8], i: usize) {
+pub unsafe fn bound_check(a: &mut [u8], i: usize) {
     a[i] = 0;
 }
 

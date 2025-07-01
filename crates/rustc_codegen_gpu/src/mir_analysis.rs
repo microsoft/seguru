@@ -224,6 +224,12 @@ fn analyze_loop(
     Ok(())
 }
 
+fn is_fn_unsafe(tcx: rustc_middle::ty::TyCtxt<'_>, def_id: rustc_span::def_id::DefId) -> bool {
+    // Check that the item is a function-like item
+    let fn_sig = tcx.fn_sig(def_id).skip_binder().skip_binder();
+    fn_sig.safety == rustc_hir::Safety::Unsafe
+}
+
 pub(crate) fn analyze_gpu_code(
     tcx: rustc_middle::ty::TyCtxt<'_>,
     def_id: rustc_span::def_id::DefId,
@@ -235,7 +241,10 @@ pub(crate) fn analyze_gpu_code(
     let mut out = Vec::new();
     write_mir_pretty(tcx, Some(def_id), &mut out).unwrap();
     if is_kernel_entry {
-        analyze_access_to_mut(tcx, mir)?;
+        let skip_check = is_fn_unsafe(tcx, def_id);
+        if !skip_check {
+            analyze_access_to_mut(tcx, mir)?;
+        }
     }
     analyze_loop(tcx, def_id)
 }

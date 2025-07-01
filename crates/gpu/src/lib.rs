@@ -1,6 +1,7 @@
 #![feature(negative_impls)]
 #![feature(register_tool)]
 #![register_tool(gpu_codegen)]
+#![feature(rustc_attrs)]
 
 mod dim;
 mod print;

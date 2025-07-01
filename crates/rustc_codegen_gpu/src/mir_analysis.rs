@@ -96,7 +96,18 @@ impl<'tcx> Visitor<'tcx> for ReadWriteVistor<'_, 'tcx> {
             if let Some((def_id, generic_args)) = func.const_fn_def() {
                 let attr = crate::attr::GpuAttributes::build(&self.tcx, def_id);
                 // Skip the chunk function to allow the trusted GPU memory partition.
-                if let Some(crate::attr::GpuItem::IntoIter | crate::attr::GpuItem::SubsliceMut) = attr.gpu_item {
+                let mut is_trusted_chunk_function = false;
+                if Some(def_id)
+                    == self.tcx.get_diagnostic_item(rustc_span::symbol::Symbol::intern(
+                        "gpu::GpuChunksMut::new",
+                    ))
+                {
+                    is_trusted_chunk_function = true;
+                }
+                if let Some(crate::attr::GpuItem::SubsliceMut) = attr.gpu_item {
+                    is_trusted_chunk_function = true;
+                }
+                if is_trusted_chunk_function {
                     self.visit_span(*fn_span);
                     self.visit_operand(func, location);
                     // Only skip the first argument.

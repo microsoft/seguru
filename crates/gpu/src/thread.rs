@@ -42,6 +42,7 @@ impl<'env, T> GpuChunksMut<'env, T> {
         unimplemented!()
     }
 
+    #[rustc_diagnostic_item = "gpu::GpuChunksMut::new"]
     #[gpu_codegen::device]
     #[inline(never)]
     pub fn new(

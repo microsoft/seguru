@@ -6,7 +6,7 @@
 
 #[no_mangle]
 #[gpu_codegen::kernel]
-pub fn test(a: &[i16], b: &mut [i16]) {
+pub unsafe fn test(a: &[i16], b: &mut [i16]) {
     let id = gpu::thread_id(gpu::DimType::X);
     let c = #[gpu_codegen::device]|v| {
         v + a[id]

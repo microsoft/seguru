@@ -5,7 +5,7 @@
 
 #[no_mangle]
 #[gpu_codegen::kernel]
-pub fn assign(a: i32, b: &mut [i32; 10]) {
+pub unsafe fn assign(a: i32, b: &mut [i32; 10]) {
     for i in 0..10 {
         b[i] = a;
     }

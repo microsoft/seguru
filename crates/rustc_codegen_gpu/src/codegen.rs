@@ -49,16 +49,10 @@ pub(crate) fn module_codegen<'tcx>(
             }
             match &mono_item {
                 rustc_middle::mir::mono::MonoItem::Fn(instance) => {
-                    /*let mir = tcx.optimized_mir(instance.def_id());
-                    let output = String::new();
-                    let mut out = Vec::new();
-                    rustc_middle::mir::pretty::write_mir_pretty(
-                        tcx,
-                        Some(instance.def_id()),
-                        &mut out,
-                    )
-                    .unwrap();
-                    debug!("mir {}", String::from_utf8(out).unwrap());*/
+                    crate::mir_analysis::analyze_gpu_code(tcx, instance.def_id(), attr.kernel)
+                        .unwrap_or_else(|err| {
+                            err.fatal(tcx);
+                        });
                     if !attr.is_builtin() {
                         mono_item.define::<GpuBuilder<'_, '_, '_>>(&cx);
                     }

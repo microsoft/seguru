@@ -6,7 +6,7 @@
 #[no_mangle]
 #[gpu_codegen::kernel]
 #[allow(unused_variables)]
-pub fn integers(a: usize, b: i8, c: u8, d: u16, e: u32, out: &mut [usize]) {
+pub unsafe fn integers(a: usize, b: i8, c: u8, d: u16, e: u32, out: &mut [usize]) {
     out[0] = a + b as usize;
     out[1] = a + 1;
     out[2] = (e + c as u32) as _;

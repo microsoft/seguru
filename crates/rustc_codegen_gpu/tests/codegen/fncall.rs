@@ -12,7 +12,7 @@ fn foo(a: i32, b: &mut i32) {
 
 #[no_mangle]
 #[gpu_codegen::kernel]
-pub fn assign(a: i32, b: &mut i32) {
+pub unsafe fn assign(a: i32, b: &mut i32) {
     foo(a, b);
 }
 

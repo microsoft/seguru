@@ -6,6 +6,16 @@
 pub const GPU_MEMCPY_D2H: u8 = 0;
 pub const GPU_MEMCPY_H2D: u8 = 1;
 
+pub struct GPUConfig {
+    pub grid_dim_x: u32,
+    pub grid_dim_y: u32,
+    pub grid_dim_z: u32,
+    pub block_dim_x: u32,
+    pub block_dim_y: u32,
+    pub block_dim_z: u32,
+    pub shared_mem_bytes: u32,
+}
+
 // This matches bindgen::Builder output
 include!("./bindings.rs");
 

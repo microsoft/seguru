@@ -159,7 +159,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
     fn call_gpu_builtin_operation(
         &mut self,
         gpu_item: GpuItem,
-        fn_ptr_value: melior::ir::Value<'ml, 'a>,
+        _fn_ptr_value: melior::ir::Value<'ml, 'a>,
         closure_ptrs: &[rustc_middle::ty::Instance<'tcx>],
         args: &[melior::ir::Value<'ml, 'a>],
         return_types: &[melior::ir::Type<'ml>],
@@ -257,69 +257,10 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 closure_args.push(self.alloca_san_dummy()); // &ThreadScope
                 self.call_op(fn_ptr, &[], &closure_args, Some(fn_type), span)
             }
-            GpuItem::Grid => {
-                trace!("gpu.grid args: {:?}", args);
-                self.extra_state.args.insert(gpu_item, args.to_vec());
-                let op_ref = self.append_op(melior::dialect::func::call(
-                    self.mlir_ctx,
-                    fn_ptr_value.to_func_sym().unwrap(),
-                    args,
-                    return_types,
-                    loc,
-                ));
-                Ok(Some(op_ref))
-            }
-            GpuItem::Block => {
-                trace!("gpu.block args: {:?}", args);
-                self.extra_state.args.insert(gpu_item, args.to_vec());
-                let op_ref = self.append_op(melior::dialect::func::call(
-                    self.mlir_ctx,
-                    fn_ptr_value.to_func_sym().unwrap(),
-                    args,
-                    return_types,
-                    loc,
-                ));
-                Ok(Some(op_ref))
-            }
             GpuItem::Launch => {
-                trace!("gpu.launch args: {:?}", args);
-                self.extra_state.args.insert(gpu_item, args.to_vec());
-                /*let op = melior::ir::operation::OperationBuilder::new(
-                    "gpu.launch",
-                    self.to_mlir_loc(span),
-                )
-                .add_results(return_types)
-                .build()
-                .unwrap();*/
-                Ok(None)
+                panic!("gpu.launch is not yet implemented");
             }
-            GpuItem::IntoIter => {
-                assert!(return_types.is_empty());
-                let res_ptr = args[0];
-                assert!(res_ptr.r#type().is_mem_ref());
-
-                self.store(args[1], res_ptr, rustc_abi::Align::EIGHT);
-                let size_ptr = self.inbounds_gep(
-                    args[2].r#type(),
-                    res_ptr,
-                    &[self.const_value(1, self.type_index())],
-                );
-                self.store(args[2], size_ptr, rustc_abi::Align::EIGHT);
-                let window_ptr: Value<'ml, 'a> = self.inbounds_gep(
-                    args[3].r#type(),
-                    res_ptr,
-                    &[self.const_value(2, self.type_index())],
-                );
-                self.store(args[3], window_ptr, rustc_abi::Align::EIGHT);
-                let index_ptr = self.inbounds_gep(
-                    args[4].r#type(),
-                    res_ptr,
-                    &[self.const_value(3, self.type_index())],
-                );
-                self.store(args[4], index_ptr, rustc_abi::Align::EIGHT);
-                Ok(None)
-            }
-            GpuItem::IterNext => {
+            GpuItem::UniqueChunk => {
                 warn!("gpu.iter_next args: {:?}", args);
                 let arg = args[0];
                 let ptr =
@@ -346,7 +287,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 let offset = self.mul(window, index);
                 self.call_gpu_builtin_operation(
                     GpuItem::SubsliceMut,
-                    fn_ptr_value,
+                    _fn_ptr_value,
                     closure_ptrs,
                     &[ptr, size, index, window],
                     return_types,

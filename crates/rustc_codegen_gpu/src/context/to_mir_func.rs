@@ -9,10 +9,11 @@ use rustc_middle::ty::{AssocItemContainer, Instance};
 use tracing::{trace, warn};
 
 use super::GPUCodegenContext;
-use crate::attr::{GpuAttributes, GpuItem};
+use crate::attr::GpuAttributes;
 use crate::context::CodegenGPUError;
 use crate::mlir::{MLIRMutOpHelpers, MLIROpHelpers, MLIRVisibility};
 
+#[allow(dead_code)]
 fn is_impl_of_trait_method(
     tcx: &rustc_middle::ty::TyCtxt<'_>,
     def_id: DefId,
@@ -195,7 +196,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 return fn_db[&sym];
             }
         }
-        let mut gpu_attrs = self.get_gpu_attrs(def_id);
+        let gpu_attrs = self.get_gpu_attrs(def_id);
         let need_def = gpu_attrs.is_gpu_related();
         let span = instance.def.default_span(tcx);
         let location: melior::ir::Location<'ml> = self.to_mlir_loc(span);
@@ -204,7 +205,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let ftype = self
             .fn_abi_to_fn_type(fn_abi, gpu_attrs.kernel)
             .unwrap_or_else(|e| self.emit_error(e, span));
-        if is_impl_of_trait_method(
+        /*if is_impl_of_trait_method(
             &tcx,
             def_id,
             rustc_span::sym::IntoIterator,
@@ -219,9 +220,9 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             rustc_span::sym::Iterator,
             rustc_span::sym::next,
         ) {
-            gpu_attrs.gpu_item = Some(GpuItem::IterNext);
+            gpu_attrs.gpu_item = Some(GpuItem::UniqueChunk);
             //self.type_func(&[], self.type_empty())
-        }
+        }*/
         let fn_type = melior::ir::attribute::TypeAttribute::new(ftype.into());
         let mut operation: Operation<'ml> = if !gpu_attrs.kernel {
             melior::dialect::ods::func::func(

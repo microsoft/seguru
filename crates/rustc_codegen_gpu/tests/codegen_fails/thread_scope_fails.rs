@@ -14,10 +14,10 @@ fn kernel(a: &[u8], b: &mut u8) {
 #[gpu_macros::kernel_v2]
 #[no_mangle]
 pub fn kernel_arith(a: &[u8], b: &mut [u8], window: usize) {
-    let chunks: gpu::GpuChunksMut<'_, u8> = gpu::gpu_chunk_mut(b, window, gpu::GpuChunkIdx::new());
+    let chunks = gpu::GpuChunksMut::<'_, u8>::new(b, window, gpu::GpuChunkIdx::new());
     let scope = gpu::scope(|s| {
         s //~ ERROR lifetime may not live long enough
     });
-    let c = chunks.next(scope);
+    let c = chunks.unique_chunk(scope);
     kernel(a, &mut c[0]);
 }

@@ -15,9 +15,9 @@ fn kernel(a: &[u8], b: &mut u8) -> u8 {
 #[gpu_macros::kernel_v2]
 #[no_mangle]
 pub fn kernel_arith(a: &[u8], b: &mut [u8], window: usize) {
-    let chunks: gpu::GpuChunksMut<'_, u8> = gpu::gpu_chunk_mut(b, window, gpu::GpuChunkIdx::new());
+    let chunks = gpu::GpuChunksMut::<'_, u8>::new(b, window, gpu::GpuChunkIdx::new());
     let val = gpu::scope(|s| {
-        let c = chunks.next(s);
+        let c = chunks.unique_chunk(s);
         kernel(a, &mut c[0])
     });
     gpu::println!("setting b[?] = %u", val);

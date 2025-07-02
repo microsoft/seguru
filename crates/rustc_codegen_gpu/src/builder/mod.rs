@@ -96,6 +96,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
     fn call_op(
         &mut self,
         fn_ptr_value: melior::ir::Value<'ml, 'a>,
+        closure_ptrs: &[rustc_middle::ty::Instance<'tcx>],
         args: &[melior::ir::Value<'ml, 'a>],
         ftype: Option<FunctionType<'ml>>,
         span: Span,
@@ -121,6 +122,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 return self.call_gpu_builtin_operation(
                     gpu_item,
                     fn_ptr_value,
+                    closure_ptrs,
                     args,
                     &return_type,
                     span,
@@ -157,7 +159,8 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
     fn call_gpu_builtin_operation(
         &mut self,
         gpu_item: GpuItem,
-        fn_ptr_value: melior::ir::Value<'ml, 'a>,
+        _fn_ptr_value: melior::ir::Value<'ml, 'a>,
+        closure_ptrs: &[rustc_middle::ty::Instance<'tcx>],
         args: &[melior::ir::Value<'ml, 'a>],
         return_types: &[melior::ir::Type<'ml>],
         span: Span,
@@ -240,55 +243,57 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 Ok(None)
             }
             GpuItem::Scope => {
-                trace!("gpu.scope args: {:?}", args);
+                use rustc_codegen_ssa_gpu::traits::MiscCodegenMethods;
                 self.extra_state.inside_gpu_scope = true;
-                let op_ref = self.append_op(melior::dialect::func::call(
-                    self.mlir_ctx,
-                    fn_ptr_value.to_func_sym().unwrap(),
-                    args,
-                    return_types,
-                    loc,
-                ));
-                Ok(Some(op_ref))
-            }
-            GpuItem::Grid => {
-                trace!("gpu.grid args: {:?}", args);
-                self.extra_state.args.insert(gpu_item, args.to_vec());
-                let op_ref = self.append_op(melior::dialect::func::call(
-                    self.mlir_ctx,
-                    fn_ptr_value.to_func_sym().unwrap(),
-                    args,
-                    return_types,
-                    loc,
-                ));
-                Ok(Some(op_ref))
-            }
-            GpuItem::Block => {
-                trace!("gpu.block args: {:?}", args);
-                self.extra_state.args.insert(gpu_item, args.to_vec());
-                let op_ref = self.append_op(melior::dialect::func::call(
-                    self.mlir_ctx,
-                    fn_ptr_value.to_func_sym().unwrap(),
-                    args,
-                    return_types,
-                    loc,
-                ));
-                Ok(Some(op_ref))
+                let closure = closure_ptrs[0];
+                let fn_ptr = self.get_fn_addr(closure);
+                let fn_type: FunctionType<'ml> = fn_ptr.r#type().try_into().unwrap();
+                warn!("gpu.scope args: {:?} {} {}", args, fn_type, fn_type.input_count());
+                let extra_arg_len = fn_type.input_count() - 1;
+                assert!(extra_arg_len <= args.len());
+                let start = args.len() - extra_arg_len;
+                let mut closure_args = vec![];
+                closure_args.extend(&args[start..start + extra_arg_len]);
+                closure_args.push(self.alloca_san_dummy()); // &ThreadScope
+                self.call_op(fn_ptr, &[], &closure_args, Some(fn_type), span)
             }
             GpuItem::Launch => {
-                trace!("gpu.launch args: {:?}", args);
-                self.extra_state.args.insert(gpu_item, args.to_vec());
-                /*let op = melior::ir::operation::OperationBuilder::new(
-                    "gpu.launch",
-                    self.to_mlir_loc(span),
-                )
-                .add_results(return_types)
-                .build()
-                .unwrap();*/
-                Ok(None)
+                panic!("gpu.launch is not yet implemented");
             }
-            GpuItem::IntoIter => todo!(),
-            GpuItem::IterNext => todo!(),
+            GpuItem::UniqueChunk => {
+                warn!("gpu.iter_next args: {:?}", args);
+                let arg = args[0];
+                let ptr =
+                    self.load(self.type_memref(self.type_i8(), &[1]), arg, rustc_abi::Align::EIGHT);
+                let size_ptr = self.inbounds_gep(
+                    self.type_index(),
+                    arg,
+                    &[self.const_value(1, self.type_index())],
+                );
+                let size = self.load(self.type_index(), size_ptr, rustc_abi::Align::EIGHT);
+                let window_ptr = self.inbounds_gep(
+                    self.type_i64(),
+                    arg,
+                    &[self.const_value(2, self.type_index())],
+                );
+                let window = self.load(self.type_i64(), window_ptr, rustc_abi::Align::EIGHT);
+
+                let index_ptr = self.inbounds_gep(
+                    self.type_index(),
+                    arg,
+                    &[self.const_value(3, self.type_index())],
+                );
+                let index = self.load(self.type_index(), index_ptr, rustc_abi::Align::EIGHT);
+                let offset = self.mul(window, index);
+                self.call_gpu_builtin_operation(
+                    GpuItem::SubsliceMut,
+                    _fn_ptr_value,
+                    closure_ptrs,
+                    &[ptr, size, index, window],
+                    return_types,
+                    span,
+                )
+            }
             GpuItem::Subslice | GpuItem::SubsliceMut => {
                 trace!("gpu.subslice(_mut) args: {:?}", args);
                 // args[0]: original:      memref<1xi8>
@@ -326,7 +331,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 let res = op_ref.result(0).unwrap().into();
                 self.op_to_extra_values.insert(op_ref.location().to_string(), vec![res, window]);
 
-                Ok(Some(op_ref))
+                Ok(None)
             }
         }
     }
@@ -862,6 +867,9 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn add(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
+        let lhs = self.use_value(lhs);
+        let rhs = self.use_value(rhs);
+        let rhs = self.intcast(rhs, lhs.r#type(), false);
         let op = melior::dialect::arith::addi(lhs, rhs, self.cur_loc());
         self.append_op_res(op)
     }
@@ -903,6 +911,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
 
     fn mul(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
         // TODO: Currently casting rhs to lhs. A better way is to see who's longer...
+        let lhs = self.use_value(lhs);
+        let rhs = self.use_value(rhs);
         let rhs_casted = self.intcast(rhs, lhs.r#type(), false);
         let op = melior::dialect::arith::muli(lhs, rhs_casted, self.cur_loc());
         self.append_op_res(op)
@@ -1072,7 +1082,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             count = size.bytes() as i64;
             self.type_i8()
         };
-        let mem_ref_ty = mlir_type::MemRefType::new(ty, &[count], None, None);
+        let mem_ref_ty = self.type_memref(ty, &[count]).try_into().unwrap();
         let op = melior::dialect::memref::alloca(
             self.mlir_ctx,
             mem_ref_ty,
@@ -1583,6 +1593,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         if self.is_unreachable() {
             return;
         }
+        let src = self.mlir_memref_view(src, dst.r#type(), None);
         let op = melior::dialect::ods::memref::copy(self.mlir_ctx, dst, src, self.cur_loc()).into();
         self.append_op(op);
     }
@@ -1779,30 +1790,24 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         }
         let args = &args;
         let ftype = fn_abi.map(|abi| {
-            self.fn_abi_to_fn_type(abi).unwrap_or_else(|e| self.emit_error(e, self.cur_span))
+            self.fn_abi_to_fn_type(abi, false).unwrap_or_else(|e| self.emit_error(e, self.cur_span))
         });
         let span = self.cur_span;
-        let op = self.call_op(llfn, args, ftype, span).unwrap();
+        let op = self.call_op(llfn, &closure_ptrs, args, ftype, span).unwrap();
+        let loc = self.cur_loc().to_string();
+
         if let Some(op) = op {
             if op.result_count() > 0 {
-                let ret: mlir_ir::Value<'ml, 'val> = op.result(0).unwrap().into();
-                if op.result_count() > 1 {
-                    let mut ret_vec = vec![];
-                    for i in 0..op.result_count() {
-                        let ret: mlir_ir::Value<'ml, 'val> = op.result(i).unwrap().into();
-                        ret_vec.push(ret);
-                    }
-                    self.op_to_extra_values.insert(op.location().to_string(), ret_vec);
+                let mut ret_vec = vec![];
+                for i in 0..op.result_count() {
+                    let ret: mlir_ir::Value<'ml, 'val> = op.result(i).unwrap().into();
+                    ret_vec.push(ret);
                 }
-                //self.span_to_type.insert(self.cur_span, ret.r#type());
-                ret
-            } else {
-                llfn
+                self.op_to_extra_values.insert(loc.clone(), ret_vec);
             }
-        } else {
-            // This is a virtual call used by the compiler.
-            llfn
         }
+
+        *self.op_to_extra_values.get(&loc).unwrap_or(&vec![llfn]).first().unwrap()
     }
 
     fn zext(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {

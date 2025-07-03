@@ -65,7 +65,7 @@ impl<T: Copy> Copy for GpuShared<T> {}
 impl<T: Copy> Clone for GpuShared<T> {
     #[inline]
     fn clone(&self) -> GpuShared<T> {
-        GpuShared { value: self.value }
+        *self
     }
 }
 
@@ -78,7 +78,7 @@ impl<T> GpuShared<T> {
     }
 }
 
-impl<'a, T> Deref for GpuShared<T> {
+impl<T> Deref for GpuShared<T> {
     type Target = T;
 
     #[inline(always)]

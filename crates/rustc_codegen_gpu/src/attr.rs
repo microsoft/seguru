@@ -11,6 +11,7 @@ pub(crate) struct GpuAttributes {
     pub host: bool,
     pub device: bool, // a device function called by a kernel but not by host directly
     pub gpu_item: Option<GpuItem>,
+    pub shared_size: bool, // this is used to decide whether to call `gpu_shared_size`.
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
@@ -24,8 +25,10 @@ pub enum GpuItem {
     Scope,
     Launch,
     UniqueChunk,
+    SyncThreads, // this is used to decide whether to call thread_sync.
     Subslice,
     SubsliceMut,
+    NewSharedMem,
 }
 
 impl TryFrom<&str> for GpuItem {
@@ -40,8 +43,10 @@ impl TryFrom<&str> for GpuItem {
             "gpu.launch" => GpuItem::Launch,
             "add_mlir_string_attr" => GpuItem::AddStringAttr,
             "gpu.unique_chunk" => GpuItem::UniqueChunk,
+            "gpu.sync_threads" => GpuItem::SyncThreads,
             "gpu.subslice" => GpuItem::Subslice,
             "gpu.subslice_mut" => GpuItem::SubsliceMut,
+            "gpu.new_shared_mem" => GpuItem::NewSharedMem,
             _ => return Err(()),
         };
         Ok(ret)
@@ -62,8 +67,10 @@ impl From<GpuItem> for &'static str {
             GpuItem::Scope => "gpu.scope",
             GpuItem::Launch => "gpu.launch",
             GpuItem::UniqueChunk => "gpu.unique_chunk",
+            GpuItem::SyncThreads => "gpu.sync_threads",
             GpuItem::Subslice => "gpu.subslice",
             GpuItem::SubsliceMut => "gpu.subslice_mut",
+            GpuItem::NewSharedMem => "gpu.new_shared_mem",
         }
     }
 }
@@ -86,6 +93,10 @@ pub fn device_symbol() -> Symbol {
 
 pub fn gpu_builtin_symbol() -> Symbol {
     Symbol::intern("builtin")
+}
+
+pub fn gpu_shared_size_symbol() -> Symbol {
+    Symbol::intern("shared_size")
 }
 
 pub(crate) fn token_to_string(token: &Token) -> Result<Option<String>, ()> {
@@ -114,7 +125,7 @@ impl GpuAttributes {
     }
 
     pub fn is_gpu_related(&self) -> bool {
-        self.kernel || self.host || self.device || self.gpu_item.is_some()
+        self.kernel || self.host || self.device || self.gpu_item.is_some() || self.shared_size
     }
 
     pub fn is_builtin(&self) -> bool {
@@ -133,6 +144,9 @@ impl GpuAttributes {
             }
             if attr.path_matches(&[gpu_symbol(), device_symbol()]) {
                 gpu_attrs.device = true;
+            }
+            if attr.path_matches(&[gpu_symbol(), gpu_shared_size_symbol()]) {
+                gpu_attrs.shared_size = true;
             }
             if attr.path_matches(&[gpu_symbol(), gpu_builtin_symbol()]) {
                 let Attribute::Unparsed(item) = attr else {

@@ -1,13 +1,28 @@
 use melior::Context;
 use melior::dialect::ods::memref as raw_memref;
-use melior::ir::attribute::{DenseI32ArrayAttribute, DenseI64ArrayAttribute};
+use melior::ir::attribute::{DenseI32ArrayAttribute, DenseI64ArrayAttribute, IntegerAttribute};
 use melior::ir::operation::OperationMutLike;
-use melior::ir::r#type::MemRefType;
+use melior::ir::r#type::{IntegerType, MemRefType};
 use melior::ir::{Attribute, Location, Operation, Type, TypeLike, Value, ValueLike};
 
 use crate::mlir::attr::StridedLayoutAttribute;
 use crate::mlir::mlir_val_to_const_int;
 
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum MemorySpace {
+    Global = 0,
+    Shared = 3,
+}
+
+impl MemorySpace {
+    pub(crate) fn to_attr<'ml>(self, ctx: &'ml Context) -> Attribute<'ml> {
+        match self {
+            MemorySpace::Shared => Attribute::parse(ctx, "#gpu.address_space<workgroup>").unwrap(),
+            _ => IntegerAttribute::new(Type::from(IntegerType::new(ctx, 64)), self as i64).into(),
+        }
+    }
+}
 pub(crate) enum StaticOrDynamic<'ml, 'a> {
     Static(i64),
     Dynamic(Value<'ml, 'a>),
@@ -168,7 +183,7 @@ fn subview_or_reinterpret_cast<'c, 'a>(
     let dim = StaticOrDynamic::to_static_size_vec(sizes);
     let dynamic_sizes = StaticOrDynamic::to_dynamic_vec(sizes);
 
-    let result_ty = MemRefType::new(basety, &dim, layout, None);
+    let result_ty = MemRefType::new(basety, &dim, layout, source_memref_ty.memory_space());
     let mut op: Operation<'c> = if use_reinterpret {
         raw_memref::reinterpret_cast(
             mlir_ctx,

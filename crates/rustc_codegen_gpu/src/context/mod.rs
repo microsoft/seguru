@@ -5,7 +5,7 @@ mod coverage;
 mod debug;
 mod misc;
 mod predef;
-mod to_mir_func;
+pub(crate) mod to_mir_func;
 mod ty;
 
 use std::collections::HashMap;
@@ -35,6 +35,8 @@ pub(crate) struct GPUCodegenContext<'tcx, 'ml, 'a> {
     pub const_alloc: RwLock<HashMap<rustc_const_eval::interpret::AllocId, mlir_ir::Value<'ml, 'a>>>,
     pub const_name_to_allocid: RwLock<HashMap<String, rustc_const_eval::interpret::AllocId>>,
     pub span_to_types: RwLock<HashMap<rustc_span::Span, mlir_ir::Type<'ml>>>,
+    pub fn_shared_memory_size: RwLock<HashMap<String, usize>>,
+    pub expected_shared_memory_size: RwLock<HashMap<String, (rustc_span::Span, usize)>>,
     pub tcx: rustc_middle::ty::TyCtxt<'tcx>,
 }
 
@@ -50,7 +52,7 @@ impl<'tcx, 'ml, 'a> std::fmt::Debug for GPUCodegenContext<'tcx, 'ml, 'a> {
 
 impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     #[inline(always)]
-    pub fn emit_error(&self, msg: String, span: rustc_span::Span) -> ! {
+    pub fn emit_error(&self, msg: String, span: impl Into<rustc_errors::MultiSpan>) -> ! {
         self.tcx.sess.dcx().span_fatal(span, msg)
     }
 
@@ -76,6 +78,8 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             const_alloc: RwLock::new(HashMap::new()),
             const_name_to_allocid: RwLock::new(HashMap::new()),
             span_to_types: RwLock::new(HashMap::new()),
+            fn_shared_memory_size: RwLock::new(HashMap::new()),
+            expected_shared_memory_size: RwLock::new(HashMap::new()),
         }
     }
 

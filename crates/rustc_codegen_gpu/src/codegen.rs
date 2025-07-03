@@ -30,34 +30,30 @@ pub(crate) fn module_codegen<'tcx>(
         );
         let mono_items = cgu.items_in_deterministic_order(tcx);
         for &(mono_item, data) in &mono_items {
-            let attr = crate::attr::GpuAttributes::build(&tcx, mono_item.def_id());
-            if attr.is_gpu_related() {
-                trace!("define {}", mono_item);
-            } else {
-                trace!("skip {}", mono_item);
-                continue;
-            }
             mono_item.predefine::<GpuBuilder<'_, '_, '_>>(&cx, data.linkage, data.visibility);
         }
         for (mono_item, mono_data) in mono_items {
             let attr = crate::attr::GpuAttributes::build(&tcx, mono_item.def_id());
-            if attr.is_gpu_related() {
-                trace!("define {}", mono_item);
-            } else {
-                trace!("skip {}", mono_item);
-                continue;
-            }
             match &mono_item {
                 rustc_middle::mir::mono::MonoItem::Fn(instance) => {
+                    if attr.is_gpu_related() {
+                        trace!("define {}", mono_item);
+                    } else {
+                        trace!("skip {}", mono_item);
+                        continue;
+                    }
                     crate::mir_analysis::analyze_gpu_code(tcx, instance.def_id(), attr.kernel)
                         .unwrap_or_else(|err| {
                             err.fatal(tcx);
                         });
                     if !attr.is_builtin() {
                         mono_item.define::<GpuBuilder<'_, '_, '_>>(&cx);
+                        if attr.kernel && !cx.check_share_memory_size(instance) {}
                     }
                 }
-                rustc_middle::mir::mono::MonoItem::Static(def_id) => todo!(),
+                rustc_middle::mir::mono::MonoItem::Static(def_id) => {
+                    continue;
+                }
                 rustc_middle::mir::mono::MonoItem::GlobalAsm(item_id) => todo!(),
             }
         }

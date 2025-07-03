@@ -13,7 +13,6 @@ pub struct GPUConfig {
     pub block_dim_x: u32,
     pub block_dim_y: u32,
     pub block_dim_z: u32,
-    pub shared_mem_bytes: u32,
 }
 
 // This matches bindgen::Builder output

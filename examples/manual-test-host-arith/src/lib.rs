@@ -26,7 +26,6 @@ fn kernel_arith(a: &[u8], b: &mut [u8]) {
         block_dim_x: 4,
         block_dim_y: 1,
         block_dim_z: 1,
-        shared_mem_bytes: 0,
     };
 }
 

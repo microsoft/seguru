@@ -24,8 +24,10 @@ pub enum GpuItem {
     Scope,
     Launch,
     UniqueChunk,
+    SyncThreads, // this is used to decide whether to call thread_sync.
     Subslice,
     SubsliceMut,
+    NewSharedMem,
 }
 
 impl TryFrom<&str> for GpuItem {
@@ -40,8 +42,10 @@ impl TryFrom<&str> for GpuItem {
             "gpu.launch" => GpuItem::Launch,
             "add_mlir_string_attr" => GpuItem::AddStringAttr,
             "gpu.unique_chunk" => GpuItem::UniqueChunk,
+            "gpu.sync_threads" => GpuItem::SyncThreads,
             "gpu.subslice" => GpuItem::Subslice,
             "gpu.subslice_mut" => GpuItem::SubsliceMut,
+            "gpu.new_shared_mem" => GpuItem::NewSharedMem,
             _ => return Err(()),
         };
         Ok(ret)
@@ -62,8 +66,10 @@ impl From<GpuItem> for &'static str {
             GpuItem::Scope => "gpu.scope",
             GpuItem::Launch => "gpu.launch",
             GpuItem::UniqueChunk => "gpu.unique_chunk",
+            GpuItem::SyncThreads => "gpu.sync_threads",
             GpuItem::Subslice => "gpu.subslice",
             GpuItem::SubsliceMut => "gpu.subslice_mut",
+            GpuItem::NewSharedMem => "gpu.new_shared_mem",
         }
     }
 }

@@ -1,4 +1,4 @@
-use melior::ir::{self as mlir_ir, ShapedTypeLike, TypeLike, r#type as mlir_type};
+use melior::ir::{self as mlir_ir, Attribute, ShapedTypeLike, TypeLike, r#type as mlir_type};
 use rustc_abi::{BackendRepr, Primitive};
 use rustc_codegen_ssa_gpu::traits::{
     BackendTypes, BaseTypeCodegenMethods, DerivedTypeCodegenMethods, LayoutTypeCodegenMethods,
@@ -8,6 +8,7 @@ use rustc_middle::ty::layout::LayoutOf;
 use tracing::debug;
 
 use super::GPUCodegenContext;
+use crate::mlir::memref::MemorySpace;
 
 pub type MLIRType<'ctx> = mlir_ir::Type<'ctx>;
 
@@ -47,37 +48,56 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
 
     /// Note: Tuple is an abstract type in MLIR,
     /// so we need to use self.expand_type to get the real types.
-    fn type_tuple(&self, types: &[MLIRType<'ml>]) -> MLIRType<'ml> {
+    pub(crate) fn type_tuple(&self, types: &[MLIRType<'ml>]) -> MLIRType<'ml> {
         MLIRType::from(mlir_type::TupleType::new(self.mlir_ctx, types))
     }
 
     /// Safety:
     ///   This is safe if eletype is not a memref type.
     ///   MemRef is not 8bytes and so we should be careful when using creating MemRef<nxMemRef<..>>.
-    pub(crate) unsafe fn _type_memref(&self, eletype: MLIRType<'ml>, dim: &[i64]) -> MLIRType<'ml> {
+    pub(crate) unsafe fn _type_memref(
+        &self,
+        eletype: MLIRType<'ml>,
+        dim: &[i64],
+        memory_space: Option<Attribute<'ml>>,
+    ) -> MLIRType<'ml> {
         MLIRType::from(mlir_type::MemRefType::new(
             eletype,
             dim,
             Some(crate::mlir::memref::default_memref_layout(self.mlir_ctx)),
-            None,
+            memory_space,
         ))
     }
 
-    pub(crate) fn type_memref(&self, eletype: MLIRType<'ml>, dim: &[i64]) -> MLIRType<'ml> {
+    pub(crate) fn type_shared_memref(&self, eletype: MLIRType<'ml>, dim: &[i64]) -> MLIRType<'ml> {
+        self.type_memref(eletype, dim, Some(MemorySpace::Shared.to_attr(self.mlir_ctx)))
+    }
+
+    pub(crate) fn type_memref(
+        &self,
+        eletype: MLIRType<'ml>,
+        dim: &[i64],
+        memory_space: Option<Attribute<'ml>>,
+    ) -> MLIRType<'ml> {
         if eletype.is_mem_ref() {
             // type_memref should be treated as 8bytes instead of the real memref type (>40bytes)
             return unsafe {
                 self._type_memref(
                     self.type_i8(),
                     dim.iter().map(|&d| d * 8).collect::<Vec<_>>().as_slice(),
+                    memory_space,
                 )
             };
         }
-        unsafe { self._type_memref(eletype, dim) }
+        unsafe { self._type_memref(eletype, dim, memory_space) }
     }
 
-    pub(crate) fn type_memref_single(&self, eletype: MLIRType<'ml>) -> MLIRType<'ml> {
-        self.type_memref(eletype, &[1])
+    pub(crate) fn type_memref_single(
+        &self,
+        eletype: MLIRType<'ml>,
+        memory_space: Option<Attribute<'ml>>,
+    ) -> MLIRType<'ml> {
+        self.type_memref(eletype, &[1], memory_space)
     }
 
     pub(crate) fn type_index(&self) -> MLIRType<'ml> {
@@ -182,12 +202,13 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         &self,
         ty: &rustc_middle::ty::Ty<'tcx>,
         immediate: bool,
+        memory_space: Option<Attribute<'ml>>,
     ) -> MLIRType<'ml> {
         match ty.kind() {
             rustc_middle::ty::TyKind::Str => {
                 let ty = ty.builtin_deref(true).unwrap_or_else(|| panic!("{:?}", ty));
                 let layout = self.layout_of(ty);
-                self.type_memref_single(self.type_i8())
+                self.type_memref_single(self.type_i8(), memory_space)
             }
             rustc_middle::ty::TyKind::RawPtr(inner_type, _)
             | rustc_middle::ty::TyKind::Ref(_, inner_type, _)
@@ -195,9 +216,9 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 let layout = self.layout_of(*inner_type);
                 let bytes = layout.size.bytes() as i64;
                 if bytes == 0 {
-                    self.type_memref_single(self.type_i8())
+                    self.type_memref_single(self.type_i8(), memory_space)
                 } else {
-                    self.type_memref(self.type_i8(), &[bytes])
+                    self.type_memref(self.type_i8(), &[bytes], memory_space)
                 }
             }
             rustc_middle::ty::TyKind::Closure(_, _) => {
@@ -205,10 +226,19 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 let bytes = layout.size.bytes() as i64;
                 if bytes == 0 {
                     // Closure takes zero arguments
-                    self.type_memref_single(self.type_i8())
+                    self.type_memref_single(self.type_i8(), memory_space)
                 } else {
                     // Closure takes some arguments via pointer.
-                    self.type_memref(self.type_i8(), &[bytes])
+                    self.type_memref(self.type_i8(), &[bytes], memory_space)
+                }
+            }
+            rustc_middle::ty::TyKind::Adt(def, substs) => {
+                let layout = self.layout_of(*ty);
+                let bytes = layout.size.bytes() as i64;
+                if bytes == 0 {
+                    self.type_memref_single(self.type_i8(), memory_space)
+                } else {
+                    self.type_memref(self.type_i8(), &[bytes], memory_space)
                 }
             }
             _ => {
@@ -220,57 +250,32 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     fn scalar_mlir_type(
         &self,
         scalar: &rustc_abi::Scalar,
-        ty: Option<&rustc_middle::ty::Ty<'tcx>>,
+        layout: Option<&rustc_middle::ty::layout::TyAndLayout<'tcx>>,
         immediate: bool,
+        memory_space: Option<Attribute<'ml>>,
     ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type {
         if immediate && scalar.is_bool() {
             return self.type_i1();
         }
-        if let Some(ty) = ty {
-            match ty.kind() {
-                rustc_middle::ty::TyKind::Adt(def, substs) => {
-                    // Ensure we translate struct field of usize to type_index
-                    if def.is_struct() || def.is_union() {
-                        let fields = def.non_enum_variant().fields.as_slice();
-                        let mut valid_fields = vec![];
-                        for f in fields {
-                            let ty = self.tcx.type_of(f.did).skip_binder();
-                            let layout = self.layout_of(ty);
-                            if layout.is_zst() {
-                                continue; // Skip zero-sized types
-                            }
-                            valid_fields.push(f);
-                        }
-                        if valid_fields.len() > 1 {
-                            panic!(
-                                "Unsupported struct with more than 1 field: {:?} in {:?}",
-                                def, ty
-                            );
-                        }
-                        if valid_fields.len() == 1 {
-                            let field_ty =
-                                self.tcx.type_of(valid_fields.first().unwrap().did).skip_binder();
-                            return self.scalar_mlir_type(scalar, Some(&field_ty), immediate);
-                        }
-                    }
+        if let Some(layout) = layout {
+            let ty = layout.ty;
+            if let rustc_middle::ty::TyKind::Adt(def, substs) = ty.kind() {
+                // Ensure we translate struct field of usize to type_index
+                if def.is_struct() || def.is_union() {
+                    self.arbitrary_mlir_type(layout, immediate);
                 }
-                rustc_middle::ty::TyKind::Int(rustc_middle::ty::IntTy::Isize)
-                | rustc_middle::ty::TyKind::Uint(rustc_middle::ty::UintTy::Usize) => {
-                    return self.type_index();
-                }
-                _ => {}
             }
         }
         match scalar.primitive() {
             Primitive::Int(i, _signed) => self.type_from_integer(i),
             Primitive::Float(f) => self.type_from_float(f),
             Primitive::Pointer(a) => {
-                if let Some(ptr_ty) = ty {
-                    let ty = self.pointer_to_mlir_type(ptr_ty, immediate);
+                if let Some(ptr_ty) = layout.map(|l| &l.ty) {
+                    let ty = self.pointer_to_mlir_type(ptr_ty, immediate, memory_space);
                     assert!(ty.is_mem_ref());
                     ty
                 } else {
-                    self.type_memref_single(self.type_i8())
+                    self.type_memref_single(self.type_i8(), memory_space)
                 }
             }
         }
@@ -284,7 +289,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let cx = self.mlir_ctx;
         match layout.backend_repr {
             BackendRepr::Scalar(scalar) => {
-                self.scalar_mlir_type(&scalar, Some(&layout.ty), immediate)
+                self.scalar_mlir_type(&scalar, Some(&layout), immediate, None)
             }
             BackendRepr::ScalarPair(s1, s2) => {
                 // An immediate pair always contains just the two elements, without any padding
@@ -394,7 +399,7 @@ impl<'tcx, 'ml, 'a> BaseTypeCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> 
     }
 
     fn type_ptr_ext(&self, address_space: rustc_abi::AddressSpace) -> Self::Type {
-        self.type_memref_single(self.type_i8())
+        self.type_memref_single(self.type_i8(), None)
     }
 
     fn type_kind(&self, ty: Self::Type) -> rustc_codegen_ssa_gpu::common::TypeKind {
@@ -477,6 +482,22 @@ impl<'tcx, 'ml, 'a> LayoutTypeCodegenMethods<'tcx> for GPUCodegenContext<'tcx, '
             panic!("TyAndLayout::scalar_pair_element_llty({:?}): not applicable", self);
         };
         let scalar: rustc_abi::Scalar = [a, b][index];
-        self.scalar_mlir_type(&scalar, None, immediate)
+        if index == 1 {
+            self.scalar_mlir_type(&scalar, None, immediate, None)
+        } else {
+            // Check if the type is adt gpu::GpuShared<T>, if so, it it a shared memory type.
+            let memory_space = if let Some(def) = layout.ty.ty_adt_def() {
+                if Some(def.did())
+                    == self.tcx.get_diagnostic_item(rustc_span::Symbol::intern("gpu::GpuShared"))
+                {
+                    Some(MemorySpace::Shared.to_attr(self.mlir_ctx))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            self.scalar_mlir_type(&scalar, None, immediate, memory_space)
+        }
     }
 }

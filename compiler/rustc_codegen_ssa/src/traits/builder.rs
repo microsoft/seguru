@@ -76,6 +76,8 @@ pub trait BuilderMethods<'a, 'tcx>:
 
     fn alloca_san_dummy(&mut self) -> Self::Value;
 
+    fn alloca_shared(&mut self, size: Size, align: Align) -> Self::Value;
+
     fn emit_gpu_scalar_to_backend(
         &self,
         cv: rustc_middle::mir::interpret::Scalar,

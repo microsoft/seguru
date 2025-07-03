@@ -1119,6 +1119,13 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         let ret_type =
             self.type_shared_memref(self.type_i8(), &[crate::mlir::memref::dynamic_size()]);
         let ret_final_type = self.type_shared_memref(self.type_i8(), &[size.bytes() as i64]);
+        let used_size = self.fn_shared_memory_size.read().unwrap()[&self.name];
+        if used_size > 0 {
+            self.emit_error(
+                "Only support a single shared var allocation in current version".into(),
+                self.cur_span,
+            );
+        }
         *self.fn_shared_memory_size.write().unwrap().get_mut(&self.name).unwrap() +=
             size.bytes() as usize;
         let ptr = self.append_op_res(

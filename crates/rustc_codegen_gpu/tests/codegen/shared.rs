@@ -5,6 +5,9 @@
 #![feature(stmt_expr_attributes)]
 #![no_std]
 
+#[gpu_codegen::shared_size]
+pub static shared_size_alloc_shared: usize = 10;
+
 #[gpu_macros::kernel_v2]
 #[no_mangle]
 pub fn alloc_shared(a: &[u8], _a_window: usize, b: &mut [u8], b_window: usize) {

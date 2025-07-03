@@ -268,7 +268,67 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let body = self.mlir_body(in_gpu_mod);
         trace!("append operation to block {} {:?}", operation, fn_sym);
         let op = body.append_operation(operation);
-        self.fn_db.write().unwrap().insert(sym, op);
+        self.fn_db.write().unwrap().insert(sym.clone(), op);
+        self.fn_shared_memory_size.write().unwrap().insert(sym, 0);
         op
     }
+
+    pub(crate) fn check_share_memory_size(&self, instance: &Instance<'tcx>) -> bool {
+        let sym = self.tcx.symbol_name(*instance).name.to_string();
+        let expected = self.expected_shared_memory_size.read().unwrap().get(&sym);
+        let (expected_span, expected) = self
+            .expected_shared_memory_size
+            .read()
+            .unwrap()
+            .get(&sym)
+            .map_or((rustc_span::DUMMY_SP, 0), |v| *v);
+
+        let actual = self.fn_shared_memory_size.read().unwrap()[&sym];
+        if actual != expected {
+            self.emit_error(
+                format!("Shared memory size mismatch: expected {}, found {}", expected, actual,),
+                rustc_errors::MultiSpan::from_spans(vec![
+                    expected_span,
+                    self.tcx.def_span(instance.def_id()),
+                ]),
+            )
+        } else {
+            true
+        }
+    }
 }
+
+/*
+pub(crate) fn build_shared_size<'tcx: 'a, 'ml, 'a, 'val: 'a>(
+    cx: &'val GPUCodegenContext<'tcx, 'ml, 'a>,
+    instance: &Instance<'tcx>,
+) {
+    let name = cx.tcx.symbol_name(*instance).name.to_string();
+    let shared = cx.fn_shared_memory_size.read().unwrap()[&name];
+    use rustc_codegen_ssa_gpu::traits::BaseTypeCodegenMethods;
+    let fn_type = melior::ir::attribute::TypeAttribute::new(
+        FunctionType::new(cx.mlir_ctx, &[], &[cx.type_i32()]).into(),
+    );
+    let fn_sym = StringAttribute::new(cx.mlir_ctx, format!("shared_memory_{}", name).as_str());
+    let region = melior::ir::Region::new();
+    let block = melior::ir::Block::new(&[]);
+
+    use melior::ir::RegionLike;
+    use rustc_codegen_ssa_gpu::traits::BuilderMethods;
+    let llbb = region.append_block(melior::ir::Block::new(&[]));
+    let new_fn = melior::dialect::ods::func::func(
+        cx.mlir_ctx,
+        region,
+        // accepts a StringAttribute which is the function name.
+        fn_sym,
+        // A type attribute, defining the function signature.
+        fn_type,
+        cx.unknown_loc(),
+    );
+    let op = cx.mlir_body(false).append_operation(new_fn.into());
+    let mut builder: crate::builder::GpuBuilder<'tcx, 'ml, 'val> =
+        crate::builder::GpuBuilder::build(cx, llbb);
+    let size = builder.const_value(shared, cx.type_i32());
+    builder.ret(size);
+}
+*/

@@ -13,7 +13,8 @@ use melior::ir::attribute::StringAttribute;
 use melior::ir::operation::OperationLike;
 use melior::ir::r#type::{self as mlir_type, FunctionType, MemRefType};
 use melior::ir::{
-    self as mlir_ir, BlockLike, Location, RegionLike, RegionRef, TypeLike, Value, ValueLike,
+    self as mlir_ir, BlockLike, Location, RegionLike, RegionRef, ShapedTypeLike, TypeLike, Value,
+    ValueLike,
 };
 use rustc_abi::BackendRepr;
 use rustc_codegen_ssa_gpu::mir::operand::{OperandRef, OperandValue};
@@ -43,6 +44,7 @@ impl<'ml, 'a> GpuBuilderState<'ml, 'a> {
 
 pub(crate) struct GpuBuilder<'tcx, 'ml, 'a> {
     pub cx: &'a GPUCodegenContext<'tcx, 'ml, 'a>,
+    pub name: String,
     pub cur_block: <GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::BasicBlock,
     pub cur_span: rustc_span::Span,
     pub span_to_type: HashMap<rustc_span::Span, mlir_type::Type<'ml>>,
@@ -61,7 +63,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         unsafe { self.cur_block.to_ref() }
     }
 
-    fn const_value(
+    pub fn const_value(
         &self,
         val: impl std::fmt::Display,
         ty: mlir_ir::Type<'ml>,
@@ -96,7 +98,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
     fn call_op(
         &mut self,
         fn_ptr_value: melior::ir::Value<'ml, 'a>,
-        closure_ptrs: &[rustc_middle::ty::Instance<'tcx>],
+        instance: Option<rustc_middle::ty::Instance<'tcx>>,
         args: &[melior::ir::Value<'ml, 'a>],
         ftype: Option<FunctionType<'ml>>,
         span: Span,
@@ -122,7 +124,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 return self.call_gpu_builtin_operation(
                     gpu_item,
                     fn_ptr_value,
-                    closure_ptrs,
+                    instance,
                     args,
                     &return_type,
                     span,
@@ -160,12 +162,33 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         &mut self,
         gpu_item: GpuItem,
         _fn_ptr_value: melior::ir::Value<'ml, 'a>,
-        closure_ptrs: &[rustc_middle::ty::Instance<'tcx>],
+        instance: Option<rustc_middle::ty::Instance<'tcx>>,
         args: &[melior::ir::Value<'ml, 'a>],
         return_types: &[melior::ir::Type<'ml>],
         span: Span,
     ) -> Result<Option<melior::ir::OperationRef<'ml, 'a>>, melior::Error> {
         let loc = self.to_mlir_loc(span);
+        let get_generic_type = || {
+            let mut generic_types = vec![];
+            if let Some(instance) = instance {
+                for arg in instance.args.iter() {
+                    if let rustc_type_ir::GenericArgKind::Type(ty) = arg.unpack() {
+                        generic_types.push(ty);
+                    }
+                }
+            }
+            generic_types
+        };
+        let get_closures = || {
+            let mut closure_ptrs = vec![];
+            for ty in get_generic_type() {
+                if let Some(c) = self.ty_to_closure(&ty) {
+                    closure_ptrs.push(c);
+                }
+            }
+            closure_ptrs
+        };
+
         match gpu_item {
             GpuItem::ThreadId => {
                 // attrs must be parsed from #gpu<dim(x)>
@@ -244,8 +267,8 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             }
             GpuItem::Scope => {
                 use rustc_codegen_ssa_gpu::traits::MiscCodegenMethods;
+                let closure = get_closures()[0];
                 self.extra_state.inside_gpu_scope = true;
-                let closure = closure_ptrs[0];
                 let fn_ptr = self.get_fn_addr(closure);
                 let fn_type: FunctionType<'ml> = fn_ptr.r#type().try_into().unwrap();
                 warn!("gpu.scope args: {:?} {} {}", args, fn_type, fn_type.input_count());
@@ -255,7 +278,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 let mut closure_args = vec![];
                 closure_args.extend(&args[start..start + extra_arg_len]);
                 closure_args.push(self.alloca_san_dummy()); // &ThreadScope
-                self.call_op(fn_ptr, &[], &closure_args, Some(fn_type), span)
+                self.call_op(fn_ptr, None, &closure_args, Some(fn_type), span)
             }
             GpuItem::Launch => {
                 panic!("gpu.launch is not yet implemented");
@@ -263,8 +286,11 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             GpuItem::UniqueChunk => {
                 warn!("gpu.iter_next args: {:?}", args);
                 let arg = args[0];
-                let ptr =
-                    self.load(self.type_memref(self.type_i8(), &[1]), arg, rustc_abi::Align::EIGHT);
+                let ptr = self.load(
+                    self.type_memref(self.type_i8(), &[1], None),
+                    arg,
+                    rustc_abi::Align::EIGHT,
+                );
                 let size_ptr = self.inbounds_gep(
                     self.type_index(),
                     arg,
@@ -288,11 +314,15 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 self.call_gpu_builtin_operation(
                     GpuItem::SubsliceMut,
                     _fn_ptr_value,
-                    closure_ptrs,
-                    &[ptr, size, index, window],
+                    instance,
+                    &[ptr, offset, index, window],
                     return_types,
                     span,
                 )
+            }
+            GpuItem::SyncThreads => {
+                self.append_op(melior::dialect::ods::gpu::barrier(self.mlir_ctx, loc).into());
+                Ok(None)
             }
             GpuItem::Subslice | GpuItem::SubsliceMut => {
                 trace!("gpu.subslice(_mut) args: {:?}", args);
@@ -333,6 +363,10 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
 
                 Ok(None)
             }
+            GpuItem::NewSharedMem => {
+                // Do not init the content of the shared memory.
+                Ok(None)
+            }
         }
     }
 
@@ -345,8 +379,9 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         if indices.len() != 1 {
             panic!("only supports single index");
         }
-
-        let base_ty = self.mlir_element_type(ptr.r#type());
+        let src_ty = ptr.r#type();
+        let src_memref_ty = MemRefType::try_from(src_ty).unwrap();
+        let base_ty = src_memref_ty.element();
         let indices = indices
             .iter()
             .map(|v| {
@@ -361,8 +396,14 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         let ptr = if ty != base_ty {
             let size = self.static_size_of(ty);
             let base_size = self.static_size_of(base_ty);
+            if size % base_size != 0 {
+                warn!(
+                    "inbounds_gep_op: size {} is not a multiple of base size {} for type {:?}",
+                    size, base_size, ty
+                );
+            }
             assert!(size % base_size == 0);
-            let target_memref_ty = self.type_memref(ty, &[1]);
+            let target_memref_ty = self.type_memref(ty, &[1], src_memref_ty.memory_space());
             self.mlir_memref_view(ptr, target_memref_ty, None)
         } else {
             ptr
@@ -470,7 +511,9 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         if dst_ty == ty {
             return val;
         }
+        let dst_memref_ty: MemRefType<'ml> = dst_ty.try_into().expect("expected memref type");
         let memref_ty: MemRefType<'ml> = ty.try_into().expect("expected memref type");
+        assert!(memref_ty.memory_space() == dst_memref_ty.memory_space());
         let layout = crate::mlir::attr::StridedLayoutAttribute::try_from(memref_ty.layout());
         let base_memref = val;
         let (base_memref, base_byte_offset) = match layout {
@@ -647,8 +690,13 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     type CodegenCx = GPUCodegenContext<'tcx, 'ml, 'val>;
 
     fn build(cx: &'a Self::CodegenCx, llbb: Self::BasicBlock) -> Self {
+        let sym = StringAttribute::try_from(
+            llbb.parent_operation().unwrap().attribute("sym_name").unwrap(),
+        )
+        .unwrap();
         Self {
             cx,
+            name: sym.value().to_string(),
             cur_block: llbb,
             cur_span: rustc_span::DUMMY_SP,
             extra_state: GpuBuilderState::new(),
@@ -664,16 +712,9 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         llbb: Self::BasicBlock,
         san_dummy: Self::Value,
     ) -> Self {
-        Self {
-            cx,
-            cur_block: llbb,
-            cur_span: rustc_span::DUMMY_SP,
-            extra_state: GpuBuilderState::new(),
-            dummy: PhantomData,
-            span_to_type: HashMap::new(),
-            op_to_extra_values: HashMap::new(),
-            san_dummy: Some(san_dummy),
-        }
+        let mut builder = Self::build(cx, llbb);
+        builder.san_dummy = Some(san_dummy);
+        builder
     }
 
     fn cx(&self) -> &Self::CodegenCx {
@@ -1074,6 +1115,24 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         val
     }
 
+    fn alloca_shared(&mut self, size: rustc_abi::Size, align: rustc_abi::Align) -> Self::Value {
+        let ret_type =
+            self.type_shared_memref(self.type_i8(), &[crate::mlir::memref::dynamic_size()]);
+        let ret_final_type = self.type_shared_memref(self.type_i8(), &[size.bytes() as i64]);
+        *self.fn_shared_memory_size.write().unwrap().get_mut(&self.name).unwrap() +=
+            size.bytes() as usize;
+        let ptr = self.append_op_res(
+            melior::dialect::ods::gpu::dynamic_shared_memory(
+                self.mlir_ctx,
+                ret_type,
+                self.cur_loc(),
+            )
+            .into(),
+        );
+        let ptr = self.mlir_memref_view(ptr, ret_final_type, None);
+        ptr
+    }
+
     fn alloca(&mut self, size: rustc_abi::Size, align: rustc_abi::Align) -> Self::Value {
         let mut count = 1i64;
         let ty = if let Some(ty) = self.get_type_by_span(&self.cur_span) {
@@ -1082,7 +1141,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             count = size.bytes() as i64;
             self.type_i8()
         };
-        let mem_ref_ty = self.type_memref(ty, &[count]).try_into().unwrap();
+        // The alloca function is used to allocate memory on the stack and thus must be default memory space.
+        let mem_ref_ty = self.type_memref(ty, &[count], None).try_into().unwrap();
         let op = melior::dialect::memref::alloca(
             self.mlir_ctx,
             mem_ref_ty,
@@ -1103,8 +1163,14 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         // If the type is memref, we need to load the address (See store).
         let load_ty = if ty.is_mem_ref() { self.type_index() } else { ty };
         // ptr is almost always memref<sizexi8>. Must be casted into memref<ty>
-        let ptr = if load_ty != self.mlir_element_type(ptr.r#type()) {
-            self.mlir_memref_view(ptr, self.type_memref(load_ty, &[1]), None)
+        let src_ptr_ty = ptr.r#type();
+        let src_memref_ty: MemRefType<'ml> = src_ptr_ty.try_into().unwrap();
+        let ptr = if load_ty != src_memref_ty.element() {
+            self.mlir_memref_view(
+                ptr,
+                self.type_memref(load_ty, &[1], src_memref_ty.memory_space()),
+                None,
+            )
         } else {
             ptr
         };
@@ -1158,8 +1224,13 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
                 } else {
                     Some(self.const_value(b_offset.bytes(), self.type_index()))
                 };
-                let ptr = if i > 0 || (base_ty != self.mlir_element_type(ptr.r#type())) {
-                    self.mlir_memref_view(ptr, self.type_memref(base_ty, &[1]), offset)
+                let ptr_memref_ty = MemRefType::try_from(ptr.r#type()).unwrap();
+                let ptr = if i > 0 || base_ty != ptr_memref_ty.element() {
+                    self.mlir_memref_view(
+                        ptr,
+                        self.type_memref(base_ty, &[1], ptr_memref_ty.memory_space()),
+                        offset,
+                    )
                 } else {
                     ptr
                 };
@@ -1281,8 +1352,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             val_ty
         };
         let const_idx = self.const_value(0, self.type_index());
-        let memref_ty = MemRefType::try_from(ptr_ty).unwrap();
-        let target_memref_ty = MemRefType::new(store_ty, &[1], None, None);
+        let dst_memref_ty = MemRefType::try_from(ptr_ty).unwrap();
+        let target_memref_ty = MemRefType::new(store_ty, &[1], None, dst_memref_ty.memory_space());
         let ptr = if self.mlir_element_type(ptr_ty) != store_ty {
             dbg!("Implicit cast {} {}", ptr_ty, store_ty);
             self.mlir_memref_view(ptr, target_memref_ty.into(), None)
@@ -1416,8 +1487,19 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         self.store(val, ptr, align);
         let ptr = self.inbounds_gep(self.type_i64(), base_memref, &[two]);
         self.store(self.const_value(0, self.type_i64()), ptr, align);
-        let casted_base_memref =
-            self.mlir_memref_view(base_memref, unsafe { self._type_memref(dest_ty, &[1]) }, None);
+        if self.fn_shared_memory_size.read().unwrap()[&self.name] > 0 {
+            panic!(
+                "inttoptr: {:?} {} -> {} where memoryspace is unknown",
+                self.cur_span,
+                val.r#type(),
+                dest_ty
+            );
+        }
+        let casted_base_memref = self.mlir_memref_view(
+            base_memref,
+            unsafe { self._type_memref(dest_ty, &[1], None) },
+            None,
+        );
         self.mlir_load(dest_ty, casted_base_memref, &[zero], align)
     }
 
@@ -1430,6 +1512,13 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         let src_ty = val.r#type();
         if src_ty == dest_ty {
             return val;
+        }
+        if src_ty.is_mem_ref() {
+            assert!(!is_signed);
+            return self.ptrtoint(val, dest_ty);
+        }
+        if !src_ty.is_integer() && !src_ty.is_index() {
+            panic!();
         }
         if let Some(const_val) = crate::mlir::mlir_val_to_const_int(val) {
             return self.const_value(const_val, dest_ty);
@@ -1446,14 +1535,14 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn pointercast(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
-        assert!(!self.is_unreachable());
-        let op = if val.r#type().is_llvm_pointer_type() {
-            melior::dialect::ods::llvm::ptrtoint(self.mlir_ctx, dest_ty, val, self.cur_loc()).into()
+        if val.r#type().is_llvm_pointer_type() {
+            self.append_op_res(
+                melior::dialect::ods::llvm::ptrtoint(self.mlir_ctx, dest_ty, val, self.cur_loc())
+                    .into(),
+            )
         } else {
-            melior::dialect::ods::memref::cast(self.mlir_ctx, dest_ty, val, self.cur_loc()).into()
-        };
-
-        self.append_op_res(op)
+            self.mlir_memref_view(val, dest_ty, None)
+        }
     }
 
     fn icmp(
@@ -1497,6 +1586,22 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
                 melior::dialect::arith::CmpiPredicate::Sle
             }
         };
+
+        let lhs_ty = lhs.r#type();
+        let rhs_ty = rhs.r#type();
+
+        let mut normalized_value = |ty: Self::Type, val| {
+            let val = self.use_value(val);
+            if ty.is_mem_ref() {
+                self.ptrtoint(val, self.type_index())
+            } else if ty.is_index() || ty.is_integer() {
+                val
+            } else {
+                self.emit_error(format!("Unsupported type for icmp: {}", ty), self.cur_span)
+            }
+        };
+        let lhs = normalized_value(lhs_ty, lhs);
+        let rhs = normalized_value(rhs_ty, rhs);
 
         let op = if lhs.r#type().is_index() {
             melior::dialect::arith::cmpi(
@@ -1593,7 +1698,18 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         if self.is_unreachable() {
             return;
         }
-        let src = self.mlir_memref_view(src, dst.r#type(), None);
+        let dst_ty = MemRefType::try_from(dst.r#type()).unwrap();
+        let src_ty = MemRefType::try_from(src.r#type()).unwrap();
+        let dst_ty = if dst_ty.memory_space() != src_ty.memory_space() {
+            let mut sizes = vec![];
+            for i in 0..dst_ty.rank() {
+                sizes.push(dst_ty.dim_size(i).unwrap() as i64);
+            }
+            self.type_memref(dst_ty.element(), &sizes, src_ty.memory_space())
+        } else {
+            dst_ty.into()
+        };
+        let src = self.mlir_memref_view(src, dst_ty, None);
         let op = melior::dialect::ods::memref::copy(self.mlir_ctx, dst, src, self.cur_loc()).into();
         self.append_op(op);
     }
@@ -1671,11 +1787,19 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             }
             *self.op_to_extra_values[&op_val.owner().location().to_string()]
                 .get(idx as usize)
-                .unwrap()
+                .unwrap_or_else(|| {
+                    panic!("Index out of bounds in extract_value {} for {}", idx, agg_val)
+                })
         }
     }
 
     fn insert_value(&mut self, agg_val: Self::Value, elt: Self::Value, idx: u64) -> Self::Value {
+        /*if agg_val == self.const_poison(agg_val.r#type()) {
+            return elt;
+        } else {
+            return &[agg_val, elt];
+        }
+        warn!("insert_value {} {} {}", agg_val, elt, idx);*/
         todo!()
     }
 
@@ -1776,24 +1900,12 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             return llfn;
         }
         let args = args.iter().map(|arg| self.use_value(*arg)).collect::<Vec<_>>();
-        let mut closure_ptrs = vec![];
-        if let Some(instance) = instance {
-            let mut closure_count = 0;
-            for arg in instance.args.iter() {
-                if let rustc_type_ir::GenericArgKind::Type(ty) = arg.unpack() {
-                    if let Some(c) = self.ty_to_closure(&ty) {
-                        closure_count += 1;
-                        closure_ptrs.push(c);
-                    }
-                }
-            }
-        }
         let args = &args;
         let ftype = fn_abi.map(|abi| {
             self.fn_abi_to_fn_type(abi, false).unwrap_or_else(|e| self.emit_error(e, self.cur_span))
         });
         let span = self.cur_span;
-        let op = self.call_op(llfn, &closure_ptrs, args, ftype, span).unwrap();
+        let op = self.call_op(llfn, instance, args, ftype, span).unwrap();
         let loc = self.cur_loc().to_string();
 
         if let Some(op) = op {

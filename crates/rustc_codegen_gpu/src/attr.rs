@@ -11,6 +11,7 @@ pub(crate) struct GpuAttributes {
     pub host: bool,
     pub device: bool, // a device function called by a kernel but not by host directly
     pub gpu_item: Option<GpuItem>,
+    pub shared_size: bool, // this is used to decide whether to call `gpu_shared_size`.
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
@@ -94,6 +95,10 @@ pub fn gpu_builtin_symbol() -> Symbol {
     Symbol::intern("builtin")
 }
 
+pub fn gpu_shared_size_symbol() -> Symbol {
+    Symbol::intern("shared_size")
+}
+
 pub(crate) fn token_to_string(token: &Token) -> Result<Option<String>, ()> {
     match token.kind {
         TokenKind::Literal(lit) => Ok(Some(lit.symbol.as_str().to_string())),
@@ -120,7 +125,7 @@ impl GpuAttributes {
     }
 
     pub fn is_gpu_related(&self) -> bool {
-        self.kernel || self.host || self.device || self.gpu_item.is_some()
+        self.kernel || self.host || self.device || self.gpu_item.is_some() || self.shared_size
     }
 
     pub fn is_builtin(&self) -> bool {
@@ -139,6 +144,9 @@ impl GpuAttributes {
             }
             if attr.path_matches(&[gpu_symbol(), device_symbol()]) {
                 gpu_attrs.device = true;
+            }
+            if attr.path_matches(&[gpu_symbol(), gpu_shared_size_symbol()]) {
+                gpu_attrs.shared_size = true;
             }
             if attr.path_matches(&[gpu_symbol(), gpu_builtin_symbol()]) {
                 let Attribute::Unparsed(item) = attr else {

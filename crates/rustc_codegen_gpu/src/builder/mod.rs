@@ -221,7 +221,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                     self.append_op(crate::mlir::gpu::grid_dim(self.mlir_ctx, dimention, loc));
                 Ok(Some(op_ref))
             }
-            GpuItem::Printf => {
+            GpuItem::PrintArgs => {
                 // printf function should starts with a format passed by add_mlir_string_attr
                 // args can be passed to printf as a list of values.
                 // printf ends with an empty printf
@@ -233,9 +233,9 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 } else {
                     self.extra_state.args.get_mut(&gpu_item).unwrap().extend(args);
                 }
-                if !args.is_empty() {
-                    return Ok(None);
-                }
+                Ok(None)
+            }
+            GpuItem::PrintFormat => {
                 let Ok(format) = self.extra_state.attrs.pop().unwrap().try_into() else {
                     let err =
                         format!("{:?} must take a single StringAttribute as format", gpu_item);
@@ -282,6 +282,10 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             }
             GpuItem::Launch => {
                 panic!("gpu.launch is not yet implemented");
+            }
+            GpuItem::NewChunk => {
+                // Not a builtin.
+                unreachable!();
             }
             GpuItem::UniqueChunk => {
                 warn!("gpu.iter_next args: {:?}", args);

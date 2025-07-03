@@ -21,7 +21,7 @@ macro_rules! dim_fn {
 
 macro_rules! def_dim_fn {
     ($name: ident, $priv_name: ident, $pub_name: ident) => {
-        #[gpu_codegen::builtin(gpu.$name)]
+        #[rustc_diagnostic_item = concat!("gpu::", stringify!($name))]
         #[gpu_codegen::device]
         #[inline(never)]
         fn $priv_name() -> usize {

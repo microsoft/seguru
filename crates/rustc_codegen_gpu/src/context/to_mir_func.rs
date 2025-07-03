@@ -70,7 +70,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         if self.fn_ptr_db.read().unwrap().contains_key(&sym) {
             return self.fn_ptr_db.read().unwrap()[&sym].1;
         }
-        let gpu_attrs = self.get_gpu_attrs(instance.def_id());
+        let gpu_attrs = GpuAttributes::build(&self.tcx, def_id);
         let function =
             melior::ir::attribute::FlatSymbolRefAttribute::new(self.mlir_ctx, sym.as_str());
         let op = self.get_fn(instance);
@@ -176,11 +176,6 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         Ok(ftype)
     }
 
-    pub fn get_gpu_attrs(&self, def_id: rustc_hir::def_id::DefId) -> GpuAttributes {
-        let attrs = self.tcx().get_attrs_unchecked(def_id);
-        GpuAttributes::parse(attrs)
-    }
-
     pub fn to_mir_func_decl(
         &self,
         instance: Instance<'tcx>,
@@ -196,7 +191,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 return fn_db[&sym];
             }
         }
-        let gpu_attrs = self.get_gpu_attrs(def_id);
+        let gpu_attrs = GpuAttributes::build(&tcx, def_id);
         let need_def = gpu_attrs.is_gpu_related();
         let span = instance.def.default_span(tcx);
         let location: melior::ir::Location<'ml> = self.to_mlir_loc(span);

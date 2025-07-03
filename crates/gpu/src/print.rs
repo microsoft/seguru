@@ -1,23 +1,31 @@
-#[gpu_codegen::builtin(gpu.printf)]
+#[rustc_diagnostic_item = "gpu::printf"]
+#[gpu_codegen::device]
 pub fn printf() -> usize {
     unimplemented!()
 }
 
-pub trait PushPrintfArg {
+trait SupportedPrintfArg {}
+
+#[allow(private_bounds)]
+pub trait PushPrintfArg: SupportedPrintfArg + Sized {
     /// Push an argument to the printf function.
-    fn push_printf_arg(self);
+    fn push_printf_arg(self) {
+        unimplemented!()
+    }
+}
+
+impl<T: SupportedPrintfArg + Sized> PushPrintfArg for T {
+    #[rustc_diagnostic_item = "gpu::print_args"]
+    #[gpu_codegen::device]
+    fn push_printf_arg(self) {
+        // This will be implemented by the macro below.
+        unimplemented!()
+    }
 }
 
 macro_rules! def_push_printf_arg {
     ($t:ty) => {
-        impl PushPrintfArg for $t {
-            #[gpu_codegen::builtin(gpu.printf)]
-            #[gpu_codegen::device]
-            #[inline(never)]
-            fn push_printf_arg(self) {
-                unimplemented!()
-            }
-        }
+        impl SupportedPrintfArg for $t {}
     };
     () => {};
 }

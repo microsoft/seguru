@@ -1,5 +1,3 @@
-use rustc_ast::token::{Token, TokenKind};
-use rustc_ast::tokenstream::TokenTree;
 use rustc_hir::Attribute;
 use rustc_hir::def_id::DefId;
 use rustc_span::Symbol;
@@ -20,10 +18,12 @@ pub enum GpuItem {
     GlobalThreadId,
     BlockDim,
     GridDim,
-    Printf,
+    PrintFormat,
+    PrintArgs,
     AddStringAttr,
     Scope,
     Launch,
+    NewChunk,
     UniqueChunk,
     SyncThreads, // this is used to decide whether to call thread_sync.
     Subslice,
@@ -32,46 +32,65 @@ pub enum GpuItem {
 }
 
 impl TryFrom<&str> for GpuItem {
+    type Error = ();
+
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         let ret = match s {
-            "gpu.thread_id" => GpuItem::ThreadId,
-            "gpu.global_thread_id" => GpuItem::GlobalThreadId,
-            "gpu.block_dim" => GpuItem::BlockDim,
-            "gpu.grid_dim" => GpuItem::GridDim,
-            "gpu.printf" => GpuItem::Printf,
-            "gpu.scope" => GpuItem::Scope,
-            "gpu.launch" => GpuItem::Launch,
-            "add_mlir_string_attr" => GpuItem::AddStringAttr,
-            "gpu.unique_chunk" => GpuItem::UniqueChunk,
-            "gpu.sync_threads" => GpuItem::SyncThreads,
-            "gpu.subslice" => GpuItem::Subslice,
-            "gpu.subslice_mut" => GpuItem::SubsliceMut,
-            "gpu.new_shared_mem" => GpuItem::NewSharedMem,
+            "gpu::thread_id" => GpuItem::ThreadId,
+            "gpu::global_thread_id" => GpuItem::GlobalThreadId,
+            "gpu::block_dim" => GpuItem::BlockDim,
+            "gpu::grid_dim" => GpuItem::GridDim,
+            "gpu::printf" => GpuItem::PrintFormat,
+            "gpu::print_args" => GpuItem::PrintArgs,
+            "gpu::scope" => GpuItem::Scope,
+            "gpu::launch" => GpuItem::Launch,
+            "gpu::add_mlir_string_attr" => GpuItem::AddStringAttr,
+            "gpu::GpuChunksMut::new" => GpuItem::NewChunk,
+            "gpu::GpuChunksMut::unique_chunk" => GpuItem::UniqueChunk,
+            "gpu::sync_threads" => GpuItem::SyncThreads,
+            "gpu::subslice" => GpuItem::Subslice,
+            "gpu::subslice_mut" => GpuItem::SubsliceMut,
+            "gpu::new_shared_mem" => GpuItem::NewSharedMem,
             _ => return Err(()),
         };
         Ok(ret)
     }
-
-    type Error = ();
 }
 
 impl From<GpuItem> for &'static str {
     fn from(item: GpuItem) -> &'static str {
         match item {
-            GpuItem::ThreadId => "gpu.thread_id",
-            GpuItem::GlobalThreadId => "gpu.global_thread_id",
-            GpuItem::BlockDim => "gpu.block_dim",
-            GpuItem::GridDim => "gpu.grid_dim",
-            GpuItem::Printf => "gpu.printf",
-            GpuItem::AddStringAttr => "add_mlir_string_attr",
-            GpuItem::Scope => "gpu.scope",
-            GpuItem::Launch => "gpu.launch",
-            GpuItem::UniqueChunk => "gpu.unique_chunk",
-            GpuItem::SyncThreads => "gpu.sync_threads",
-            GpuItem::Subslice => "gpu.subslice",
-            GpuItem::SubsliceMut => "gpu.subslice_mut",
-            GpuItem::NewSharedMem => "gpu.new_shared_mem",
+            GpuItem::ThreadId => "gpu::thread_id",
+            GpuItem::GlobalThreadId => "gpu::global_thread_id",
+            GpuItem::BlockDim => "gpu::block_dim",
+            GpuItem::GridDim => "gpu::grid_dim",
+            GpuItem::PrintFormat => "gpu::printf",
+            GpuItem::PrintArgs => "gpu::print_args",
+            GpuItem::AddStringAttr => "gpu::add_mlir_string_attr",
+            GpuItem::Scope => "gpu::scope",
+            GpuItem::Launch => "gpu::launch",
+            GpuItem::NewChunk => "gpu::GpuChunksMut::new",
+            GpuItem::UniqueChunk => "gpu::GpuChunksMut::unique_chunk",
+            GpuItem::SyncThreads => "gpu::sync_threads",
+            GpuItem::Subslice => "gpu::subslice",
+            GpuItem::SubsliceMut => "gpu::subslice_mut",
+            GpuItem::NewSharedMem => "gpu::new_shared_mem",
         }
+    }
+}
+
+impl From<GpuItem> for Symbol {
+    fn from(item: GpuItem) -> Self {
+        Symbol::intern(item.into())
+    }
+}
+
+impl TryFrom<Symbol> for GpuItem {
+    type Error = ();
+
+    fn try_from(symbol: Symbol) -> Result<Self, Self::Error> {
+        let s = symbol.as_str();
+        GpuItem::try_from(s)
     }
 }
 
@@ -91,37 +110,34 @@ pub fn device_symbol() -> Symbol {
     Symbol::intern("device")
 }
 
-pub fn gpu_builtin_symbol() -> Symbol {
-    Symbol::intern("builtin")
-}
-
 pub fn gpu_shared_size_symbol() -> Symbol {
     Symbol::intern("shared_size")
-}
-
-pub(crate) fn token_to_string(token: &Token) -> Result<Option<String>, ()> {
-    match token.kind {
-        TokenKind::Literal(lit) => Ok(Some(lit.symbol.as_str().to_string())),
-        TokenKind::Ident(symbol, _) => Ok(Some(symbol.as_str().to_string())),
-        TokenKind::Comma => Ok(None),
-        TokenKind::Dot => Ok(Some(".".to_string())),
-        _ => Err(()),
-    }
 }
 
 impl GpuAttributes {
     pub fn build(tcx: &rustc_middle::ty::TyCtxt<'_>, def_id: DefId) -> GpuAttributes {
         let attrs = tcx.get_attrs_unchecked(def_id);
-        GpuAttributes::parse(attrs)
+        let mut gpu_attr = GpuAttributes::parse(attrs);
+        if let Some(sym) = tcx.all_diagnostic_items(()).id_to_name.get(&def_id) {
+            if let Ok(gpu_item) = GpuItem::try_from(*sym) {
+                gpu_attr.gpu_item = Some(gpu_item);
+            }
+        }
+
+        gpu_attr
     }
 
     pub fn to_mlir_attribute<'ml>(
         &self,
         ctx: &'ml melior::Context,
     ) -> Option<melior::ir::Attribute<'ml>> {
-        self.gpu_item.map(|gpu_item| {
-            melior::ir::attribute::StringAttribute::new(ctx, gpu_item.into()).into()
-        })
+        if self.is_builtin() {
+            self.gpu_item.map(|gpu_item| {
+                melior::ir::attribute::StringAttribute::new(ctx, gpu_item.into()).into()
+            })
+        } else {
+            None
+        }
     }
 
     pub fn is_gpu_related(&self) -> bool {
@@ -129,10 +145,14 @@ impl GpuAttributes {
     }
 
     pub fn is_builtin(&self) -> bool {
-        self.gpu_item.is_some()
+        match self.gpu_item {
+            Some(GpuItem::NewChunk) => false,
+            Some(_) => true,
+            _ => false,
+        }
     }
 
-    pub fn parse(attrs: &[Attribute]) -> Self {
+    fn parse(attrs: &[Attribute]) -> Self {
         let mut gpu_attrs = Self::default();
 
         for attr in attrs {
@@ -147,34 +167,6 @@ impl GpuAttributes {
             }
             if attr.path_matches(&[gpu_symbol(), gpu_shared_size_symbol()]) {
                 gpu_attrs.shared_size = true;
-            }
-            if attr.path_matches(&[gpu_symbol(), gpu_builtin_symbol()]) {
-                let Attribute::Unparsed(item) = attr else {
-                    dbg!(attr);
-                    panic!("gpu builtin func must have a name");
-                };
-                let sym = match &item.args {
-                    rustc_hir::AttrArgs::Delimited(delim_args) => delim_args
-                        .tokens
-                        .iter()
-                        .map(|tt| match tt {
-                            TokenTree::Token(t, _) => token_to_string(t).unwrap().unwrap(),
-                            TokenTree::Delimited(
-                                delim_span,
-                                delim_spacing,
-                                delimiter,
-                                token_stream,
-                            ) => todo!(),
-                        })
-                        .collect::<Vec<_>>()
-                        .concat(),
-                    _ => panic!("gpu builtin func must have a name"),
-                };
-                gpu_attrs.gpu_item = Some(
-                    sym.as_str()
-                        .try_into()
-                        .unwrap_or_else(|_| panic!("Unsupported builtin item {}", sym.as_str())),
-                );
             }
         }
         gpu_attrs

@@ -8,7 +8,7 @@ pub struct ThreadScope<'scope, 'env: 'scope> {
     env: PhantomData<&'env mut &'env ()>,
 }
 
-#[gpu_codegen::builtin(gpu.scope)]
+#[rustc_diagnostic_item = "gpu::scope"]
 #[gpu_codegen::device]
 #[inline(never)]
 pub fn scope<'env, F, T>(f: F) -> T
@@ -34,7 +34,7 @@ impl<'env, T> GpuChunksMut<'env, T> {
     /// _thread_scope is a dummy parameter to ensure that
     /// this chunk is only accessible within the scope of the thread.
     #[inline(never)]
-    #[gpu_codegen::builtin(gpu.unique_chunk)]
+    #[rustc_diagnostic_item = "gpu::GpuChunksMut::unique_chunk"]
     #[gpu_codegen::device]
     pub fn unique_chunk<'scope>(
         &self,
@@ -70,7 +70,7 @@ impl<T: Copy> Clone for GpuShared<T> {
 }
 
 impl<T> GpuShared<T> {
-    #[gpu_codegen::builtin(gpu.new_shared_mem)]
+    #[rustc_diagnostic_item = "gpu::new_shared_mem"]
     #[gpu_codegen::device]
     #[inline(never)]
     pub const fn uninit() -> Self {
@@ -105,7 +105,7 @@ pub fn chunk_mut<T>(original: &mut [T], window: usize, idx: crate::GpuChunkIdx) 
 
 #[inline(never)]
 #[gpu_codegen::device]
-#[gpu_codegen::builtin(gpu.sync_threads)]
+#[rustc_diagnostic_item = "gpu::sync_threads"]
 pub fn sync_threads() {
     unimplemented!();
 }

@@ -17,7 +17,7 @@ mod internal {
     }
 }
 
-#[gpu_macros::host]
+#[gpu_macros::host(manual_test_gpu_arith::kernel_arith)]
 fn kernel_arith(a: &[u8], b: &mut [u8]) {
     let config = cuda_bindings::GPUConfig {
         grid_dim_x: 1,
@@ -26,7 +26,6 @@ fn kernel_arith(a: &[u8], b: &mut [u8]) {
         block_dim_x: 4,
         block_dim_y: 1,
         block_dim_z: 1,
-        shared_mem_bytes: 0,
     };
 }
 

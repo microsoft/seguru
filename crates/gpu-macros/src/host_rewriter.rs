@@ -138,6 +138,8 @@ fn host_create_wrapper(func: &syn::ItemFn, span: Span) -> syn::ItemFn {
     // 3. Call the actual function
     // Build call args:
     let call_args: Vec<_> = call_args_rev.into_iter().rev().collect();
+    let shared_mem_size_ident =
+        syn::Ident::new(&format!("const_share_size_{}", &func.sig.ident), func.span());
     // println!("{}", quote!(#func_ident(#(#call_args),*);));
     let call_stub_vec = vec![
         syn::parse(quote! {
@@ -167,7 +169,7 @@ fn host_create_wrapper(func: &syn::ItemFn, span: Span) -> syn::ItemFn {
                     config.block_dim_x,
                     config.block_dim_y,
                     config.block_dim_z,
-                    config.shared_mem_bytes,
+                    #shared_mem_size_ident as u32,
                     args_for_launching_ptr,
                     core::ptr::null_mut(),
                 );
@@ -198,20 +200,45 @@ fn host_create_wrapper(func: &syn::ItemFn, span: Span) -> syn::ItemFn {
     wrapper_func
 }
 
-pub(crate) fn rewrite(_: TokenStream, input: TokenStream) -> TokenStream {
+pub(crate) fn rewrite(attr: TokenStream, input: TokenStream) -> TokenStream {
     let fun = syn::parse_macro_input!(input as syn::ItemFn);
     let fun_span = fun.span();
 
+    //println!("{:?}", attr.into_iter().last());
+
     let mut wrapper_stream = proc_macro2::TokenStream::new();
+
+    // Add the constant shared mem thing
+    let func_ident: proc_macro::Ident =
+        if let Some(proc_macro::TokenTree::Ident(ident)) = attr.clone().into_iter().last() {
+            ident
+        } else {
+            panic!("Your must pass your kernel function's ident");
+        };
+    let local_share_mem_size_ident =
+        syn::Ident::new(&format!("const_share_size_{}", func_ident), fun_span);
+    let mut const_val_def: proc_macro::TokenStream =
+        quote! { #[allow(non_upper_case_globals)] const #local_share_mem_size_ident: usize = }
+            .into();
+    let mut attr_token_trees: Vec<proc_macro::TokenTree> = attr.into_iter().collect();
+    attr_token_trees.pop();
+    let share_mem_prefix: proc_macro::TokenStream = attr_token_trees.into_iter().collect();
+    const_val_def.extend(share_mem_prefix);
+    let share_mem_size_ident = syn::Ident::new(&format!("shared_size_{}", func_ident), fun_span);
+    let const_val_def_end: proc_macro::TokenStream = quote! { #share_mem_size_ident ; }.into();
+    const_val_def.extend(const_val_def_end);
 
     // The newly generated function uses the same span as the attributes
     let wrapper_fun = host_create_wrapper(&fun, fun_span);
     wrapper_fun.to_tokens(&mut wrapper_stream);
 
+    let wrapper_stream_macro: proc_macro::TokenStream = wrapper_stream.into();
+    const_val_def.extend(wrapper_stream_macro);
+
     // Original function is dropped and replaced with our stuff
 
-    let source_code = wrapper_stream.to_string();
-    println!("{}", source_code);
+    // let source_code = const_val_def.to_string();
+    // println!("{}", source_code);
 
-    proc_macro::TokenStream::from(wrapper_stream)
+    const_val_def
 }

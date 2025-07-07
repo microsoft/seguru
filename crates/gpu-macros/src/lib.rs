@@ -21,6 +21,11 @@ pub fn kernel(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 #[proc_macro_attribute]
+pub fn shared_size(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    gpu_syntax::rewrite_shared_size(item)
+}
+
+#[proc_macro_attribute]
 pub fn host(attr: TokenStream, item: TokenStream) -> TokenStream {
     host_rewriter::rewrite(attr, item)
 }

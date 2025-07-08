@@ -383,17 +383,11 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             GpuItem::AtomicAdd => {
                 trace!("gpu.atomic_add args: {:?}", args);
                 // args[0]: ptr:      memref<1xi8>
-                // args[1]: ptr_size: memref<1xi8>
-                // args[2]: offset:   usize
-                // args[3]: val:      value, can be any thing... (f32, i32, ...)
+                // args[1]: val:      value, can be any thing... (f32, i32, ...)
 
                 let ptr = args[0];
-                let ptr_size = args[1];
-                let offset = self.intcast(args[2], self.type_index(), false);
-                let val = args[3];
-
-                // Bound check
-                self.build_sfi(ptr, ptr_size, offset);
+                let val = args[1];
+                let offset = self.emit_constant(0, self.type_index());
 
                 let indices_vec = vec![offset];
                 let indices = &indices_vec;

@@ -36,7 +36,7 @@ pub fn subslice_mut<T>(_original: &mut [T], _offset: usize, _window: usize) -> &
 #[inline(never)]
 #[gpu_codegen::builtin(gpu.atomic_add)]
 #[rustc_diagnostic_item = "gpu::atomic_add"]
-pub fn atomic_add<T>(_slice: &mut [T], _offset: usize, _val: T) -> T {
+pub fn atomic_add<T>(_slice: &mut T, _val: T) -> T {
     unimplemented!()
 }
 

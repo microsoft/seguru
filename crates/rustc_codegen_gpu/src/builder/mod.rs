@@ -380,6 +380,53 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 // Do not init the content of the shared memory.
                 Ok(None)
             }
+            GpuItem::AtomicAdd => {
+                trace!("gpu.atomic_add args: {:?}", args);
+                // args[0]: ptr:      memref<1xi8>
+                // args[1]: ptr_size: memref<1xi8>
+                // args[2]: offset:   usize
+                // args[3]: val:      value, can be any thing... (f32, i32, ...)
+
+                let ptr = args[0];
+                let ptr_size = args[1];
+                let offset = self.intcast(args[2], self.type_index(), false);
+                let val = args[3];
+
+                // Bound check
+                self.build_sfi(ptr, ptr_size, offset);
+
+                let indices_vec = vec![offset];
+                let indices = &indices_vec;
+                let kind = if val.r#type().is_integer() || val.r#type().is_index() {
+                    mlir_ir::attribute::IntegerAttribute::new(self.type_i64(), 1).into()
+                } else {
+                    mlir_ir::attribute::IntegerAttribute::new(self.type_i64(), 0).into()
+                };
+
+                // Translate ptr into the correct form
+                let ptr_memref_ty = MemRefType::try_from(ptr.r#type()).unwrap();
+                let ptr_t = if self.mlir_element_type(ptr.r#type()) != val.r#type() {
+                    let target_memref_ty =
+                        MemRefType::new(val.r#type(), &[1], None, ptr_memref_ty.memory_space());
+                    self.mlir_memref_view(ptr, target_memref_ty.into(), None)
+                } else {
+                    ptr
+                };
+
+                let atomic_rmw_op = melior::dialect::ods::memref::atomic_rmw(
+                    self.mlir_ctx,
+                    val.r#type(),
+                    val,
+                    ptr_t,
+                    indices,
+                    kind,
+                    self.cur_loc(),
+                );
+
+                self.append_op(atomic_rmw_op.into());
+
+                Ok(None)
+            }
         }
     }
 

@@ -29,6 +29,7 @@ pub enum GpuItem {
     Subslice,
     SubsliceMut,
     NewSharedMem,
+    AtomicAdd,
 }
 
 impl TryFrom<&str> for GpuItem {
@@ -51,6 +52,7 @@ impl TryFrom<&str> for GpuItem {
             "gpu::subslice" => GpuItem::Subslice,
             "gpu::subslice_mut" => GpuItem::SubsliceMut,
             "gpu::new_shared_mem" => GpuItem::NewSharedMem,
+            "gpu::atomic_add" => GpuItem::AtomicAdd,
             _ => return Err(()),
         };
         Ok(ret)
@@ -75,6 +77,7 @@ impl From<GpuItem> for &'static str {
             GpuItem::Subslice => "gpu::subslice",
             GpuItem::SubsliceMut => "gpu::subslice_mut",
             GpuItem::NewSharedMem => "gpu::new_shared_mem",
+            GpuItem::AtomicAdd => "gpu::atomic_add",
         }
     }
 }

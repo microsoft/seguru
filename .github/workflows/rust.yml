@@ -98,4 +98,5 @@ jobs:
       - name: Run examples
         working-directory: examples
         run: |
+          cargo clean
           cargo build

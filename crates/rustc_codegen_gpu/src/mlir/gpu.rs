@@ -121,3 +121,22 @@ pub(crate) fn nvvm_redux_sync<'ml, 'a>(
         .build()
         .expect("valid operation")
 }
+
+pub(crate) fn shuffle<'ml, 'a>(
+    ctx: &'ml melior::Context,
+    arg: Value<'ml, 'a>,
+    offset: Value<'ml, 'a>,
+    width: Value<'ml, 'a>,
+    mode: Attribute<'ml>,
+    location: Location<'ml>,
+) -> Operation<'ml> {
+    melior::dialect::ods::gpu::ShuffleOperationBuilder::new(ctx, location)
+        .value(arg)
+        .offset(offset)
+        .width(width)
+        .mode(mode)
+        .shuffle_result(arg.r#type())
+        .valid(Type::from(IntegerType::new(ctx, 1)))
+        .build()
+        .into()
+}

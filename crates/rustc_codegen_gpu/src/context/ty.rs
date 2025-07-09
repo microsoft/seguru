@@ -395,7 +395,8 @@ impl<'tcx, 'ml, 'a> BaseTypeCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> 
     }
 
     fn val_ty(&self, v: Self::Value) -> Self::Type {
-        todo!()
+        use melior::ir::ValueLike;
+        v.r#type()
     }
 
     fn type_ptr_ext(&self, address_space: rustc_abi::AddressSpace) -> Self::Type {

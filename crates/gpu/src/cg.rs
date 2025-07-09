@@ -112,3 +112,59 @@ impl<const SIZE: usize, const STRIDE: usize> ThreadWarpTile<SIZE, STRIDE> {
 pub fn _redux_sync<T>(_value: T, _mask: u32) -> T {
     unimplemented!()
 }
+
+#[rustc_diagnostic_item = "gpu::shuffle"]
+#[gpu_codegen::device]
+#[inline(never)]
+pub fn _shuffle<T>(_value: T, _offset: u32, _width: u32) -> (T, bool) {
+    unimplemented!()
+}
+
+/// define a macro to use shuffle with a specific mode xor, up, down.
+#[macro_export]
+macro_rules! shuffle {
+    (xor, $value:expr, $offset:expr, $width:expr) => {{
+        add_mlir_string_attr(concat!("#gpu<shuffle_mode xor>"));
+        $crate::cg::_shuffle($value, $offset, $width)
+    }};
+    (up, $value:expr, $offset:expr, $width:expr) => {{
+        add_mlir_string_attr(concat!("#gpu<shuffle_mode up>"));
+        $crate::cg::_shuffle($value, $offset, $width)
+    }};
+    (down, $value:expr, $offset:expr, $width:expr) => {{
+        add_mlir_string_attr(concat!("#gpu<shuffle_mode down>"));
+        $crate::cg::_shuffle($value, $offset, $width)
+    }};
+    (idx, $value:expr, $offset:expr, $width:expr) => {{
+        add_mlir_string_attr(concat!("#gpu<shuffle_mode idx>"));
+        $crate::cg::_shuffle($value, $offset, $width)
+    }};
+}
+
+#[gpu_codegen::device]
+#[inline(always)]
+pub fn reduce_add_f32(_warp: ThreadWarpTile<32, 1>, value: f32) -> f32 {
+    pub const SIZE: u32 = 32;
+    let mut offset = SIZE >> 1;
+    let mut val = value;
+    while offset > 0 {
+        let (peer_val, _) = shuffle!(xor, value, offset, SIZE);
+        val += peer_val;
+        offset /= 2;
+    }
+    val
+}
+
+#[gpu_codegen::device]
+#[inline(always)]
+pub fn reduce_max_f32(_warp: ThreadWarpTile<32, 1>, value: f32) -> f32 {
+    pub const SIZE: u32 = 32;
+    let mut offset = SIZE >> 1;
+    let mut val = value;
+    while offset > 0 {
+        let (peer_val, _) = shuffle!(xor, value, offset, SIZE);
+        val = if val > peer_val { val } else { peer_val };
+        offset /= 2;
+    }
+    val
+}

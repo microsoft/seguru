@@ -288,10 +288,20 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                     subgroup_reduce(self.mlir_ctx, args[0], op_attr, true, c_size, c_stride, loc);
                 Ok(Some(self.append_op(op)))
             }
+            GpuItem::Shuffle => {
+                assert!(self.extra_state.attrs.len() == 1);
+                let mode = self.extra_state.attrs.pop().unwrap();
+                let val: Value<'_, '_> = args[0];
+                let offset = args[1];
+                let width = args[2];
+                assert!(offset.r#type() == self.type_i32());
+                assert!(width.r#type() == self.type_i32());
+                let op = crate::mlir::gpu::shuffle(self.mlir_ctx, val, offset, width, mode, loc);
+                Ok(Some(self.append_op(op)))
+            }
             GpuItem::NvvmReduxSync => {
                 assert!(self.extra_state.attrs.len() == 1);
                 let op_attr = self.extra_state.attrs.pop().unwrap();
-                let generic_consts = get_generic_const();
                 let mask = args[1];
                 assert!(mask.r#type() == self.type_i32());
                 let abs = false;
@@ -1181,6 +1191,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn and(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
+        let lhs = self.use_value(lhs);
+        let rhs = self.use_value(rhs);
         let rhs_casted = self.intcast(rhs, lhs.r#type(), false);
         let op = melior::dialect::arith::andi(lhs, rhs_casted, self.cur_loc());
         self.append_op_res(op)

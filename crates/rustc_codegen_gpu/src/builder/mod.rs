@@ -228,6 +228,14 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                     self.append_op(crate::mlir::gpu::block_dim(self.mlir_ctx, dimention, loc));
                 Ok(Some(op_ref))
             }
+            GpuItem::BlockId => {
+                // attrs must be parsed from #gpu<dim(x)>
+                assert!(self.extra_state.attrs.len() == 1);
+                let dimention = self.extra_state.attrs.pop().unwrap();
+                let op_ref =
+                    self.append_op(crate::mlir::gpu::block_id(self.mlir_ctx, dimention, loc));
+                Ok(Some(op_ref))
+            }
             GpuItem::GridDim => {
                 // attrs must be parsed from #gpu<dim(x)>
                 assert!(self.extra_state.attrs.len() == 1);

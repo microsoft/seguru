@@ -8,7 +8,7 @@ mod dim;
 mod print;
 mod thread;
 
-pub use dim::{DimType, GpuChunkIdx, block_dim, global_id, grid_dim, thread_id};
+pub use dim::{DimType, GpuChunkIdx, block_dim, block_id, global_id, grid_dim, thread_id};
 pub use print::{PushPrintfArg, printf};
 pub use thread::{GpuChunksMut, GpuShared, chunk_mut, scope, sync_threads};
 

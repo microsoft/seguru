@@ -22,6 +22,14 @@ pub fn thread_id<'c>(
     gpu_dim_op_index(ctx, "gpu.thread_id", dim, location)
 }
 
+pub fn block_id<'c>(
+    ctx: &'c melior::Context,
+    dim: Attribute<'c>,
+    location: Location<'c>,
+) -> Operation<'c> {
+    gpu_dim_op_index(ctx, "gpu.block_id", dim, location)
+}
+
 pub fn global_id<'c>(
     ctx: &'c melior::Context,
     dim: Attribute<'c>,

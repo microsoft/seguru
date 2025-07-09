@@ -43,4 +43,12 @@ pub fn atomic_add<T>(_slice: &mut T, _val: T) -> T {
     unimplemented!()
 }
 
+#[repr(C)]
+pub struct float4 {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub w: f32,
+}
+
 /*  TODO: Define shared memory */

@@ -44,10 +44,37 @@ impl CompileConfig {
     pub fn mlir_opt(&self, inpath: &Path, outpath: &Path) -> std::io::Result<()> {
         // mlir-opt must use "shell" in order to pass correct arguments.
         info!("[mlir-opt] outputs {}", outpath.display());
+        //--pass-pipeline='builtin.module(gpu-kernel-outlining,convert-gpu-to-nvvm{has-redux=1},convert-nvvm-to-llvm,reconcile-unrealized-casts)'
+
+        //format!("-gpu-lower-to-nvvm-pipeline='opt-level={} cubin-chip={} cubin-features={}'",self.opt_level, self.cubin_chip, self.cubin_features)
+        // mlir/lib/Dialect/GPU/Pipelines/GPUToNVVMPipeline.cpp
         let mlir_opt_args = format!(
-            "-gpu-lower-to-nvvm-pipeline='opt-level={} cubin-chip={} cubin-features={}'",
-            self.opt_level, self.cubin_chip, self.cubin_features
+            "--pass-pipeline=\
+            'builtin.module(\
+            convert-nvgpu-to-nvvm,\
+            gpu-kernel-outlining,\
+            convert-vector-to-scf,\
+            convert-scf-to-cf,\
+            convert-nvvm-to-llvm,\
+            convert-func-to-llvm,\
+            expand-strided-metadata,\
+            nvvm-attach-target{{triple=nvptx64-nvidia-cuda chip={} features={} O={}}},\
+            lower-affine,\
+            convert-arith-to-llvm,\
+            convert-index-to-llvm{{index-bitwidth=64}},\
+            canonicalize,\
+            cse,\
+            reconcile-unrealized-casts,\
+            gpu.module(\
+                convert-gpu-to-nvvm{{has-redux=1}},\
+                canonicalize,\
+                cse),\
+            gpu-to-llvm,\
+            gpu-module-to-binary,convert-math-to-llvm,\
+            reconcile-unrealized-casts, canonicalize,cse)'",
+            self.cubin_chip, self.cubin_features, self.opt_level
         );
+
         let cmd = format!(
             "{} {} {} -o {} ",
             which::which("mlir-opt").expect("mlir-opt not found").display(),
@@ -55,6 +82,7 @@ impl CompileConfig {
             inpath.to_str().unwrap(),
             outpath.to_str().unwrap(),
         );
+        tracing::warn!("Running command: {}", cmd);
         let args = ["-c", cmd.as_str()];
         command("sh", args)
     }

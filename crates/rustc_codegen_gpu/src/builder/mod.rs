@@ -27,6 +27,7 @@ use tracing::{debug, trace, warn};
 
 use crate::attr::GpuItem;
 use crate::context::GPUCodegenContext;
+use crate::mlir::gpu::{DimFn, NonDimFn, all_reduce, subgroup_reduce};
 use crate::mlir::memref::{extract_strided_metadata, extract_strided_metadata_results};
 use crate::mlir::{BUILTIN_SYM, BlockRefWithTime, MLIROpHelpers, ValueToOpRef};
 
@@ -194,6 +195,18 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             }
             generic_types
         };
+
+        let get_generic_const = || {
+            let mut generic_types = vec![];
+            if let Some(instance) = instance {
+                for arg in instance.args.iter() {
+                    if let rustc_type_ir::GenericArgKind::Const(c) = arg.unpack() {
+                        generic_types.push(c);
+                    }
+                }
+            }
+            generic_types
+        };
         let get_closures = || {
             let mut closure_ptrs = vec![];
             for ty in get_generic_type() {
@@ -205,36 +218,107 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         };
 
         match gpu_item {
+            GpuItem::AllReduce => {
+                assert!(self.extra_state.attrs.len() == 1);
+                let op_attr = self.extra_state.attrs.pop().unwrap();
+                let op = self.append_op(all_reduce(self.mlir_ctx, args[0], op_attr, true, loc));
+                Ok(Some(op))
+            }
             GpuItem::ThreadId => {
                 // attrs must be parsed from #gpu<dim(x)>
                 assert!(self.extra_state.attrs.len() == 1);
                 assert!(return_types.len() == 1);
                 let dimention = self.extra_state.attrs.pop().unwrap();
-                let op_ref =
-                    self.append_op(crate::mlir::gpu::thread_id(self.mlir_ctx, dimention, loc));
-                Ok(Some(op_ref))
+                Ok(Some(self.append_op(DimFn::ThreadId.build(self.mlir_ctx, dimention, loc))))
             }
             GpuItem::GlobalThreadId => {
                 let dimention = self.extra_state.attrs.pop().unwrap();
-                let op_ref =
-                    self.append_op(crate::mlir::gpu::global_id(self.mlir_ctx, dimention, loc));
-                Ok(Some(op_ref))
+                Ok(Some(self.append_op(DimFn::GlobalThreadId.build(self.mlir_ctx, dimention, loc))))
+            }
+            GpuItem::BlockId => {
+                // attrs must be parsed from #gpu<dim(x)>
+                assert!(self.extra_state.attrs.len() == 1);
+                let dimention = self.extra_state.attrs.pop().unwrap();
+                Ok(Some(self.append_op(DimFn::BlockId.build(self.mlir_ctx, dimention, loc))))
+            }
+            GpuItem::LaneId => {
+                assert!(self.extra_state.attrs.is_empty());
+                Ok(Some(self.append_op(NonDimFn::LaneId.build(self.mlir_ctx, loc))))
+            }
+            GpuItem::SubgroupId => {
+                assert!(self.extra_state.attrs.is_empty());
+                Ok(Some(self.append_op(NonDimFn::SubgroupId.build(self.mlir_ctx, loc))))
+            }
+            GpuItem::SubgroupSize => {
+                assert!(self.extra_state.attrs.is_empty());
+                Ok(Some(self.append_op(NonDimFn::SubgroupSize.build(self.mlir_ctx, loc))))
+            }
+            GpuItem::SubgroupReduce => {
+                assert!(self.extra_state.attrs.len() == 1);
+                let op_attr = self.extra_state.attrs.pop().unwrap();
+                let generic_consts = get_generic_const();
+                let c_size = generic_consts[0].try_to_target_usize(self.tcx).unwrap() as _;
+                let c_stride = generic_consts[1].try_to_target_usize(self.tcx).unwrap() as _;
+                if args[0].r#type() != self.type_i32() {
+                    self.emit_error(
+                        format!(
+                            "gpu.subgroup_reduce: args[0] must be i32, but got {}",
+                            args[0].r#type()
+                        ),
+                        span,
+                    );
+                }
+                if c_size != 32 && c_stride != 0 {
+                    self.emit_error(
+                        "Due to limited subgroup conversion, we only support cluster_size = warp_size = 32, and stride_size = 1".to_string(),
+                        span,
+                    );
+                }
+                if (c_size > 32 || c_stride > 32) || c_size == 0 || c_stride == 0 {
+                    self.emit_error(
+                        format!(
+                            "gpu.subgroup_reduce: c_size = {}, c_stride = {} must be in range [1, 32]",
+                            c_size, c_stride
+                        ),
+                        span,
+                    );
+                }
+                assert!(c_stride <= 32);
+                let op =
+                    subgroup_reduce(self.mlir_ctx, args[0], op_attr, true, c_size, c_stride, loc);
+                Ok(Some(self.append_op(op)))
+            }
+            GpuItem::NvvmReduxSync => {
+                assert!(self.extra_state.attrs.len() == 1);
+                let op_attr = self.extra_state.attrs.pop().unwrap();
+                let generic_consts = get_generic_const();
+                let mask = args[1];
+                assert!(mask.r#type() == self.type_i32());
+                let abs = false;
+                let val = args[0];
+                let is_float = val.r#type().is_float();
+                let op = crate::mlir::gpu::nvvm_redux_sync(
+                    self.mlir_ctx,
+                    val,
+                    mask,
+                    op_attr,
+                    abs,
+                    is_float,
+                    loc,
+                );
+                Ok(Some(self.append_op(op)))
             }
             GpuItem::BlockDim => {
                 // attrs must be parsed from #gpu<dim(x)>
                 assert!(self.extra_state.attrs.len() == 1);
                 let dimention = self.extra_state.attrs.pop().unwrap();
-                let op_ref =
-                    self.append_op(crate::mlir::gpu::block_dim(self.mlir_ctx, dimention, loc));
-                Ok(Some(op_ref))
+                Ok(Some(self.append_op(DimFn::BlockDim.build(self.mlir_ctx, dimention, loc))))
             }
             GpuItem::GridDim => {
                 // attrs must be parsed from #gpu<dim(x)>
                 assert!(self.extra_state.attrs.len() == 1);
                 let dimention = self.extra_state.attrs.pop().unwrap();
-                let op_ref =
-                    self.append_op(crate::mlir::gpu::grid_dim(self.mlir_ctx, dimention, loc));
-                Ok(Some(op_ref))
+                Ok(Some(self.append_op(DimFn::GridDim.build(self.mlir_ctx, dimention, loc))))
             }
             GpuItem::PrintArgs => {
                 // printf function should starts with a format passed by add_mlir_string_attr

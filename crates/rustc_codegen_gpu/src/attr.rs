@@ -14,8 +14,15 @@ pub(crate) struct GpuAttributes {
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
 pub enum GpuItem {
+    AllReduce,
     ThreadId,
     GlobalThreadId,
+    BlockId,
+    LaneId,
+    NvvmReduxSync,
+    SubgroupId,
+    SubgroupReduce,
+    SubgroupSize,
     BlockDim,
     GridDim,
     PrintFormat,
@@ -37,8 +44,15 @@ impl TryFrom<&str> for GpuItem {
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         let ret = match s {
+            "gpu::all_reduce" => GpuItem::AllReduce,
             "gpu::thread_id" => GpuItem::ThreadId,
             "gpu::global_thread_id" => GpuItem::GlobalThreadId,
+            "gpu::block_id" => GpuItem::BlockId,
+            "gpu::lane_id" => GpuItem::LaneId,
+            "gpu::subgroup_id" => GpuItem::SubgroupId,
+            "gpu::subgroup_reduce" => GpuItem::SubgroupReduce,
+            "gpu::subgroup_size" => GpuItem::SubgroupSize,
+            "nvvm::redux_sync" => GpuItem::NvvmReduxSync,
             "gpu::block_dim" => GpuItem::BlockDim,
             "gpu::grid_dim" => GpuItem::GridDim,
             "gpu::printf" => GpuItem::PrintFormat,
@@ -62,8 +76,15 @@ impl TryFrom<&str> for GpuItem {
 impl From<GpuItem> for &'static str {
     fn from(item: GpuItem) -> &'static str {
         match item {
+            GpuItem::AllReduce => "gpu::all_reduce",
             GpuItem::ThreadId => "gpu::thread_id",
             GpuItem::GlobalThreadId => "gpu::global_thread_id",
+            GpuItem::BlockId => "gpu::block_id",
+            GpuItem::LaneId => "gpu::lane_id",
+            GpuItem::SubgroupId => "gpu::subgroup_id",
+            GpuItem::SubgroupReduce => "gpu::subgroup_reduce",
+            GpuItem::SubgroupSize => "gpu::subgroup_size",
+            GpuItem::NvvmReduxSync => "nvvm::redux_sync",
             GpuItem::BlockDim => "gpu::block_dim",
             GpuItem::GridDim => "gpu::grid_dim",
             GpuItem::PrintFormat => "gpu::printf",

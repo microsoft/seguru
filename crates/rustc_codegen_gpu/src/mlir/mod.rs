@@ -11,7 +11,7 @@ use melior::dialect::ods::memref::GetGlobalOperation;
 use melior::dialect::{DialectRegistry, arith, func};
 use melior::ir::attribute::{FlatSymbolRefAttribute, StringAttribute, TypeAttribute};
 use melior::ir::operation::{OperationLike, OperationMutLike, OperationResult};
-use melior::ir::r#type::FunctionType;
+use melior::ir::r#type::{FunctionType, IntegerType, MemRefType, RankedTensorType, TupleType};
 use melior::ir::*;
 use melior::utility::register_all_dialects;
 use rustc_span::Loc;
@@ -316,4 +316,56 @@ pub(crate) fn mlir_val_to_const_int<'ml, 'a>(value: melior::ir::Value<'ml, 'a>) 
     } else {
         None
     }
+}
+
+pub(crate) fn float_width(ty: melior::ir::r#type::Type<'_>) -> Option<usize> {
+    if ty.is_float() {
+        unsafe { Some(mlir_sys::mlirFloatTypeGetWidth(ty.to_raw()) as usize) }
+    } else {
+        None
+    }
+}
+
+pub(crate) fn static_size_of(ty: Type<'_>) -> usize {
+    if ty.is_integer() {
+        let int_ty = IntegerType::try_from(ty).unwrap();
+        int_ty.width() as usize / 8
+    } else if ty.is_index() || ty.is_mem_ref() {
+        size_of::<usize>()
+    } else if ty.is_float() {
+        tracing::warn!("float type {:?} size calculation {}", ty, float_width(ty).unwrap());
+        float_width(ty).unwrap() / 8
+    } else if ty.is_tuple() {
+        let tuple = TupleType::try_from(ty).unwrap();
+        let mut total_size = 0;
+        for i in 0..tuple.type_count() {
+            total_size += static_size_of(tuple.r#type(i).unwrap());
+            tracing::warn!("Tuple type {:?} size calculation {}", tuple, total_size);
+        }
+        total_size
+    } else if ty.is_ranked_tensor() {
+        let ranked_ty = RankedTensorType::try_from(ty).unwrap();
+        let ty = ranked_ty.element();
+        let base_size = static_size_of(ty);
+        todo!();
+    } else {
+        panic!("Unsupported type: {:?}", ty);
+    }
+}
+
+pub(crate) fn type_memref<'ml>(
+    ctx: &'ml Context,
+    eletype: Type<'ml>,
+    dim: &[i64],
+    layout: Option<Attribute<'ml>>,
+    memory_space: Option<Attribute<'ml>>,
+) -> Type<'ml> {
+    if eletype.is_tuple() {
+        let size = crate::mlir::static_size_of(eletype);
+        assert!(!dim.is_empty());
+        let mut dim = dim.to_vec();
+        dim.push(size as i64);
+        return type_memref(ctx, IntegerType::new(ctx, 8).into(), &dim, layout, memory_space);
+    }
+    Type::from(MemRefType::new(eletype, dim, layout, memory_space))
 }

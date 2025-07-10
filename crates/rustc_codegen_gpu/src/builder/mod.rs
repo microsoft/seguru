@@ -1679,11 +1679,19 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         let op = if src_ty.is_index() || dest_ty.is_index() {
             // If either is index, we need to use index_cast
             melior::dialect::arith::index_cast(val, dest_ty, self.cur_loc())
-        } else if !is_signed {
-            melior::dialect::arith::extui(val, dest_ty, self.cur_loc())
         } else {
-            melior::dialect::arith::extsi(val, dest_ty, self.cur_loc())
+            // Integer. Are we doing an extension or trucation?
+            let src_int_ty = melior::ir::r#type::IntegerType::try_from(src_ty).unwrap();
+            let dst_int_ty = melior::ir::r#type::IntegerType::try_from(dest_ty).unwrap();
+            if src_int_ty.width() > dst_int_ty.width() {
+                melior::dialect::arith::trunci(val, dest_ty, self.cur_loc())
+            } else if !is_signed {
+                melior::dialect::arith::extui(val, dest_ty, self.cur_loc())
+            } else {
+                melior::dialect::arith::extsi(val, dest_ty, self.cur_loc())
+            }
         };
+
         self.append_op_res(op)
     }
 

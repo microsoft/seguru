@@ -73,27 +73,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
     }
 
     fn static_size_of(&self, ty: mlir_ir::Type<'_>) -> usize {
-        if ty.is_integer() {
-            self.cx.mlir_integer_width(ty) / 8
-        } else if ty.is_index() || ty.is_mem_ref() {
-            size_of::<usize>()
-        } else if ty.is_float() {
-            self.mlir_float_width(ty) / 8
-        } else if ty.is_tuple() {
-            let tuple = mlir_type::TupleType::try_from(ty).unwrap();
-            let mut total_size = 0;
-            for i in 0..tuple.type_count() {
-                total_size += self.static_size_of(tuple.r#type(i).unwrap());
-            }
-            total_size
-        } else if ty.is_ranked_tensor() {
-            let ranked_ty = mlir_type::RankedTensorType::try_from(ty).unwrap();
-            let ty = self.mlir_element_type(ty);
-            let base_size = self.static_size_of(ty);
-            todo!();
-        } else {
-            panic!("Unsupported type: {:?}", ty);
-        }
+        crate::mlir::static_size_of(ty)
     }
 
     fn call_op(
@@ -495,8 +475,8 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 let ptr_memref_ty = MemRefType::try_from(ptr.r#type()).unwrap();
                 let ptr_t = if self.mlir_element_type(ptr.r#type()) != val.r#type() {
                     let target_memref_ty =
-                        MemRefType::new(val.r#type(), &[1], None, ptr_memref_ty.memory_space());
-                    self.mlir_memref_view(ptr, target_memref_ty.into(), None)
+                        self.type_memref(val.r#type(), &[1], ptr_memref_ty.memory_space());
+                    self.mlir_memref_view(ptr, target_memref_ty, None)
                 } else {
                     ptr
                 };
@@ -530,7 +510,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         let src_ty = ptr.r#type();
         let src_memref_ty = MemRefType::try_from(src_ty).unwrap();
         let base_ty = src_memref_ty.element();
-        let indices = indices
+        let mut indices = indices
             .iter()
             .map(|v| {
                 if v.r#type().is_integer() || v.r#type().is_index() {
@@ -541,6 +521,8 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 }
             })
             .collect::<Vec<_>>();
+        let target_memref_ty =
+            MemRefType::try_from(self.type_memref(ty, &[1], src_memref_ty.memory_space())).unwrap();
         let ptr = if ty != base_ty {
             let size = self.static_size_of(ty);
             let base_size = self.static_size_of(base_ty);
@@ -551,18 +533,32 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 );
             }
             assert!(size % base_size == 0);
-            let target_memref_ty = self.type_memref(ty, &[1], src_memref_ty.memory_space());
-            self.mlir_memref_view(ptr, target_memref_ty, None)
+            self.mlir_memref_view(ptr, target_memref_ty.into(), None)
         } else {
             ptr
         };
+        let mut sizes = vec![1.into()];
+        let mut strides = vec![1.into()];
+        let base_ty = target_memref_ty.element();
+        if target_memref_ty.rank() > 1 {
+            for i in 1..target_memref_ty.rank() {
+                indices.push(0.into());
+                sizes.push((target_memref_ty.dim_size(i).unwrap() as i64).into());
+                strides.push(1.into());
+                warn!(
+                    "inbounds_gep_op: only supports 1D memref, but got rank {}, strides: {:?}",
+                    target_memref_ty.rank(),
+                    strides,
+                );
+            }
+        }
         crate::mlir::memref::subview(
             self.mlir_ctx,
-            ty,
+            base_ty,
             ptr,
             &indices,
-            &[1.into()],
-            &[1.into()],
+            &sizes,
+            &strides,
             self.cur_loc(),
         )
     }
@@ -1510,10 +1506,10 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         };
         let const_idx = self.const_value(0, self.type_index());
         let dst_memref_ty = MemRefType::try_from(ptr_ty).unwrap();
-        let target_memref_ty = MemRefType::new(store_ty, &[1], None, dst_memref_ty.memory_space());
+        let target_memref_ty = self.type_memref(store_ty, &[1], dst_memref_ty.memory_space());
         let ptr = if self.mlir_element_type(ptr_ty) != store_ty {
             dbg!("Implicit cast {} {}", ptr_ty, store_ty);
-            self.mlir_memref_view(ptr, target_memref_ty.into(), None)
+            self.mlir_memref_view(ptr, target_memref_ty, None)
         } else {
             ptr
         };
@@ -1654,7 +1650,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         }
         let casted_base_memref = self.mlir_memref_view(
             base_memref,
-            unsafe { self._type_memref(dest_ty, &[1], None) },
+            unsafe { self._type_memref(dest_ty, &[1], None, None) },
             None,
         );
         self.mlir_load(dest_ty, casted_base_memref, &[zero], align)
@@ -1867,7 +1863,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             dst_ty.into()
         };
         let src = self.mlir_memref_view(src, dst_ty, None);
-        let op = melior::dialect::ods::memref::copy(self.mlir_ctx, dst, src, self.cur_loc()).into();
+        let op = melior::dialect::ods::memref::copy(self.mlir_ctx, src, dst, self.cur_loc()).into();
         self.append_op(op);
     }
 

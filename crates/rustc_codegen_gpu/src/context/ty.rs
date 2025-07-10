@@ -8,6 +8,7 @@ use rustc_middle::ty::layout::LayoutOf;
 use tracing::debug;
 
 use super::GPUCodegenContext;
+use crate::mlir::float_width;
 use crate::mlir::memref::MemorySpace;
 
 pub type MLIRType<'ctx> = mlir_ir::Type<'ctx>;
@@ -29,7 +30,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
 
     pub(crate) fn mlir_float_width(&self, ty: MLIRType<'_>) -> usize {
         assert!(ty.is_float());
-        unsafe { mlir_sys::mlirFloatTypeGetWidth(ty.to_raw()) as usize }
+        float_width(ty).unwrap()
     }
 
     pub(crate) fn mlir_element_type<'b>(&self, ty: MLIRType<'b>) -> MLIRType<'b> {
@@ -59,14 +60,10 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         &self,
         eletype: MLIRType<'ml>,
         dim: &[i64],
+        layout: Option<Attribute<'ml>>,
         memory_space: Option<Attribute<'ml>>,
     ) -> MLIRType<'ml> {
-        MLIRType::from(mlir_type::MemRefType::new(
-            eletype,
-            dim,
-            Some(crate::mlir::memref::default_memref_layout(self.mlir_ctx)),
-            memory_space,
-        ))
+        crate::mlir::type_memref(self.mlir_ctx, eletype, dim, layout, memory_space)
     }
 
     pub(crate) fn type_shared_memref(&self, eletype: MLIRType<'ml>, dim: &[i64]) -> MLIRType<'ml> {
@@ -85,11 +82,12 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 self._type_memref(
                     self.type_i8(),
                     dim.iter().map(|&d| d * 8).collect::<Vec<_>>().as_slice(),
+                    None,
                     memory_space,
                 )
             };
         }
-        unsafe { self._type_memref(eletype, dim, memory_space) }
+        unsafe { self._type_memref(eletype, dim, None, memory_space) }
     }
 
     pub(crate) fn type_memref_single(
@@ -256,15 +254,6 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type {
         if immediate && scalar.is_bool() {
             return self.type_i1();
-        }
-        if let Some(layout) = layout {
-            let ty = layout.ty;
-            if let rustc_middle::ty::TyKind::Adt(def, substs) = ty.kind() {
-                // Ensure we translate struct field of usize to type_index
-                if def.is_struct() || def.is_union() {
-                    self.arbitrary_mlir_type(layout, immediate);
-                }
-            }
         }
         match scalar.primitive() {
             Primitive::Int(i, _signed) => self.type_from_integer(i),

@@ -23,6 +23,8 @@ impl MemorySpace {
         }
     }
 }
+
+#[derive(Debug)]
 pub(crate) enum StaticOrDynamic<'ml, 'a> {
     Static(i64),
     Dynamic(Value<'ml, 'a>),
@@ -108,10 +110,6 @@ pub fn dynamic_size() -> i64 {
     unsafe { mlir_sys::mlirShapedTypeGetDynamicSize() }
 }
 
-pub(crate) fn default_memref_layout<'c>(mlir_ctx: &'c Context) -> Attribute<'c> {
-    StridedLayoutAttribute::new(mlir_ctx, 0, &[1]).into()
-}
-
 /// Implement reinterpret_cast for MemRef types.
 pub fn reinterpret_cast<'c, 'a>(
     mlir_ctx: &'c Context,
@@ -148,9 +146,9 @@ fn subview_or_reinterpret_cast<'c, 'a>(
     location: Location<'c>,
     use_reinterpret: bool,
 ) -> Operation<'c> {
-    assert!(offsets.len() == 1);
-    assert!(strides.len() == 1);
-    assert!(sizes.len() == 1);
+    //assert!(offsets.len() == 1);
+    //assert!(strides.len() == 1);
+    //assert!(sizes.len() == 1);
     let source_ty = ptr.r#type();
     let source_memref_ty: MemRefType<'_> =
         source_ty.try_into().expect("expected memref type for ptr");
@@ -170,24 +168,38 @@ fn subview_or_reinterpret_cast<'c, 'a>(
     } else {
         &offsets[0]
     };
-    let layout = Some(StaticOrDynamic::to_static_stride_and_offset_attr(
-        mlir_ctx,
-        dst_layout_offset,
-        strides,
-    ));
     let static_offsets = StaticOrDynamic::to_static_stride_or_offset_attr(mlir_ctx, offsets);
     let dynamic_offsets = StaticOrDynamic::to_dynamic_vec(offsets);
     let static_strides = StaticOrDynamic::to_static_stride_or_offset_attr(mlir_ctx, strides);
     let dynamic_strides = StaticOrDynamic::to_dynamic_vec(strides);
     let static_sizes = StaticOrDynamic::to_static_size_attr(mlir_ctx, sizes);
-    let dim = StaticOrDynamic::to_static_size_vec(sizes);
     let dynamic_sizes = StaticOrDynamic::to_dynamic_vec(sizes);
 
-    let result_ty = MemRefType::new(basety, &dim, layout, source_memref_ty.memory_space());
+    // Construct the result type.
+    let mut dim = vec![];
+    let mut dim_skip = true;
+    if sizes.len() > 1 {
+        for size in sizes {
+            if size.to_static_size() != 1 || !dim_skip {
+                dim.push(size.to_static_size());
+                dim_skip = false;
+            }
+        }
+    } else {
+        dim.push(sizes[0].to_static_size());
+    }
+    let layout = Some(StaticOrDynamic::to_static_stride_and_offset_attr(
+        mlir_ctx,
+        dst_layout_offset,
+        &strides[0..dim.len()],
+    ));
+
+    let result_ty =
+        crate::mlir::type_memref(mlir_ctx, basety, &dim, layout, source_memref_ty.memory_space());
     let mut op: Operation<'c> = if use_reinterpret {
         raw_memref::reinterpret_cast(
             mlir_ctx,
-            result_ty.into(),
+            result_ty,
             ptr,
             &dynamic_offsets,
             &dynamic_sizes,
@@ -201,7 +213,7 @@ fn subview_or_reinterpret_cast<'c, 'a>(
     } else {
         raw_memref::subview(
             mlir_ctx,
-            result_ty.into(),
+            result_ty,
             ptr,
             &dynamic_offsets,
             &dynamic_sizes,

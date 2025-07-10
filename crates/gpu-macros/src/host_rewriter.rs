@@ -110,12 +110,8 @@ fn host_create_wrapper(func: &syn::ItemFn, span: Span) -> syn::ItemFn {
 
                         // Add local to call args in a reversed manner
                         call_args_rev.push(arg_window_ptr_ident);
-                        for _ in 0..4 {
-                            call_args_rev.push(arg_size_ptr_ident.clone());
-                        }
-                        for _ in 0..2 {
-                            call_args_rev.push(arg_ptr_ptr_ident.clone());
-                        }
+                        call_args_rev.push(arg_size_ptr_ident.clone());
+                        call_args_rev.push(arg_ptr_ptr_ident.clone());
                     } else {
                         // Add ident as is
                         let call_arg =

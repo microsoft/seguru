@@ -66,7 +66,7 @@ impl CompileConfig {
             cse,\
             reconcile-unrealized-casts,\
             gpu.module(\
-                convert-gpu-to-nvvm{{has-redux=1}},\
+                convert-gpu-to-nvvm{{has-redux=1 use-bare-ptr-memref-call-conv=1}},\
                 canonicalize,\
                 cse),\
             gpu-to-llvm,\

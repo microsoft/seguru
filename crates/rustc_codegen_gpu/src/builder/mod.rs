@@ -1863,7 +1863,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             dst_ty.into()
         };
         let src = self.mlir_memref_view(src, dst_ty, None);
-        let op = melior::dialect::ods::memref::copy(self.mlir_ctx, dst, src, self.cur_loc()).into();
+        let op = melior::dialect::ods::memref::copy(self.mlir_ctx, src, dst, self.cur_loc()).into();
         self.append_op(op);
     }
 

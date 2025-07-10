@@ -9,6 +9,16 @@ mod dim;
 mod print;
 mod thread;
 
+pub struct GpuChunkableMut<'a, T> {
+    pub slice: &'a mut [T],
+    pub window: usize,
+}
+
+pub struct GpuChunkable<'a, T> {
+    pub slice: &'a [T],
+    pub window: usize,
+}
+
 pub use dim::{
     DimType, GpuChunkIdx, block_dim, block_id, cluster_id, global_id, grid_dim, thread_id,
 };

@@ -12,13 +12,14 @@ mod internal {
         a_window: usize,
         b: &mut [u8],
         b_window: usize,
+        c: &[u8],
     ) {
-        manual_test_gpu_arith::kernel_arith_wrapper(a, a_window, b, b_window);
+        manual_test_gpu_arith::kernel_arith_wrapper(a, a_window, b, b_window, c);
     }
 }
 
 #[gpu_macros::host(manual_test_gpu_arith::kernel_arith)]
-fn kernel_arith(a: &[u8], b: &mut [u8]) {
+fn kernel_arith(a: &gpu::GpuChunkable<u8>, b: &gpu::GpuChunkableMut<u8>, c: &[u8]) {
     let config = cuda_bindings::GPUConfig {
         grid_dim_x: 1,
         grid_dim_y: 1,
@@ -124,10 +125,12 @@ fn main() -> ExitCode {
     // TODO: Make h_a non-mutable
     let h_a: &[u8] = &[1, 2, 3, 4];
     let h_b: &mut [u8] = &mut [5, 6, 7, 8];
+    let h_c: &[u8] = &[10, 11, 12, 13];
 
     // Allocate the two device-side arrays and build them into slices
     let d_a;
     let d_b;
+    let d_c;
 
     if let Some(dev_slice) = cuda_bindings::memalloc::<u8>(len * std::mem::size_of::<u8>()) {
         d_a = dev_slice;
@@ -139,7 +142,14 @@ fn main() -> ExitCode {
     if let Some(dev_slice) = cuda_bindings::memalloc::<u8>(len * std::mem::size_of::<u8>()) {
         d_b = dev_slice;
     } else {
-        eprintln!("{}: failed to allocate d_a", args[0]);
+        eprintln!("{}: failed to allocate d_b", args[0]);
+        return ExitCode::from(1);
+    }
+
+    if let Some(dev_slice) = cuda_bindings::memalloc::<u8>(len * std::mem::size_of::<u8>()) {
+        d_c = dev_slice;
+    } else {
+        eprintln!("{}: failed to allocate d_c", args[0]);
         return ExitCode::from(1);
     }
 
@@ -166,8 +176,23 @@ fn main() -> ExitCode {
         return ExitCode::from(1);
     }
 
+    if cuda_bindings::memcpy(
+        d_c,
+        h_c,
+        len * std::mem::size_of::<u8>(),
+        cuda_bindings::GPU_MEMCPY_H2D,
+    ) != 0
+    {
+        eprintln!("{}: failed to copy c", args[0]);
+        return ExitCode::from(1);
+    }
+
+    let d_a_c = gpu::GpuChunkable::<u8> { slice: d_a, window };
+
+    let d_b_c = gpu::GpuChunkableMut::<u8> { slice: d_b, window };
+
     // Now do the kernel
-    if launch_kernel_arith(d_a, window, d_b, window) != 0 {
+    if launch_kernel_arith(&d_a_c, &d_b_c, d_c) != 0 {
         eprintln!("{}: failed to execute kernel", args[0]);
         return ExitCode::from(1);
     }

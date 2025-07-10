@@ -10,3 +10,4 @@ crate-type = ["bin"]
 cuda_bindings = {path = "../../crates/cuda_bindings"}
 manual-test-gpu-arith = {path = "../manual-test-gpu-arith"}
 gpu_macros = { path = "../../crates/gpu-macros" }
+gpu = { path = "../../crates/gpu" }

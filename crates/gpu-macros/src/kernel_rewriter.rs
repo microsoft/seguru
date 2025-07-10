@@ -24,65 +24,117 @@ fn kernel_create_wrapper(func: &mut syn::ItemFn, span: Span) -> syn::ItemFn {
 
     // 2. Add window to the argument list (also build the slices along the way)
     let wrapper_args = &mut wrapper_func.sig.inputs;
+    let original_args = &mut func.sig.inputs;
     let mut call_args_rev = vec![];
 
     // Backwards iteration so that insertion don't mess up the indices
     // Thanks the good idea of the LLM of Google Search
     for i in (0..wrapper_args.len()).rev() {
-        let arg = &wrapper_args[i];
+        let arg = &mut wrapper_args[i];
         if let syn::FnArg::Typed(pat_type) = arg {
             if let syn::Pat::Ident(pat_ident) = *pat_type.pat.clone() {
                 if let syn::Type::Reference(type_ref) = &*pat_type.ty {
-                    if let syn::Type::Slice(_) = &*type_ref.elem {
-                        // Only append window to the slice
+                    if let syn::Type::Path(path) = &*type_ref.elem {
+                        // It MUST follow the gpu::GpuChunkable(Mut)
 
-                        // Create a name for it
-                        let arg_type = &*pat_type.ty;
-                        let arg_name = pat_ident.ident.clone();
-                        let window_arg_name = &format!("{}_window", pat_ident.ident);
-                        let window_arg_ident = syn::Pat::Ident(syn::PatIdent {
-                            attrs: Vec::new(),
-                            by_ref: None,
-                            mutability: None,
-                            ident: syn::Ident::new(window_arg_name, span),
-                            subpat: None,
-                        });
-                        let window_arg = syn::FnArg::Typed(syn::PatType {
-                            attrs: Vec::new(),
-                            pat: Box::new(window_arg_ident.clone()),
-                            colon_token: syn::token::Colon { spans: [span] },
-                            ty: Box::new(syn::Type::Verbatim(quote! { usize })),
-                        });
+                        if path.path.segments[0].ident == "gpu"
+                            && (path.path.segments[1].ident == "GpuChunkableMut"
+                                || path.path.segments[1].ident == "GpuChunkable")
+                        {
+                            if let syn::PathArguments::AngleBracketed(slice_arg) =
+                                &path.path.segments[1].arguments
+                            {
+                                if let syn::GenericArgument::Type(slice_ty) = &slice_arg.args[0] {
+                                    let is_mut = path.path.segments[1].ident == "GpuChunkableMut";
+                                    let replaced_arg_name = syn::Pat::Ident(syn::PatIdent {
+                                        attrs: Vec::new(),
+                                        by_ref: None,
+                                        mutability: None,
+                                        ident: syn::Ident::new(&pat_ident.ident.to_string(), span),
+                                        subpat: None,
+                                    });
+                                    let replaced_arg = if is_mut {
+                                        syn::FnArg::Typed(syn::PatType {
+                                            attrs: Vec::new(),
+                                            pat: Box::new(replaced_arg_name.clone()),
+                                            colon_token: syn::token::Colon { spans: [span] },
+                                            ty: Box::new(syn::Type::Verbatim(
+                                                quote! { &mut [ #slice_ty ] },
+                                            )),
+                                        })
+                                    } else {
+                                        syn::FnArg::Typed(syn::PatType {
+                                            attrs: Vec::new(),
+                                            pat: Box::new(replaced_arg_name.clone()),
+                                            colon_token: syn::token::Colon { spans: [span] },
+                                            ty: Box::new(syn::Type::Verbatim(
+                                                quote! { &[ #slice_ty ] },
+                                            )),
+                                        })
+                                    };
+                                    let arg_type = if is_mut {
+                                        syn::Type::Verbatim(quote! { &mut [ #slice_ty ] })
+                                    } else {
+                                        syn::Type::Verbatim(quote! { &[ #slice_ty ] })
+                                    };
+                                    let arg_name = pat_ident.ident.clone();
+                                    let window_arg_name = &format!("{}_window", pat_ident.ident);
+                                    let window_arg_ident = syn::Pat::Ident(syn::PatIdent {
+                                        attrs: Vec::new(),
+                                        by_ref: None,
+                                        mutability: None,
+                                        ident: syn::Ident::new(window_arg_name, span),
+                                        subpat: None,
+                                    });
+                                    let window_arg = syn::FnArg::Typed(syn::PatType {
+                                        attrs: Vec::new(),
+                                        pat: Box::new(window_arg_ident.clone()),
+                                        colon_token: syn::token::Colon { spans: [span] },
+                                        ty: Box::new(syn::Type::Verbatim(quote! { usize })),
+                                    });
 
-                        let arg_local_name = &format!("{}_local", pat_ident.ident);
-                        let arg_local_ident = syn::Ident::new(arg_local_name, func.span());
+                                    let arg_local_name = &format!("{}_local", pat_ident.ident);
+                                    let arg_local_ident = syn::Ident::new(arg_local_name, span);
 
-                        // See if we are mutable
-                        let new_slice = if type_ref.mutability.is_some() {
-                            syn::parse(quote! {
-                                let #arg_local_ident: #arg_type = gpu::subslice_mut(#arg_name, __c * #window_arg_ident, #window_arg_ident);
-                            }.into()).expect("Failed to parse input as a statement 3")
+                                    *arg = replaced_arg.clone();
+                                    original_args[i] = replaced_arg;
+
+                                    // See if we are mutable
+                                    let new_slice = if is_mut {
+                                        syn::parse(quote! {
+                                            let #arg_local_ident: #arg_type = gpu::subslice_mut(#arg_name, __c * #window_arg_ident, #window_arg_ident);
+                                        }.into()).expect("Failed to parse input as a statement 3")
+                                    } else {
+                                        syn::parse(quote! {
+                                            let #arg_local_ident: #arg_type = gpu::subslice(#arg_name, __c * #window_arg_ident, #window_arg_ident);
+                                        }.into()).expect("Failed to parse input as a statement 3")
+                                    };
+                                    stmts.push(new_slice);
+
+                                    // Add
+                                    wrapper_args.insert(i + 1, window_arg);
+
+                                    // Add local to call args
+                                    call_args_rev.push(arg_local_ident);
+                                } else {
+                                    panic!("Not a type in angle bracket");
+                                }
+                            } else {
+                                panic!("No type for GpuChunkableMut");
+                            }
                         } else {
-                            syn::parse(quote! {
-                                let #arg_local_ident: #arg_type = gpu::subslice(#arg_name, __c * #window_arg_ident, #window_arg_ident);
-                            }.into()).expect("Failed to parse input as a statement 3")
-                        };
-                        stmts.push(new_slice);
-
-                        // Add
-                        wrapper_args.insert(i + 1, window_arg);
-
-                        // Add local to call args
-                        call_args_rev.push(arg_local_ident);
+                            // Add ident as is
+                            let call_arg = syn::Ident::new(&format!("{}", pat_ident.ident), span);
+                            call_args_rev.push(call_arg);
+                        }
                     } else {
                         // Add ident as is
-                        let call_arg =
-                            syn::Ident::new(&format!("{}", pat_ident.ident), func.span());
+                        let call_arg = syn::Ident::new(&format!("{}", pat_ident.ident), span);
                         call_args_rev.push(call_arg);
                     }
                 } else {
                     // Add ident as is
-                    let call_arg = syn::Ident::new(&format!("{}", pat_ident.ident), func.span());
+                    let call_arg = syn::Ident::new(&format!("{}", pat_ident.ident), span);
                     call_args_rev.push(call_arg);
                 }
             } else {

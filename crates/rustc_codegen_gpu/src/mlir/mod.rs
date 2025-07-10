@@ -333,14 +333,12 @@ pub(crate) fn static_size_of(ty: Type<'_>) -> usize {
     } else if ty.is_index() || ty.is_mem_ref() {
         size_of::<usize>()
     } else if ty.is_float() {
-        tracing::warn!("float type {:?} size calculation {}", ty, float_width(ty).unwrap());
         float_width(ty).unwrap() / 8
     } else if ty.is_tuple() {
         let tuple = TupleType::try_from(ty).unwrap();
         let mut total_size = 0;
         for i in 0..tuple.type_count() {
             total_size += static_size_of(tuple.r#type(i).unwrap());
-            tracing::warn!("Tuple type {:?} size calculation {}", tuple, total_size);
         }
         total_size
     } else if ty.is_ranked_tensor() {

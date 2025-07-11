@@ -210,7 +210,8 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             }
             rustc_middle::ty::TyKind::RawPtr(inner_type, _)
             | rustc_middle::ty::TyKind::Ref(_, inner_type, _)
-            | rustc_middle::ty::TyKind::Slice(inner_type) => {
+            | rustc_middle::ty::TyKind::Slice(inner_type)
+            | rustc_middle::ty::TyKind::Array(inner_type, _) => {
                 let layout = self.layout_of(*inner_type);
                 let bytes = layout.size.bytes() as i64;
                 if bytes == 0 {

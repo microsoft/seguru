@@ -8,7 +8,7 @@ fn host_create_wrapper(func: &syn::ItemFn, span: Span) -> syn::ItemFn {
     // 1. Create a new function and change its name and attributes
     let mut wrapper_func = func.clone();
     wrapper_func.sig.ident = syn::Ident::new(&format!("launch_{}", &func.sig.ident), span);
-    let kernel_func_str = &format!("{}_wrapper", &func.sig.ident);
+    let kernel_func_str = &format!("{}", &func.sig.ident);
 
     wrapper_func.attrs.clear();
     wrapper_func.sig.output = syn::ReturnType::Type(

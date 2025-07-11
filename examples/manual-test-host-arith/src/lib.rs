@@ -14,7 +14,7 @@ mod internal {
         b_window: usize,
         c: &[u8],
     ) {
-        manual_test_gpu_arith::kernel_arith_wrapper(a, a_window, b, b_window, c);
+        manual_test_gpu_arith::kernel_arith(a, a_window, b, b_window, c);
     }
 }
 

@@ -473,7 +473,7 @@ impl<'tcx, 'ml, 'a> LayoutTypeCodegenMethods<'tcx> for GPUCodegenContext<'tcx, '
         };
         let scalar: rustc_abi::Scalar = [a, b][index];
         if index == 1 {
-            self.scalar_mlir_type(&scalar, None, immediate, None)
+            self.scalar_mlir_type(&scalar, Some(&layout), immediate, None)
         } else {
             // Check if the type is adt gpu::GpuShared<T>, if so, it it a shared memory type.
             let memory_space = if let Some(def) = layout.ty.ty_adt_def() {
@@ -487,7 +487,7 @@ impl<'tcx, 'ml, 'a> LayoutTypeCodegenMethods<'tcx> for GPUCodegenContext<'tcx, '
             } else {
                 None
             };
-            self.scalar_mlir_type(&scalar, None, immediate, memory_space)
+            self.scalar_mlir_type(&scalar, Some(&layout), immediate, memory_space)
         }
     }
 }

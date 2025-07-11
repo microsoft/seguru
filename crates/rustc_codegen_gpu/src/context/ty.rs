@@ -199,25 +199,24 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     fn pointer_to_mlir_type(
         &self,
         ty: &rustc_middle::ty::Ty<'tcx>,
-        immediate: bool,
+        _immediate: bool,
         memory_space: Option<Attribute<'ml>>,
     ) -> MLIRType<'ml> {
         match ty.kind() {
-            rustc_middle::ty::TyKind::Str => {
-                let ty = ty.builtin_deref(true).unwrap_or_else(|| panic!("{:?}", ty));
-                let layout = self.layout_of(ty);
-                self.type_memref_single(self.type_i8(), memory_space)
-            }
+            rustc_middle::ty::TyKind::Str => self.type_memref_single(self.type_i8(), memory_space),
             rustc_middle::ty::TyKind::RawPtr(inner_type, _)
             | rustc_middle::ty::TyKind::Ref(_, inner_type, _)
             | rustc_middle::ty::TyKind::Slice(inner_type)
             | rustc_middle::ty::TyKind::Array(inner_type, _) => {
-                let layout = self.layout_of(*inner_type);
-                let bytes = layout.size.bytes() as i64;
-                if bytes == 0 {
-                    self.type_memref_single(self.type_i8(), memory_space)
+                if inner_type.is_primitive() {
+                    let size = inner_type.primitive_size(self.tcx);
+                    if size.bytes() == 0 {
+                        self.type_memref_single(self.type_i8(), memory_space)
+                    } else {
+                        self.type_memref(self.type_i8(), &[size.bytes() as i64], memory_space)
+                    }
                 } else {
-                    self.type_memref(self.type_i8(), &[bytes], memory_space)
+                    self.pointer_to_mlir_type(inner_type, _immediate, memory_space)
                 }
             }
             rustc_middle::ty::TyKind::Closure(_, _) => {

@@ -43,3 +43,34 @@ pub fn encoder_forward_kernel3(
         out[0] = add_float4(&wte[(ix * C4 + c4) as usize], &wpe[(t * C4 + c4) as usize]);
     }
 }
+
+// really bad naive kernel with atomicAdd
+#[gpu_macros::kernel]
+#[no_mangle]
+pub fn encoder_backward_kernel(
+    dwte: &mut [f32],
+    dwpe: &mut [f32],
+    dout: &[f32],
+    inp: &[i32],
+    B: i32,
+    T: i32,
+    C: i32,
+) {
+    let idx = (gpu::block_dim(gpu::DimType::X) * gpu::block_id(gpu::DimType::X)
+        + gpu::thread_id(gpu::DimType::X)) as i32;
+    let N = B * T * C;
+
+    if idx < N {
+        let bt = idx / C;
+        let b = bt / T;
+        let t = bt % T;
+        let c = idx % C;
+
+        let ix = inp[(b * T + t) as usize];
+
+        let dout_btc: f32 = dout[(b * T * C + t * C + c) as usize];
+
+        gpu::atomic_add::<f32>(&mut dwte[(ix * C + c) as usize], dout_btc);
+        gpu::atomic_add::<f32>(&mut dwpe[(t * C + c) as usize], dout_btc);
+    }
+}

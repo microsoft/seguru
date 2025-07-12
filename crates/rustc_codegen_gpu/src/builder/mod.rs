@@ -1435,11 +1435,26 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
                 if let rustc_abi::Primitive::Pointer(_) = layout.primitive() {
                     if data == 0 { self.const_null(ty) } else { self.const_undef(ty) }
                 } else {
-                    self.mlir_const_val_from_type(
-                        cv.assert_scalar_int().to_int(int.size()),
-                        ty,
-                        self.cur_block(),
-                    )
+                    let data = if ty.is_index() || ty.is_integer() {
+                        data.to_string()
+                    } else if ty.is_float() {
+                        let mut data = match int.size().bits() {
+                            16 => int.to_f16().to_string(),
+                            32 => int.to_f32().to_string(),
+                            64 => int.to_f64().to_string(),
+                            _ => panic!("Unsupported float size: {:?}", int.size()),
+                        };
+                        if !data.contains(".") {
+                            data.push_str(".0");
+                        }
+                        data
+                    } else {
+                        self.emit_error(
+                            format!("Unsupported type for scalar: {:?}", ty),
+                            self.cur_span,
+                        )
+                    };
+                    self.mlir_const_val_from_type(data, ty, self.cur_block())
                 }
             }
             rustc_const_eval::interpret::Scalar::Ptr(ptr, s) => {

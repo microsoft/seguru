@@ -11,8 +11,9 @@ use gpu::float4;
 #[inline(always)]
 #[no_mangle]
 pub fn add_float4(a: &float4, b: &float4) -> float4 {
+    let f: f32 = 1.234;
     float4 {
-        x: a.x + b.x,
+        x: a.x + b.x + f,
         y: a.y + b.y,
         z: a.z + b.z,
         w: a.w + b.w,
@@ -27,3 +28,5 @@ pub fn test_float4(out: &gpu::GpuChunkableMut<float4>, in1: &float4, in2: &float
 
 // CHECK: @gpu_bin_cst = internal constant
 // PTX_CHECK: .visible .entry test_float4
+// PTX_CHECK: add.rn.f32
+// PTX_CHECK: 0f3F9DF3B6

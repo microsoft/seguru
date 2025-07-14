@@ -3,6 +3,7 @@
 #![feature(register_tool)]
 #![register_tool(gpu_codegen)]
 #![feature(stmt_expr_attributes)]
+#![no_std]
 
 extern crate gpu;
 use gpu::float4;

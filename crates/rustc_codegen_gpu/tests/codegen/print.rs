@@ -4,6 +4,7 @@
 #![register_tool(gpu_codegen)]
 #![no_std]
 
+extern crate gpu;
 
 #[no_mangle]
 #[gpu_codegen::kernel]

@@ -3,6 +3,8 @@
 #![feature(stmt_expr_attributes)]
 #![no_std]
 
+extern crate gpu;
+
 #[gpu_codegen::device]
 #[no_mangle]
 /// assume BK * BK == number of threads in a block x axis.

@@ -1,5 +1,6 @@
 #![feature(register_tool)]
 #![register_tool(gpu_codegen)]
+#![no_std]
 
 #[no_mangle]
 #[gpu_codegen::kernel]

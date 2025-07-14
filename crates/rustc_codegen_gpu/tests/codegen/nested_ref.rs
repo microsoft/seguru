@@ -2,6 +2,7 @@
 // compile-pass
 #![feature(register_tool)]
 #![register_tool(gpu_codegen)]
+#![no_std]
 
 pub struct X<'a> {
     a: &'a [u8]

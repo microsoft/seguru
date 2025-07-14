@@ -206,13 +206,15 @@ impl ExtraBackendMethods for GPUCodegenBackend {
     ) -> (rustc_codegen_ssa_gpu::ModuleCodegen<Self::Module>, u64) {
         let start_time = std::time::Instant::now();
         let dep_node = tcx.codegen_unit(cgu_name).codegen_dep_node(tcx);
-        let (module, _) = tcx.dep_graph.with_task(
-            dep_node,
-            tcx,
-            cgu_name,
-            crate::codegen::module_codegen,
-            Some(rustc_middle::dep_graph::hash_result),
-        );
+        let (module, _) = rustc_middle::ty::print::with_no_trimmed_paths!({
+            tcx.dep_graph.with_task(
+                dep_node,
+                tcx,
+                cgu_name,
+                crate::codegen::module_codegen,
+                Some(rustc_middle::dep_graph::hash_result),
+            )
+        });
         let time_to_codegen = start_time.elapsed();
         eprintln!("compile_codegen_unit {}", cgu_name);
         let cost = time_to_codegen.as_nanos() as u64;

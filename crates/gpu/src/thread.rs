@@ -1,7 +1,7 @@
 /// This is motivated by thread::scope in Rust std lib.
 /// Be careful when modifying this code since it is part of the TCB to support data-race free GPU programming.
 use core::marker::PhantomData;
-use std::ops::{Deref, DerefMut};
+use core::ops::{Deref, DerefMut};
 
 pub struct ThreadScope<'scope, 'env: 'scope> {
     scope: PhantomData<&'scope mut &'scope ()>,

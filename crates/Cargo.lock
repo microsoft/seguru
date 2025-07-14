@@ -734,7 +734,6 @@ name = "rustc_codegen_gpu"
 version = "0.1.0"
 dependencies = [
  "compiletest_rs",
- "gpu",
  "gpu_macros",
  "melior",
  "melior-macro 0.17.0",

@@ -2,6 +2,7 @@
 // compile-pass
 #![feature(register_tool)]
 #![register_tool(gpu_codegen)]
+#![no_std]
 
 #[repr(packed, C)]
 #[derive(Clone, Copy)]

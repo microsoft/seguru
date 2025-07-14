@@ -261,6 +261,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let in_gpu_mod = gpu_attrs.kernel || gpu_attrs.device;
         operation.set_op_visible(self.mlir_ctx, visibility);
         let body = self.mlir_body(in_gpu_mod);
+        tracing::debug!("attr = {:?}", gpu_attrs.gpu_item);
         trace!("append operation to block {} {:?}", operation, fn_sym);
         let op = body.append_operation(operation);
         self.fn_db.write().unwrap().insert(sym.clone(), op);

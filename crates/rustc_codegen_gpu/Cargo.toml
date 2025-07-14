@@ -23,7 +23,6 @@ path = "tests/bin/filecheck.rs"
 [dev-dependencies]
 compiletest_rs = "0.9.0"
 gpu_macros = {path = "../gpu-macros"}
-gpu = {path = "../gpu"}
 
 [package.metadata.rust-analyzer]
 rustc_private = true

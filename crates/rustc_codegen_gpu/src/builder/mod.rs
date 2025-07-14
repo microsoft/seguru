@@ -1,4 +1,5 @@
 mod abi;
+mod asm;
 mod coverage;
 mod debug;
 mod intrinsic;
@@ -19,7 +20,7 @@ use melior::ir::{
 use rustc_abi::BackendRepr;
 use rustc_codegen_ssa_gpu::mir::operand::{OperandRef, OperandValue};
 use rustc_codegen_ssa_gpu::traits::{
-    AsmBuilderMethods, BackendTypes, BaseTypeCodegenMethods, BuilderMethods, ConstCodegenMethods,
+    BackendTypes, BaseTypeCodegenMethods, BuilderMethods, ConstCodegenMethods,
     LayoutTypeCodegenMethods, OverflowOp, StaticBuilderMethods,
 };
 use rustc_span::Span;
@@ -31,6 +32,7 @@ use crate::mlir::gpu::{DimFn, NonDimFn, all_reduce, subgroup_reduce};
 use crate::mlir::memref::{extract_strided_metadata, extract_strided_metadata_results};
 use crate::mlir::{BUILTIN_SYM, BlockRefWithTime, MLIROpHelpers, ValueToOpRef};
 
+#[derive(Debug)]
 pub(crate) struct GpuBuilderState<'ml, 'a> {
     pub attrs: Vec<mlir_ir::Attribute<'ml>>,
     pub args: HashMap<crate::attr::GpuItem, Vec<mlir_ir::Value<'ml, 'a>>>,
@@ -43,6 +45,7 @@ impl<'ml, 'a> GpuBuilderState<'ml, 'a> {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct GpuBuilder<'tcx, 'ml, 'a> {
     pub cx: &'a GPUCodegenContext<'tcx, 'ml, 'a>,
     pub name: String,
@@ -801,21 +804,6 @@ impl<'tcx, 'ml, 'a> BackendTypes for GpuBuilder<'tcx, 'ml, 'a> {
 
 impl<'tcx, 'ml, 'a> StaticBuilderMethods for GpuBuilder<'tcx, 'ml, 'a> {
     fn get_static(&mut self, def_id: rustc_hir::def_id::DefId) -> Self::Value {
-        todo!()
-    }
-}
-
-impl<'tcx: 'a, 'ml: 'a, 'a> AsmBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
-    fn codegen_inline_asm(
-        &mut self,
-        template: &[rustc_ast::InlineAsmTemplatePiece],
-        operands: &[rustc_codegen_ssa_gpu::traits::InlineAsmOperandRef<'tcx, Self>],
-        options: rustc_ast::InlineAsmOptions,
-        line_spans: &[rustc_span::Span],
-        instance: rustc_middle::ty::Instance<'_>,
-        dest: Option<Self::BasicBlock>,
-        catch_funclet: Option<(Self::BasicBlock, Option<&Self::Funclet>)>,
-    ) {
         todo!()
     }
 }

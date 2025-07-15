@@ -8,18 +8,18 @@ mod internal {
     /// This is needed in order to force the compiler to link the GPU code.
     #[allow(dead_code)]
     fn dummy_api_checker_kernel_launch_wrapper(
-        a: &[u8],
+        a: &[u32],
         a_window: usize,
-        b: &mut [u8],
+        b: &mut [u32],
         b_window: usize,
-        c: &[u8],
+        c: &[u32],
     ) {
         manual_test_gpu_arith::kernel_arith(a, a_window, b, b_window, c);
     }
 }
 
 #[gpu_macros::host(manual_test_gpu_arith::kernel_arith)]
-fn kernel_arith(a: &gpu::GpuChunkable<u8>, b: &gpu::GpuChunkableMut<u8>, c: &[u8]) {
+fn kernel_arith(a: &gpu::GpuChunkable<u32>, b: &gpu::GpuChunkableMut<u32>, c: &[u32]) {
     let config = cuda_bindings::GPUConfig {
         grid_dim_x: 1,
         grid_dim_y: 1,
@@ -123,30 +123,30 @@ fn main() -> ExitCode {
 
     // Allocate the two host-side arrays
     // TODO: Make h_a non-mutable
-    let h_a: &[u8] = &[1, 2, 3, 4];
-    let h_b: &mut [u8] = &mut [5, 6, 7, 8];
-    let h_c: &[u8] = &[10, 11, 12, 13];
+    let h_a: &[u32] = &[1, 2, 3, 4];
+    let h_b: &mut [u32] = &mut [5, 6, 7, 8];
+    let h_c: &[u32] = &[10, 11, 12, 13];
 
     // Allocate the two device-side arrays and build them into slices
     let d_a;
     let d_b;
     let d_c;
 
-    if let Some(dev_slice) = cuda_bindings::memalloc::<u8>(len * std::mem::size_of::<u8>()) {
+    if let Some(dev_slice) = cuda_bindings::memalloc::<u32>(len * std::mem::size_of::<u32>()) {
         d_a = dev_slice;
     } else {
         eprintln!("{}: failed to allocate d_a", args[0]);
         return ExitCode::from(1);
     }
 
-    if let Some(dev_slice) = cuda_bindings::memalloc::<u8>(len * std::mem::size_of::<u8>()) {
+    if let Some(dev_slice) = cuda_bindings::memalloc::<u32>(len * std::mem::size_of::<u32>()) {
         d_b = dev_slice;
     } else {
         eprintln!("{}: failed to allocate d_b", args[0]);
         return ExitCode::from(1);
     }
 
-    if let Some(dev_slice) = cuda_bindings::memalloc::<u8>(len * std::mem::size_of::<u8>()) {
+    if let Some(dev_slice) = cuda_bindings::memalloc::<u32>(len * std::mem::size_of::<u32>()) {
         d_c = dev_slice;
     } else {
         eprintln!("{}: failed to allocate d_c", args[0]);
@@ -157,7 +157,7 @@ fn main() -> ExitCode {
     if cuda_bindings::memcpy(
         d_a,
         h_a,
-        len * std::mem::size_of::<u8>(),
+        len * std::mem::size_of::<u32>(),
         cuda_bindings::GPU_MEMCPY_H2D,
     ) != 0
     {
@@ -168,7 +168,7 @@ fn main() -> ExitCode {
     if cuda_bindings::memcpy(
         d_b,
         h_b,
-        len * std::mem::size_of::<u8>(),
+        len * std::mem::size_of::<u32>(),
         cuda_bindings::GPU_MEMCPY_H2D,
     ) != 0
     {
@@ -179,7 +179,7 @@ fn main() -> ExitCode {
     if cuda_bindings::memcpy(
         d_c,
         h_c,
-        len * std::mem::size_of::<u8>(),
+        len * std::mem::size_of::<u32>(),
         cuda_bindings::GPU_MEMCPY_H2D,
     ) != 0
     {
@@ -187,9 +187,9 @@ fn main() -> ExitCode {
         return ExitCode::from(1);
     }
 
-    let d_a_c = gpu::GpuChunkable::<u8> { slice: d_a, window };
+    let d_a_c = gpu::GpuChunkable::<u32> { slice: d_a, window };
 
-    let d_b_c = gpu::GpuChunkableMut::<u8> { slice: d_b, window };
+    let d_b_c = gpu::GpuChunkableMut::<u32> { slice: d_b, window };
 
     // Now do the kernel
     if launch_kernel_arith(&d_a_c, &d_b_c, d_c) != 0 {
@@ -201,7 +201,7 @@ fn main() -> ExitCode {
     if cuda_bindings::memcpy(
         h_b,
         d_b,
-        len * std::mem::size_of::<u8>(),
+        len * std::mem::size_of::<u32>(),
         cuda_bindings::GPU_MEMCPY_D2H,
     ) != 0
     {

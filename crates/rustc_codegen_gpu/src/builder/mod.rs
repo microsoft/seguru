@@ -31,6 +31,7 @@ use crate::context::GPUCodegenContext;
 use crate::mlir::gpu::{DimFn, NonDimFn, all_reduce, subgroup_reduce};
 use crate::mlir::memref::{extract_strided_metadata, extract_strided_metadata_results};
 use crate::mlir::{BUILTIN_SYM, BlockRefWithTime, MLIROpHelpers, ValueToOpRef};
+use crate::rustc_middle::ty::layout::LayoutOf;
 
 #[derive(Debug)]
 pub(crate) struct GpuBuilderState<'ml, 'a> {
@@ -422,7 +423,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             }
             GpuItem::Subslice | GpuItem::SubsliceMut => {
                 trace!("gpu.subslice(_mut) args: {:?}", args);
-                // args[0]: original:      memref<1xi8>
+                // args[0]: original:      memref<size xi8>
                 // args[1]: original_size: i64
                 // args[2]: offset:        index
                 // args[3]: window:        i64
@@ -443,11 +444,24 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
 
                 // 2. Build the subslice: Done by transforming memref<1xi8> into the
                 //    strided form using subview. Shortcut to use inbounds_gep
+                //    IMPORTANT: ALL OFFSETS IN memref<size xi8> MUST BE BYTE-BASED,
+                //               NOT ELEMENT-BASED
+                let slice_ty = get_generic_type()[0];
+                let slice_ty_layout = self.cx.layout_of(slice_ty);
+                let slice_type = self.mlir_type(slice_ty_layout, false);
+
+                // offset needs to time size of slice_type
+                let element_size =
+                    self.emit_constant(self.static_size_of(slice_type) as u64, self.type_index());
+                let byte_based_offset = self.mul(offset, element_size);
                 let indices = vec![offset; 1];
-                let subview_op = self.inbounds_gep_op(self.type_i8(), original, &indices);
+
+                let subview_op = self.inbounds_gep_op(slice_type, original, &indices);
                 let op_ref = self.append_op(subview_op);
 
                 // 3. Build the 'pair' of memref and i64
+                //    IMPORTANT: WINDOW HERE IS STILL ELEMENT-BASED. BYTE-BASDE IS ONLY
+                //               USED FOR MEMREF!
                 let res = op_ref.result(0).unwrap().into();
                 self.op_to_extra_values.insert(op_ref.location().to_string(), vec![res, window]);
 
@@ -501,6 +515,10 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         }
     }
 
+    // Instead of generating things with a true type (e.g., memref<?xf32>), this function
+    // should generate memref<size xi8> (e.g., 4xi8) with the offset given. This is
+    // critical since otherwise we can't really change the type anymore.
+    // IMPORTANT: THE OFFSETS IN THIS memref<size xi8> MUST BE SIZE-BASED!
     fn inbounds_gep_op(
         &mut self,
         ty: <GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::Type,
@@ -518,14 +536,25 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             .map(|v| {
                 if v.r#type().is_integer() || v.r#type().is_index() {
                     let v = self.use_value(*v);
-                    self.intcast(v, self.type_index(), false).into()
+
+                    let element_size =
+                        self.emit_constant(self.static_size_of(ty) as u64, self.type_i64());
+                    let byte_index = self.mul(v, element_size);
+
+                    self.intcast(byte_index, self.type_index(), false).into()
                 } else {
                     panic!("Must be int or index type");
                 }
             })
             .collect::<Vec<_>>();
-        let target_memref_ty =
-            MemRefType::try_from(self.type_memref(ty, &[1], src_memref_ty.memory_space())).unwrap();
+        // target_memref_ty here has to be i8, size is ty's size
+        let target_memref_ty = MemRefType::try_from(self.type_memref(
+            self.type_i8(),
+            &[self.static_size_of(ty) as i64],
+            src_memref_ty.memory_space(),
+        ))
+        .unwrap();
+        // base_ty is always i8
         let ptr = if ty != base_ty {
             let size = self.static_size_of(ty);
             let base_size = self.static_size_of(base_ty);
@@ -540,7 +569,8 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         } else {
             ptr
         };
-        let mut sizes = vec![1.into()];
+        // size on the first stride represents the element size
+        let mut sizes = vec![(self.static_size_of(ty) as i64).into()];
         let mut strides = vec![1.into()];
         let base_ty = target_memref_ty.element();
         if target_memref_ty.rank() > 1 {
@@ -637,6 +667,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         if ty == dst_ty {
             val
         } else if ty.is_mem_ref() && dst_ty.is_mem_ref() {
+            // Should be i8 to i8 here
             self.mlir_memref_view(val, dst_ty, None)
         } else if ty.is_index() || dst_ty.is_index() {
             assert!(ty.is_integer() || dst_ty.is_integer());
@@ -671,7 +702,12 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 let op = self.append_op(op.into());
                 let results = extract_strided_metadata_results(memref_ty, op);
                 let element_ty = self.mlir_element_type(ty);
-                assert!(element_ty == self.type_i8());
+
+                if element_ty != self.type_i8() {
+                    warn!("mlir_memref_view: element_ty is not type_i8");
+                    let backtrace = std::backtrace::Backtrace::force_capture();
+                    println!("{}", backtrace);
+                }
 
                 // The results.base_memref is memref<i8>,
                 // but we need 1d memref<sizexi8> to use view
@@ -1367,6 +1403,9 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
                 };
                 let ptr_memref_ty = MemRefType::try_from(ptr.r#type()).unwrap();
                 let ptr = if i > 0 || base_ty != ptr_memref_ty.element() {
+                    // TODO: Likely OK but I'm not sure... This thing feeds into the load
+                    // eventually which, if ptr is already the base_ty, will bypass the
+                    // mlir_memref_view in load
                     self.mlir_memref_view(
                         ptr,
                         self.type_memref(base_ty, &[1], ptr_memref_ty.memory_space()),
@@ -1705,6 +1744,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
                     .into(),
             )
         } else {
+            // TODO: Likely wanting an i8 ptr here
             self.mlir_memref_view(val, dest_ty, None)
         }
     }
@@ -1864,14 +1904,12 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         }
         let dst_ty = MemRefType::try_from(dst.r#type()).unwrap();
         let src_ty = MemRefType::try_from(src.r#type()).unwrap();
-        let dst_ty = if dst_ty.memory_space() != src_ty.memory_space() {
+        let dst_ty = {
             let mut sizes = vec![];
             for i in 0..dst_ty.rank() {
                 sizes.push(dst_ty.dim_size(i).unwrap() as i64);
             }
             self.type_memref(dst_ty.element(), &sizes, src_ty.memory_space())
-        } else {
-            dst_ty.into()
         };
         let src = self.mlir_memref_view(src, dst_ty, None);
         let op = melior::dialect::ods::memref::copy(self.mlir_ctx, src, dst, self.cur_loc()).into();

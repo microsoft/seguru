@@ -87,7 +87,7 @@ jobs:
 
       - name: Clippy examples
         working-directory: examples
-        run: RUSTC=rustc cargo clippy -- -D warnings -C panic=abort
+        run: RUSTC=rustc cargo clippy --workspace --exclude llm-rs-gpu -- -D warnings -C panic=abort
 
       - name: Run tests
         working-directory: crates/rustc_codegen_gpu

@@ -4,6 +4,9 @@
 #![allow(internal_features)]
 #![feature(rustc_attrs)]
 #![no_std]
+#![feature(asm_experimental_arch)]
+
+use core::arch::asm;
 
 pub mod cg;
 mod dim;
@@ -58,6 +61,21 @@ pub struct float4 {
     pub y: f32,
     pub z: f32,
     pub w: f32,
+}
+
+#[gpu_codegen::device]
+#[inline(always)]
+pub fn __ldcs_f32(val: &f32) -> f32 {
+    let mut ret: f32;
+    let ptr = val as *const f32;
+    unsafe {
+        asm!(
+            "ld.global.cs.f32 {0:e}, [{1:r}];",
+            out(reg) ret,
+            in(reg) ptr,
+        );
+    }
+    ret
 }
 
 /*  TODO: Define shared memory */

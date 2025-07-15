@@ -91,13 +91,6 @@ pub fn encoder_backward_kernel(
 //     unimplemented!();
 // }
 
-// TODO: This is a temporary dummy function
-// Should be replaced by a real one
-#[gpu_macros::device]
-fn __ldcs(val: &f32) -> f32 {
-    *val
-}
-
 #[gpu_macros::kernel]
 #[no_mangle]
 pub fn permute_kernel(
@@ -123,8 +116,8 @@ pub fn permute_kernel(
         let inp_idx = (b * N * 3 * NH * d) + (n * 3 * NH * d) + (0 * NH * d) + (nh_ * d) + d_;
 
         // q, k, v are local
-        q[0] = __ldcs(&inp[(inp_idx) as usize]);
-        k[0] = __ldcs(&inp[(inp_idx + NH * d) as usize]);
-        v[0] = __ldcs(&inp[(inp_idx + 2 * (NH * d)) as usize]);
+        q[0] = gpu::__ldcs_f32(&inp[(inp_idx) as usize]);
+        k[0] = gpu::__ldcs_f32(&inp[(inp_idx + NH * d) as usize]);
+        v[0] = gpu::__ldcs_f32(&inp[(inp_idx + 2 * (NH * d)) as usize]);
     }
 }

@@ -74,3 +74,57 @@ pub fn encoder_backward_kernel(
         gpu::atomic_add::<f32>(&mut dwpe[(t * C + c) as usize], dout_btc);
     }
 }
+
+// TODO: out is column-chunked by wrap. Not supported currently
+// #[gpu_macros::kernel]
+// #[no_mangle]
+// pub fn layernorm_forward_kernel3(
+//     out: &mut [f32],
+//     mean: &mut [f32],
+//     rstd: &mut [f32],
+//     inp: &[i32],
+//     weight: &[f32],
+//     bias: &[f32],
+//     N: i32,
+//     C: i32,
+// ) {
+//     unimplemented!();
+// }
+
+// TODO: This is a temporary dummy function
+// Should be replaced by a real one
+#[gpu_macros::device]
+fn __ldcs(val: &f32) -> f32 {
+    *val
+}
+
+#[gpu_macros::kernel]
+#[no_mangle]
+pub fn permute_kernel(
+    q: &gpu::GpuChunkableMut<f32>,
+    k: &gpu::GpuChunkableMut<f32>,
+    v: &gpu::GpuChunkableMut<f32>,
+    inp: &[f32],
+    B: i32,
+    N: i32,
+    NH: i32,
+    d: i32,
+) {
+    let idx = (gpu::block_dim(gpu::DimType::X) * gpu::block_id(gpu::DimType::X)
+        + gpu::thread_id(gpu::DimType::X)) as i32;
+
+    if idx < B * NH * N * d {
+        let b = idx / (NH * N * d);
+        let mut rest = idx % (NH * N * d);
+        let nh_ = rest / (N * d);
+        rest = rest % (N * d);
+        let n = rest / d;
+        let d_ = rest % d;
+        let inp_idx = (b * N * 3 * NH * d) + (n * 3 * NH * d) + (0 * NH * d) + (nh_ * d) + d_;
+
+        // q, k, v are local
+        q[0] = __ldcs(&inp[(inp_idx) as usize]);
+        k[0] = __ldcs(&inp[(inp_idx + NH * d) as usize]);
+        v[0] = __ldcs(&inp[(inp_idx + 2 * (NH * d)) as usize]);
+    }
+}

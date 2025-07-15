@@ -10,9 +10,9 @@ use core::arch::asm;
 #[gpu_codegen::kernel]
 pub unsafe fn test_asm(a: u32, b: &mut u32) {
    asm!(
-        "mov.u32 {}, {};",
-        out(reg32) *b,
-        in(reg32) a,
+        "mov.u32 {0:e}, {1:e};",
+        out(reg) *b,
+        in(reg) a,
     );
     asm!("membar.gl;");
 }

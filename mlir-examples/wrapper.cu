@@ -30,7 +30,7 @@ void dump_ptx_to_file(const char *ptx, const char *filename) {
 }
 
 int main(int argc, const char **argv) {
-  CUdeviceptr d_a, d_b; // u32[array_size]
+  CUdeviceptr d_a, d_b, d_c; // u32[array_size]
   uint64_t array_size = 4;
   uint64_t fake_array_size = array_size;
   uint64_t window = 1;
@@ -45,8 +45,9 @@ int main(int argc, const char **argv) {
     fake_array_size = atoi(argv[1]);
   }
 
-  char h_a[4] = { 1, 2, 3, 4 };
-  char h_b[4] = { 5, 6, 7, 8 };
+  int h_a[4] = { 1, 2, 3, 4 };
+  int h_b[4] = { 5, 6, 7, 8 };
+  int h_c[4] = { 10, 11, 12, 13};
 
   checkCudaErrors(cuInit(0));
 
@@ -56,11 +57,13 @@ int main(int argc, const char **argv) {
   CUcontext ctx;
   checkCudaErrors(cuCtxCreate(&ctx, 0, dev));
 
-  checkCudaErrors(cuMemAlloc(&d_a, array_size * sizeof(char)));
-  checkCudaErrors(cuMemAlloc(&d_b, array_size * sizeof(char)));
+  checkCudaErrors(cuMemAlloc(&d_a, array_size * sizeof(int)));
+  checkCudaErrors(cuMemAlloc(&d_b, array_size * sizeof(int)));
+  checkCudaErrors(cuMemAlloc(&d_c, array_size * sizeof(int)));
 
-  checkCudaErrors(cuMemcpyHtoD(d_a, h_a, sizeof(char) * 4));
-  checkCudaErrors(cuMemcpyHtoD(d_b, h_b, sizeof(char) * 4));
+  checkCudaErrors(cuMemcpyHtoD(d_a, h_a, sizeof(int) * 4));
+  checkCudaErrors(cuMemcpyHtoD(d_b, h_b, sizeof(int) * 4));
+  checkCudaErrors(cuMemcpyHtoD(d_c, h_c, sizeof(int) * 4));
 
   // Load module from in-memory PTX string
   CUmodule module;
@@ -84,24 +87,20 @@ int main(int argc, const char **argv) {
   }
 
   checkCudaErrors(cuModuleGetFunction(&kernel, module,
-                                      "kernel_arith_wrapper")); // Match kernel name
+                                      "kernel_arith")); // Match kernel name
 
   void *args[] = {
     &d_a,
-    &d_a,
-    &fake_array_size,
-    &fake_array_size,
-    &fake_array_size,
     &fake_array_size,
     &window,
     &d_b,
-    &d_b,
     &fake_array_size,
+    &window,
+    &d_c,
     &fake_array_size,
-    &fake_array_size,
-    &fake_array_size,
-    &window
+    NULL
   };
+
   checkCudaErrors(cuLaunchKernel(kernel, 1, 1, 1, // grid
                                  4, 1, 1,         // block
                                  0,               // shared mem
@@ -110,7 +109,7 @@ int main(int argc, const char **argv) {
 
   checkCudaErrors((CUresult)cudaDeviceSynchronize());
 
-  checkCudaErrors(cuMemcpyDtoH(h_b, d_b, sizeof(char) * 4));
+  checkCudaErrors(cuMemcpyDtoH(h_b, d_b, sizeof(int) * 4));
 
   cudaDeviceSynchronize();
 

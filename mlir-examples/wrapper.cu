@@ -30,7 +30,7 @@ void dump_ptx_to_file(const char *ptx, const char *filename) {
 }
 
 int main(int argc, const char **argv) {
-  CUdeviceptr d_a, d_b, d_c; // u32[array_size]
+  CUdeviceptr d_a, d_b, d_c, d_f, d_g; // u32[array_size]
   uint64_t array_size = 4;
   uint64_t fake_array_size = array_size;
   uint64_t window = 1;
@@ -47,7 +47,9 @@ int main(int argc, const char **argv) {
 
   int h_a[4] = { 1, 2, 3, 4 };
   int h_b[4] = { 5, 6, 7, 8 };
-  int h_c[4] = { 10, 11, 12, 13};
+  int h_c[4] = { 10, 11, 12, 13 };
+  float h_f[4] = { 0.0, 0.0, 0.0, 0.0 };
+  float h_g[4] = { 1.1, 2.2, 3.3, 4.4 };
 
   checkCudaErrors(cuInit(0));
 
@@ -60,10 +62,14 @@ int main(int argc, const char **argv) {
   checkCudaErrors(cuMemAlloc(&d_a, array_size * sizeof(int)));
   checkCudaErrors(cuMemAlloc(&d_b, array_size * sizeof(int)));
   checkCudaErrors(cuMemAlloc(&d_c, array_size * sizeof(int)));
+  checkCudaErrors(cuMemAlloc(&d_f, array_size * sizeof(float)));
+  checkCudaErrors(cuMemAlloc(&d_g, array_size * sizeof(float)));
 
   checkCudaErrors(cuMemcpyHtoD(d_a, h_a, sizeof(int) * 4));
   checkCudaErrors(cuMemcpyHtoD(d_b, h_b, sizeof(int) * 4));
   checkCudaErrors(cuMemcpyHtoD(d_c, h_c, sizeof(int) * 4));
+  checkCudaErrors(cuMemcpyHtoD(d_f, h_f, sizeof(float) * 4));
+  checkCudaErrors(cuMemcpyHtoD(d_g, h_g, sizeof(float) * 4));
 
   // Load module from in-memory PTX string
   CUmodule module;
@@ -98,7 +104,11 @@ int main(int argc, const char **argv) {
     &window,
     &d_c,
     &fake_array_size,
-    NULL
+    &d_f,
+    &fake_array_size,
+    &window,
+    &d_g,
+    &fake_array_size,
   };
 
   checkCudaErrors(cuLaunchKernel(kernel, 1, 1, 1, // grid
@@ -110,11 +120,15 @@ int main(int argc, const char **argv) {
   checkCudaErrors((CUresult)cudaDeviceSynchronize());
 
   checkCudaErrors(cuMemcpyDtoH(h_b, d_b, sizeof(int) * 4));
+  checkCudaErrors(cuMemcpyDtoH(h_f, d_f, sizeof(float) * 4));
 
   cudaDeviceSynchronize();
 
   for (int i = 0; i < 4; i++)
-    printf("[?] b[%d] = %d %c= a[%d] = %d\n", i, h_b[i], ((h_b[i] == h_a[i]) ? '=' : '!'), i, h_a[i]);
+    printf("[?] b[%d] = %d\n", i, h_b[i]);
+
+  for (int i = 0; i < 4; i++)
+    printf("[?] f[%d] = %f\n", i, h_f[i]);
 
   cuModuleUnload(module);
   cuCtxDestroy(ctx);

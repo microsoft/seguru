@@ -3,9 +3,6 @@ name = "manual-test-host-arith"
 version = "0.1.0"
 edition = "2021"
 
-[lib]
-crate-type = ["bin"]
-
 [dependencies]
 cuda_bindings = {workspace = true}
 manual-test-gpu-arith = {path = "../manual-test-gpu-arith"}

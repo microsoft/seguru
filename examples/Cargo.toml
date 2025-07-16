@@ -5,3 +5,8 @@ members = [
     "manual-test-host-arith",
     "llm-rs-gpu",
 ]
+
+[workspace.dependencies]
+cuda_bindings = {path = "../crates/cuda_bindings"}
+gpu_macros = { path = "../crates/gpu-macros" }
+gpu = { path = "../crates/gpu" }

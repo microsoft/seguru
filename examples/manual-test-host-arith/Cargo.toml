@@ -7,7 +7,7 @@ edition = "2021"
 crate-type = ["bin"]
 
 [dependencies]
-cuda_bindings = {path = "../../crates/cuda_bindings"}
+cuda_bindings = {workspace = true}
 manual-test-gpu-arith = {path = "../manual-test-gpu-arith"}
-gpu_macros = { path = "../../crates/gpu-macros" }
-gpu = { path = "../../crates/gpu" }
+gpu_macros = {workspace = true}
+gpu = {workspace = true}

@@ -2,7 +2,6 @@ use melior::ir::operation::{OperationLike, OperationRefMut};
 use melior::ir::{BlockLike, RegionLike};
 
 pub fn visit_ops_recursively<F: Fn(&mut OperationRefMut)>(op: &mut OperationRefMut, f: &F) {
-    f(op);
     if let Some(mut op) = op.next_in_block_mut() {
         visit_ops_recursively(&mut op, f);
     }
@@ -16,4 +15,6 @@ pub fn visit_ops_recursively<F: Fn(&mut OperationRefMut)>(op: &mut OperationRefM
             block = current_block.next_in_region();
         }
     }
+    // Call f for operation in reversed order so that we will not make a operation invalid if we modify its prior ops.
+    f(op);
 }

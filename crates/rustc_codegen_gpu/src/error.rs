@@ -3,6 +3,7 @@
 pub enum GpuCodegenError {
     MisuseMutableArgument,
     UnsupportedAsm(String),
+    InvalidMLIR(String),
 }
 
 pub type GpuCodegenResult<T> = Result<T, GpuCodegenError>;

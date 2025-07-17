@@ -940,10 +940,28 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         if self.is_unreachable() {
             return;
         }
-        let op = if self.inside_kernel_func() {
-            self.cx.gpu_return(&[self.use_value(v)], self.cur_loc())
+        let mut rets = vec![];
+        if v.r#type().is_tuple() {
+            let mut opt_rets = vec![];
+            if let Err(err) = crate::mlir::poison::decode_ret_value(
+                self.mlir_ctx,
+                v,
+                &mut opt_rets,
+                self.cur_loc(),
+            ) {
+                self.emit_error(
+                    format!("Failed to decode return value: {}", self.name),
+                    self.cur_span,
+                );
+            }
+            rets.extend(opt_rets.iter().map(|v| self.use_value(v.unwrap())));
         } else {
-            self.cx.cpu_return(&[self.use_value(v)], self.cur_loc())
+            rets.push(self.use_value(v));
+        }
+        let op = if self.inside_kernel_func() {
+            self.cx.gpu_return(&rets, self.cur_loc())
+        } else {
+            self.cx.cpu_return(&rets, self.cur_loc())
         };
         self.append_op(op);
     }
@@ -1982,7 +2000,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         } else {
             let Ok(op_val) = mlir_ir::operation::OperationResult::<'ml, 'a>::try_from(agg_val)
             else {
-                panic!("agg_val is not an operation result");
+                panic!("agg_val is not an operation result {}", agg_val);
             };
             if idx == 0 {
                 return agg_val;
@@ -1996,13 +2014,13 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn insert_value(&mut self, agg_val: Self::Value, elt: Self::Value, idx: u64) -> Self::Value {
-        /*if agg_val == self.const_poison(agg_val.r#type()) {
-            return elt;
-        } else {
-            return &[agg_val, elt];
-        }
-        warn!("insert_value {} {} {}", agg_val, elt, idx);*/
-        todo!()
+        self.append_op_res(crate::mlir::poison::insert_value(
+            self.mlir_ctx,
+            agg_val,
+            elt,
+            idx,
+            self.cur_loc(),
+        ))
     }
 
     fn set_personality_fn(&mut self, personality: Self::Value) {

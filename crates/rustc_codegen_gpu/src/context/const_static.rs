@@ -122,8 +122,7 @@ impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
     }
 
     fn const_poison(&self, t: Self::Type) -> Self::Value {
-        let op =
-            crate::mlir::poison::const_poison(self.mlir_ctx, self.type_i64(), self.unknown_loc());
+        let op = crate::mlir::poison::const_poison(self.mlir_ctx, t, self.unknown_loc());
         let op = self.mlir_body(true).append_operation(op);
         op.result(0).unwrap().into()
     }

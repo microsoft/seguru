@@ -38,6 +38,9 @@ pub enum GpuItem {
     SubsliceMut,
     NewSharedMem,
     AtomicAdd,
+    BuildSFI,
+    GetLocalMut2D,
+    GetLocal2D,
 }
 
 impl TryFrom<&str> for GpuItem {
@@ -69,6 +72,9 @@ impl TryFrom<&str> for GpuItem {
             "gpu::subslice_mut" => GpuItem::SubsliceMut,
             "gpu::new_shared_mem" => GpuItem::NewSharedMem,
             "gpu::atomic_add" => GpuItem::AtomicAdd,
+            "gpu::build_sfi" => GpuItem::BuildSFI,
+            "gpu::get_local_mut_2d" => GpuItem::GetLocalMut2D,
+            "gpu::get_local_2d" => GpuItem::GetLocal2D,
             _ => return Err(()),
         };
         Ok(ret)
@@ -102,6 +108,9 @@ impl From<GpuItem> for &'static str {
             GpuItem::SubsliceMut => "gpu::subslice_mut",
             GpuItem::NewSharedMem => "gpu::new_shared_mem",
             GpuItem::AtomicAdd => "gpu::atomic_add",
+            GpuItem::BuildSFI => "gpu::build_sfi",
+            GpuItem::GetLocalMut2D => "gpu::get_local_mut_2d",
+            GpuItem::GetLocal2D => "gpu::get_local_2d",
         }
     }
 }
@@ -174,6 +183,8 @@ impl GpuAttributes {
     pub fn is_builtin(&self) -> bool {
         match self.gpu_item {
             Some(GpuItem::NewChunk) => false,
+            Some(GpuItem::GetLocalMut2D) => false,
+            Some(GpuItem::GetLocal2D) => false,
             Some(_) => true,
             _ => false,
         }

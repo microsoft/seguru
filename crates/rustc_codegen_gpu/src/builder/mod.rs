@@ -511,6 +511,26 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
 
                 Ok(None)
             }
+            GpuItem::GetLocalMut2D => {
+                // Not a builtin.
+                unreachable!();
+            }
+            GpuItem::GetLocal2D => {
+                // Not a builtin.
+                unreachable!();
+            }
+            GpuItem::BuildSFI => {
+                trace!("gpu.build_sfi args: {:?}", args);
+                // args[0]: size:    i64
+                // args[1]: offset:  i64
+
+                let size = args[0];
+                let offset = args[1];
+
+                self.build_sfi(size, offset);
+
+                Ok(None)
+            }
         }
     }
 

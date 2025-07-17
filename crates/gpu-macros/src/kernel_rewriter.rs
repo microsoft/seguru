@@ -112,6 +112,126 @@ fn kernel_rewrite_func(func: &mut syn::ItemFn, span: Span) {
                             } else {
                                 panic!("No type for GpuChunkableMut");
                             }
+                        } else if path.path.segments[0].ident == "gpu"
+                            && (path.path.segments[1].ident == "GpuChunkableMut2D"
+                                || path.path.segments[1].ident == "GpuChunkable2D")
+                        {
+                            if let syn::PathArguments::AngleBracketed(slice_arg) =
+                                &path.path.segments[1].arguments
+                            {
+                                if let syn::GenericArgument::Type(slice_ty) = &slice_arg.args[0] {
+                                    let is_mut = path.path.segments[1].ident == "GpuChunkableMut2D";
+                                    let replaced_arg_name = syn::Pat::Ident(syn::PatIdent {
+                                        attrs: Vec::new(),
+                                        by_ref: None,
+                                        mutability: None,
+                                        ident: syn::Ident::new(
+                                            &format!("__args_{}", pat_ident.ident),
+                                            span,
+                                        ),
+                                        subpat: None,
+                                    });
+                                    let arg_struct_name = syn::Pat::Ident(syn::PatIdent {
+                                        attrs: Vec::new(),
+                                        by_ref: None,
+                                        mutability: None,
+                                        ident: syn::Ident::new(
+                                            &format!("__args_{}_struct", pat_ident.ident),
+                                            span,
+                                        ),
+                                        subpat: None,
+                                    });
+                                    let replaced_arg = if is_mut {
+                                        syn::FnArg::Typed(syn::PatType {
+                                            attrs: Vec::new(),
+                                            pat: Box::new(replaced_arg_name.clone()),
+                                            colon_token: syn::token::Colon { spans: [span] },
+                                            ty: Box::new(syn::Type::Verbatim(
+                                                quote! { &mut [ #slice_ty ] },
+                                            )),
+                                        })
+                                    } else {
+                                        syn::FnArg::Typed(syn::PatType {
+                                            attrs: Vec::new(),
+                                            pat: Box::new(replaced_arg_name.clone()),
+                                            colon_token: syn::token::Colon { spans: [span] },
+                                            ty: Box::new(syn::Type::Verbatim(
+                                                quote! { &[ #slice_ty ] },
+                                            )),
+                                        })
+                                    };
+                                    let arg_struct_type = if is_mut {
+                                        syn::Type::Verbatim(
+                                            quote! { gpu::GpuChunkableMut2D<#slice_ty> },
+                                        )
+                                    } else {
+                                        syn::Type::Verbatim(
+                                            quote! { gpu::GpuChunkable2D<#slice_ty> },
+                                        )
+                                    };
+                                    let size_x_arg_name =
+                                        &format!("__args_{}_size_x", pat_ident.ident);
+                                    let size_x_arg_ident = syn::Pat::Ident(syn::PatIdent {
+                                        attrs: Vec::new(),
+                                        by_ref: None,
+                                        mutability: None,
+                                        ident: syn::Ident::new(size_x_arg_name, span),
+                                        subpat: None,
+                                    });
+                                    let size_x_arg = syn::FnArg::Typed(syn::PatType {
+                                        attrs: Vec::new(),
+                                        pat: Box::new(size_x_arg_ident.clone()),
+                                        colon_token: syn::token::Colon { spans: [span] },
+                                        ty: Box::new(syn::Type::Verbatim(quote! { usize })),
+                                    });
+
+                                    // See if we are mutable
+                                    let new_struct = if is_mut {
+                                        syn::parse(quote! {
+                                            let mut #arg_struct_name: #arg_struct_type = gpu::GpuChunkableMut2D::<#slice_ty> {
+                                                slice: #replaced_arg_name,
+                                                size_x: #size_x_arg_ident,
+                                            };
+                                        }.into()).expect("Failed to parse input as a statement 4")
+                                    } else {
+                                        syn::parse(quote! {
+                                            let #arg_struct_name: #arg_struct_type = gpu::GpuChunkable2D::<#slice_ty> {
+                                                slice: #replaced_arg_name,
+                                                size_x: #size_x_arg_ident,
+                                            };
+                                        }.into()).expect("Failed to parse input as a statement 3")
+                                    };
+                                    stmts.push(new_struct);
+
+                                    let new_struct_ref = if is_mut {
+                                        syn::parse(
+                                            quote! {
+                                                let #pat_ident = &mut #arg_struct_name;
+                                            }
+                                            .into(),
+                                        )
+                                        .expect("Failed to parse input as a statement 5")
+                                    } else {
+                                        syn::parse(
+                                            quote! {
+                                                let #pat_ident = &#arg_struct_name;
+                                            }
+                                            .into(),
+                                        )
+                                        .expect("Failed to parse input as a statement 6")
+                                    };
+                                    stmts.push(new_struct_ref);
+
+                                    *arg = replaced_arg.clone();
+
+                                    // Add
+                                    func_args.insert(i + 1, size_x_arg);
+                                } else {
+                                    panic!("Not a type in angle bracket");
+                                }
+                            } else {
+                                panic!("No type for GpuChunkableMut2D");
+                            }
                         }
                     }
                 }

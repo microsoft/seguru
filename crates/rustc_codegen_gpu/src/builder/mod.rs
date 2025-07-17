@@ -145,7 +145,6 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
 
     fn build_sfi(
         &mut self,
-        ptr: melior::ir::Value<'ml, 'a>,
         ptr_size: melior::ir::Value<'ml, 'a>,
         offset: melior::ir::Value<'ml, 'a>,
     ) {
@@ -440,7 +439,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 //    a.k.a. offset + window - 1 < original size
                 //    The subslice must fit within the range of the original buffer
                 let index_int_upper = self.add(window, offset);
-                self.build_sfi(original, original_size, index_int_upper);
+                self.build_sfi(original_size, index_int_upper);
 
                 // 2. Build the subslice: Done by transforming memref<1xi8> into the
                 //    strided form using subview. Shortcut to use inbounds_gep
@@ -509,6 +508,26 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 );
 
                 self.append_op(atomic_rmw_op.into());
+
+                Ok(None)
+            }
+            GpuItem::GetLocalMut2D => {
+                // Not a builtin.
+                unreachable!();
+            }
+            GpuItem::GetLocal2D => {
+                // Not a builtin.
+                unreachable!();
+            }
+            GpuItem::BuildSFI => {
+                trace!("gpu.build_sfi args: {:?}", args);
+                // args[0]: size:    i64
+                // args[1]: offset:  i64
+
+                let size = args[0];
+                let offset = args[1];
+
+                self.build_sfi(size, offset);
 
                 Ok(None)
             }
@@ -956,7 +975,11 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             }
             rets.extend(opt_rets.iter().map(|v| self.use_value(v.unwrap())));
         } else {
-            rets.push(self.use_value(v));
+            // Force convert types into the destination type. Technically there shouldn't
+            // be any type changes except for the memref which needs to be 'viewed' as
+            // unranked
+            let func_type = self.cur_block.parent_operation().unwrap().get_func_type().unwrap();
+            rets.push(self.use_value_as_ty(v, func_type.result(0).unwrap()));
         }
         let op = if self.inside_kernel_func() {
             self.cx.gpu_return(&rets, self.cur_loc())

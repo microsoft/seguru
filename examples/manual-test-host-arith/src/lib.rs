@@ -25,8 +25,8 @@ mod internal {
 
 #[gpu_macros::host(manual_test_gpu_arith::kernel_arith)]
 fn kernel_arith(
-    a: &gpu::GpuChunkable<u32>,
-    b: &gpu::GpuChunkableMut<u32>,
+    a: &gpu::GpuChunkable2D<u32>,
+    b: &gpu::GpuChunkableMut2D<u32>,
     c: &[u32],
     f: &gpu::GpuChunkableMut<f32>,
     g: &[f32],
@@ -35,8 +35,8 @@ fn kernel_arith(
         grid_dim_x: 1,
         grid_dim_y: 1,
         grid_dim_z: 1,
-        block_dim_x: 4,
-        block_dim_y: 1,
+        block_dim_x: 1,
+        block_dim_y: 4,
         block_dim_z: 1,
     };
 }
@@ -238,9 +238,15 @@ fn main() -> ExitCode {
         return ExitCode::from(1);
     }
 
-    let d_a_c = gpu::GpuChunkable::<u32> { slice: d_a, window };
+    let d_a_c = gpu::GpuChunkable2D::<u32> {
+        slice: d_a,
+        size_x: 1,
+    };
 
-    let d_b_c = gpu::GpuChunkableMut::<u32> { slice: d_b, window };
+    let d_b_c = gpu::GpuChunkableMut2D::<u32> {
+        slice: d_b,
+        size_x: 1,
+    };
 
     let d_f_c = gpu::GpuChunkableMut::<f32> { slice: d_f, window };
 

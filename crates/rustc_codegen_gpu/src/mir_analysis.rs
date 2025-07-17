@@ -152,7 +152,8 @@ impl<'tcx> Visitor<'tcx> for ReadWriteVistor<'_, 'tcx> {
                 if let Some(
                     crate::attr::GpuItem::SubsliceMut
                     | crate::attr::GpuItem::NewChunk
-                    | crate::attr::GpuItem::AtomicAdd,
+                    | crate::attr::GpuItem::AtomicAdd
+                    | crate::attr::GpuItem::GetLocalMut2D,
                 ) = attr.gpu_item
                 {
                     is_trusted_chunk_function = true;

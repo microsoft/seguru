@@ -23,6 +23,38 @@ pub struct GpuChunkable<'a, T> {
     pub window: usize,
 }
 
+pub struct GpuChunkableMut2D<'a, T> {
+    pub slice: &'a mut [T],
+    pub size_x: usize,
+}
+
+pub struct GpuChunkable2D<'a, T> {
+    pub slice: &'a [T],
+    pub size_x: usize,
+}
+
+impl<'a, T> GpuChunkableMut2D<'a, T> {
+    pub fn new(slice: &'a mut [T], size_x: usize) -> GpuChunkableMut2D<'a, T> {
+        if slice.len() % size_x != 0 || slice.is_empty() {
+            // We're fucked
+            panic!("slice is not aligned with the sizes provided");
+        }
+
+        GpuChunkableMut2D::<'a, T> { slice, size_x }
+    }
+}
+
+impl<'a, T> GpuChunkable2D<'a, T> {
+    pub fn new(slice: &'a [T], size_x: usize) -> GpuChunkable2D<'a, T> {
+        if slice.len() % size_x != 0 || slice.is_empty() {
+            // We're fucked
+            panic!("slice is not aligned with the sizes provided");
+        }
+
+        GpuChunkable2D::<'a, T> { slice, size_x }
+    }
+}
+
 #[inline(never)]
 #[gpu_codegen::builtin(gpu.build_sfi)]
 #[rustc_diagnostic_item = "gpu::build_sfi"]

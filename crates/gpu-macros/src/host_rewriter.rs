@@ -96,6 +96,69 @@ fn host_create_wrapper(func: &syn::ItemFn, span: Span) -> syn::ItemFn {
                             call_args_rev.push(arg_window_ptr_ident);
                             call_args_rev.push(arg_size_ptr_ident.clone());
                             call_args_rev.push(arg_ptr_ptr_ident.clone());
+                        } else if path.path.segments[0].ident == "gpu"
+                            && (path.path.segments[1].ident == "GpuChunkableMut2D"
+                                || path.path.segments[1].ident == "GpuChunkable2D")
+                        {
+                            let arg_ptr_ident =
+                                syn::Ident::new(&format!("{}_ptr", pat_ident.ident), span);
+                            let arg_ptr_rptr_ident =
+                                syn::Ident::new(&format!("{}_ptr_rptr", pat_ident.ident), span);
+                            let arg_ptr_ptr_ident =
+                                syn::Ident::new(&format!("{}_ptr_ptr", pat_ident.ident), span);
+
+                            let arg_size_ident =
+                                syn::Ident::new(&format!("{}_size", pat_ident.ident), span);
+                            let arg_size_rptr_ident =
+                                syn::Ident::new(&format!("{}_size_rptr", pat_ident.ident), span);
+                            let arg_size_ptr_ident =
+                                syn::Ident::new(&format!("{}_size_ptr", pat_ident.ident), span);
+
+                            let arg_size_x_rptr_ident = syn::Ident::new(
+                                &format!("{}_size_x_ptr_rptr", pat_ident.ident),
+                                span,
+                            );
+                            let arg_size_x_ptr_ident = syn::Ident::new(
+                                &format!("{}_size_x_ptr_ptr", pat_ident.ident),
+                                span,
+                            );
+
+                            // Build up the ptrs needed in args
+                            let arg_stub_vec = vec![
+                                syn::parse(quote! {
+                                        let #arg_ptr_ident = #pat_ident.slice.as_ptr() as *const ::std::os::raw::c_void;
+                                    }.into()).expect("Failed to parse input as a statement 8"),
+                                syn::parse(quote! {
+                                        let #arg_ptr_rptr_ident: *const *const ::std::os::raw::c_void = &#arg_ptr_ident;
+                                    }.into()).expect("Failed to parse input as a statement 9"),
+                                syn::parse(quote! {
+                                        let #arg_ptr_ptr_ident = #arg_ptr_rptr_ident as *const ::std::os::raw::c_void;
+                                    }.into()).expect("Failed to parse input as a statement 10"),
+                                syn::parse(quote! {
+                                        let #arg_size_ident = #pat_ident.slice.len();
+                                    }.into()).expect("Failed to parse input as a statement 11"),
+                                syn::parse(quote! {
+                                        let #arg_size_rptr_ident: *const usize = &#arg_size_ident;
+                                    }.into()).expect("Failed to parse input as a statement 12"),
+                                syn::parse(quote! {
+                                        let #arg_size_ptr_ident: *const ::std::os::raw::c_void = #arg_size_rptr_ident as *const ::std::os::raw::c_void;
+                                    }.into()).expect("Failed to parse input as a statement 13"),
+                                syn::parse(quote! {
+                                        let #arg_size_x_rptr_ident: *const usize = &#pat_ident.size_x;
+                                    }.into()).expect("Failed to parse input as a statement 14"),
+                                syn::parse(quote! {
+                                        let #arg_size_x_ptr_ident: *const ::std::os::raw::c_void =
+                                            #arg_size_x_rptr_ident as *const ::std::os::raw::c_void;
+                                    }.into()).expect("Failed to parse input as a statement 15"),
+                            ];
+                            for arg_stub_stmt in arg_stub_vec {
+                                stmts.push(arg_stub_stmt);
+                            }
+
+                            // Add local to call args in a reversed manner
+                            call_args_rev.push(arg_size_x_ptr_ident);
+                            call_args_rev.push(arg_size_ptr_ident.clone());
+                            call_args_rev.push(arg_ptr_ptr_ident.clone());
                         } else {
                             // Add ident as is
                             let call_arg = syn::Ident::new(&format!("{}", pat_ident.ident), span);

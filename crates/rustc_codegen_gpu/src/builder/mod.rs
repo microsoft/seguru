@@ -145,7 +145,6 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
 
     fn build_sfi(
         &mut self,
-        ptr: melior::ir::Value<'ml, 'a>,
         ptr_size: melior::ir::Value<'ml, 'a>,
         offset: melior::ir::Value<'ml, 'a>,
     ) {
@@ -440,7 +439,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 //    a.k.a. offset + window - 1 < original size
                 //    The subslice must fit within the range of the original buffer
                 let index_int_upper = self.add(window, offset);
-                self.build_sfi(original, original_size, index_int_upper);
+                self.build_sfi(original_size, index_int_upper);
 
                 // 2. Build the subslice: Done by transforming memref<1xi8> into the
                 //    strided form using subview. Shortcut to use inbounds_gep

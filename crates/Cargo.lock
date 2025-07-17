@@ -216,6 +216,7 @@ version = "0.1.0"
 dependencies = [
  "bindgen 0.72.0",
  "cc",
+ "typed-arena",
 ]
 
 [[package]]
@@ -353,6 +354,9 @@ checksum = "a8d1add55171497b4705a648c6b583acafb01d58050a51727785f0b2c8e0a2b2"
 [[package]]
 name = "gpu"
 version = "0.1.0"
+dependencies = [
+ "cuda_bindings",
+]
 
 [[package]]
 name = "gpu_macros"
@@ -734,6 +738,7 @@ name = "rustc_codegen_gpu"
 version = "0.1.0"
 dependencies = [
  "compiletest_rs",
+ "cuda_bindings",
  "gpu_macros",
  "melior",
  "melior-macro 0.17.0",
@@ -742,6 +747,7 @@ dependencies = [
  "rustc_codegen_ssa",
  "tracing",
  "tracing-subscriber",
+ "typed-arena",
 ]
 
 [[package]]

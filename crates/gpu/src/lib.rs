@@ -13,47 +13,8 @@ mod dim;
 mod print;
 mod thread;
 
-pub struct GpuChunkableMut<'a, T> {
-    pub slice: &'a mut [T],
-    pub window: usize,
-}
-
-pub struct GpuChunkable<'a, T> {
-    pub slice: &'a [T],
-    pub window: usize,
-}
-
-pub struct GpuChunkableMut2D<'a, T> {
-    pub slice: &'a mut [T],
-    pub size_x: usize,
-}
-
-pub struct GpuChunkable2D<'a, T> {
-    pub slice: &'a [T],
-    pub size_x: usize,
-}
-
-impl<'a, T> GpuChunkableMut2D<'a, T> {
-    pub fn new(slice: &'a mut [T], size_x: usize) -> GpuChunkableMut2D<'a, T> {
-        if slice.len() % size_x != 0 || slice.is_empty() {
-            // We're fucked
-            panic!("slice is not aligned with the sizes provided");
-        }
-
-        GpuChunkableMut2D::<'a, T> { slice, size_x }
-    }
-}
-
-impl<'a, T> GpuChunkable2D<'a, T> {
-    pub fn new(slice: &'a [T], size_x: usize) -> GpuChunkable2D<'a, T> {
-        if slice.len() % size_x != 0 || slice.is_empty() {
-            // We're fucked
-            panic!("slice is not aligned with the sizes provided");
-        }
-
-        GpuChunkable2D::<'a, T> { slice, size_x }
-    }
-}
+#[cfg(not(feature = "codegen_tests"))]
+pub use cuda_bindings::{GpuChunkable, GpuChunkable2D, GpuChunkableMut, GpuChunkableMut2D};
 
 #[inline(never)]
 #[gpu_codegen::builtin(gpu.build_sfi)]
@@ -62,6 +23,7 @@ pub fn build_sfi(_size: usize, _offset: usize) {
     unimplemented!()
 }
 
+#[cfg(not(feature = "codegen_tests"))]
 #[rustc_diagnostic_item = "gpu::get_local_mut_2d"]
 #[gpu_codegen::device]
 #[inline(always)]
@@ -77,12 +39,13 @@ pub fn get_local_mut_2d<'a, T>(
     let col = x * grid_dim(DimType::X) * block_dim(DimType::X)
         + block_dim(DimType::X) * block_id(DimType::X)
         + thread_id(DimType::X);
-    build_sfi(a.size_x, col);
+    build_sfi(a.size_x(), col);
 
     // Here Rust will automatic generate an SFI
-    &mut a.slice[a.size_x * row + col]
+    unsafe { &mut (&mut *(a.as_ptr() as *mut [T]))[a.size_x() * row + col] }
 }
 
+#[cfg(not(feature = "codegen_tests"))]
 #[rustc_diagnostic_item = "gpu::get_local_2d"]
 #[gpu_codegen::device]
 #[inline(always)]
@@ -94,10 +57,10 @@ pub fn get_local_2d<'a, T>(a: &'a GpuChunkable2D<'a, T>, x: usize, y: usize) -> 
     let col = x * grid_dim(DimType::X) * block_dim(DimType::X)
         + block_dim(DimType::X) * block_id(DimType::X)
         + thread_id(DimType::X);
-    build_sfi(a.size_x, col);
+    build_sfi(a.size_x(), col);
 
     // Here Rust will automatic generate an SFI
-    &a.slice[a.size_x * row + col]
+    unsafe { &(&*a.as_ptr())[a.size_x() * row + col] }
 }
 
 pub use dim::{DimType, GpuChunkIdx, block_dim, block_id, global_id, grid_dim, thread_id};
@@ -123,6 +86,23 @@ pub fn subslice<T>(_original: &[T], _offset: usize, _window: usize) -> &[T] {
 #[rustc_diagnostic_item = "gpu::subslice_mut"]
 pub fn subslice_mut<T>(_original: &mut [T], _offset: usize, _window: usize) -> &mut [T] {
     unimplemented!()
+}
+
+#[cfg(not(feature = "codegen_tests"))]
+#[inline(never)]
+#[rustc_diagnostic_item = "gpu::get_chunk"]
+#[gpu_codegen::device]
+pub fn get_mut_chunk<'a, T>(
+    chunkable: &mut GpuChunkableMut<'a, T>,
+    idx_pattern: GpuChunkIdx,
+) -> &'a mut [T] {
+    let w = chunkable.window();
+    let end_idx = w + idx_pattern.as_usize() * w;
+    unsafe {
+        // Here Rust will automatic generate an SFI
+        let end = &(&*chunkable.as_ptr())[end_idx] as *const T as *mut T;
+        core::slice::from_raw_parts_mut(end.sub(w), w)
+    }
 }
 
 #[inline(never)]

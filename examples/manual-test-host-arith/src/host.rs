@@ -6,26 +6,28 @@ mod internal {
     /// This is needed in order to force the compiler to link the GPU code.
     #[allow(dead_code)]
     fn dummy_api_checker_kernel_launch_wrapper(
-        a: &[u32],
+        a: &cuda_bindings::CudaMemBox<[u32]>,
         a_window: usize,
-        b: &mut [u32],
+        b: &mut cuda_bindings::CudaMemBox<[u32]>,
         b_window: usize,
-        c: &[u32],
-        f: &mut [f32],
+        c: &cuda_bindings::CudaMemBox<[u32]>,
+        f: &mut cuda_bindings::CudaMemBox<[f32]>,
         f_window: usize,
-        g: &[f32],
+        g: &cuda_bindings::CudaMemBox<[f32]>,
     ) {
-        manual_test_gpu_arith::kernel_arith(a, a_window, b, b_window, c, f, f_window, g);
+        unsafe {
+            manual_test_gpu_arith::kernel_arith(a, a_window, b, b_window, c, f, f_window, g);
+        }
     }
 }
 
 #[gpu_macros::host(manual_test_gpu_arith::kernel_arith)]
 pub fn kernel_arith(
-    a: &gpu::GpuChunkable2D<u32>,
-    b: &gpu::GpuChunkableMut2D<u32>,
-    c: &[u32],
-    f: &gpu::GpuChunkableMut<f32>,
-    g: &[f32],
+    a: gpu::GpuChunkable2D<u32>,
+    b: gpu::GpuChunkableMut2D<u32>,
+    c: &cuda_bindings::CudaMemBox<[u32]>,
+    f: gpu::GpuChunkableMut<f32>,
+    g: &cuda_bindings::CudaMemBox<[f32]>,
 ) {
     let config = cuda_bindings::GPUConfig {
         grid_dim_x: 1,
@@ -37,6 +39,40 @@ pub fn kernel_arith(
     };
 }
 
+/*
+#[allow(non_upper_case_globals)]
+const const_share_size_kernel_arith: usize = manual_test_gpu_arith::shared_size_kernel_arith;
+pub fn kernel_arith(
+    a: cuda_bindings::GpuChunkable<u32>,
+    b: cuda_bindings::GpuChunkableMut<u32>,
+    c: &cuda_bindings::CudaMemBox<[u32]>,
+    f: cuda_bindings::GpuChunkableMut<f32>,
+    g: &cuda_bindings::CudaMemBox<[f32]>,
+) -> Result<(), cuda_bindings::CudaError> {
+    let config = cuda_bindings::GPUConfig {
+        grid_dim_x: 1,
+        grid_dim_y: 1,
+        grid_dim_z: 1,
+        block_dim_x: 4,
+        block_dim_y: 1,
+        block_dim_z: 1,
+    };
+    let mut args_for_launching: Vec<&dyn AsKernelParams> = vec![];
+    args_for_launching.push(&a);
+    args_for_launching.push(&b);
+    args_for_launching.push(&c);
+    args_for_launching.push(&f);
+    args_for_launching.push(&g);
+    let func_name_cstr = std::ffi::CString::new("kernel_arith").unwrap();
+    let res = cuda_bindings::launch_kernel(
+        "kernel_arith",
+        config,
+        const_share_size_kernel_arith,
+        &args_for_launching,
+        true,
+    )?;
+    Ok(())
+}
 // This wrapper should be generated automatically. Note that it should have known the
 // kernel function's name!
 //fn kernel_launch_wrapper(a: &[u8], a_window: usize, b: &mut [u8], b_window: usize) -> i32 {
@@ -106,3 +142,4 @@ pub fn kernel_arith(
 //
 //    res
 //}
+*/

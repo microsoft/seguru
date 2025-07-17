@@ -62,10 +62,13 @@ fn run_codegen_tests(src: PathBuf, mode: &str) {
         TARGET,
         "--out-dir",
         gpu_target.to_str().unwrap(),
+        "--cfg",
+        "feature=\"codegen_tests\"",
         "--crate-name",
         "gpu",
         gpu_src.to_str().unwrap(),
     ]);
+    println!("rustc_gpu_flags = rustc {:?}", rustc_gpu_flags.join(" "));
     INIT.call_once(|| {
         Command::new("rustc").args(&rustc_gpu_flags).status().expect("Failed to run rustc");
     });

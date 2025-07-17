@@ -942,7 +942,14 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         let op = if self.inside_kernel_func() {
             self.cx.gpu_return(&[self.use_value(v)], self.cur_loc())
         } else {
-            self.cx.cpu_return(&[self.use_value(v)], self.cur_loc())
+            // Force convert types into the destination type. Technically there shouldn't
+            // be any type changes except for the memref which needs to be 'viewed' as
+            // unranked
+            let func_type = self.cur_block.parent_operation().unwrap().get_func_type().unwrap();
+            self.cx.cpu_return(
+                &[self.use_value_as_ty(v, func_type.result(0).unwrap())],
+                self.cur_loc(),
+            )
         };
         self.append_op(op);
     }

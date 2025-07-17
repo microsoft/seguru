@@ -8,17 +8,19 @@ pub static shared_size_kernel_arith: usize = 0;
 #[gpu_macros::kernel]
 #[no_mangle]
 pub fn kernel_arith(
-    a: &gpu::GpuChunkable<u32>,
-    b: &gpu::GpuChunkableMut<u32>,
+    a: &gpu::GpuChunkable2D<u32>,
+    b: &gpu::GpuChunkableMut2D<u32>,
     c: &[u32],
     f: &gpu::GpuChunkableMut<f32>,
     g: &[f32],
 ) {
-    let thread_id = gpu::thread_id(gpu::DimType::X);
-    b[0] = a[0] + c[thread_id];
-    gpu::atomic_add::<u32>(&mut b[0], 1);
+    let thread_id = gpu::thread_id(gpu::DimType::Y);
+    let a_local = gpu::get_local_2d::<u32>(a, 0, 0);
+    let b_local = gpu::get_local_mut_2d::<u32>(b, 0, 0);
+    *b_local = *a_local + c[thread_id];
+    gpu::atomic_add::<u32>(b_local, 1);
     let mut out: u32;
-    let in32: u32 = b[0] + 30;
+    let in32: u32 = *b_local + 30;
     unsafe {
         core::arch::asm!(
         "mov.u32 {0:e}, {1:e};",
@@ -26,6 +28,6 @@ pub fn kernel_arith(
         in(reg) in32,
         );
     }
-    b[0] = out;
+    *b_local = out;
     f[0] = gpu::__ldcs_f32(&g[thread_id]);
 }

@@ -23,6 +23,13 @@ pub struct GpuChunkable<'a, T> {
     pub window: usize,
 }
 
+#[inline(never)]
+#[gpu_codegen::builtin(gpu.build_sfi)]
+#[rustc_diagnostic_item = "gpu::build_sfi"]
+pub fn build_sfi(_size: usize, _offset: usize) {
+    unimplemented!()
+}
+
 pub use dim::{DimType, GpuChunkIdx, block_dim, block_id, global_id, grid_dim, thread_id};
 pub use print::{PushPrintfArg, printf};
 pub use thread::{GpuChunksMut, GpuShared, chunk_mut, scope, sync_threads};

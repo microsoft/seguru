@@ -6,18 +6,13 @@ mod internal {
     /// This is needed in order to force the compiler to link the GPU code.
     #[allow(dead_code)]
     fn dummy_api_checker_kernel_launch_wrapper(
-        a: &cuda_bindings::CudaMemBox<[u32]>,
-        a_window: usize,
-        b: &mut cuda_bindings::CudaMemBox<[u32]>,
-        b_window: usize,
+        a: gpu::GpuChunkable2D<u32>,
+        b: gpu::GpuChunkableMut2D<u32>,
         c: &cuda_bindings::CudaMemBox<[u32]>,
-        f: &mut cuda_bindings::CudaMemBox<[f32]>,
-        f_window: usize,
+        f: gpu::GpuChunkableMut<f32>,
         g: &cuda_bindings::CudaMemBox<[f32]>,
     ) {
-        unsafe {
-            manual_test_gpu_arith::kernel_arith(a, a_window, b, b_window, c, f, f_window, g);
-        }
+        manual_test_gpu_arith::kernel_arith(a, b, c, f, g);
     }
 }
 

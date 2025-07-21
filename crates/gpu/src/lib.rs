@@ -5,7 +5,7 @@
 #![feature(rustc_attrs)]
 #![no_std]
 #![feature(asm_experimental_arch)]
-
+#![feature(core_intrinsics)]
 use core::arch::asm;
 
 pub mod cg;
@@ -97,11 +97,15 @@ pub fn get_mut_chunk<'a, T>(
     idx_pattern: GpuChunkIdx,
 ) -> &'a mut [T] {
     let w = chunkable.window();
-    let end_idx = w + idx_pattern.as_usize() * w;
+    let start_idx = idx_pattern.as_usize() * w;
+    let end_idx = w + start_idx - 1;
     unsafe {
         // Here Rust will automatic generate an SFI
-        let end = &(&*chunkable.as_ptr())[end_idx] as *const T as *mut T;
-        core::slice::from_raw_parts_mut(end.sub(w), w)
+        let slice_ptr: *const [T] = chunkable.as_ptr();
+        let slice = &*slice_ptr;
+        let end = &slice[end_idx] as *const T as *mut T;
+        let start = core::intrinsics::offset(end, 1 - w as isize);
+        &mut *core::intrinsics::aggregate_raw_ptr::<*mut [T], _, _>(start, w)
     }
 }
 

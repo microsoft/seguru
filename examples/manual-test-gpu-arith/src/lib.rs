@@ -1,24 +1,27 @@
 #![no_std]
 #![allow(clippy::too_many_arguments)]
 
+use gpu::GpuChunkIdx;
+
 #[allow(non_upper_case_globals)]
 #[gpu_macros::shared_size]
 pub static shared_size_kernel_arith: usize = 0;
 
 /// # Safety
 /// This kernel might be unsafe because it uses Chunkable::new that is not defined as trusted chunking func.
-#[gpu_macros::kernel]
+#[gpu_macros::kernel_v2]
 #[no_mangle]
-pub unsafe fn kernel_arith(
-    a: &gpu::GpuChunkable2D<u32>,
-    b: &gpu::GpuChunkableMut2D<u32>,
+pub fn kernel_arith(
+    a: gpu::GpuChunkable2D<u32>,
+    b: gpu::GpuChunkableMut2D<u32>,
     c: &[u32],
-    f: &gpu::GpuChunkableMut<f32>,
+    f: gpu::GpuChunkableMut<f32>,
     g: &[f32],
 ) {
     let thread_id = gpu::thread_id(gpu::DimType::Y);
-    let a_local = gpu::get_local_2d::<u32>(a, 0, 0);
-    let b_local = gpu::get_local_mut_2d::<u32>(b, 0, 0);
+    let a_local = gpu::get_local_2d::<u32>(&a, 0, 0);
+    let mut b = b;
+    let b_local = gpu::get_local_mut_2d::<u32>(&mut b, 0, 0);
     *b_local = *a_local + c[thread_id];
     gpu::atomic_add::<u32>(b_local, 1);
     let mut out: u32;
@@ -31,5 +34,7 @@ pub unsafe fn kernel_arith(
         );
     }
     *b_local = out;
+    let mut f = f;
+    let f = gpu::get_mut_chunk(&mut f, GpuChunkIdx::new());
     f[0] = gpu::__ldcs_f32(&g[thread_id]);
 }

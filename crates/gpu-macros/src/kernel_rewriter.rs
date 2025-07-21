@@ -6,7 +6,6 @@ use syn::spanned::Spanned;
 fn kernel_rewrite_func(func: &mut syn::ItemFn, span: Span) {
     // Rewrite:
     // 1. Replace the function's attributes
-    func.attrs.clear();
     func.attrs.push(syn::parse_quote! {#[unsafe(no_mangle)]});
 
     let mut stmts = vec![
@@ -188,17 +187,14 @@ fn kernel_rewrite_func(func: &mut syn::ItemFn, span: Span) {
                                     // See if we are mutable
                                     let new_struct = if is_mut {
                                         syn::parse(quote! {
-                                            let mut #arg_struct_name: #arg_struct_type = gpu::GpuChunkableMut2D::<#slice_ty> {
-                                                slice: #replaced_arg_name,
-                                                size_x: #size_x_arg_ident,
-                                            };
+                                            let mut #arg_struct_name: #arg_struct_type = unsafe{gpu::GpuChunkableMut2D::new_from_gpu(#replaced_arg_name, #size_x_arg_ident)};
                                         }.into()).expect("Failed to parse input as a statement 4")
                                     } else {
                                         syn::parse(quote! {
-                                            let #arg_struct_name: #arg_struct_type = gpu::GpuChunkable2D::<#slice_ty> {
-                                                slice: #replaced_arg_name,
-                                                size_x: #size_x_arg_ident,
-                                            };
+                                            let #arg_struct_name: #arg_struct_type = unsafe{ gpu::GpuChunkable2D::new_from_gpu(
+                                                #replaced_arg_name,
+                                                #size_x_arg_ident,
+                                            )};
                                         }.into()).expect("Failed to parse input as a statement 3")
                                     };
                                     stmts.push(new_struct);
@@ -262,7 +258,7 @@ pub(crate) fn rewrite(_: TokenStream, input: TokenStream, use_gpu_codegen: bool)
     fun.to_tokens(&mut new_stream);
 
     // let source_code = new_stream.to_string();
-    // println!("{}", source_code);
+    println!("{}", new_stream);
 
     proc_macro::TokenStream::from(new_stream)
 }

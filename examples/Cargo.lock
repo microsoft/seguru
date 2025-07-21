@@ -78,6 +78,7 @@ version = "0.1.0"
 dependencies = [
  "bindgen",
  "cc",
+ "typed-arena",
 ]
 
 [[package]]
@@ -95,6 +96,9 @@ checksum = "a8d1add55171497b4705a648c6b583acafb01d58050a51727785f0b2c8e0a2b2"
 [[package]]
 name = "gpu"
 version = "0.1.0"
+dependencies = [
+ "cuda_bindings",
+]
 
 [[package]]
 name = "gpu-test-arith-basic"
@@ -271,6 +275,12 @@ dependencies = [
  "quote",
  "unicode-ident",
 ]
+
+[[package]]
+name = "typed-arena"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6af6ae20167a9ece4bcb41af5b80f8a1f1df981f6391189ce00fd257af04126a"
 
 [[package]]
 name = "unicode-ident"

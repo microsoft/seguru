@@ -4,3 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+cuda_bindings = {path = "../cuda_bindings"}
+
+[features]
+default = []
+codegen_tests = []

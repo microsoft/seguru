@@ -7,13 +7,13 @@
 #[repr(packed, C)]
 pub struct A {
     a: i32,
-    b: u32,
     c: u64,
+    b: u32,
     d: f32,
 }
 
 #[no_mangle]
 #[gpu_codegen::kernel]
-pub fn assign_struct(a: A, b: &mut A) { //~ ERROR Kernel entry does not support fn abi indirect
+pub fn assign_struct(a: A, b: &mut A) { //~ ERROR Please reorder fields from largest alignment to smallest
     *b = a;
 }

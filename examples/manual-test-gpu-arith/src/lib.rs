@@ -5,9 +5,11 @@
 #[gpu_macros::shared_size]
 pub static shared_size_kernel_arith: usize = 0;
 
+/// # Safety
+/// This kernel might be unsafe because it uses Chunkable::new that is not defined as trusted chunking func.
 #[gpu_macros::kernel]
 #[no_mangle]
-pub fn kernel_arith(
+pub unsafe fn kernel_arith(
     a: &gpu::GpuChunkable2D<u32>,
     b: &gpu::GpuChunkableMut2D<u32>,
     c: &[u32],

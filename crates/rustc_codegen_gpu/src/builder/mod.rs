@@ -960,6 +960,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             return;
         }
         let mut rets = vec![];
+        let func_type = self.cur_block.parent_operation().unwrap().get_func_type().unwrap();
         if v.r#type().is_tuple() {
             let mut opt_rets = vec![];
             if let Err(err) = crate::mlir::poison::decode_ret_value(
@@ -973,12 +974,16 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
                     self.cur_span,
                 );
             }
-            rets.extend(opt_rets.iter().map(|v| self.use_value(v.unwrap())));
+            rets.extend(
+                opt_rets
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| self.use_value_as_ty(v.unwrap(), func_type.result(i).unwrap())),
+            );
         } else {
             // Force convert types into the destination type. Technically there shouldn't
             // be any type changes except for the memref which needs to be 'viewed' as
             // unranked
-            let func_type = self.cur_block.parent_operation().unwrap().get_func_type().unwrap();
             rets.push(self.use_value_as_ty(v, func_type.result(0).unwrap()));
         }
         let op = if self.inside_kernel_func() {
@@ -2145,7 +2150,9 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         let args = args.iter().map(|arg| self.use_value(*arg)).collect::<Vec<_>>();
         let args = &args;
         let ftype = fn_abi.map(|abi| {
-            self.fn_abi_to_fn_type(abi, false).unwrap_or_else(|e| self.emit_error(e, self.cur_span))
+            self.fn_abi_to_fn_type(abi, false)
+                .unwrap_or_else(|e| self.emit_error(e, self.cur_span))
+                .0
         });
         let span = self.cur_span;
         let op = self.call_op(llfn, instance, args, ftype, span).unwrap();

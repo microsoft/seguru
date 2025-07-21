@@ -23,6 +23,8 @@ path = "tests/bin/filecheck.rs"
 [dev-dependencies]
 compiletest_rs = "0.9.0"
 gpu_macros = {path = "../gpu-macros"}
+cuda_bindings = {path = "../cuda_bindings"}
+typed-arena = "2.0"
 
 [package.metadata.rust-analyzer]
 rustc_private = true

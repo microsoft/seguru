@@ -56,7 +56,7 @@ jobs:
       - name: Dep
         run: |
           test -x /home/linuxbrew/.linuxbrew/bin/brew || /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-          /home/linuxbrew/.linuxbrew/bin/brew install llvm@20
+          test -x /home/linuxbrew/.linuxbrew/bin/mlir-opt || /home/linuxbrew/.linuxbrew/bin/brew install llvm@20
           /home/linuxbrew/.linuxbrew/bin/brew install binutils
 
       - name: Set up LLVM environment
@@ -95,7 +95,7 @@ jobs:
 
       - name: Build
         working-directory: crates
-        run: cargo build --workspace --exclude cuda_bindings
+        run: cargo build --workspace
 
       - name: Run examples
         working-directory: examples

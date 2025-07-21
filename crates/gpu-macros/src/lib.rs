@@ -1,4 +1,7 @@
+#![feature(box_patterns)]
+
 extern crate proc_macro;
+
 use proc_macro::TokenStream;
 mod gpu_syntax;
 mod host_rewriter;

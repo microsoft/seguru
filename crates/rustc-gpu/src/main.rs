@@ -14,7 +14,7 @@ fn get_value(args: &[String], param: &str) -> Option<String> {
 }
 
 fn main() -> std::io::Result<()> {
-    // let log_file = std::fs::File::options().append(true).open("gpu_rustc.log")?;
+    // let log_file = std::fs::File::options().append(true).create(true).open("/tmp/rustc-gpu.log")?;
     // tracing_subscriber::fmt().with_writer(std::sync::Mutex::new(log_file)).init();
     // crate1,crate2,..
     let gpu_target_str = env::var("GPU_TARGETS").unwrap_or_default();
@@ -36,6 +36,8 @@ fn main() -> std::io::Result<()> {
                 "-Zcrate-attr=register_tool(gpu_codegen)".into(),
                 format!("-Zcodegen-backend={}", codegen_path),
             ];
+            args.push("--cfg".to_string());
+            args.push("gpu_code".to_string());
             for arg in extra_args {
                 if !args.contains(&arg) {
                     args.push(arg);

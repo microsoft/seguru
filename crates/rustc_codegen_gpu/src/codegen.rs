@@ -31,6 +31,7 @@ pub(crate) fn module_codegen<'tcx>(
         let mono_items = cgu.items_in_deterministic_order(tcx);
         for &(mono_item, data) in &mono_items {
             mono_item.predefine::<GpuBuilder<'_, '_, '_>>(&cx, data.linkage, data.visibility);
+            cx.define_indirect_if_needed();
         }
         for (mono_item, mono_data) in mono_items {
             let attr = crate::attr::GpuAttributes::build(&tcx, mono_item.def_id());

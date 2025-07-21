@@ -87,9 +87,5 @@ pub(crate) fn rewrite_shared_size(input: TokenStream, is_gpu_code: bool) -> Toke
         static_def.attrs.push(parse_quote!(#[gpu_codegen::shared_size]));
         static_def.attrs.push(parse_quote!(#[allow(non_upper_case_globals)]));
     }
-
-    let source_code = static_def.to_token_stream().to_string();
-    println!("{}", source_code);
-
     static_def.to_token_stream().into()
 }

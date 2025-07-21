@@ -32,6 +32,8 @@ pub(crate) struct GPUCodegenContext<'tcx, 'ml, 'a> {
     pub fn_db: RwLock<HashMap<String, mlir_ir::operation::OperationRef<'ml, 'a>>>,
     pub fn_ptr_db:
         RwLock<HashMap<String, (rustc_middle::ty::Instance<'tcx>, mlir_ir::Value<'ml, 'a>)>>,
+    pub indirect_entry:
+        std::sync::Mutex<Option<crate::context::to_mir_func::IndirectEntry<'tcx, 'ml>>>,
     pub const_alloc: RwLock<HashMap<rustc_const_eval::interpret::AllocId, mlir_ir::Value<'ml, 'a>>>,
     pub const_name_to_allocid: RwLock<HashMap<String, rustc_const_eval::interpret::AllocId>>,
     pub span_to_types: RwLock<HashMap<rustc_span::Span, mlir_ir::Type<'ml>>>,
@@ -75,6 +77,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             dummy: PhantomData,
             fn_db: RwLock::new(HashMap::new()),
             fn_ptr_db: RwLock::new(HashMap::new()),
+            indirect_entry: std::sync::Mutex::new(None),
             const_alloc: RwLock::new(HashMap::new()),
             const_name_to_allocid: RwLock::new(HashMap::new()),
             span_to_types: RwLock::new(HashMap::new()),

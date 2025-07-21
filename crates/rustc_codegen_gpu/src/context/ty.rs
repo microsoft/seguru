@@ -276,6 +276,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         immediate: bool,
     ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type {
         let cx = self.mlir_ctx;
+
         match layout.backend_repr {
             BackendRepr::Scalar(scalar) => {
                 self.scalar_mlir_type(&scalar, Some(&layout), immediate, None)
@@ -429,6 +430,7 @@ impl<'tcx, 'ml, 'a> LayoutTypeCodegenMethods<'tcx> for GPUCodegenContext<'tcx, '
             .unwrap_or_else(|msg| {
                 panic!();
             })
+            .0
             .into()
     }
 

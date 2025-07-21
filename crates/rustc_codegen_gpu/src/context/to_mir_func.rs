@@ -1,18 +1,36 @@
-use melior::ir::operation::OperationMutLike;
+use std::collections::HashMap;
+
+use melior::ir::attribute::StringAttribute;
+use melior::ir::operation::{OperationLike, OperationMutLike};
 use melior::ir::r#type::FunctionType;
-use melior::ir::{BlockLike, Location, Operation};
-use rustc_codegen_ssa_gpu::traits::{LayoutTypeCodegenMethods, MiscCodegenMethods};
+use melior::ir::{BlockLike, Location, Operation, ValueLike};
+use rustc_codegen_ssa_gpu::traits::{
+    ConstCodegenMethods, LayoutTypeCodegenMethods, MiscCodegenMethods,
+};
 use rustc_hir::def_id::DefId;
 use rustc_middle::query::Key;
 use rustc_middle::ty::layout::{FnAbiOf, HasTyCtxt, LayoutOf};
 use rustc_middle::ty::{AssocItemContainer, Instance};
-use tracing::{trace, warn};
+use tracing::debug;
 
 use super::GPUCodegenContext;
 use crate::attr::GpuAttributes;
+use crate::builder::GpuBuilder;
 use crate::context::CodegenGPUError;
 use crate::mlir::{MLIRMutOpHelpers, MLIROpHelpers, MLIRVisibility};
 
+const INDIRECT: &str = "__indirect_";
+pub struct IndirectEntry<'tcx, 'ml> {
+    entry_sym: String,
+    fn_type: FunctionType<'ml>,
+    indirect_args: HashMap<usize, TyAndLayout<'tcx>>,
+    dev_fn_type: FunctionType<'ml>,
+    dev_instance: Instance<'tcx>,
+    location: Location<'ml>,
+}
+
+type TyAndLayout<'tcx> = rustc_abi::TyAndLayout<'tcx, rustc_middle::ty::Ty<'tcx>>;
+type IndirectArgsTypes<'tcx> = HashMap<usize, TyAndLayout<'tcx>>;
 #[allow(dead_code)]
 fn is_impl_of_trait_method(
     tcx: &rustc_middle::ty::TyCtxt<'_>,
@@ -66,14 +84,14 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     ) -> melior::ir::Value<'ml, 'a> {
         let def_id: rustc_hir::def_id::DefId = instance.def_id();
 
-        let sym = self.tcx.symbol_name(instance).name.to_string();
-        if self.fn_ptr_db.read().unwrap().contains_key(&sym) {
-            return self.fn_ptr_db.read().unwrap()[&sym].1;
+        let instance_sym = self.tcx.symbol_name(instance).name.to_string();
+        if self.fn_ptr_db.read().unwrap().contains_key(&instance_sym) {
+            return self.fn_ptr_db.read().unwrap()[&instance_sym].1;
         }
         let gpu_attrs = GpuAttributes::build(&self.tcx, def_id);
-        let function =
-            melior::ir::attribute::FlatSymbolRefAttribute::new(self.mlir_ctx, sym.as_str());
         let op = self.get_fn(instance);
+        let sym = StringAttribute::try_from(op.attribute("sym_name").unwrap()).unwrap().value();
+        let function = melior::ir::attribute::FlatSymbolRefAttribute::new(self.mlir_ctx, sym);
         let ftyp = op.get_func_type().unwrap();
         let is_gpu = op.is_gpu_func();
         let mut const_op =
@@ -87,16 +105,18 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             self.mlir_body(is_gpu).append_operation(const_op)
         };
         let val = op.result(0).unwrap().into();
-        self.fn_ptr_db.write().unwrap().insert(sym, (instance, val));
+        self.fn_ptr_db.write().unwrap().insert(instance_sym, (instance, val));
         val
     }
 
-    pub fn fn_abi_to_inputs(
+    fn fn_abi_to_inputs(
         &self,
         abi: &rustc_target::callconv::FnAbi<'tcx, rustc_middle::ty::Ty<'tcx>>,
         is_kernel_entry: bool,
-    ) -> Result<Vec<melior::ir::Type<'ml>>, CodegenGPUError> {
+    ) -> Result<(Vec<melior::ir::Type<'ml>>, Option<IndirectArgsTypes<'tcx>>), CodegenGPUError>
+    {
         let mut args = vec![];
+        let mut real_args = HashMap::new();
         //let mut closures = vec![];
         for arg in &abi.args {
             let mlir_arg = match &arg.mode {
@@ -119,9 +139,10 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 }
                 rustc_target::callconv::PassMode::Indirect { attrs, meta_attrs, on_stack } => {
                     if is_kernel_entry {
-                        return Err("Kernel entry does not support fn abi indirect".to_string());
+                        real_args.insert(args.len(), arg.layout);
+                        //return Err("Kernel entry does not support fn abi indirect".to_string());
                     }
-                    warn!(
+                    debug!(
                         "indirect arg: {:?} attrs: {:?} meta_attrs: {:?} on_stack: {}",
                         arg.layout, attrs, meta_attrs, on_stack
                     );
@@ -132,15 +153,43 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             };
             args.append(&mut self.expand_type(mlir_arg));
         }
-        Ok(args)
+        let real_args = if real_args.is_empty() { None } else { Some(real_args) };
+        Ok((args, real_args))
     }
 
-    pub fn fn_abi_to_fn_type(
+    pub(crate) fn fn_abi_to_fn_type(
         &self,
         abi: &rustc_target::callconv::FnAbi<'tcx, rustc_middle::ty::Ty<'tcx>>,
         is_kernel_entry: bool,
-    ) -> Result<FunctionType<'ml>, CodegenGPUError> {
-        let mut args = self.fn_abi_to_inputs(abi, is_kernel_entry)?;
+    ) -> Result<
+        (FunctionType<'ml>, Option<(FunctionType<'ml>, IndirectArgsTypes<'tcx>)>),
+        CodegenGPUError,
+    > {
+        let (mut args, indirect_types) = self.fn_abi_to_inputs(abi, is_kernel_entry)?;
+
+        // In rust, if struct size > 16bytes, it is passed as a pointer via indirect mode.
+        // We need to convert it to a pointer type to translate code correctly.
+        // However, we should not do this for kernel entry function.
+        // If we have indirect arguments for kernel entry, we need to make this
+        // func as a dev function with indirect arguments
+        // and create a new kernel entry function using direct arguments.
+        let mut new_entry_args = None;
+        if let Some(indirect_types) = &indirect_types {
+            let mut tmp_args = args.clone();
+            // If we have indirect_types, we need to expand the types for
+            // a crafted kernel entry.
+            let mut keys = indirect_types.keys().collect::<Vec<_>>();
+            keys.sort_by(|a, b| b.cmp(a));
+            for i in keys {
+                tmp_args.remove(*i);
+                let mut idx = *i;
+                for t in self.expand_type(self.mlir_type(indirect_types[i], false)) {
+                    tmp_args.insert(idx, t);
+                    idx += 1;
+                }
+            }
+            new_entry_args = Some(tmp_args);
+        }
         let mut ret = vec![];
         if !abi.ret.layout.is_zst() {
             match abi.ret.mode {
@@ -162,7 +211,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                     ret.append(&mut t);
                 }
                 rustc_target::callconv::PassMode::Ignore => {
-                    warn!("Function return is ignored: {:?}", abi.ret.layout);
+                    debug!("Function return is ignored: {:?}", abi.ret.layout);
                 }
                 rustc_target::callconv::PassMode::Cast { .. } => {
                     panic!("Function return is cast: {:?} for {:?}", abi.ret.layout, abi.ret.mode);
@@ -170,10 +219,116 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             }
         }
         if args.is_empty() && ret.is_empty() {
-            warn!("function has no args and no ret");
+            debug!("function has no args and no ret");
         }
         let ftype: FunctionType<'ml> = FunctionType::new(self.mlir_ctx, &args, &ret);
-        Ok(ftype)
+        let new_ftype = new_entry_args.map(|new_args| {
+            (FunctionType::new(self.mlir_ctx, &new_args, &ret), indirect_types.unwrap())
+        });
+        Ok((ftype, new_ftype))
+    }
+
+    pub(crate) fn define_indirect_if_needed(&'ml self) {
+        let Some(entry) = self.indirect_entry.lock().unwrap().take() else {
+            return;
+        };
+        let IndirectEntry {
+            entry_sym,
+            fn_type,
+            indirect_args,
+            dev_fn_type,
+            dev_instance,
+            location,
+        } = entry;
+        use rustc_codegen_ssa_gpu::traits::{AbiBuilderMethods, BuilderMethods};
+        let mlir_ctx = self.mlir_ctx;
+        let fn_type_attr = melior::ir::attribute::TypeAttribute::new(fn_type.into());
+        let body = self.mlir_body(true);
+        let block = melior::ir::Block::new(&[]);
+        let fn_sym = melior::ir::attribute::StringAttribute::new(mlir_ctx, entry_sym.as_str());
+        let mut gpu_op: Operation<'_> = melior::dialect::ods::gpu::func(
+            mlir_ctx,
+            melior::ir::Region::new(),
+            fn_type_attr,
+            location,
+        )
+        .into();
+        gpu_op.set_attribute("kernel", melior::ir::Attribute::unit(self.mlir_ctx));
+        gpu_op.set_op_visible(self.mlir_ctx, MLIRVisibility::Public);
+        gpu_op.set_attribute(crate::mlir::SYM_NAME_SYM, fn_sym.into());
+        let op: melior::ir::OperationRef<'_, '_> = body.append_operation(gpu_op);
+
+        let bb = GpuBuilder::append_block(self, op, entry_sym.as_str());
+        let mut builder = GpuBuilder::build(self, bb);
+        let mut dev_arg_idx = 0;
+        let mut call_args = vec![];
+        let mut kernel_arg_idx = 0;
+        let mut indirect_idx = indirect_args.keys().collect::<Vec<_>>();
+        indirect_idx.sort();
+        for i in indirect_idx {
+            let ty_layout = indirect_args[i];
+            let i = *i;
+            if i > dev_arg_idx {
+                for _ in dev_arg_idx..i {
+                    call_args.push(builder.get_param(kernel_arg_idx));
+                    kernel_arg_idx += 1;
+                }
+            }
+            let layout = ty_layout.layout;
+            let size = layout.size;
+            let align = layout.align.abi;
+            let ty = self.mlir_type(ty_layout, false);
+            let arg_ptr = builder.alloca(size, align);
+            let tupe_ty = self.expand_type(ty);
+            let mut ele_offset = 0;
+            for j in 0..tupe_ty.len() {
+                let arg = builder.get_param(kernel_arg_idx);
+                let ele_ty = arg.r#type();
+                let ele_size = crate::mlir::static_size_of(ele_ty) as u64;
+                if ele_offset % ele_size != 0 {
+                    self.emit_error(
+                        format!(
+                            "Unsupported indirect argument of type {} has invalid offset {} and size {}. Please reorder fields from largest alignment to smallest.",
+                            ty_layout.ty, ele_offset, ele_size
+                        ),
+                        dev_instance.def.default_span(self.tcx),
+                    );
+                }
+                let ele_ptr = builder.inbounds_gep(
+                    ele_ty,
+                    arg_ptr,
+                    &[self.const_usize(ele_offset / ele_size)],
+                );
+
+                let elem = builder.store(arg, ele_ptr, align);
+                kernel_arg_idx += 1;
+                ele_offset += ele_size;
+            }
+            call_args.push(arg_ptr);
+            dev_arg_idx = i + 1;
+        }
+        for i in kernel_arg_idx..fn_type.input_count() {
+            call_args.push(builder.get_param(i));
+        }
+        debug!(
+            "define_indirect_if_needed fn_type = {:#?}, dev_fn_type = {:#?}, indirect_args = {:#?} call_args = {:#?}",
+            fn_type, dev_fn_type, indirect_args, call_args
+        );
+        let fn_abi = self.fn_abi_of_instance(dev_instance, rustc_middle::ty::List::empty());
+        let llfn = self.to_mir_func_const(dev_instance, None);
+        builder.call(
+            dev_fn_type.into(),
+            None,
+            Some(fn_abi),
+            llfn,
+            &call_args,
+            None,
+            Some(dev_instance),
+        );
+        builder.ret_void();
+
+        // self.fn_shared_memory_size.write().unwrap().insert(entry_sym, 0);
+        // Indirect kernel should refer to the device function to get the shared memory size.
     }
 
     pub fn to_mir_func_decl(
@@ -191,15 +346,42 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 return fn_db[&sym];
             }
         }
-        let gpu_attrs = GpuAttributes::build(&tcx, def_id);
+        let mut gpu_attrs = GpuAttributes::build(&tcx, def_id);
         let need_def = gpu_attrs.is_gpu_related();
         let span = instance.def.default_span(tcx);
         let location: melior::ir::Location<'ml> = self.to_mlir_loc(span);
-        let fn_sym = melior::ir::attribute::StringAttribute::new(mlir_ctx, sym.as_str());
+
         let fn_abi = self.fn_abi_of_instance(instance, rustc_middle::ty::List::empty());
-        let ftype = self
+        let (ftype, real_entry_ftype) = self
             .fn_abi_to_fn_type(fn_abi, gpu_attrs.kernel)
             .unwrap_or_else(|e| self.emit_error(e, span));
+        let fn_sym = if real_entry_ftype.is_some() && gpu_attrs.kernel {
+            gpu_attrs.kernel = false;
+            gpu_attrs.device = true;
+            let dev_sym = format!("{INDIRECT}{}", sym);
+            debug!(
+                "Function `{}` is a kernel entry function, but it has indirect arguments. \
+                It will be defined as a device function with name `{}`",
+                sym, dev_sym
+            );
+            let (new_ftype, indirect_args) = real_entry_ftype.unwrap();
+            *self.indirect_entry.lock().unwrap() = Some(IndirectEntry {
+                entry_sym: sym.clone(),
+                fn_type: new_ftype,
+                indirect_args,
+                dev_fn_type: ftype,
+                dev_instance: instance,
+                location,
+            });
+            let fn_db = self.fn_db.read().unwrap();
+            if fn_db.contains_key(&dev_sym) {
+                return fn_db[&dev_sym];
+            }
+            dev_sym
+        } else {
+            sym.clone()
+        };
+        let fn_sym_attr = melior::ir::attribute::StringAttribute::new(mlir_ctx, &fn_sym);
         /*if is_impl_of_trait_method(
             &tcx,
             def_id,
@@ -224,7 +406,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 mlir_ctx,
                 melior::ir::Region::new(),
                 // accepts a StringAttribute which is the function name.
-                fn_sym,
+                fn_sym_attr,
                 // A type attribute, defining the function signature.
                 fn_type,
                 location,
@@ -243,10 +425,9 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 fn_type,
                 location,
             );
-            let unit_attr = melior::ir::Attribute::unit(self.mlir_ctx);
             let mut op: Operation<'ml> = gpu_op.into();
-            op.set_attribute("kernel", unit_attr);
-            op.set_attribute(crate::mlir::SYM_NAME_SYM, fn_sym.into());
+            op.set_attribute("kernel", melior::ir::Attribute::unit(self.mlir_ctx));
+            op.set_attribute(crate::mlir::SYM_NAME_SYM, fn_sym_attr.into());
 
             op
         };
@@ -261,11 +442,10 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let in_gpu_mod = gpu_attrs.kernel || gpu_attrs.device;
         operation.set_op_visible(self.mlir_ctx, visibility);
         let body = self.mlir_body(in_gpu_mod);
-        tracing::debug!("attr = {:?}", gpu_attrs.gpu_item);
-        trace!("append operation to block {} {:?}", operation, fn_sym);
+        debug!("append operation to block {} {:?}", operation, fn_sym);
         let op = body.append_operation(operation);
-        self.fn_db.write().unwrap().insert(sym.clone(), op);
-        self.fn_shared_memory_size.write().unwrap().insert(sym, 0);
+        self.fn_db.write().unwrap().insert(sym, op);
+        self.fn_shared_memory_size.write().unwrap().insert(fn_sym.clone(), 0);
         op
     }
 
@@ -279,7 +459,20 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             .get(&sym)
             .map_or((rustc_span::DUMMY_SP, 0), |v| *v);
 
-        let actual = self.fn_shared_memory_size.read().unwrap()[&sym];
+        let dev_sym = format!("{INDIRECT}{}", sym);
+        let shared_map_read = self.fn_shared_memory_size.read().unwrap();
+        let actual = match shared_map_read.get(&sym).or_else(|| shared_map_read.get(&dev_sym)) {
+            Some(value) => *value,
+            _ => {
+                self.emit_error(
+                    format!(
+                        "Internal error: the actual shared memory size not defined for {}",
+                        sym
+                    ),
+                    expected_span,
+                );
+            }
+        };
         if actual != expected {
             self.emit_error(
                 format!("Shared memory size mismatch: expected {}, found {}", expected, actual,),

@@ -1,6 +1,6 @@
 use melior::dialect::memref as mlir_memref;
 use melior::helpers::ArithBlockExt;
-use melior::ir::{self as mlir_ir, BlockLike, r#type as mlir_type};
+use melior::ir::{self as mlir_ir, BlockLike, Location, r#type as mlir_type};
 use rustc_abi::Size;
 use rustc_codegen_ssa_gpu::traits::{
     BackendTypes, BaseTypeCodegenMethods, ConstCodegenMethods, StaticCodegenMethods,
@@ -32,6 +32,41 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         typ: <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type,
     ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Value {
         self.mlir_const_val_from_type(i, typ, self.mlir_body(false))
+    }
+
+    pub(crate) fn define_static_shared_mem(
+        &self,
+        size: rustc_abi::Size,
+        align: rustc_abi::Align,
+        loc: Location<'ml>,
+    ) -> String {
+        let ret_final_type = self.type_shared_memref(self.type_i8(), &[size.bytes() as i64]);
+        let idx = self.static_shared_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let name = format!("static_shared_{}", idx);
+        let val_ty = self.type_array(self.type_i8(), size.bytes());
+        let value = mlir_ir::attribute::DenseElementsAttribute::new(
+            val_ty,
+            &vec![0; size.bytes() as usize]
+                .iter()
+                .map(|v| {
+                    mlir_ir::attribute::IntegerAttribute::new(self.type_i8(), *v as i64).into()
+                })
+                .collect::<Vec<_>>(),
+        )
+        .unwrap()
+        .into();
+        let static_shared = mlir_memref::global(
+            self.mlir_ctx,
+            &name,
+            None,
+            ret_final_type,
+            Some(value),
+            false,
+            Some(self.align_to_attr(align)),
+            loc,
+        );
+        self.mlir_body(true).append_operation(static_shared);
+        name
     }
 
     pub(crate) fn const_data_memref_from_alloc(

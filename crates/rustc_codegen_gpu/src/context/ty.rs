@@ -1,3 +1,4 @@
+use melior::ir::r#type::MemRefType;
 use melior::ir::{self as mlir_ir, Attribute, ShapedTypeLike, TypeLike, r#type as mlir_type};
 use rustc_abi::{BackendRepr, Primitive};
 use rustc_codegen_ssa_gpu::traits::{
@@ -62,12 +63,19 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         dim: &[i64],
         layout: Option<Attribute<'ml>>,
         memory_space: Option<Attribute<'ml>>,
-    ) -> MLIRType<'ml> {
+    ) -> MemRefType<'ml> {
         crate::mlir::type_memref(self.mlir_ctx, eletype, dim, layout, memory_space)
     }
 
-    pub(crate) fn type_shared_memref(&self, eletype: MLIRType<'ml>, dim: &[i64]) -> MLIRType<'ml> {
-        self.type_memref(eletype, dim, Some(MemorySpace::Shared.to_attr(self.mlir_ctx)))
+    pub(crate) fn type_shared_memref(
+        &self,
+        eletype: MLIRType<'ml>,
+        dim: &[i64],
+    ) -> MemRefType<'ml> {
+        assert!(!eletype.is_mem_ref());
+        unsafe {
+            self._type_memref(eletype, dim, None, Some(MemorySpace::Shared.to_attr(self.mlir_ctx)))
+        }
     }
 
     pub(crate) fn type_memref(
@@ -85,9 +93,10 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                     None,
                     memory_space,
                 )
+                .into()
             };
         }
-        unsafe { self._type_memref(eletype, dim, None, memory_space) }
+        unsafe { self._type_memref(eletype, dim, None, memory_space).into() }
     }
 
     pub(crate) fn type_memref_single(

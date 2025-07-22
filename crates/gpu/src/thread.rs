@@ -73,7 +73,7 @@ impl<T> GpuShared<T> {
     #[rustc_diagnostic_item = "gpu::new_shared_mem"]
     #[gpu_codegen::device]
     #[inline(never)]
-    pub const fn uninit() -> Self {
+    pub const fn zero() -> Self {
         unimplemented!();
     }
 }

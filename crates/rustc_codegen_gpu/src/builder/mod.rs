@@ -1336,27 +1336,14 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn alloca_shared(&mut self, size: rustc_abi::Size, align: rustc_abi::Align) -> Self::Value {
-        let ret_type =
-            self.type_shared_memref(self.type_i8(), &[crate::mlir::memref::dynamic_size()]);
         let ret_final_type = self.type_shared_memref(self.type_i8(), &[size.bytes() as i64]);
-        let used_size = self.fn_shared_memory_size.read().unwrap()[&self.name];
-        if used_size > 0 {
-            self.emit_error(
-                "Only support a single shared var allocation in current version".into(),
-                self.cur_span,
-            );
-        }
-        *self.fn_shared_memory_size.write().unwrap().get_mut(&self.name).unwrap() +=
-            size.bytes() as usize;
-        let ptr = self.append_op_res(
-            melior::dialect::ods::gpu::dynamic_shared_memory(
-                self.mlir_ctx,
-                ret_type,
-                self.cur_loc(),
-            )
-            .into(),
-        );
-        let ptr = self.mlir_memref_view(ptr, ret_final_type, None);
+        let name = self.define_static_shared_mem(size, align, self.cur_loc());
+        let ptr = self.append_op_res(mlir_memref::get_global(
+            self.mlir_ctx,
+            &name,
+            ret_final_type,
+            self.cur_loc(),
+        ));
         ptr
     }
 
@@ -1742,7 +1729,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         }
         let casted_base_memref = self.mlir_memref_view(
             base_memref,
-            unsafe { self._type_memref(dest_ty, &[1], None, None) },
+            unsafe { self._type_memref(dest_ty, &[1], None, None).into() },
             None,
         );
         self.mlir_load(dest_ty, casted_base_memref, &[zero], align)

@@ -357,7 +357,7 @@ pub(crate) fn type_memref<'ml>(
     dim: &[i64],
     layout: Option<Attribute<'ml>>,
     memory_space: Option<Attribute<'ml>>,
-) -> Type<'ml> {
+) -> MemRefType<'ml> {
     if eletype.is_tuple() {
         let size = crate::mlir::static_size_of(eletype);
         assert!(!dim.is_empty());
@@ -365,5 +365,5 @@ pub(crate) fn type_memref<'ml>(
         dim.push(size as i64);
         return type_memref(ctx, IntegerType::new(ctx, 8).into(), &dim, layout, memory_space);
     }
-    Type::from(MemRefType::new(eletype, dim, layout, memory_space))
+    MemRefType::new(eletype, dim, layout, memory_space)
 }

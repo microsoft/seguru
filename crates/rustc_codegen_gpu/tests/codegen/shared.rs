@@ -7,12 +7,12 @@
 
 #[allow(non_upper_case_globals)]
 #[gpu_codegen::shared_size]
-pub static shared_size_alloc_shared: usize = 10;
+pub static shared_size_alloc_shared: usize = 0;
 
 #[gpu_macros::kernel_v2]
 #[no_mangle]
 pub fn alloc_shared(a: &[u8], _a_window: usize, b: &mut [u8], b_window: usize) {
-    let mut shared: gpu::GpuShared::<[u8; 10]> = gpu::GpuShared::uninit();
+    let mut shared = gpu::GpuShared::<[u8; 10]>::zero();
     let chunk_shared = gpu::chunk_mut(&mut *shared, 1, gpu::GpuChunkIdx::new());
     let c = chunk_shared;
     c[0] = a[gpu::thread_id(gpu::DimType::X)];

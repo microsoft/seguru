@@ -448,43 +448,6 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         self.fn_shared_memory_size.write().unwrap().insert(fn_sym.clone(), 0);
         op
     }
-
-    pub(crate) fn check_share_memory_size(&self, instance: &Instance<'tcx>) -> bool {
-        let sym = self.tcx.symbol_name(*instance).name.to_string();
-        let expected = self.expected_shared_memory_size.read().unwrap().get(&sym);
-        let (expected_span, expected) = self
-            .expected_shared_memory_size
-            .read()
-            .unwrap()
-            .get(&sym)
-            .map_or((rustc_span::DUMMY_SP, 0), |v| *v);
-
-        let dev_sym = format!("{INDIRECT}{}", sym);
-        let shared_map_read = self.fn_shared_memory_size.read().unwrap();
-        let actual = match shared_map_read.get(&sym).or_else(|| shared_map_read.get(&dev_sym)) {
-            Some(value) => *value,
-            _ => {
-                self.emit_error(
-                    format!(
-                        "Internal error: the actual shared memory size not defined for {}",
-                        sym
-                    ),
-                    expected_span,
-                );
-            }
-        };
-        if actual != expected {
-            self.emit_error(
-                format!("Shared memory size mismatch: expected {}, found {}", expected, actual,),
-                rustc_errors::MultiSpan::from_spans(vec![
-                    expected_span,
-                    self.tcx.def_span(instance.def_id()),
-                ]),
-            )
-        } else {
-            true
-        }
-    }
 }
 
 /*

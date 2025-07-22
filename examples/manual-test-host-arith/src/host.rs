@@ -24,14 +24,6 @@ pub fn kernel_arith(
     f: gpu::GpuChunkableMut<f32>,
     g: &cuda_bindings::CudaMemBox<[f32]>,
 ) {
-    let config = cuda_bindings::GPUConfig {
-        grid_dim_x: 1,
-        grid_dim_y: 1,
-        grid_dim_z: 1,
-        block_dim_x: 1,
-        block_dim_y: 4,
-        block_dim_z: 1,
-    };
 }
 
 /*

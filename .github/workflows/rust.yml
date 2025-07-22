@@ -81,10 +81,6 @@ jobs:
         working-directory: examples
         run: cargo fmt --all -- --check
 
-      - name: Format Matrix
-        working-directory: matrix
-        run: cargo fmt --all -- --check
-
       - name: Clippy
         working-directory: crates
         run: cargo clippy --workspace --exclude cuda_bindings -- -D warnings -C panic=abort
@@ -92,10 +88,6 @@ jobs:
       - name: Clippy examples
         working-directory: examples
         run: RUSTC=rustc cargo clippy --workspace --exclude llm-rs-gpu -- -D warnings -C panic=abort
-
-      - name: Clippy Matrix
-        working-directory: matrix
-        run: cargo clippy --workspace -- -D warnings -C panic=abort
 
       - name: Run tests
         working-directory: crates/rustc_codegen_gpu

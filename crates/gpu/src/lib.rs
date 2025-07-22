@@ -28,7 +28,7 @@ pub fn build_sfi(_size: usize, _offset: usize) {
 #[gpu_codegen::device]
 #[inline(always)]
 pub fn get_local_mut_2d<'a, T>(
-    a: &'a mut GpuChunkableMut2D<'a, T>,
+    a: &mut GpuChunkableMut2D<'a, T>,
     x: usize,
     y: usize,
 ) -> &'a mut T {

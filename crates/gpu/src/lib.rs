@@ -27,11 +27,7 @@ pub fn build_sfi(_size: usize, _offset: usize) {
 #[rustc_diagnostic_item = "gpu::get_local_mut_2d"]
 #[gpu_codegen::device]
 #[inline(always)]
-pub fn get_local_mut_2d<'a, T>(
-    a: &mut GpuChunkableMut2D<'a, T>,
-    x: usize,
-    y: usize,
-) -> &'a mut T {
+pub fn get_local_mut_2d<'a, T>(a: &mut GpuChunkableMut2D<'a, T>, x: usize, y: usize) -> &'a mut T {
     // Must check if col is smaller than a.size_x
     let row = y * grid_dim(DimType::Y) * block_dim(DimType::Y)
         + block_dim(DimType::Y) * block_id(DimType::Y)

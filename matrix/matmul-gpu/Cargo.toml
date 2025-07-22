@@ -1,0 +1,8 @@
+[package]
+name = "matmul-gpu"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gpu = {workspace = true}
+gpu_macros = {workspace = true}

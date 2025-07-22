@@ -22,12 +22,4 @@ pub fn inner_product_kernel(
     c: gpu::GpuChunkableMut2D<f32>,
     n: usize,
 ) {
-    let config = cuda_bindings::GPUConfig {
-        grid_dim_x: 1,
-        grid_dim_y: 1,
-        grid_dim_z: 1,
-        block_dim_x: 2,
-        block_dim_y: 2,
-        block_dim_z: 1,
-    };
 }

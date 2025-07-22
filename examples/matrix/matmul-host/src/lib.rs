@@ -39,6 +39,7 @@ fn print_square_matrix(m: &[f32], n: usize) {
 pub fn run_host_matmul(
     ctx: &cuda_bindings::GpuCtxZeroGuard<'_, '_>,
     n: usize,
+    dim: u32,
 ) -> Result<(), cuda_bindings::CudaError> {
     let m = unsafe { load_module_from_extern!(ctx, gpu_bin_cst)? };
 
@@ -65,7 +66,15 @@ pub fn run_host_matmul(
     let d_c_c = gpu::GpuChunkableMut2D::<f32>::new(d_c, n);
 
     // Now do the kernel
-    inner_product_kernel(ctx, m, d_a, d_b, d_c_c, n).expect("Kernel execution failed");
+    let config = cuda_bindings::GPUConfig {
+        grid_dim_x: 1,
+        grid_dim_y: 1,
+        grid_dim_z: 1,
+        block_dim_x: dim,
+        block_dim_y: dim,
+        block_dim_z: 1,
+    };
+    inner_product_kernel(ctx, m, config, d_a, d_b, d_c_c, n).expect("Kernel execution failed");
 
     d_c.copy_to_host(h_c, min(h_c.len(), n * n), ctx)?;
 

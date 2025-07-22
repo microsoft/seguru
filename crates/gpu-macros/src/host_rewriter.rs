@@ -6,7 +6,7 @@ use syn::{Expr, PatType, Stmt};
 
 fn host_rewrite(host_func: &mut syn::ItemFn, span: Span) {
     // Rewrite:
-    // 1. Create a new function and change its name and attributes
+    // 1. Change to return error
     let kernel_func_str = &format!("{}", &host_func.sig.ident);
 
     host_func.attrs.clear();
@@ -15,19 +15,16 @@ fn host_rewrite(host_func: &mut syn::ItemFn, span: Span) {
         syn::token::RArrow::default(), // ->
         Box::new(syn::parse_quote! { Result<(), cuda_bindings::CudaError> }), // u32
     );
-    // Allows name mangling since it's used locally
-    // host_func.attrs.push(syn::parse_quote! {#[unsafe(no_mangle)]});
 
     let mut stmts = vec![];
 
-    // 2. Add window to the argument list (also build the ptr and args along the way)
+    // 2. Build up argument list and add ctx, module, config to wrapper
     let wrapper_args = &host_func.sig.inputs;
     let host_args = syn::Ident::new("args_for_launching", span);
     let mod_arg = syn::Ident::new("host_module", span);
     let ctx_arg = syn::Ident::new("ctx", span);
+    let config_arg = syn::Ident::new("config", span);
 
-    // Backwards iteration so that insertion don't mess up the indices
-    // Thanks the good idea of the LLM of Google Search
     stmts.push(Stmt::Expr(
         Expr::Verbatim(quote_spanned! {span =>let mut #host_args = Vec::<&dyn cuda_bindings::AsHostKernelParams>::new();}),
         None,
@@ -63,6 +60,21 @@ fn host_rewrite(host_func: &mut syn::ItemFn, span: Span) {
                 attrs: vec![],
                 by_ref: None,
                 mutability: None,
+                ident: config_arg.clone(),
+                subpat: None,
+            })),
+            colon_token: syn::token::Colon::default(),
+            ty: Box::new(syn::parse_quote! { cuda_bindings::GPUConfig }),
+        }),
+    );
+    host_func.sig.inputs.insert(
+        0,
+        syn::FnArg::Typed(PatType {
+            attrs: vec![],
+            pat: Box::new(syn::Pat::Ident(syn::PatIdent {
+                attrs: vec![],
+                by_ref: None,
+                mutability: None,
                 ident: mod_arg.clone(),
                 subpat: None,
             })),
@@ -86,13 +98,9 @@ fn host_rewrite(host_func: &mut syn::ItemFn, span: Span) {
         }),
     );
 
-    // 3. Insert the config argument
-
     // 3. Call the actual function
-    // Build call args:
     let shared_mem_size_ident =
         syn::Ident::new(&format!("const_share_size_{}", kernel_func_str), span);
-    // println!("{}", quote!(#func_ident(#(#call_args),*);));
     let t = quote_spanned! {span =>
         // #Safety: this is safe if the argument types match the kernel's expected types.
         unsafe {
@@ -110,7 +118,7 @@ fn host_rewrite(host_func: &mut syn::ItemFn, span: Span) {
 
     stmts.push(Stmt::Expr(Expr::Verbatim(t), None));
     // Insert everything into the blocks of the wrapper
-    // host_func.block.stmts.clear();
+    host_func.block.stmts.clear();
     host_func.block.stmts.extend(stmts);
 }
 
@@ -151,7 +159,7 @@ pub(crate) fn rewrite(attr: TokenStream, input: TokenStream) -> TokenStream {
 
     // Original function is dropped and replaced with our stuff
 
-    //println!("{}", const_val_def);
+    // println!("{}", const_val_def);
 
     const_val_def
 }

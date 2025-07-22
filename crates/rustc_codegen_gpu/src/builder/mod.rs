@@ -333,8 +333,12 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                         format!("{:?} must take a single StringAttribute as format", gpu_item);
                     self.emit_error(err.clone(), span);
                 };
+                let mut args: Vec<Value<'ml, 'a>> = args.to_vec();
+                if let Some(extra) = self.extra_state.args.get_mut(&GpuItem::PrintArgs) {
+                    args.append(extra);
+                };
                 let op_ref = self.append_op(
-                    melior::dialect::ods::gpu::printf(self.mlir_ctx, args, format, loc).into(),
+                    melior::dialect::ods::gpu::printf(self.mlir_ctx, &args, format, loc).into(),
                 );
                 Ok(Some(op_ref))
             }

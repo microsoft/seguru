@@ -1,6 +1,6 @@
 [build]
 rustc = "../crates/target/debug/rustc-gpu"
-rustflags = ["--emit=mir"]
+rustflags = ["--emit=mir", "-Zmir-opt-level=3"]
 
 [env]
 GPU_CODEGEN = "../crates/target/debug/librustc_codegen_gpu.so"

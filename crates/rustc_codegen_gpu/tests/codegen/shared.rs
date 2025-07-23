@@ -5,27 +5,35 @@
 #![feature(stmt_expr_attributes)]
 #![no_std]
 
-#[allow(non_upper_case_globals)]
-#[gpu_codegen::shared_size]
-pub static shared_size_alloc_shared: usize = 0;
-
 #[gpu_macros::kernel_v2]
 #[no_mangle]
-pub fn alloc_shared(a: &[u8], _a_window: usize, b: &mut [u8], b_window: usize) {
+pub fn alloc_shared(a: &[u8], _a_window: usize, b: &mut [u8], b_window: usize, f: &mut [f32], salloc: gpu::DynamicSharedAlloc) {
+    let mut salloc = salloc;
+    let mut dy_shared = salloc.alloc::<f32>(32);
     let mut shared = gpu::GpuShared::<[u8; 10]>::zero();
-    let chunk_shared = gpu::chunk_mut(&mut *shared, 1, gpu::GpuChunkIdx::new());
+    let chunk_dy_shared = dy_shared.chunk_mut(1, gpu::GpuSharedChunkIdx::new());
+    let chunk_shared = shared.chunk_mut(1, gpu::GpuSharedChunkIdx::new());
     let c = chunk_shared;
     c[0] = a[gpu::thread_id(gpu::DimType::X)];
+    chunk_dy_shared[0] = 1.1;
     gpu::sync_threads();
 
     let chunked_b = gpu::chunk_mut(b, 1, gpu::GpuChunkIdx::new());
     for i in 0..10 {
         chunked_b[0] += shared[i];
     }
+
+    let chunked_f = gpu::chunk_mut(f, 1, gpu::GpuChunkIdx::new());
+    for i in 0..10 {
+        chunked_f[0] += chunk_dy_shared[i];
+    }
 }
+
 
 // CHECK: @gpu_bin_cst = internal constant
 // PTX_CHECK: .visible .entry alloc_shared
 // PTX_CHECK: bar.sync
 // PTX_CHECK: st.shared
 // PTX_CHECK: ld.shared
+// PTX_CHECK: static_shared_0
+// PTX_CHECK: __dynamic_shmem__0 

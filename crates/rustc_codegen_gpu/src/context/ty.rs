@@ -54,6 +54,23 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         MLIRType::from(mlir_type::TupleType::new(self.mlir_ctx, types))
     }
 
+    pub(crate) fn memref_set_memory_space(
+        &self,
+        memref_ty: MemRefType<'ml>,
+        memory_space: Option<Attribute<'ml>>,
+    ) -> MemRefType<'ml> {
+        self.type_memref(
+            memref_ty.element(),
+            &(0..memref_ty.rank())
+                .map(|i| memref_ty.dim_size(i).unwrap() as i64)
+                .collect::<Vec<_>>(),
+            Some(memref_ty.layout()),
+            memory_space,
+        )
+        .try_into()
+        .unwrap()
+    }
+
     /// Safety:
     ///   This is safe if eletype is not a memref type.
     ///   MemRef is not 8bytes and so we should be careful when using creating MemRef<nxMemRef<..>>.
@@ -71,10 +88,16 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         &self,
         eletype: MLIRType<'ml>,
         dim: &[i64],
+        layout: Option<Attribute<'ml>>,
     ) -> MemRefType<'ml> {
         assert!(!eletype.is_mem_ref());
         unsafe {
-            self._type_memref(eletype, dim, None, Some(MemorySpace::Shared.to_attr(self.mlir_ctx)))
+            self._type_memref(
+                eletype,
+                dim,
+                layout,
+                Some(MemorySpace::Shared.to_attr(self.mlir_ctx)),
+            )
         }
     }
 
@@ -82,6 +105,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         &self,
         eletype: MLIRType<'ml>,
         dim: &[i64],
+        layout: Option<Attribute<'ml>>,
         memory_space: Option<Attribute<'ml>>,
     ) -> MLIRType<'ml> {
         if eletype.is_mem_ref() {
@@ -90,13 +114,13 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 self._type_memref(
                     self.type_i8(),
                     dim.iter().map(|&d| d * 8).collect::<Vec<_>>().as_slice(),
-                    None,
+                    layout,
                     memory_space,
                 )
                 .into()
             };
         }
-        unsafe { self._type_memref(eletype, dim, None, memory_space).into() }
+        unsafe { self._type_memref(eletype, dim, layout, memory_space).into() }
     }
 
     pub(crate) fn type_memref_single(
@@ -104,7 +128,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         eletype: MLIRType<'ml>,
         memory_space: Option<Attribute<'ml>>,
     ) -> MLIRType<'ml> {
-        self.type_memref(eletype, &[1], memory_space)
+        self.type_memref(eletype, &[1], None, memory_space)
     }
 
     pub(crate) fn type_index(&self) -> MLIRType<'ml> {
@@ -222,9 +246,20 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                     if size.bytes() == 0 {
                         self.type_memref_single(self.type_i8(), memory_space)
                     } else {
-                        self.type_memref(self.type_i8(), &[size.bytes() as i64], memory_space)
+                        self.type_memref(self.type_i8(), &[size.bytes() as i64], None, memory_space)
                     }
                 } else {
+                    let mut memory_space = memory_space;
+                    if let Some(def) = inner_type.ty_adt_def() {
+                        tracing::warn!("Using adt {:?} as scalar type", def);
+                        if Some(def.did())
+                            == self
+                                .tcx
+                                .get_diagnostic_item(rustc_span::Symbol::intern("gpu::GpuShared"))
+                        {
+                            memory_space = Some(MemorySpace::Shared.to_attr(self.mlir_ctx));
+                        }
+                    }
                     self.pointer_to_mlir_type(inner_type, _immediate, memory_space)
                 }
             }
@@ -236,7 +271,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                     self.type_memref_single(self.type_i8(), memory_space)
                 } else {
                     // Closure takes some arguments via pointer.
-                    self.type_memref(self.type_i8(), &[bytes], memory_space)
+                    self.type_memref(self.type_i8(), &[bytes], None, memory_space)
                 }
             }
             rustc_middle::ty::TyKind::Adt(def, substs) => {
@@ -245,7 +280,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 if bytes == 0 {
                     self.type_memref_single(self.type_i8(), memory_space)
                 } else {
-                    self.type_memref(self.type_i8(), &[bytes], memory_space)
+                    self.type_memref(self.type_i8(), &[bytes], None, memory_space)
                 }
             }
             _ => {
@@ -435,7 +470,7 @@ impl<'tcx, 'ml, 'a> LayoutTypeCodegenMethods<'tcx> for GPUCodegenContext<'tcx, '
         &self,
         fn_abi: &rustc_target::callconv::FnAbi<'tcx, rustc_middle::ty::Ty<'tcx>>,
     ) -> Self::Type {
-        self.fn_abi_to_fn_type(fn_abi, false)
+        self.fn_abi_to_fn_type(fn_abi, false, false)
             .unwrap_or_else(|msg| {
                 panic!();
             })

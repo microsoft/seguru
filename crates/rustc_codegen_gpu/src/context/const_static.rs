@@ -40,7 +40,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         align: rustc_abi::Align,
         loc: Location<'ml>,
     ) -> String {
-        let ret_final_type = self.type_shared_memref(self.type_i8(), &[size.bytes() as i64]);
+        let ret_final_type = self.type_shared_memref(self.type_i8(), &[size.bytes() as i64], None);
         let idx = self.static_shared_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let name = format!("static_shared_{}", idx);
         let val_ty = self.type_array(self.type_i8(), size.bytes());

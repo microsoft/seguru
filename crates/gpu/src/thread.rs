@@ -1,7 +1,6 @@
 /// This is motivated by thread::scope in Rust std lib.
 /// Be careful when modifying this code since it is part of the TCB to support data-race free GPU programming.
 use core::marker::PhantomData;
-use core::ops::{Deref, DerefMut};
 
 pub struct ThreadScope<'scope, 'env: 'scope> {
     scope: PhantomData<&'scope mut &'scope ()>,
@@ -52,47 +51,6 @@ impl<'env, T> GpuChunksMut<'env, T> {
         idx: crate::GpuChunkIdx,
     ) -> GpuChunksMut<'env, T> {
         GpuChunksMut { _ptr: ptr, _chunk_size: chunk_size, _idx: idx }
-    }
-}
-
-#[rustc_diagnostic_item = "gpu::GpuShared"]
-pub struct GpuShared<T: Sized> {
-    value: T,
-}
-
-impl<T: Copy> Copy for GpuShared<T> {}
-
-impl<T: Copy> Clone for GpuShared<T> {
-    #[inline]
-    fn clone(&self) -> GpuShared<T> {
-        *self
-    }
-}
-
-impl<T> GpuShared<T> {
-    #[rustc_diagnostic_item = "gpu::new_shared_mem"]
-    #[gpu_codegen::device]
-    #[inline(never)]
-    pub const fn zero() -> Self {
-        unimplemented!();
-    }
-}
-
-impl<T> Deref for GpuShared<T> {
-    type Target = T;
-
-    #[inline(always)]
-    #[gpu_codegen::device]
-    fn deref(&self) -> &Self::Target {
-        &self.value
-    }
-}
-
-impl<T> DerefMut for GpuShared<T> {
-    #[inline(always)]
-    #[gpu_codegen::device]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.value
     }
 }
 

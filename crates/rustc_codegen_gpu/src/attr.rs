@@ -9,6 +9,7 @@ pub(crate) struct GpuAttributes {
     pub host: bool,
     pub device: bool, // a device function called by a kernel but not by host directly
     pub gpu_item: Option<GpuItem>,
+    pub ret_shared: bool,
     pub shared_size: bool, // this is used to decide whether to call `gpu_shared_size`.
 }
 
@@ -41,6 +42,7 @@ pub enum GpuItem {
     BuildSFI,
     GetLocalMut2D,
     GetLocal2D,
+    DynamicShared,
 }
 
 impl TryFrom<&str> for GpuItem {
@@ -75,6 +77,7 @@ impl TryFrom<&str> for GpuItem {
             "gpu::build_sfi" => GpuItem::BuildSFI,
             "gpu::get_local_mut_2d" => GpuItem::GetLocalMut2D,
             "gpu::get_local_2d" => GpuItem::GetLocal2D,
+            "gpu::base_dynamic_shared" => GpuItem::DynamicShared,
             _ => return Err(()),
         };
         Ok(ret)
@@ -111,6 +114,7 @@ impl From<GpuItem> for &'static str {
             GpuItem::BuildSFI => "gpu::build_sfi",
             GpuItem::GetLocalMut2D => "gpu::get_local_mut_2d",
             GpuItem::GetLocal2D => "gpu::get_local_2d",
+            GpuItem::DynamicShared => "gpu::base_dynamic_shared",
         }
     }
 }
@@ -148,6 +152,10 @@ pub fn device_symbol() -> Symbol {
 
 pub fn gpu_shared_size_symbol() -> Symbol {
     Symbol::intern("shared_size")
+}
+
+pub fn ret_shared() -> Symbol {
+    Symbol::intern("ret_shared")
 }
 
 impl GpuAttributes {
@@ -205,6 +213,9 @@ impl GpuAttributes {
             }
             if attr.path_matches(&[gpu_symbol(), gpu_shared_size_symbol()]) {
                 gpu_attrs.shared_size = true;
+            }
+            if attr.path_matches(&[gpu_symbol(), ret_shared()]) {
+                gpu_attrs.ret_shared = true;
             }
         }
         gpu_attrs

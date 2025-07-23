@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use melior::ir::attribute::StringAttribute;
 use melior::ir::operation::{OperationLike, OperationMutLike};
 use melior::ir::r#type::FunctionType;
-use melior::ir::{BlockLike, Location, Operation, ValueLike};
+use melior::ir::{BlockLike, Location, Operation, TypeLike, ValueLike};
 use rustc_codegen_ssa_gpu::traits::{
     ConstCodegenMethods, LayoutTypeCodegenMethods, MiscCodegenMethods,
 };
@@ -20,6 +20,7 @@ use crate::context::CodegenGPUError;
 use crate::mlir::{MLIRMutOpHelpers, MLIROpHelpers, MLIRVisibility};
 
 const INDIRECT: &str = "__indirect_";
+
 pub struct IndirectEntry<'tcx, 'ml> {
     entry_sym: String,
     fn_type: FunctionType<'ml>,
@@ -60,6 +61,50 @@ fn is_impl_of_trait_method(
 }
 
 impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
+    pub(crate) fn sanitized_symbol_name(&self, instance: Instance<'tcx>) -> String {
+        let input = self.tcx.symbol_name(instance).name.to_string();
+        let mut out = String::with_capacity(input.len());
+        let mut chars = input.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            match c {
+                // Replace known mangling patterns
+                '$' => {
+                    let mut token = String::new();
+                    while let Some(&next) = chars.peek() {
+                        if next == '$' || next == '.' {
+                            break;
+                        }
+                        token.push(chars.next().unwrap());
+                    }
+                    out.push('_');
+                    out.push_str(&token.to_lowercase());
+                    out.push('_');
+                }
+                // Replace or remove common invalid characters
+                '<' | '>' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ':' | ';' | ' ' | '-'
+                | '.' => {
+                    out.push('_');
+                }
+                // Allow letters, digits, and underscore
+                c if c.is_ascii_alphanumeric() || c == '_' => {
+                    out.push(c);
+                }
+                // Fallback: underscore for anything else
+                _ => {
+                    out.push('_');
+                }
+            }
+        }
+
+        // Avoid starting with a digit
+        if out.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+            out.insert(0, '_');
+        }
+
+        out
+    }
+
     pub fn gpu_return(
         &self,
         ret: &[melior::ir::Value<'ml, 'a>],
@@ -84,7 +129,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     ) -> melior::ir::Value<'ml, 'a> {
         let def_id: rustc_hir::def_id::DefId = instance.def_id();
 
-        let instance_sym = self.tcx.symbol_name(instance).name.to_string();
+        let instance_sym = self.sanitized_symbol_name(instance);
         if self.fn_ptr_db.read().unwrap().contains_key(&instance_sym) {
             return self.fn_ptr_db.read().unwrap()[&instance_sym].1;
         }
@@ -161,6 +206,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         &self,
         abi: &rustc_target::callconv::FnAbi<'tcx, rustc_middle::ty::Ty<'tcx>>,
         is_kernel_entry: bool,
+        ret_shared: bool,
     ) -> Result<
         (FunctionType<'ml>, Option<(FunctionType<'ml>, IndirectArgsTypes<'tcx>)>),
         CodegenGPUError,
@@ -220,6 +266,21 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         }
         if args.is_empty() && ret.is_empty() {
             debug!("function has no args and no ret");
+        }
+
+        // If we specify the return memory space to shared,
+        // we need to set the memory space for all memref return types.
+        if ret_shared {
+            ret.iter_mut().for_each(|t| {
+                if t.is_mem_ref() {
+                    *t = self
+                        .memref_set_memory_space(
+                            (*t).try_into().unwrap(),
+                            Some(crate::mlir::memref::MemorySpace::Shared.to_attr(self.mlir_ctx)),
+                        )
+                        .into();
+                }
+            });
         }
         let ftype: FunctionType<'ml> = FunctionType::new(self.mlir_ctx, &args, &ret);
         let new_ftype = new_entry_args.map(|new_args| {
@@ -338,7 +399,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     ) -> melior::ir::OperationRef<'ml, 'a> {
         let tcx = self.tcx();
         let mlir_ctx = self.mlir_ctx;
-        let sym = tcx.symbol_name(instance).name.to_string();
+        let sym = self.sanitized_symbol_name(instance);
         let def_id: rustc_hir::def_id::DefId = instance.def_id();
         {
             let fn_db = self.fn_db.read().unwrap();
@@ -353,7 +414,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
 
         let fn_abi = self.fn_abi_of_instance(instance, rustc_middle::ty::List::empty());
         let (ftype, real_entry_ftype) = self
-            .fn_abi_to_fn_type(fn_abi, gpu_attrs.kernel)
+            .fn_abi_to_fn_type(fn_abi, gpu_attrs.kernel, gpu_attrs.ret_shared)
             .unwrap_or_else(|e| self.emit_error(e, span));
         let fn_sym = if real_entry_ftype.is_some() && gpu_attrs.kernel {
             gpu_attrs.kernel = false;
@@ -445,6 +506,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         debug!("append operation to block {} {:?}", operation, fn_sym);
         let op = body.append_operation(operation);
         self.fn_db.write().unwrap().insert(sym, op);
+        self.fn_db.write().unwrap().insert(fn_sym.clone(), op);
         self.fn_shared_memory_size.write().unwrap().insert(fn_sym.clone(), 0);
         op
     }

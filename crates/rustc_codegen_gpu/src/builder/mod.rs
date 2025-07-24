@@ -387,7 +387,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 warn!("gpu.iter_next args: {:?}", args);
                 let arg = args[0];
                 let ptr = self.load(
-                    self.type_memref(self.type_i8(), &[1], None),
+                    self.type_memref(self.type_i8(), &[1], None, None),
                     arg,
                     rustc_abi::Align::EIGHT,
                 );
@@ -495,7 +495,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 let ptr_memref_ty = MemRefType::try_from(ptr.r#type()).unwrap();
                 let ptr_t = if self.mlir_element_type(ptr.r#type()) != val.r#type() {
                     let target_memref_ty =
-                        self.type_memref(val.r#type(), &[1], ptr_memref_ty.memory_space());
+                        self.type_memref(val.r#type(), &[1], None, ptr_memref_ty.memory_space());
                     self.mlir_memref_view(ptr, target_memref_ty, None)
                 } else {
                     ptr
@@ -534,6 +534,23 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 self.build_sfi(size, offset);
 
                 Ok(None)
+            }
+            GpuItem::DynamicShared => {
+                // return (base + remain_size, valid_size)
+                let ret_type = self.type_shared_memref(
+                    self.type_i8(),
+                    &[crate::mlir::memref::dynamic_size()],
+                    None,
+                );
+                let op_ref = self.append_op(
+                    melior::dialect::ods::gpu::dynamic_shared_memory(
+                        self.mlir_ctx,
+                        ret_type.into(),
+                        self.cur_loc(),
+                    )
+                    .into(),
+                );
+                Ok(Some(op_ref))
             }
         }
     }
@@ -574,6 +591,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         let target_memref_ty = MemRefType::try_from(self.type_memref(
             self.type_i8(),
             &[self.static_size_of(ty) as i64],
+            None,
             src_memref_ty.memory_space(),
         ))
         .unwrap();
@@ -709,12 +727,17 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         let ty = val.r#type();
         assert!(ty.is_mem_ref());
         assert!(dst_ty.is_mem_ref());
+
         if dst_ty == ty {
             return val;
         }
         let dst_memref_ty: MemRefType<'ml> = dst_ty.try_into().expect("expected memref type");
         let memref_ty: MemRefType<'ml> = ty.try_into().expect("expected memref type");
-        assert!(memref_ty.memory_space() == dst_memref_ty.memory_space());
+        let dst_memref_ty = if memref_ty.memory_space() != dst_memref_ty.memory_space() {
+            self.memref_set_memory_space(dst_memref_ty, memref_ty.memory_space())
+        } else {
+            dst_memref_ty
+        };
         let layout = crate::mlir::attr::StridedLayoutAttribute::try_from(memref_ty.layout());
         let base_memref = val;
         let (base_memref, base_byte_offset) = match layout {
@@ -762,7 +785,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             base_memref,
             byte_offset,
             &[], // No dynamic sizes
-            dst_ty.try_into().unwrap(),
+            dst_memref_ty,
             self.cur_loc(),
         );
         self.append_op_res(op)
@@ -1336,27 +1359,14 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn alloca_shared(&mut self, size: rustc_abi::Size, align: rustc_abi::Align) -> Self::Value {
-        let ret_type =
-            self.type_shared_memref(self.type_i8(), &[crate::mlir::memref::dynamic_size()]);
-        let ret_final_type = self.type_shared_memref(self.type_i8(), &[size.bytes() as i64]);
-        let used_size = self.fn_shared_memory_size.read().unwrap()[&self.name];
-        if used_size > 0 {
-            self.emit_error(
-                "Only support a single shared var allocation in current version".into(),
-                self.cur_span,
-            );
-        }
-        *self.fn_shared_memory_size.write().unwrap().get_mut(&self.name).unwrap() +=
-            size.bytes() as usize;
-        let ptr = self.append_op_res(
-            melior::dialect::ods::gpu::dynamic_shared_memory(
-                self.mlir_ctx,
-                ret_type,
-                self.cur_loc(),
-            )
-            .into(),
-        );
-        let ptr = self.mlir_memref_view(ptr, ret_final_type, None);
+        let ret_final_type = self.type_shared_memref(self.type_i8(), &[size.bytes() as i64], None);
+        let name = self.define_static_shared_mem(size, align, self.cur_loc());
+        let ptr = self.append_op_res(mlir_memref::get_global(
+            self.mlir_ctx,
+            &name,
+            ret_final_type,
+            self.cur_loc(),
+        ));
         ptr
     }
 
@@ -1369,7 +1379,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             self.type_i8()
         };
         // The alloca function is used to allocate memory on the stack and thus must be default memory space.
-        let mem_ref_ty = self.type_memref(ty, &[count], None).try_into().unwrap();
+        let mem_ref_ty = self.type_memref(ty, &[count], None, None).try_into().unwrap();
         let op = melior::dialect::memref::alloca(
             self.mlir_ctx,
             mem_ref_ty,
@@ -1395,7 +1405,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         let ptr = if load_ty != src_memref_ty.element() {
             self.mlir_memref_view(
                 ptr,
-                self.type_memref(load_ty, &[1], src_memref_ty.memory_space()),
+                self.type_memref(load_ty, &[1], None, src_memref_ty.memory_space()),
                 None,
             )
         } else {
@@ -1458,7 +1468,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
                     // mlir_memref_view in load
                     self.mlir_memref_view(
                         ptr,
-                        self.type_memref(base_ty, &[1], ptr_memref_ty.memory_space()),
+                        self.type_memref(base_ty, &[1], None, ptr_memref_ty.memory_space()),
                         offset,
                     )
                 } else {
@@ -1598,7 +1608,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         };
         let const_idx = self.const_value(0, self.type_index());
         let dst_memref_ty = MemRefType::try_from(ptr_ty).unwrap();
-        let target_memref_ty = self.type_memref(store_ty, &[1], dst_memref_ty.memory_space());
+        let target_memref_ty = self.type_memref(store_ty, &[1], None, dst_memref_ty.memory_space());
         let ptr = if self.mlir_element_type(ptr_ty) != store_ty {
             dbg!("Implicit cast {} {}", ptr_ty, store_ty);
             self.mlir_memref_view(ptr, target_memref_ty, None)
@@ -1687,11 +1697,13 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn uitofp(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
-        todo!()
+        let val = self.use_value(val);
+        self.append_op_res(melior::dialect::arith::uitofp(val, dest_ty, self.cur_loc()))
     }
 
     fn sitofp(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
-        todo!()
+        let val = self.use_value(val);
+        self.append_op_res(melior::dialect::arith::sitofp(val, dest_ty, self.cur_loc()))
     }
 
     fn fptrunc(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
@@ -1707,6 +1719,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         if val == self.const_null(val.r#type()) {
             return self.const_value(0, dest_ty);
         }
+
+        let ty = val.r#type();
         let ret = self.append_op_res(
             melior::dialect::ods::memref::extract_aligned_pointer_as_index(
                 self.mlir_ctx,
@@ -1742,7 +1756,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         }
         let casted_base_memref = self.mlir_memref_view(
             base_memref,
-            unsafe { self._type_memref(dest_ty, &[1], None, None) },
+            unsafe { self._type_memref(dest_ty, &[1], None, None).into() },
             None,
         );
         self.mlir_load(dest_ty, casted_base_memref, &[zero], align)
@@ -1959,7 +1973,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             for i in 0..dst_ty.rank() {
                 sizes.push(dst_ty.dim_size(i).unwrap() as i64);
             }
-            self.type_memref(dst_ty.element(), &sizes, src_ty.memory_space())
+            self.type_memref(dst_ty.element(), &sizes, None, src_ty.memory_space())
         };
         let src = self.mlir_memref_view(src, dst_ty, None);
         let op = melior::dialect::ods::memref::copy(self.mlir_ctx, src, dst, self.cur_loc()).into();
@@ -2153,11 +2167,10 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         }
         let args = args.iter().map(|arg| self.use_value(*arg)).collect::<Vec<_>>();
         let args = &args;
-        let ftype = fn_abi.map(|abi| {
-            self.fn_abi_to_fn_type(abi, false)
-                .unwrap_or_else(|e| self.emit_error(e, self.cur_span))
-                .0
-        });
+        let fn_sym_ptr = llfn.to_func_sym().unwrap();
+        let sym = fn_sym_ptr.value();
+        warn!("fn_sym_ptr = {}", fn_sym_ptr);
+        let ftype = Some(self.fn_db.read().unwrap()[sym].get_func_type().unwrap());
         let span = self.cur_span;
         let op = self.call_op(llfn, instance, args, ftype, span).unwrap();
         let loc = self.cur_loc().to_string();

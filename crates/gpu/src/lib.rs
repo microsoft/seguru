@@ -11,10 +11,12 @@ use core::arch::asm;
 pub mod cg;
 mod dim;
 mod print;
+mod shared;
 mod thread;
 
 #[cfg(not(feature = "codegen_tests"))]
 pub use cuda_bindings::{GpuChunkable, GpuChunkable2D, GpuChunkableMut, GpuChunkableMut2D};
+pub use shared::{DynamicSharedAlloc, GpuShared};
 
 #[inline(never)]
 #[gpu_codegen::builtin(gpu.build_sfi)]
@@ -59,9 +61,11 @@ pub fn get_local_2d<'a, T>(a: &'a GpuChunkable2D<'a, T>, x: usize, y: usize) -> 
     unsafe { &(&*a.as_ptr())[a.size_x() * row + col] }
 }
 
-pub use dim::{DimType, GpuChunkIdx, block_dim, block_id, global_id, grid_dim, thread_id};
+pub use dim::{
+    DimType, GpuChunkIdx, GpuSharedChunkIdx, block_dim, block_id, global_id, grid_dim, thread_id,
+};
 pub use print::{PushPrintfArg, printf};
-pub use thread::{GpuChunksMut, GpuShared, chunk_mut, scope, sync_threads};
+pub use thread::{GpuChunksMut, chunk_mut, scope, sync_threads};
 
 /// Add a string attribute to the MLIR module.
 #[rustc_diagnostic_item = "gpu::add_mlir_string_attr"]

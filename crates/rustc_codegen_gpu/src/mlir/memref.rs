@@ -195,7 +195,8 @@ fn subview_or_reinterpret_cast<'c, 'a>(
     ));
 
     let result_ty =
-        crate::mlir::type_memref(mlir_ctx, basety, &dim, layout, source_memref_ty.memory_space());
+        crate::mlir::type_memref(mlir_ctx, basety, &dim, layout, source_memref_ty.memory_space())
+            .into();
     let mut op: Operation<'c> = if use_reinterpret {
         raw_memref::reinterpret_cast(
             mlir_ctx,

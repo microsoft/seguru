@@ -29,7 +29,7 @@ impl<'tcx, 'ml> MiscCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, '_> {
     ) -> (Self::Function, bool) {
         let tcx = self.tcx();
         let mlir_ctx = self.mlir_ctx;
-        let sym = tcx.symbol_name(instance).name;
+        let sym = self.sanitized_symbol_name(instance);
         let def_id: rustc_hir::def_id::DefId = instance.def_id();
         trace!("[{}]:get_fn({:?}) => {}", self.cgu_name, instance, sym);
         let location = self.to_mlir_loc(instance.def.default_span(tcx));

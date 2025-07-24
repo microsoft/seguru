@@ -64,17 +64,54 @@ impl GpuChunkIdx {
     #[gpu_codegen::device]
     #[inline(always)]
     pub fn new() -> GpuChunkIdx {
-        let id_x = thread_id(DimType::X);
         let block_x = block_dim(DimType::X);
         let grid_x = grid_dim(DimType::X);
+        let id_x = block_id(DimType::X) * block_x + thread_id(DimType::X);
         let dim_x = block_x * grid_x;
-        let id_y = thread_id(DimType::Y);
+
         let block_y = block_dim(DimType::Y);
         let grid_y = grid_dim(DimType::Y);
+        let id_y = block_id(DimType::Y) * block_y + thread_id(DimType::Y);
         let dim_y = block_y * grid_y;
-        let id_z = thread_id(DimType::Z);
+
+        let block_z = block_dim(DimType::Z);
+        let id_z = block_id(DimType::Z) * block_z + thread_id(DimType::Z);
         let id_t = id_x + dim_x * (id_y + id_z * dim_y);
         GpuChunkIdx { id: id_t }
+    }
+
+    #[gpu_codegen::device]
+    #[inline(always)]
+    #[allow(dead_code)]
+    pub fn as_usize(&self) -> usize {
+        self.id
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct GpuSharedChunkIdx {
+    id: usize,
+}
+
+impl Default for GpuSharedChunkIdx {
+    #[gpu_codegen::device]
+    #[inline(always)]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GpuSharedChunkIdx {
+    #[gpu_codegen::device]
+    #[inline(always)]
+    pub fn new() -> GpuSharedChunkIdx {
+        let id_x = thread_id(DimType::X);
+        let block_x = block_dim(DimType::X);
+        let id_y = thread_id(DimType::Y);
+        let block_y = block_dim(DimType::Y);
+        let id_z = thread_id(DimType::Z);
+        let id_t = id_x + block_x * (id_y + id_z * block_y);
+        GpuSharedChunkIdx { id: id_t }
     }
 
     #[gpu_codegen::device]

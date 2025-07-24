@@ -49,7 +49,7 @@ pub(crate) fn module_codegen<'tcx>(
                         });
                     if !attr.is_builtin() {
                         mono_item.define::<GpuBuilder<'_, '_, '_>>(&cx);
-                        if attr.kernel && !cx.check_share_memory_size(instance) {}
+                        if attr.kernel {}
                     }
                 }
                 rustc_middle::mir::mono::MonoItem::Static(def_id) => {

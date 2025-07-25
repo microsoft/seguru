@@ -319,7 +319,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 // printf ends with an empty printf
                 assert!(self.extra_state.attrs.len() == 1);
                 if let std::collections::hash_map::Entry::Vacant(e) =
-                    self.extra_state.args.entry(gpu_item)
+                    self.extra_state.args.entry(gpu_item.clone())
                 {
                     e.insert(args.to_vec());
                 } else {
@@ -551,6 +551,11 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                     .into(),
                 );
                 Ok(Some(op_ref))
+            }
+            GpuItem::DeviceIntrinsic(name) => {
+                // Not a builtin.
+                let op = intrinsic::device_intrinsic(self, &name, args, self.cur_loc());
+                Ok(Some(op))
             }
         }
     }

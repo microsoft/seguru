@@ -1,5 +1,5 @@
 use std::ffi::OsStr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use tracing::info;
@@ -40,6 +40,39 @@ where
     Ok(())
 }
 
+fn find_libdevice() -> Option<PathBuf> {
+    // Try CUDA_HOME first
+    if let Ok(cuda_home) = std::env::var("CUDA_HOME") {
+        let path = Path::new(&cuda_home).join("nvvm/libdevice/libdevice.10.bc");
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    // Try default installation path
+    let default_path = Path::new("/usr/local/cuda/nvvm/libdevice/libdevice.10.bc");
+    if default_path.exists() {
+        return Some(default_path.to_path_buf());
+    }
+
+    // Optionally: scan other possible versions
+    let libdevice_dir = Path::new("/usr/local/cuda/nvvm/libdevice/");
+    if let Ok(entries) = libdevice_dir.read_dir() {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file()
+                && path.file_name().unwrap_or_default().to_string_lossy().starts_with("libdevice")
+                && path.extension().map(|s| s == "bc").unwrap_or(false)
+            {
+                return Some(path);
+            }
+        }
+    }
+
+    // Nothing found
+    None
+}
+
 impl CompileConfig {
     pub fn mlir_opt(&self, inpath: &Path, outpath: &Path) -> std::io::Result<()> {
         // mlir-opt must use "shell" in order to pass correct arguments.
@@ -48,6 +81,7 @@ impl CompileConfig {
 
         //format!("-gpu-lower-to-nvvm-pipeline='opt-level={} cubin-chip={} cubin-features={}'",self.opt_level, self.cubin_chip, self.cubin_features)
         // mlir/lib/Dialect/GPU/Pipelines/GPUToNVVMPipeline.cpp
+        let dev_lib = find_libdevice().expect("Cannot find libdevice.10.bc");
         let mlir_opt_args = format!(
             "--pass-pipeline=\
             'builtin.module(\
@@ -70,9 +104,13 @@ impl CompileConfig {
                 canonicalize,\
                 cse),\
             gpu-to-llvm,\
-            gpu-module-to-binary,convert-math-to-llvm,\
+            gpu-module-to-binary{{l={}}},\
+            convert-math-to-llvm,\
             reconcile-unrealized-casts, canonicalize,cse)'",
-            self.cubin_chip, self.cubin_features, self.opt_level
+            self.cubin_chip,
+            self.cubin_features,
+            self.opt_level,
+            dev_lib.display()
         );
 
         let cmd = format!(

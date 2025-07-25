@@ -37,7 +37,8 @@ pub fn kernel_arith(
 
     let mut f = f;
     let f = gpu::get_mut_chunk(&mut f, GpuChunkIdx::new());
-    f[0] = gpu::__ldcs_f32(&g[thread_id]);
+    let g_local = gpu::__ldcs_f32(&g[thread_id]);
+    f[0] = g_local.sin();
 
     let mut shared = gpu::GpuShared::<[f32; 32]>::zero();
     let shared_chunk = shared.chunk_mut(1, GpuSharedChunkIdx::new());

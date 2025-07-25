@@ -6,9 +6,11 @@
 #![no_std]
 #![feature(asm_experimental_arch)]
 #![feature(core_intrinsics)]
+
 use core::arch::asm;
 
 pub mod cg;
+mod device_intrinsic;
 mod dim;
 mod print;
 mod shared;
@@ -16,6 +18,7 @@ mod thread;
 
 #[cfg(not(feature = "codegen_tests"))]
 pub use cuda_bindings::{GpuChunkable, GpuChunkable2D, GpuChunkableMut, GpuChunkableMut2D};
+pub use device_intrinsic::GPUDeviceFloatIntrinsics;
 pub use shared::{DynamicSharedAlloc, GpuShared};
 
 #[inline(never)]

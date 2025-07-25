@@ -13,7 +13,7 @@ pub(crate) struct GpuAttributes {
     pub shared_size: bool, // this is used to decide whether to call `gpu_shared_size`.
 }
 
-#[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
+#[derive(PartialEq, Eq, Debug, Clone, Hash)]
 pub enum GpuItem {
     AllReduce,
     ThreadId,
@@ -43,6 +43,7 @@ pub enum GpuItem {
     GetLocalMut2D,
     GetLocal2D,
     DynamicShared,
+    DeviceIntrinsic(String),
 }
 
 impl TryFrom<&str> for GpuItem {
@@ -78,50 +79,56 @@ impl TryFrom<&str> for GpuItem {
             "gpu::get_local_mut_2d" => GpuItem::GetLocalMut2D,
             "gpu::get_local_2d" => GpuItem::GetLocal2D,
             "gpu::base_dynamic_shared" => GpuItem::DynamicShared,
+            s if s.starts_with("gpu::device_intrinsics::") => {
+                GpuItem::DeviceIntrinsic(s.replace("gpu::device_intrinsics::", ""))
+            }
             _ => return Err(()),
         };
         Ok(ret)
     }
 }
 
-impl From<GpuItem> for &'static str {
-    fn from(item: GpuItem) -> &'static str {
+impl From<GpuItem> for String {
+    fn from(item: GpuItem) -> String {
         match item {
-            GpuItem::AllReduce => "gpu::all_reduce",
-            GpuItem::ThreadId => "gpu::thread_id",
-            GpuItem::GlobalThreadId => "gpu::global_thread_id",
-            GpuItem::LaneId => "gpu::lane_id",
-            GpuItem::SubgroupId => "gpu::subgroup_id",
-            GpuItem::SubgroupReduce => "gpu::subgroup_reduce",
-            GpuItem::SubgroupSize => "gpu::subgroup_size",
-            GpuItem::Shuffle => "gpu::shuffle",
-            GpuItem::NvvmReduxSync => "nvvm::redux_sync",
-            GpuItem::BlockDim => "gpu::block_dim",
-            GpuItem::BlockId => "gpu::block_id",
-            GpuItem::GridDim => "gpu::grid_dim",
-            GpuItem::PrintFormat => "gpu::printf",
-            GpuItem::PrintArgs => "gpu::print_args",
-            GpuItem::AddStringAttr => "gpu::add_mlir_string_attr",
-            GpuItem::Scope => "gpu::scope",
-            GpuItem::Launch => "gpu::launch",
-            GpuItem::NewChunk => "gpu::GpuChunksMut::new",
-            GpuItem::UniqueChunk => "gpu::GpuChunksMut::unique_chunk",
-            GpuItem::SyncThreads => "gpu::sync_threads",
-            GpuItem::Subslice => "gpu::subslice",
-            GpuItem::SubsliceMut => "gpu::subslice_mut",
-            GpuItem::NewSharedMem => "gpu::new_shared_mem",
-            GpuItem::AtomicAdd => "gpu::atomic_add",
-            GpuItem::BuildSFI => "gpu::build_sfi",
-            GpuItem::GetLocalMut2D => "gpu::get_local_mut_2d",
-            GpuItem::GetLocal2D => "gpu::get_local_2d",
-            GpuItem::DynamicShared => "gpu::base_dynamic_shared",
+            GpuItem::AllReduce => "gpu::all_reduce".into(),
+            GpuItem::ThreadId => "gpu::thread_id".into(),
+            GpuItem::GlobalThreadId => "gpu::global_thread_id".into(),
+            GpuItem::LaneId => "gpu::lane_id".into(),
+            GpuItem::SubgroupId => "gpu::subgroup_id".into(),
+            GpuItem::SubgroupReduce => "gpu::subgroup_reduce".into(),
+            GpuItem::SubgroupSize => "gpu::subgroup_size".into(),
+            GpuItem::Shuffle => "gpu::shuffle".into(),
+            GpuItem::NvvmReduxSync => "nvvm::redux_sync".into(),
+            GpuItem::BlockDim => "gpu::block_dim".into(),
+            GpuItem::BlockId => "gpu::block_id".into(),
+            GpuItem::GridDim => "gpu::grid_dim".into(),
+            GpuItem::PrintFormat => "gpu::printf".into(),
+            GpuItem::PrintArgs => "gpu::print_args".into(),
+            GpuItem::AddStringAttr => "gpu::add_mlir_string_attr".into(),
+            GpuItem::Scope => "gpu::scope".into(),
+            GpuItem::Launch => "gpu::launch".into(),
+            GpuItem::NewChunk => "gpu::GpuChunksMut::new".into(),
+            GpuItem::UniqueChunk => "gpu::GpuChunksMut::unique_chunk".into(),
+            GpuItem::SyncThreads => "gpu::sync_threads".into(),
+            GpuItem::Subslice => "gpu::subslice".into(),
+            GpuItem::SubsliceMut => "gpu::subslice_mut".into(),
+            GpuItem::NewSharedMem => "gpu::new_shared_mem".into(),
+            GpuItem::AtomicAdd => "gpu::atomic_add".into(),
+            GpuItem::BuildSFI => "gpu::build_sfi".into(),
+            GpuItem::GetLocalMut2D => "gpu::get_local_mut_2d".into(),
+            GpuItem::GetLocal2D => "gpu::get_local_2d".into(),
+            GpuItem::DynamicShared => "gpu::base_dynamic_shared".into(),
+            GpuItem::DeviceIntrinsic(name) => {
+                format!("gpu::device_intrinsics::{}", name)
+            }
         }
     }
 }
 
 impl From<GpuItem> for Symbol {
     fn from(item: GpuItem) -> Self {
-        Symbol::intern(item.into())
+        Symbol::intern(&String::from(item))
     }
 }
 
@@ -176,8 +183,8 @@ impl GpuAttributes {
         ctx: &'ml melior::Context,
     ) -> Option<melior::ir::Attribute<'ml>> {
         if self.is_builtin() {
-            self.gpu_item.map(|gpu_item| {
-                melior::ir::attribute::StringAttribute::new(ctx, gpu_item.into()).into()
+            self.gpu_item.clone().map(|gpu_item| {
+                melior::ir::attribute::StringAttribute::new(ctx, &String::from(gpu_item)).into()
             })
         } else {
             None

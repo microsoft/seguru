@@ -1,5 +1,6 @@
 #![no_std]
 #![allow(clippy::too_many_arguments)]
+#![feature(stmt_expr_attributes)]
 
 use gpu::{GpuChunkIdx, GpuSharedChunkIdx};
 
@@ -9,7 +10,7 @@ pub static shared_size_kernel_arith: usize = 0;
 
 /// # Safety
 /// This kernel might be unsafe because it uses Chunkable::new that is not defined as trusted chunking func.
-#[gpu_macros::kernel_v2]
+#[gpu_macros::kernel]
 #[no_mangle]
 pub fn kernel_arith(
     a: gpu::GpuChunkable2D<u32>,
@@ -49,6 +50,11 @@ pub fn kernel_arith(
         f[0] += shared[i];
         i += 1;
     }
+
+    let warp = gpu::cg::ThreadWarpTile::<32, 1>();
+    warp.run_on_thread_0_x_single::<f32>(f, |v| {
+        v[0] += 1.5;
+    });
 }
 
 /*

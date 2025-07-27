@@ -552,6 +552,57 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 );
                 Ok(Some(op_ref))
             }
+            GpuItem::ExecOnThread0 => {
+                // args[0]: warp_size: u64
+                // args[1]: local_val: T
+                // args[2]: local_val_size: u64
+                // args[3.]: What ever needed by f
+
+                use rustc_codegen_ssa_gpu::traits::MiscCodegenMethods;
+                let f = get_closures()[0];
+                self.extra_state.inside_gpu_scope = true;
+                let fn_ptr = self.get_fn_addr(f);
+                let fn_type: FunctionType<'ml> = fn_ptr.r#type().try_into().unwrap();
+
+                trace!(
+                    "gpu.exec_on_thread_0 args: {:?} {} {}",
+                    args,
+                    fn_type,
+                    fn_type.input_count()
+                );
+                let extra_arg_len = fn_type.input_count() - 1;
+                assert!(extra_arg_len <= args.len());
+                let start = args.len() - extra_arg_len;
+                let mut f_args = vec![];
+                f_args.push(args[0]); // local_val
+                f_args.extend(&args[start..start + extra_arg_len]);
+
+                // Runs on thread 0 only
+                let lane_0_region = melior::ir::Region::new();
+                let lane_0_block = melior::ir::Block::new(&[]);
+                let lane_0_block_ref = lane_0_region.append_block(lane_0_block);
+                let parent_block = self.cur_block;
+                self.cur_block = lane_0_block_ref;
+                let _ = self.call_op(fn_ptr, None, &f_args, Some(fn_type), span);
+                let yield_op = melior::dialect::ods::gpu::r#yield(self.mlir_ctx, &[], loc);
+                self.append_op(yield_op.into());
+                self.cur_block = parent_block;
+
+                let lane_id = self.emit_constant(0, self.type_index());
+
+                // TODO: Is this what we want?
+                let warp_size = mlir_ir::attribute::IntegerAttribute::new(self.type_i64(), 32);
+                let op = melior::dialect::ods::gpu::warp_execute_on_lane_0(
+                    self.mlir_ctx,
+                    &[],
+                    lane_id,
+                    &[],
+                    lane_0_region,
+                    warp_size,
+                    loc,
+                );
+                Ok(Some(self.append_op(op.into())))
+            }
             GpuItem::DeviceIntrinsic(name) => {
                 // Not a builtin.
                 let op = intrinsic::device_intrinsic(self, &name, args, self.cur_loc());

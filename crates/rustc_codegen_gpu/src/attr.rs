@@ -43,6 +43,7 @@ pub enum GpuItem {
     GetLocalMut2D,
     GetLocal2D,
     DynamicShared,
+    ExecOnThread0,
     DeviceIntrinsic(String),
 }
 
@@ -79,6 +80,7 @@ impl TryFrom<&str> for GpuItem {
             "gpu::get_local_mut_2d" => GpuItem::GetLocalMut2D,
             "gpu::get_local_2d" => GpuItem::GetLocal2D,
             "gpu::base_dynamic_shared" => GpuItem::DynamicShared,
+            "gpu::exec_on_thread_0" => GpuItem::ExecOnThread0,
             s if s.starts_with("gpu::device_intrinsics::") => {
                 GpuItem::DeviceIntrinsic(s.replace("gpu::device_intrinsics::", ""))
             }
@@ -119,6 +121,7 @@ impl From<GpuItem> for String {
             GpuItem::GetLocalMut2D => "gpu::get_local_mut_2d".into(),
             GpuItem::GetLocal2D => "gpu::get_local_2d".into(),
             GpuItem::DynamicShared => "gpu::base_dynamic_shared".into(),
+            GpuItem::ExecOnThread0 => "gpu::exec_on_thread_0".into(),
             GpuItem::DeviceIntrinsic(name) => {
                 format!("gpu::device_intrinsics::{}", name)
             }

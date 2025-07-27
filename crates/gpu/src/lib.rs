@@ -64,6 +64,17 @@ pub fn get_local_2d<'a, T>(a: &'a GpuChunkable2D<'a, T>, x: usize, y: usize) -> 
     unsafe { &(&*a.as_ptr())[a.size_x() * row + col] }
 }
 
+#[inline(never)]
+#[rustc_diagnostic_item = "gpu::exec_on_thread_0"]
+#[gpu_codegen::device]
+pub fn exec_on_thread_0<F, T>(_local_val: &mut [T], _f: F)
+where
+    F: FnOnce(&mut [T]) + Clone + Send,
+{
+    // Prevent dead code elimination. Will not appear in final code
+    _f(_local_val);
+}
+
 pub use dim::{
     DimType, GpuChunkIdx, GpuSharedChunkIdx, block_dim, block_id, global_id, grid_dim, thread_id,
 };

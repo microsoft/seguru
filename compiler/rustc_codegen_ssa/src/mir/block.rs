@@ -78,6 +78,10 @@ impl<'a, 'tcx> TerminatorCodegenHelper<'tcx> {
     ) -> Bx::BasicBlock {
         let (needs_landing_pad, is_cleanupret) = self.llbb_characteristics(fx, target);
         let mut lltarget = fx.llbb(target);
+        if fx.is_gpu {
+            // Don't do cleanup since we're a GPU
+            return lltarget;
+        }
         if needs_landing_pad {
             lltarget = fx.landing_pad_for(target);
         }
@@ -201,11 +205,20 @@ impl<'a, 'tcx> TerminatorCodegenHelper<'tcx> {
         }
 
         let unwind_block = match unwind {
-            mir::UnwindAction::Cleanup(cleanup) => Some(self.llbb_with_cleanup(fx, cleanup)),
+            mir::UnwindAction::Cleanup(cleanup) => {
+                if fx.is_gpu {
+                    None
+                } else {
+                    Some(self.llbb_with_cleanup(fx, cleanup))
+                }
+            }
             mir::UnwindAction::Continue => None,
             mir::UnwindAction::Unreachable => None,
             mir::UnwindAction::Terminate(reason) => {
-                if fx.mir[self.bb].is_cleanup && base::wants_new_eh_instructions(fx.cx.tcx().sess) {
+                if fx.is_gpu
+                    || fx.mir[self.bb].is_cleanup
+                        && base::wants_new_eh_instructions(fx.cx.tcx().sess)
+                {
                     // MSVC SEH will abort automatically if an exception tries to
                     // propagate out from cleanup.
 
@@ -1389,7 +1402,12 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         self.set_debug_loc(bx, terminator.source_info);
         match terminator.kind {
             mir::TerminatorKind::UnwindResume => {
-                self.codegen_resume_terminator(helper, bx);
+                // Just shouldn't happen for GPU
+                if !self.is_gpu {
+                    self.codegen_resume_terminator(helper, bx);
+                } else {
+                    bx.unreachable();
+                }
                 MergingSucc::False
             }
 

@@ -283,6 +283,14 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                     self.type_memref(self.type_i8(), &[bytes], None, memory_space)
                 }
             }
+            rustc_middle::ty::TyKind::Tuple(list) => {
+                let type_list = list.as_slice();
+                if type_list.len() != 1 {
+                    panic!("Only tuples with length of 1 is supported. {:?}", ty);
+                }
+
+                self.pointer_to_mlir_type(&type_list[0], _immediate, memory_space)
+            }
             _ => {
                 panic!("Unsupported pointer type: {:?}", ty);
             }

@@ -85,6 +85,18 @@ impl<const SIZE: usize, const STRIDE: usize> ThreadWarpTile<SIZE, STRIDE> {
         unimplemented!()
     }
 
+    #[gpu_codegen::device]
+    #[inline(always)]
+    pub fn subgroup_id(&self) -> usize {
+        crate::thread_id(crate::DimType::X) / SIZE
+    }
+
+    #[gpu_codegen::device]
+    #[inline(always)]
+    pub fn lane_id(&self) -> usize {
+        crate::thread_id(crate::DimType::X) % SIZE
+    }
+
     /// Reduce by software-defined warp.
     #[gpu_codegen::device]
     #[inline(always)]

@@ -97,6 +97,23 @@ impl<const SIZE: usize, const STRIDE: usize> ThreadWarpTile<SIZE, STRIDE> {
         crate::thread_id(crate::DimType::X) % SIZE
     }
 
+    #[gpu_codegen::device]
+    #[inline(always)]
+    pub fn run_on_thread_0_x_single<T>(
+        self,
+        slice: &mut [T],
+        f: impl FnOnce(&mut [T]) + Clone + Send,
+    ) {
+        // Build ref from the slice on the wrap
+        let offset = SIZE * crate::block_id(crate::DimType::X) + self.subgroup_id();
+        let local_val = crate::subslice_mut(slice, offset, 1);
+
+        // Call exec_on_thread_0
+        if self.lane_id() == 0 {
+            f(local_val);
+        }
+    }
+
     /// Reduce by software-defined warp.
     #[gpu_codegen::device]
     #[inline(always)]

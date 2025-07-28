@@ -3,14 +3,16 @@ use crate::add_mlir_string_attr;
 #[rustc_diagnostic_item = concat!("gpu::subgroup_id")]
 #[gpu_codegen::device]
 #[inline(never)]
-pub fn subgroup_id() -> usize {
+#[allow(dead_code)]
+fn subgroup_id() -> usize {
     unimplemented!()
 }
 
 #[rustc_diagnostic_item = concat!("gpu::lane_id")]
 #[gpu_codegen::device]
 #[inline(never)]
-pub fn lane_id() -> usize {
+#[allow(dead_code)]
+fn lane_id() -> usize {
     unimplemented!()
 }
 

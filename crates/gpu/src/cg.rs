@@ -107,7 +107,7 @@ impl<const SIZE: usize, const STRIDE: usize> ThreadWarpTile<SIZE, STRIDE> {
 
     #[gpu_codegen::device]
     #[inline(always)]
-    pub fn run_on_thread_0<T>(self, slice: &mut [T], f: impl FnOnce(&mut T) + Clone + Send) {
+    pub fn run_on_lane_0<T>(self, slice: &mut [T], f: impl FnOnce(&mut T) + Clone + Send) {
         // Build ref from the slice on the wrap
         let offset = SIZE * crate::block_id(crate::DimType::X)
             + crate::grid_dim(crate::DimType::X)

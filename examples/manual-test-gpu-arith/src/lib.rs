@@ -52,7 +52,7 @@ pub fn kernel_arith(
     }
 
     let warp = gpu::cg::ThreadWarpTile::<32, 1>();
-    warp.run_on_thread_0::<f32>(f, |v| {
+    warp.run_on_lane_0::<f32>(f, |v| {
         *v += 1.5;
     });
 }

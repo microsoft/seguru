@@ -88,13 +88,21 @@ impl<const SIZE: usize, const STRIDE: usize> ThreadWarpTile<SIZE, STRIDE> {
     #[gpu_codegen::device]
     #[inline(always)]
     pub fn subgroup_id(&self) -> usize {
-        crate::thread_id(crate::DimType::X) / SIZE
+        crate::thread_id(crate::DimType::X)
+            + crate::block_dim(crate::DimType::X)
+                * (crate::thread_id(crate::DimType::Y)
+                    + crate::block_dim(crate::DimType::Y) * crate::thread_id(crate::DimType::Z))
+                / SIZE
     }
 
     #[gpu_codegen::device]
     #[inline(always)]
     pub fn lane_id(&self) -> usize {
-        crate::thread_id(crate::DimType::X) % SIZE
+        crate::thread_id(crate::DimType::X)
+            + crate::block_dim(crate::DimType::X)
+                * (crate::thread_id(crate::DimType::Y)
+                    + crate::block_dim(crate::DimType::Y) * crate::thread_id(crate::DimType::Z))
+                % SIZE
     }
 
     #[gpu_codegen::device]
@@ -105,7 +113,11 @@ impl<const SIZE: usize, const STRIDE: usize> ThreadWarpTile<SIZE, STRIDE> {
         f: impl FnOnce(&mut [T]) + Clone + Send,
     ) {
         // Build ref from the slice on the wrap
-        let offset = SIZE * crate::block_id(crate::DimType::X) + self.subgroup_id();
+        let offset = SIZE * crate::block_id(crate::DimType::X)
+            + crate::grid_dim(crate::DimType::X)
+                * (crate::block_id(crate::DimType::Y)
+                    + crate::grid_dim(crate::DimType::Y) * crate::block_id(crate::DimType::Z))
+            + self.subgroup_id();
         let local_val = crate::subslice_mut(slice, offset, 1);
 
         // Call exec_on_thread_0

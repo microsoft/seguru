@@ -1,7 +1,7 @@
 use std::env;
 use std::str::FromStr;
 
-use cuda_bindings::cuda_ctx;
+use gpu_host::cuda_ctx;
 
 fn main() {
     let args: Vec<String> = env::args().collect();

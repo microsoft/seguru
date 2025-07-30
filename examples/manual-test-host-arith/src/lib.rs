@@ -2,13 +2,13 @@ mod host;
 
 use host::kernel_arith;
 
-use cuda_bindings::load_module_from_extern;
+use gpu_host::load_module_from_extern;
 
 pub fn run_host_arith(
-    ctx: &cuda_bindings::GpuCtxZeroGuard<'_, '_>,
+    ctx: &gpu_host::GpuCtxZeroGuard<'_, '_>,
     len: usize,
     w: usize,
-) -> Result<(), cuda_bindings::CudaError> {
+) -> Result<(), gpu_host::CudaError> {
     let m = unsafe { load_module_from_extern!(ctx, gpu_bin_cst)? };
     // Allocate the two host-side arrays
     // TODO: Make h_a non-mutable
@@ -36,7 +36,7 @@ pub fn run_host_arith(
     let d_f_c = gpu::GpuChunkableMut::<f32>::new(d_f, w);
 
     // Now do the kernel
-    let config = cuda_bindings::GPUConfig {
+    let config = gpu_host::GPUConfig {
         grid_dim_x: 1,
         grid_dim_y: 1,
         grid_dim_z: 1,

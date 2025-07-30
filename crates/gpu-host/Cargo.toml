@@ -1,0 +1,7 @@
+[package]
+name = "gpu_host"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cuda_bindings = {path = "../cuda_bindings", default-features = false}

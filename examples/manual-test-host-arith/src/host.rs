@@ -8,9 +8,9 @@ mod internal {
     fn dummy_api_checker_kernel_launch_wrapper(
         a: gpu::GpuChunkable2D<u32>,
         b: gpu::GpuChunkableMut2D<u32>,
-        c: &cuda_bindings::CudaMemBox<[u32]>,
+        c: &gpu_host::CudaMemBox<[u32]>,
         f: gpu::GpuChunkableMut<f32>,
-        g: &cuda_bindings::CudaMemBox<[f32]>,
+        g: &gpu_host::CudaMemBox<[f32]>,
     ) {
         manual_test_gpu_arith::kernel_arith(a, b, c, f, g);
     }
@@ -20,9 +20,9 @@ mod internal {
 pub fn kernel_arith(
     a: gpu::GpuChunkable2D<u32>,
     b: gpu::GpuChunkableMut2D<u32>,
-    c: &cuda_bindings::CudaMemBox<[u32]>,
+    c: &gpu_host::CudaMemBox<[u32]>,
     f: gpu::GpuChunkableMut<f32>,
-    g: &cuda_bindings::CudaMemBox<[f32]>,
+    g: &gpu_host::CudaMemBox<[f32]>,
 ) {
 }
 
@@ -30,13 +30,13 @@ pub fn kernel_arith(
 #[allow(non_upper_case_globals)]
 const const_share_size_kernel_arith: usize = manual_test_gpu_arith::shared_size_kernel_arith;
 pub fn kernel_arith(
-    a: cuda_bindings::GpuChunkable<u32>,
-    b: cuda_bindings::GpuChunkableMut<u32>,
-    c: &cuda_bindings::CudaMemBox<[u32]>,
-    f: cuda_bindings::GpuChunkableMut<f32>,
-    g: &cuda_bindings::CudaMemBox<[f32]>,
-) -> Result<(), cuda_bindings::CudaError> {
-    let config = cuda_bindings::GPUConfig {
+    a: gpu_host::GpuChunkable<u32>,
+    b: gpu_host::GpuChunkableMut<u32>,
+    c: &gpu_host::CudaMemBox<[u32]>,
+    f: gpu_host::GpuChunkableMut<f32>,
+    g: &gpu_host::CudaMemBox<[f32]>,
+) -> Result<(), gpu_host::CudaError> {
+    let config = gpu_host::GPUConfig {
         grid_dim_x: 1,
         grid_dim_y: 1,
         grid_dim_z: 1,
@@ -51,7 +51,7 @@ pub fn kernel_arith(
     args_for_launching.push(&f);
     args_for_launching.push(&g);
     let func_name_cstr = std::ffi::CString::new("kernel_arith").unwrap();
-    let res = cuda_bindings::launch_kernel(
+    let res = gpu_host::launch_kernel(
         "kernel_arith",
         config,
         const_share_size_kernel_arith,
@@ -105,7 +105,7 @@ pub fn kernel_arith(
 //
 //    let mut res;
 //    unsafe {
-//        res = cuda_bindings::gpu_launch_kernel(
+//        res = gpu_host::gpu_launch_kernel(
 //            func_name,
 //            1,
 //            1,
@@ -124,7 +124,7 @@ pub fn kernel_arith(
 //    }
 //
 //    unsafe {
-//        res = cuda_bindings::gpu_device_sync();
+//        res = gpu_host::gpu_device_sync();
 //    }
 //
 //    res

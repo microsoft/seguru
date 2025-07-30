@@ -1,4 +1,7 @@
+use alloc::boxed::Box;
+use alloc::vec;
 /// The use of Gpu context is guarded by GpuToken, GpuCtxIdToken, GpuCtxActiveToken.
+use alloc::vec::Vec;
 use core::marker::PhantomData;
 
 use typed_arena::Arena;
@@ -7,12 +10,13 @@ use super::unsafe_bindings::*;
 use super::{CUDA_SUCCESS, CudaError};
 use crate::{AsHostKernelParams, GPUConfig};
 
-static GPU: std::sync::OnceLock<GpuToken> = std::sync::OnceLock::new();
-
-thread_local! {
-    /// Create a thread-local GPU_CTX context
-    /// Cuda allow us to create a single context per CPU thread, so we use a thread-local variable to store it.
-    static CTX_TOKEN: core::cell::RefCell<Option<GpuCtxCreateAndUseToken>> = const { core::cell::RefCell::new(Some(GpuCtxCreateAndUseToken::new())) };
+macro_rules! eprintln {
+    () => {
+        panic!()
+    };
+    ($($arg:tt)*) => {{
+        panic!($($arg)*);
+    }};
 }
 
 /// CtxSpace is a trait to ensure that we can create a GPU context per context space N.
@@ -20,19 +24,21 @@ thread_local! {
 /// After a context with space N is created, we can only create a context with space Succ<N>.
 pub trait GpuCtxSpace {}
 pub struct CtxSpaceZero;
-pub struct Succ<N: GpuCtxSpace>(std::marker::PhantomData<N>);
+pub struct Succ<N: GpuCtxSpace>(core::marker::PhantomData<N>);
 
 impl GpuCtxSpace for CtxSpaceZero {}
 impl<N: GpuCtxSpace> GpuCtxSpace for Succ<N> {}
 
 // GPU instance token guarantees that the GPU is initialized and can be used.
 #[derive(Debug)]
-struct GpuToken {
+pub struct GpuToken {
     dummy: PhantomData<()>,
 }
 
 impl GpuToken {
-    fn new() -> Self {
+    /// # Safety
+    /// This function is safe if no more than one GPU instance is created across the whole process.
+    pub unsafe fn new() -> Self {
         let ret = unsafe { cuInit(0) };
         if ret != CUDA_SUCCESS {
             eprintln!("cuInit fails err = {}", CudaError::Err(ret));
@@ -54,79 +60,29 @@ pub struct GpuCtxIdToken<N: GpuCtxSpace> {
 /// This is a combo toke to create a GPU context.
 #[allow(dead_code)]
 pub struct GpuCtxToken<'a, N: GpuCtxSpace> {
-    token: GpuCtxIdToken<N>,
-    gpu: &'a GpuToken,
+    pub token: GpuCtxIdToken<N>,
+    pub gpu: &'a GpuToken,
 }
 
 /// This is a per-CPU thread token to create and use a GPU context.
-struct GpuCtxCreateAndUseToken {
+pub struct GpuCtxCreateAndUseToken {
     active: GpuActiveToken,
     token: GpuCtxIdToken<CtxSpaceZero>,
 }
 
 impl GpuCtxCreateAndUseToken {
-    const fn new() -> Self {
+    /// # Safety
+    /// This function is safe if no more than one GpuCtxCreateAndUseToken is created for the current CPU thread
+    pub const unsafe fn new() -> Self {
         GpuCtxCreateAndUseToken {
             active: GpuActiveToken { _marker: PhantomData },
             token: GpuCtxIdToken { _marker: PhantomData },
         }
     }
-}
 
-/// All CUDA operations must be done in cuda_scope created by this function.
-/// It allows developers to use mutiple GPU contexts in a single CPU thread.
-/// The use of different GPU contexts is guarded by GpuCtxToken and GpuActiveToken.
-/// It provides a safe and flexible way to manage GPU contexts than Cuda Runtime API.
-/// It statically ensures that
-///     1. Multiple GPU contexts for the same device to be created in a single CPU thread.
-///     2. Only one GPU context can be active at a time in a single CPU thread.
-///     3. no cross-context memory or module access.
-///     4. no cross-context kernel launch.
-///     5. Safe memory creation and destroy.
-/// Thus the context is guaranteed to be used safely when code compiles.
-pub fn cuda_scope<T>(
-    f: impl for<'a> FnOnce(GpuCtxToken<'a, CtxSpaceZero>, &mut GpuActiveToken) -> T,
-) -> T {
-    let instance = GPU.get_or_init(GpuToken::new);
-    CTX_TOKEN.with(|token| {
-        let ret = if let Some(mut token) = token.borrow_mut().take() {
-            // If we already have an active context, we can use it.
-            let ct = GpuCtxToken {
-                token: token.token,
-                gpu: instance,
-            };
-            f(ct, &mut token.active)
-        } else {
-            panic!("No active GPU context found. Ensure cuda_scope is not called inside another cuda_scope.");
-        };
-        token.borrow_mut().replace(GpuCtxCreateAndUseToken::new());
-    ret
-    })
-}
-
-/// This function is used to create a single GPU context with the given context space CtxSpaceZero.
-/// It is useful in most cases where a process only needs a single GPU context.
-pub fn cuda_ctx<T>(
-    dev_id: u32,
-    f: impl for<'ctx, 'a> FnOnce(&GpuCtxZeroGuard<'ctx, 'a>) -> T,
-) -> T {
-    let instance = GPU.get_or_init(GpuToken::new);
-    CTX_TOKEN.with(|token| {
-        let ret = if let Some(mut token) = token.borrow_mut().take() {
-            // If we already have an active context, we can use it.
-            let ct = GpuCtxToken {
-                token: token.token,
-                gpu: instance,
-            };
-            let (ctx_h, _) = GpuCtxHandle::<CtxSpaceZero>::new(ct, dev_id, CUctx_flags::CU_CTX_SCHED_AUTO);
-            let ctx = ctx_h.activate(&mut token.active);
-            f(&ctx)
-        } else {
-            panic!("No active GPU context found. Ensure cuda_scope is not called inside another cuda_scope.");
-        };
-        token.borrow_mut().replace(GpuCtxCreateAndUseToken::new());
-    ret
-    })
+    pub fn expose(self) -> (GpuActiveToken, GpuCtxIdToken<CtxSpaceZero>) {
+        (self.active, self.token)
+    }
 }
 
 /// We ensure each CPU thread has an unique handle per N.
@@ -320,7 +276,7 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
         m: &GpuModule<N>,
         func_name: &str,
     ) -> Result<GpuFunction<'ctx, N>, CudaError> {
-        let func_name_cstr = std::ffi::CString::new(func_name).expect("Failed to create CString");
+        let func_name_cstr = alloc::ffi::CString::new(func_name).expect("Failed to create CString");
         let mut f: CUfunction;
         let ret;
         unsafe {

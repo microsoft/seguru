@@ -9,6 +9,6 @@ members = [
 ]
 
 [workspace.dependencies]
-cuda_bindings = {path = "../crates/cuda_bindings"}
+gpu_host = {path = "../crates/gpu-host"}
 gpu_macros = { path = "../crates/gpu-macros" }
 gpu = { path = "../crates/gpu" }

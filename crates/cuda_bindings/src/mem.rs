@@ -5,6 +5,15 @@ use super::unsafe_bindings::*;
 use super::{CUDA_SUCCESS, CudaError};
 use crate::ctx::{CtxSpaceZero, GpuCtxArenaTrait, GpuCtxGuard, GpuCtxSpace};
 
+macro_rules! eprintln {
+    () => {
+        panic!()
+    };
+    ($($arg:tt)*) => {{
+        panic!($($arg)*);
+    }};
+}
+
 /// N is the namespace ID for the GPU context.
 #[derive(Debug)]
 pub struct CudaMemBox<T: ?Sized, N: GpuCtxSpace + 'static = CtxSpaceZero> {
@@ -29,7 +38,7 @@ pub(crate) unsafe fn gpu_memalloc(size: usize) -> Result<*mut c_void, CudaError>
 
 impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
     pub fn new_gmem<T: 'static>(&self) -> Result<&'ctx mut CudaMemBox<T, N>, CudaError> {
-        let size = std::mem::size_of::<T>();
+        let size = core::mem::size_of::<T>();
         let ptr = unsafe { crate::mem::gpu_memalloc(size)? as *mut T };
         let m = CudaMemBox::<T, N> { ptr, _marker: PhantomData };
         Ok(self.ctx.alloc_typed(m))
@@ -39,7 +48,7 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
         &self,
         len: usize,
     ) -> Result<&'ctx mut CudaMemBox<[T], N>, CudaError> {
-        let size = std::mem::size_of::<T>() * len;
+        let size = core::mem::size_of::<T>() * len;
         let ptr = unsafe {
             let raw = gpu_memalloc(size)?;
             core::slice::from_raw_parts_mut(raw as _, len)
@@ -55,7 +64,7 @@ impl<T: Sized, N: GpuCtxSpace> CudaMemBox<T, N> {
         dst: &mut T,
         _ctx: &GpuCtxGuard<'ctx, 'a, N>,
     ) -> Result<(), CudaError> {
-        let size = std::mem::size_of::<T>();
+        let size = core::mem::size_of::<T>();
         unsafe {
             cuMemcpyDtoH_v2(dst as *mut _ as _, self.as_devptr(), size);
         }
@@ -67,7 +76,7 @@ impl<T: Sized, N: GpuCtxSpace> CudaMemBox<T, N> {
         src: &T,
         _ctx: &GpuCtxGuard<'ctx, 'a, N>,
     ) -> Result<(), CudaError> {
-        let size = std::mem::size_of::<T>();
+        let size = core::mem::size_of::<T>();
         unsafe {
             cuMemcpyHtoD_v2(self.as_devptr(), src as *const _ as _, size);
         }
@@ -85,7 +94,7 @@ impl<T, N: GpuCtxSpace> CudaMemBox<[T], N> {
         if len > dst.len() || len > self.ptr.len() {
             return Err(CudaError::MemCopyOutOfBound);
         }
-        let size = std::mem::size_of::<T>() * len;
+        let size = core::mem::size_of::<T>() * len;
         unsafe {
             cuMemcpyDtoH_v2(dst as *mut _ as _, self.as_devptr(), size);
         }
@@ -101,7 +110,7 @@ impl<T, N: GpuCtxSpace> CudaMemBox<[T], N> {
         if len > src.len() || len > self.ptr.len() {
             return Err(CudaError::MemCopyOutOfBound);
         }
-        let size = std::mem::size_of::<T>() * len;
+        let size = core::mem::size_of::<T>() * len;
         unsafe {
             cuMemcpyHtoD_v2(self.as_devptr(), src as *const _ as _, size);
         }

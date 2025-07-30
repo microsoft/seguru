@@ -6,8 +6,8 @@ mod internal {
     /// This is needed in order to force the compiler to link the GPU code.
     #[allow(dead_code)]
     fn dummy_api_checker_kernel_launch_wrapper(
-        a: &cuda_bindings::CudaMemBox<[f32]>,
-        b: &cuda_bindings::CudaMemBox<[f32]>,
+        a: &gpu_host::CudaMemBox<[f32]>,
+        b: &gpu_host::CudaMemBox<[f32]>,
         c: gpu::GpuChunkableMut2D<f32>,
         n: usize,
     ) {
@@ -17,8 +17,8 @@ mod internal {
 
 #[gpu_macros::host(matmul_gpu::inner_product_kernel)]
 pub fn inner_product_kernel(
-    a: &cuda_bindings::CudaMemBox<[f32]>,
-    b: &cuda_bindings::CudaMemBox<[f32]>,
+    a: &gpu_host::CudaMemBox<[f32]>,
+    b: &gpu_host::CudaMemBox<[f32]>,
     c: gpu::GpuChunkableMut2D<f32>,
     n: usize,
 ) {

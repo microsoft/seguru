@@ -1,3 +1,7 @@
+use alloc::boxed::Box;
+use alloc::vec;
+use alloc::vec::Vec;
+
 use crate::CudaMemBox;
 use crate::ctx::GpuCtxSpace;
 

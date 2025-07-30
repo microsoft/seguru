@@ -4,6 +4,7 @@ members = [
     "rustc-gpu",
     "gpu",
     "gpu-macros",
+    "gpu-host",
     "mlir-compile",
     "cuda_bindings",
 ]

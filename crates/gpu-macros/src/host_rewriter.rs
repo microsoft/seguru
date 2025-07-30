@@ -12,8 +12,8 @@ fn host_rewrite(host_func: &mut syn::ItemFn, span: Span) {
     host_func.attrs.clear();
     let is_async = host_func.sig.asyncness.is_some();
     host_func.sig.output = syn::ReturnType::Type(
-        syn::token::RArrow::default(), // ->
-        Box::new(syn::parse_quote! { Result<(), cuda_bindings::CudaError> }), // u32
+        syn::token::RArrow::default(),                                   // ->
+        Box::new(syn::parse_quote! { Result<(), gpu_host::CudaError> }), // u32
     );
 
     let mut stmts = vec![];
@@ -26,7 +26,7 @@ fn host_rewrite(host_func: &mut syn::ItemFn, span: Span) {
     let config_arg = syn::Ident::new("config", span);
 
     stmts.push(Stmt::Expr(
-        Expr::Verbatim(quote_spanned! {span =>let mut #host_args = Vec::<&dyn cuda_bindings::AsHostKernelParams>::new();}),
+        Expr::Verbatim(quote_spanned! {span =>let mut #host_args = Vec::<&dyn gpu_host::AsHostKernelParams>::new();}),
         None,
     ));
     wrapper_args.iter().for_each(|arg| {
@@ -42,7 +42,7 @@ fn host_rewrite(host_func: &mut syn::ItemFn, span: Span) {
         }
     });
     let mut bounds = syn::punctuated::Punctuated::new();
-    bounds.push(syn::parse_quote! { cuda_bindings::GpuCtxSpace });
+    bounds.push(syn::parse_quote! { gpu_host::GpuCtxSpace });
     bounds.push(syn::parse_quote! { 'static });
     host_func.sig.generics.params.push(syn::GenericParam::Type(syn::TypeParam {
         attrs: vec![],
@@ -64,7 +64,7 @@ fn host_rewrite(host_func: &mut syn::ItemFn, span: Span) {
                 subpat: None,
             })),
             colon_token: syn::token::Colon::default(),
-            ty: Box::new(syn::parse_quote! { cuda_bindings::GPUConfig }),
+            ty: Box::new(syn::parse_quote! { gpu_host::GPUConfig }),
         }),
     );
     host_func.sig.inputs.insert(
@@ -79,7 +79,7 @@ fn host_rewrite(host_func: &mut syn::ItemFn, span: Span) {
                 subpat: None,
             })),
             colon_token: syn::token::Colon::default(),
-            ty: Box::new(syn::parse_quote! { &cuda_bindings::GpuModule<N> }),
+            ty: Box::new(syn::parse_quote! { &gpu_host::GpuModule<N> }),
         }),
     );
     host_func.sig.inputs.insert(
@@ -94,7 +94,7 @@ fn host_rewrite(host_func: &mut syn::ItemFn, span: Span) {
                 subpat: None,
             })),
             colon_token: syn::token::Colon::default(),
-            ty: Box::new(syn::parse_quote! { &cuda_bindings::GpuCtxGuard<'_, '_, N> }),
+            ty: Box::new(syn::parse_quote! { &gpu_host::GpuCtxGuard<'_, '_, N> }),
         }),
     );
 

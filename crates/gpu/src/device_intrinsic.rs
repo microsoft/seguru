@@ -23,14 +23,8 @@ macro_rules! impl_dev_intrinsics3 {
     };
 }
 
-#[cfg(not(feature = "codegen_tests"))]
-macro_rules! impl_dev_intrinsics_for_test {
-    () => {};
-}
-
 /// codegen_test cannot find rust/deps/compiler_builtins-0.1.152.
-#[cfg(feature = "codegen_tests")]
-macro_rules! impl_dev_intrinsics_for_test {
+macro_rules! impl_dev_intrinsics_for_core {
     () => {
         impl_dev_intrinsics!(max, Self);
         impl_dev_intrinsics!(min, Self);
@@ -58,7 +52,7 @@ pub trait GPUDeviceFloatIntrinsics: Sized {
     impl_dev_intrinsics!(log10, Self);
     impl_dev_intrinsics!(log1p, Self);
     impl_dev_intrinsics!(log2, Self);
-    impl_dev_intrinsics_for_test!();
+    impl_dev_intrinsics_for_core!();
 }
 
 impl GPUDeviceFloatIntrinsics for f32 {}

@@ -109,6 +109,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpu_host"
+version = "0.1.0"
+dependencies = [
+ "cuda_bindings",
+]
+
+[[package]]
 name = "gpu_macros"
 version = "0.1.0"
 dependencies = [
@@ -168,8 +175,8 @@ dependencies = [
 name = "manual-test-host-arith"
 version = "0.1.0"
 dependencies = [
- "cuda_bindings",
  "gpu",
+ "gpu_host",
  "gpu_macros",
  "manual-test-gpu-arith",
 ]
@@ -186,8 +193,8 @@ dependencies = [
 name = "matmul-host"
 version = "0.1.0"
 dependencies = [
- "cuda_bindings",
  "gpu",
+ "gpu_host",
  "gpu_macros",
  "matmul-gpu",
 ]

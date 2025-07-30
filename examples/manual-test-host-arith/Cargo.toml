@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-cuda_bindings = {workspace = true}
+gpu_host = {workspace = true}
 manual-test-gpu-arith = {path = "../manual-test-gpu-arith"}
 gpu_macros = {workspace = true}
 gpu = {workspace = true}

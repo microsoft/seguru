@@ -1,6 +1,6 @@
 mod host;
 
-use cuda_bindings::load_module_from_extern;
+use gpu_host::load_module_from_extern;
 use host::inner_product_kernel;
 
 fn cpu_inner_product(a: &[f32], b: &[f32], c: &mut [f32], n: usize) {
@@ -37,10 +37,10 @@ fn print_square_matrix(m: &[f32], n: usize) {
 }
 
 pub fn run_host_matmul(
-    ctx: &cuda_bindings::GpuCtxZeroGuard<'_, '_>,
+    ctx: &gpu_host::GpuCtxZeroGuard<'_, '_>,
     n: usize,
     dim: u32,
-) -> Result<(), cuda_bindings::CudaError> {
+) -> Result<(), gpu_host::CudaError> {
     let m = unsafe { load_module_from_extern!(ctx, gpu_bin_cst)? };
 
     let mut initial_array = vec![];
@@ -66,7 +66,7 @@ pub fn run_host_matmul(
     let d_c_c = gpu::GpuChunkableMut2D::<f32>::new(d_c, n);
 
     // Now do the kernel
-    let config = cuda_bindings::GPUConfig {
+    let config = gpu_host::GPUConfig {
         grid_dim_x: 1,
         grid_dim_y: 1,
         grid_dim_z: 1,

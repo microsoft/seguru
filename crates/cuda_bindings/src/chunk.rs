@@ -1,7 +1,10 @@
+use alloc::boxed::Box;
+use alloc::vec;
+use alloc::vec::Vec;
 use core::marker::PhantomData;
 
-use crate::CudaMemBox;
-use crate::params::{AsHostKernelParams, AsKernelParamsGuard};
+use crate::params::AsKernelParamsGuard;
+use crate::{AsHostKernelParams, CudaMemBox};
 
 macro_rules! impl_chunkable_as_kernel_params {
     ($($t: tt)*) => {

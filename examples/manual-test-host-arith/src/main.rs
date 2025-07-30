@@ -1,4 +1,4 @@
-use cuda_bindings::cuda_ctx;
+use gpu_host::cuda_ctx;
 use std::env;
 use std::str::FromStr;
 fn main() {

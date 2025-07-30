@@ -359,6 +359,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpu_host"
+version = "0.1.0"
+dependencies = [
+ "cuda_bindings",
+]
+
+[[package]]
 name = "gpu_macros"
 version = "0.1.0"
 dependencies = [

@@ -11,6 +11,7 @@ fn main() {
     let bindings = bindgen::Builder::default()
         // The input header we would like to generate bindings for.
         .header("libcuda_bindings/lib.h")
+        .use_core()
         .clang_arg("-I/usr/local/cuda/include")
         .default_enum_style(bindgen::EnumVariation::Rust { non_exhaustive: false })
         .generate_comments(false)

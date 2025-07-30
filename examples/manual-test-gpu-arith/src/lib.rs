@@ -2,6 +2,7 @@
 #![allow(clippy::too_many_arguments)]
 #![feature(stmt_expr_attributes)]
 
+use gpu::GPUDeviceFloatIntrinsics;
 use gpu::{GpuChunkIdx, GpuSharedChunkIdx};
 
 #[allow(non_upper_case_globals)]

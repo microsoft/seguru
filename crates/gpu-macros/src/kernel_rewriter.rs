@@ -8,15 +8,7 @@ fn kernel_rewrite_func(func: &mut syn::ItemFn, span: Span) {
     // 1. Replace the function's attributes
     func.attrs.push(syn::parse_quote! {#[unsafe(no_mangle)]});
 
-    let mut stmts = vec![
-        syn::parse(
-            quote! {
-                let __c = gpu::block_dim(gpu::DimType::X) * gpu::block_id(gpu::DimType::X) + gpu::thread_id(gpu::DimType::X);
-            }
-            .into(),
-        )
-        .expect("Failed to parse input as a statement 2"),
-    ];
+    let mut stmts = vec![];
 
     // 2. Add window to the argument list (also build the slices along the way)
     let func_args = &mut func.sig.inputs;
@@ -94,11 +86,11 @@ fn kernel_rewrite_func(func: &mut syn::ItemFn, span: Span) {
                                     // See if we are mutable
                                     let new_slice = if is_mut {
                                         syn::parse(quote! {
-                                            let #pat_ident: #arg_type = gpu::subslice_mut(#replaced_arg_name, __c * #window_arg_ident, #window_arg_ident);
+                                            let #pat_ident: #arg_type = gpu::chunk_mut(#replaced_arg_name, #window_arg_ident, gpu::GpuChunkIdx::new());
                                         }.into()).expect("Failed to parse input as a statement 3")
                                     } else {
                                         syn::parse(quote! {
-                                            let #pat_ident: #arg_type = gpu::subslice(#replaced_arg_name, __c * #window_arg_ident, #window_arg_ident);
+                                            let #pat_ident: #arg_type = gpu::chunk(#replaced_arg_name, #window_arg_ident, gpu::GpuChunkIdx::new());
                                         }.into()).expect("Failed to parse input as a statement 3")
                                     };
                                     stmts.push(new_slice);

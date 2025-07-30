@@ -68,7 +68,7 @@ pub use dim::{
     DimType, GpuChunkIdx, GpuSharedChunkIdx, block_dim, block_id, global_id, grid_dim, thread_id,
 };
 pub use print::{PushPrintfArg, printf};
-pub use thread::{GpuChunksMut, chunk_mut, scope, sync_threads};
+pub use thread::{GpuChunksMut, chunk, chunk_mut, scope, sync_threads};
 
 /// Add a string attribute to the MLIR module.
 #[rustc_diagnostic_item = "gpu::add_mlir_string_attr"]
@@ -78,16 +78,27 @@ pub fn add_mlir_string_attr(_: &'static str) -> usize {
     unimplemented!()
 }
 
+/// This is safe to use.
+/// Not part of TCB, but defined in pair with subslice_mut.
+/// Defined to make gpu_macros::kernel work fluently.
 #[inline(never)]
-#[gpu_codegen::builtin(gpu.subslice)]
 #[rustc_diagnostic_item = "gpu::subslice"]
-pub fn subslice<T>(_original: &[T], _offset: usize, _window: usize) -> &[T] {
+#[gpu_codegen::device]
+pub(crate) fn subslice<T>(_original: &[T], _offset: usize, _window: usize) -> &[T] {
     unimplemented!()
 }
 
+/// # Safety
+/// This function is unsafe because it assumes that the [_offset, _offset+ _window) is unique per GPU thread.
+/// If it is not unique per GPU thread, it can cause racing on the same memory location.
 #[inline(never)]
 #[rustc_diagnostic_item = "gpu::subslice_mut"]
-pub fn subslice_mut<T>(_original: &mut [T], _offset: usize, _window: usize) -> &mut [T] {
+#[gpu_codegen::device]
+pub(crate) unsafe fn subslice_mut<T>(
+    _original: &mut [T],
+    _offset: usize,
+    _window: usize,
+) -> &mut [T] {
     unimplemented!()
 }
 

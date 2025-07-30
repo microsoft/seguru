@@ -111,7 +111,7 @@ impl<T, const N: usize> GpuShared<[T; N]> {
     #[inline(always)]
     pub fn chunk_mut(&mut self, window: usize, idx: super::GpuSharedChunkIdx) -> &mut [T] {
         let offset = idx.as_usize() * window;
-        crate::subslice_mut(&mut self.value, offset, window)
+        unsafe { crate::subslice_mut(&mut self.value, offset, window) }
     }
 }
 impl<T> GpuShared<[T]> {
@@ -120,6 +120,6 @@ impl<T> GpuShared<[T]> {
     #[inline(always)]
     pub fn chunk_mut(&mut self, window: usize, idx: super::GpuSharedChunkIdx) -> &mut [T] {
         let offset = idx.as_usize() * window;
-        crate::subslice_mut(&mut self.value, offset, window)
+        unsafe { crate::subslice_mut(&mut self.value, offset, window) }
     }
 }

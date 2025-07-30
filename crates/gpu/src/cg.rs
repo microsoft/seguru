@@ -114,12 +114,17 @@ impl<const SIZE: usize, const STRIDE: usize> ThreadWarpTile<SIZE, STRIDE> {
                 * (crate::block_id(crate::DimType::Y)
                     + crate::grid_dim(crate::DimType::Y) * crate::block_id(crate::DimType::Z))
             + self.subgroup_id();
-        let local_val = crate::subslice_mut(slice, offset, 1);
-        let local_ref = &mut local_val[0];
+
+        // SAFETY: The offset is unique per Warp not per GPU thread. Although
+        // multiple threads in the same warp may access the same memory
+        // location, the `run_on_lane_0` function ensures only lane 0 (a
+        // specific thread inside a warp) will execute the closure.
+        // Thus it is safe to use it here.
+        let local_val = unsafe { crate::subslice_mut(slice, offset, 1) };
 
         // Call exec_on_thread_0
         if self.lane_id() == 0 {
-            f(local_ref);
+            f(&mut local_val[0]);
         }
     }
 

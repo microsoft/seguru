@@ -12,10 +12,9 @@ pub fn kernel_arith(a: &[u8], b: &mut [u8]) {
 pub fn kernel_arith_wrapper(a: &[u8], a_window: usize, b: &mut [u8], b_window: usize) {
     let c = gpu::GpuChunkIdx::new().as_usize();
 
-    let a_local: &[u8] = gpu::subslice(a, c * a_window, a_window);
-    let b_local: &mut [u8] = gpu::subslice_mut(b, c * b_window, b_window);
+    let b_local: &mut [u8] = gpu::chunk_mut(b, b_window, gpu::GpuChunkIdx::new());
 
-    kernel_arith(a_local, b_local);
+    kernel_arith(a, b_local);
 }
 
 // CHECK: @gpu_bin_cst = internal constant

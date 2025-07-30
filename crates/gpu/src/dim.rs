@@ -20,7 +20,8 @@ macro_rules! dim_fn {
 }
 
 macro_rules! def_dim_fn {
-    ($name: ident, $priv_name: ident, $pub_name: ident) => {
+    ($name: ident, $priv_name: ident, $pub_name: ident, $(#[$meta:meta])*) => {
+        $(#[$meta])*
         #[rustc_diagnostic_item = concat!("gpu::", stringify!($name))]
         #[gpu_codegen::device]
         #[inline(never)]
@@ -28,6 +29,7 @@ macro_rules! def_dim_fn {
             unimplemented!()
         }
 
+        $(#[$meta])*
         #[gpu_codegen::device]
         #[inline(always)]
         pub fn $pub_name(dim: DimType) -> usize {
@@ -40,11 +42,11 @@ macro_rules! def_dim_fn {
     };
 }
 
-def_dim_fn!(global_thread_id, _global_thread_id, global_id);
-def_dim_fn!(thread_id, _thread_id, thread_id);
-def_dim_fn!(block_id, _block_id, block_id);
-def_dim_fn!(block_dim, _block_dim, block_dim);
-def_dim_fn!(grid_dim, _grid_dim, grid_dim);
+def_dim_fn!(global_thread_id, _global_thread_id, global_id,);
+def_dim_fn!(thread_id, _thread_id, thread_id,);
+def_dim_fn!(block_id, _block_id, block_id,);
+def_dim_fn!(block_dim, _block_dim, block_dim, #[gpu_codegen::ret_sync_data(0)]);
+def_dim_fn!(grid_dim, _grid_dim, grid_dim, #[gpu_codegen::ret_sync_data(0)]);
 
 #[derive(Clone, Copy)]
 pub struct GpuChunkIdx {

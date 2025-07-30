@@ -264,14 +264,16 @@ impl<'tcx> Visitor<'tcx> for TaintSourceDetector<'tcx> {
             if let Some((def_id, generic_args)) = func.const_fn_def() {
                 let attr = crate::attr::GpuAttributes::build(&self.tcx, def_id);
                 debug!(
-                    "Checking terminator at {:?} {:?} for taint source: {:?}",
-                    location, def_id, attr.gpu_item
+                    "Checking terminator at {:?} {:?} for taint source: {:?} {:?}",
+                    location, def_id, attr.gpu_item, attr.ret_sync_data
                 );
 
                 // Those functions are not considered as source since they should
                 // generate non-diversed data is the input is non-diversed.
                 // TODO: confirm all DeviceIntrinsic is non-diversed.
                 // Currently DeviceIntrinsic only defines some float compute operations.
+                // We only care the returned value since the mut arg will
+                // only be tainted when reaching that the terminator.
                 let trusted_non_diversed = matches!(
                     attr.gpu_item,
                     Some(
@@ -284,7 +286,7 @@ impl<'tcx> Visitor<'tcx> for TaintSourceDetector<'tcx> {
                             | GpuItem::NewSharedMem
                             | GpuItem::DeviceIntrinsic(_)
                     )
-                );
+                ) || attr.ret_sync_data.contains(&-1);
 
                 // Since any device function may call thread_id, block_id,
                 // we conservatively consider all device function calls as taint sources
@@ -338,15 +340,16 @@ impl<'tcx> TaintTracking<'tcx> {
         &self,
         args: &[rustc_span::source_map::Spanned<Operand<'tcx>>],
         destination: Option<&Place<'tcx>>,
+        attr: &Option<GpuAttributes>,
         state: &mut DenseBitSet<Local>,
     ) {
         let mut mut_args = vec![];
         let mut tainted = false;
-        args.iter().for_each(|arg| {
+        args.iter().enumerate().for_each(|(i, arg)| {
             if let Some(local) = operand_local(&arg.node) {
                 let local_decl = &self.body.local_decls[local];
                 if local_decl.mutability.is_mut() {
-                    mut_args.push(local);
+                    mut_args.push((i, local));
                 }
             }
         });
@@ -357,11 +360,35 @@ impl<'tcx> TaintTracking<'tcx> {
                 }
             }
         });
+
+        // Even if the function is not tainted, we still need to
+        // propagate the tainted locals to the mut args.
+        // This is because the function body may call functions
+        // that could create taint source.
+        // No need to deal with destination since TaintSourceDetector
+        // will handle the destination local.
+        for (i, arg) in mut_args.iter() {
+            if let Some(attr) = attr {
+                // If the function is marked as ret_sync_data,
+                // we should not propagate the taint to the argument.
+                // This is because the function is expected to return
+                // the sync data and thus the argument should not be tainted.
+                // TODO: we will check and verify that the function is indeed
+                // returning the sync data.
+                if attr.ret_sync_data.contains(&(*i as isize)) {
+                    continue;
+                }
+            }
+            state.insert(*arg);
+        }
+
+        // If the function includes a taint source, we aggresively
+        // propagate the taint to the destination and mut args.
         if tainted {
             if let Some(destination) = destination {
                 state.insert(destination.local);
             }
-            for arg in mut_args.iter() {
+            for (i, arg) in mut_args.iter() {
                 state.insert(*arg);
             }
         }
@@ -477,10 +504,12 @@ impl<'tcx> Analysis<'tcx> for TaintTracking<'tcx> {
         // Taint the destination and mut arg if args include a tainted local.
         match &terminator.kind {
             TerminatorKind::Call { func, ref args, destination, .. } => {
-                self.propogate_fn_call(args, Some(destination), state);
+                let (_, gpu_attr) = check_terminator_call(self.tcx, self.body, terminator);
+                self.propogate_fn_call(args, Some(destination), &gpu_attr, state);
             }
             TerminatorKind::TailCall { func, ref args, .. } => {
-                self.propogate_fn_call(args, None, state);
+                let (_, gpu_attr) = check_terminator_call(self.tcx, self.body, terminator);
+                self.propogate_fn_call(args, None, &gpu_attr, state);
             }
 
             TerminatorKind::SwitchInt { ref targets, ref discr, .. } => {

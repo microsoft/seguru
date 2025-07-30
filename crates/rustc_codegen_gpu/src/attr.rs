@@ -11,7 +11,19 @@ pub(crate) struct GpuAttributes {
     pub gpu_item: Option<GpuItem>,
     pub ret_shared: bool,
     pub shared_size: bool, // this is used to decide whether to call `gpu_shared_size`.
-    pub sync_data: Option<Vec<usize>>, // The parameters that should have same value across threads. -1 => returned value.
+
+    // The parameters that should have same value across threads.
+    // If empty, it requires the control flow is the same across threads.
+    // If not empty, it requires both control flow and data flow (for arguments
+    // at indices) are the same across threads.
+    pub sync_data: Option<Vec<usize>>,
+
+    // Indices of parameters that must have the same value across all threads.
+    // Use -1 to indicate the return value. non-neg indices indicate the mutable
+    // parameters. Ensures that if these inputs are uniform, the return value
+    // will also be uniform across GPU threads.
+    // No effect if empty.
+    pub ret_sync_data: Vec<isize>,
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, Hash)]
@@ -170,6 +182,10 @@ pub fn sync_data() -> Symbol {
     Symbol::intern("sync_data")
 }
 
+fn ret_sync_data() -> Symbol {
+    Symbol::intern("ret_sync_data")
+}
+
 impl GpuAttributes {
     pub fn build(tcx: &rustc_middle::ty::TyCtxt<'_>, def_id: DefId) -> GpuAttributes {
         let attrs = tcx.get_attrs_unchecked(def_id);
@@ -251,6 +267,34 @@ impl GpuAttributes {
                     }
 
                     gpu_attrs.sync_data = Some(sync_data);
+                }
+            }
+
+            if attr.path_matches(&[gpu_symbol(), ret_sync_data()]) {
+                let mut ret_sync_data = vec![];
+                tracing::debug!(
+                    "Parsing ret_sync_data from attribute: {:?} {:?}",
+                    attr,
+                    attr.meta_item_list()
+                );
+                if let Some(meta_list) = attr.meta_item_list() {
+                    // Expect a literal like 1, 2, -1
+                    for meta in meta_list {
+                        if let Some(lit) = meta.lit() {
+                            if let rustc_ast::LitKind::Int(value, _) = lit.kind {
+                                ret_sync_data.push(value.get() as isize - 1);
+                            } else {
+                                panic!(
+                                    "Expected an integer literal for ret_sync_data, found {:?}",
+                                    lit
+                                );
+                            }
+                        } else {
+                            panic!("Expected a literal for ret_sync_data, found {:?}", meta);
+                        }
+                    }
+
+                    gpu_attrs.ret_sync_data = ret_sync_data;
                 }
             }
         }

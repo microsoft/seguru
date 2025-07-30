@@ -537,15 +537,16 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             }
             GpuItem::DynamicShared => {
                 // return (base + remain_size, valid_size)
-                let ret_type = self.type_shared_memref(
+                let ret_type = self.type_memref(
                     self.type_i8(),
                     &[crate::mlir::memref::dynamic_size()],
                     None,
+                    Some(crate::mlir::memref::MemorySpace::DynamicShared.to_attr(self.mlir_ctx)),
                 );
                 let op_ref = self.append_op(
                     melior::dialect::ods::gpu::dynamic_shared_memory(
                         self.mlir_ctx,
-                        ret_type.into(),
+                        ret_type,
                         self.cur_loc(),
                     )
                     .into(),

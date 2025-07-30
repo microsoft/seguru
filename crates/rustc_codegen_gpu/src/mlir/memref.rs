@@ -13,12 +13,15 @@ use crate::mlir::mlir_val_to_const_int;
 pub(crate) enum MemorySpace {
     Global = 0,
     Shared = 3,
+    DynamicShared,
 }
 
 impl MemorySpace {
     pub(crate) fn to_attr<'ml>(self, ctx: &'ml Context) -> Attribute<'ml> {
         match self {
-            MemorySpace::Shared => Attribute::parse(ctx, "#gpu.address_space<workgroup>").unwrap(),
+            MemorySpace::DynamicShared => {
+                Attribute::parse(ctx, "#gpu.address_space<workgroup>").unwrap()
+            }
             _ => IntegerAttribute::new(Type::from(IntegerType::new(ctx, 64)), self as i64).into(),
         }
     }

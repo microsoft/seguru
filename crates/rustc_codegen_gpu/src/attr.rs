@@ -11,6 +11,7 @@ pub(crate) struct GpuAttributes {
     pub gpu_item: Option<GpuItem>,
     pub ret_shared: bool,
     pub shared_size: bool, // this is used to decide whether to call `gpu_shared_size`.
+    pub sync_data: Option<Vec<usize>>, // The parameters that should have same value across threads. -1 => returned value.
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, Hash)]
@@ -165,6 +166,10 @@ pub fn ret_shared() -> Symbol {
     Symbol::intern("ret_shared")
 }
 
+pub fn sync_data() -> Symbol {
+    Symbol::intern("sync_data")
+}
+
 impl GpuAttributes {
     pub fn build(tcx: &rustc_middle::ty::TyCtxt<'_>, def_id: DefId) -> GpuAttributes {
         let attrs = tcx.get_attrs_unchecked(def_id);
@@ -223,6 +228,30 @@ impl GpuAttributes {
             }
             if attr.path_matches(&[gpu_symbol(), ret_shared()]) {
                 gpu_attrs.ret_shared = true;
+            }
+
+            if attr.path_matches(&[gpu_symbol(), sync_data()]) {
+                let mut sync_data = vec![];
+
+                if let Some(meta_list) = attr.meta_item_list() {
+                    // Expect a literal like 1, 2
+                    for meta in meta_list {
+                        if let Some(lit) = meta.lit() {
+                            if let rustc_ast::LitKind::Int(value, _) = lit.kind {
+                                sync_data.push(value.get() as usize);
+                            } else {
+                                panic!(
+                                    "Expected an integer literal for sync_data, found {:?}",
+                                    lit
+                                );
+                            }
+                        } else {
+                            panic!("Expected a literal for sync_data, found {:?}", meta);
+                        }
+                    }
+
+                    gpu_attrs.sync_data = Some(sync_data);
+                }
             }
         }
         gpu_attrs

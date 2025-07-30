@@ -94,6 +94,7 @@ pub(crate) fn subslice<T>(_original: &[T], _offset: usize, _window: usize) -> &[
 #[inline(never)]
 #[rustc_diagnostic_item = "gpu::subslice_mut"]
 #[gpu_codegen::device]
+#[gpu_codegen::sync_data(0, 2)]
 pub(crate) unsafe fn subslice_mut<T>(
     _original: &mut [T],
     _offset: usize,
@@ -106,6 +107,7 @@ pub(crate) unsafe fn subslice_mut<T>(
 #[inline(never)]
 #[rustc_diagnostic_item = "gpu::get_chunk"]
 #[gpu_codegen::device]
+#[gpu_codegen::sync_data(0)]
 pub fn get_mut_chunk<'a, T>(
     chunkable: &mut GpuChunkableMut<'a, T>,
     idx_pattern: GpuChunkIdx,

@@ -20,6 +20,7 @@ impl<T: Copy> Clone for GpuShared<T> {
 impl<T> GpuShared<T> {
     #[rustc_diagnostic_item = "gpu::new_shared_mem"]
     #[gpu_codegen::device]
+    #[gpu_codegen::sync_data]
     #[inline(never)]
     pub const fn zero() -> Self {
         unimplemented!();
@@ -108,18 +109,20 @@ impl<T> core::ops::IndexMut<usize> for GpuShared<[T]> {
 impl<T, const N: usize> GpuShared<[T; N]> {
     #[gpu_codegen::device]
     #[gpu_codegen::ret_shared]
+    #[gpu_codegen::sync_data(0, 1)]
     #[inline(always)]
     pub fn chunk_mut(&mut self, window: usize, idx: super::GpuSharedChunkIdx) -> &mut [T] {
         let offset = idx.as_usize() * window;
-        crate::subslice_mut(&mut self.value, offset, window)
+        unsafe { crate::subslice_mut(&mut self.value, offset, window) }
     }
 }
 impl<T> GpuShared<[T]> {
     #[gpu_codegen::device]
     #[gpu_codegen::ret_shared]
+    #[gpu_codegen::sync_data(0, 1)]
     #[inline(always)]
     pub fn chunk_mut(&mut self, window: usize, idx: super::GpuSharedChunkIdx) -> &mut [T] {
         let offset = idx.as_usize() * window;
-        crate::subslice_mut(&mut self.value, offset, window)
+        unsafe { crate::subslice_mut(&mut self.value, offset, window) }
     }
 }

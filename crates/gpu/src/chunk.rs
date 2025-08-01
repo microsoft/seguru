@@ -30,7 +30,8 @@ pub fn get_local_mut_2d<'a, T>(a: &mut GpuChunkableMut2D<'a, T>, x: usize, y: us
         x * dim(DimType::X) + block_dim(DimType::X) * block_id(DimType::X) + thread_id(DimType::X);
     let z_size = dim(DimType::Z);
     build_sfi(2, z_size);
-    build_sfi(a.size_x(), col);
+    // assert!(col <= a.size_x());
+    build_sfi(a.size_x() + 1, col);
 
     // Here Rust will automatic generate an SFI
     unsafe { &mut (&mut *(a.as_ptr() as *mut [T]))[a.size_x() * row + col] }

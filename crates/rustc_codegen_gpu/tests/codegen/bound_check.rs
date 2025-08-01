@@ -12,5 +12,5 @@ pub unsafe fn bound_check(a: &mut [u8], i: usize) {
 
 // CHECK: @gpu_bin_cst = internal constant
 // PTX_CHECK: .visible .entry bound_check
-// PTX_CHECK: shr.s64
-// PTX_CHECK: ld.volatile.u8
+// PTX_CHECK: setp.lt
+// PTX_CHECK: selp.b64

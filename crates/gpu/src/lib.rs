@@ -10,16 +10,26 @@
 use core::arch::asm;
 
 pub mod cg;
+mod chunk;
 mod device_intrinsic;
 mod dim;
 mod print;
 mod shared;
 mod thread;
 
+pub use chunk::{chunk, chunk_mut};
+#[cfg(not(feature = "codegen_tests"))]
+pub use chunk::{get_local_2d, get_local_mut_2d};
 #[cfg(not(feature = "codegen_tests"))]
 pub use cuda_bindings::{GpuChunkable, GpuChunkable2D, GpuChunkableMut, GpuChunkableMut2D};
 pub use device_intrinsic::GPUDeviceFloatIntrinsics;
+pub use dim::{
+    DimType, GpuChunkIdx, GpuSharedChunkIdx, block_dim, block_id, dim, global_id, grid_dim,
+    thread_id,
+};
+pub use print::{PushPrintfArg, printf};
 pub use shared::{DynamicSharedAlloc, GpuShared};
+pub use thread::{GpuChunksMut, scope, sync_threads};
 
 #[inline(never)]
 #[gpu_codegen::builtin(gpu.build_sfi)]
@@ -27,48 +37,6 @@ pub use shared::{DynamicSharedAlloc, GpuShared};
 pub fn build_sfi(_size: usize, _offset: usize) {
     unimplemented!()
 }
-
-#[cfg(not(feature = "codegen_tests"))]
-#[rustc_diagnostic_item = "gpu::get_local_mut_2d"]
-#[gpu_codegen::device]
-#[inline(always)]
-pub fn get_local_mut_2d<'a, T>(a: &mut GpuChunkableMut2D<'a, T>, x: usize, y: usize) -> &'a mut T {
-    // Must check if col is smaller than a.size_x
-    let row = y * grid_dim(DimType::Y) * block_dim(DimType::Y)
-        + block_dim(DimType::Y) * block_id(DimType::Y)
-        + thread_id(DimType::Y);
-    let col = x * grid_dim(DimType::X) * block_dim(DimType::X)
-        + block_dim(DimType::X) * block_id(DimType::X)
-        + thread_id(DimType::X);
-    build_sfi(a.size_x(), col);
-
-    // Here Rust will automatic generate an SFI
-    unsafe { &mut (&mut *(a.as_ptr() as *mut [T]))[a.size_x() * row + col] }
-}
-
-#[cfg(not(feature = "codegen_tests"))]
-#[rustc_diagnostic_item = "gpu::get_local_2d"]
-#[gpu_codegen::device]
-#[inline(always)]
-pub fn get_local_2d<'a, T>(a: &'a GpuChunkable2D<'a, T>, x: usize, y: usize) -> &'a T {
-    // Must check if col is smaller than a.size_x
-    let row = y * grid_dim(DimType::Y) * block_dim(DimType::Y)
-        + block_dim(DimType::Y) * block_id(DimType::Y)
-        + thread_id(DimType::Y);
-    let col = x * grid_dim(DimType::X) * block_dim(DimType::X)
-        + block_dim(DimType::X) * block_id(DimType::X)
-        + thread_id(DimType::X);
-    build_sfi(a.size_x(), col);
-
-    // Here Rust will automatic generate an SFI
-    unsafe { &(&*a.as_ptr())[a.size_x() * row + col] }
-}
-
-pub use dim::{
-    DimType, GpuChunkIdx, GpuSharedChunkIdx, block_dim, block_id, global_id, grid_dim, thread_id,
-};
-pub use print::{PushPrintfArg, printf};
-pub use thread::{GpuChunksMut, chunk, chunk_mut, scope, sync_threads};
 
 /// Add a string attribute to the MLIR module.
 #[rustc_diagnostic_item = "gpu::add_mlir_string_attr"]

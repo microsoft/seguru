@@ -48,6 +48,17 @@ def_dim_fn!(block_id, _block_id, block_id,);
 def_dim_fn!(block_dim, _block_dim, block_dim, #[gpu_codegen::ret_sync_data(0)]);
 def_dim_fn!(grid_dim, _grid_dim, grid_dim, #[gpu_codegen::ret_sync_data(0)]);
 
+#[gpu_codegen::device]
+#[gpu_codegen::ret_sync_data(0)]
+#[inline(always)]
+pub fn dim(dim: DimType) -> usize {
+    match dim {
+        DimType::X => block_dim(DimType::X) * grid_dim(DimType::X),
+        DimType::Y => block_dim(DimType::Y) * grid_dim(DimType::Y),
+        DimType::Z => block_dim(DimType::Z) * grid_dim(DimType::Z),
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct GpuChunkIdx {
     id: usize,
@@ -62,6 +73,16 @@ impl Default for GpuChunkIdx {
 }
 
 impl GpuChunkIdx {
+    #[gpu_codegen::device]
+    pub fn threads_count() -> usize {
+        block_dim(DimType::X)
+            * grid_dim(DimType::X)
+            * block_dim(DimType::Y)
+            * grid_dim(DimType::Y)
+            * block_dim(DimType::Z)
+            * grid_dim(DimType::Z)
+    }
+
     // TODO: optimize the default 3D to 2D or 1D based on the user-specified grid and block dimensions.
     #[gpu_codegen::device]
     #[inline(always)]

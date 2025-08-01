@@ -54,23 +54,6 @@ impl<'env, T> GpuChunksMut<'env, T> {
     }
 }
 
-#[inline(always)]
-#[gpu_codegen::device]
-#[rustc_diagnostic_item = "gpu::chunk_mut"]
-#[gpu_codegen::sync_data(0, 1)]
-pub fn chunk_mut<T>(original: &mut [T], window: usize, idx: crate::GpuChunkIdx) -> &mut [T] {
-    let offset = idx.as_usize() * window;
-    // SAFETY: This is safe since GpuChunkIdx is unique per GPU thread.
-    unsafe { crate::subslice_mut(original, offset, window) }
-}
-
-#[inline(always)]
-#[gpu_codegen::device]
-pub fn chunk<T>(original: &[T], window: usize, idx: crate::GpuChunkIdx) -> &[T] {
-    let offset = idx.as_usize() * window;
-    crate::subslice(original, offset, window)
-}
-
 #[inline(never)]
 #[gpu_codegen::device]
 #[rustc_diagnostic_item = "gpu::sync_threads"]

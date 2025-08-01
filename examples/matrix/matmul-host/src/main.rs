@@ -5,8 +5,8 @@ use gpu_host::cuda_ctx;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let mut n: usize = 4;
-    let mut dim: u32 = 2;
+    let mut n: usize = 1024;
+    let mut dim: u32 = 128;
 
     if args.len() >= 2 {
         // Take length here

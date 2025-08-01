@@ -45,7 +45,7 @@ pub fn run_host_matmul(
 
     let mut initial_array = vec![];
     for i in 0..(n * n) {
-        initial_array.push(i as f32);
+        initial_array.push((i % 32) as f32);
     }
 
     let mut initial_c = vec![0.0; n * n];
@@ -66,26 +66,34 @@ pub fn run_host_matmul(
     let d_c_c = gpu::GpuChunkableMut2D::<f32>::new(d_c, n);
 
     // Now do the kernel
+    // block_dim_x * block_dim_y * block_dim_z must be less than or equal to 1024
+    assert!(dim < 32 || dim % 32 == 0, "dim must be a multiple of 32 or less than 32");
     let config = gpu_host::GPUConfig {
-        grid_dim_x: 1,
-        grid_dim_y: 1,
+        grid_dim_x: if dim > 32 { dim / 32 } else { 1 },
+        grid_dim_y: if dim > 32 { dim / 32 } else { 1 },
         grid_dim_z: 1,
-        block_dim_x: dim,
-        block_dim_y: dim,
+        block_dim_x: if dim > 32 { 32 } else { dim },
+        block_dim_y: if dim > 32 { 32 } else { dim },
         block_dim_z: 1,
     };
+    let start = std::time::Instant::now();
     inner_product_kernel(ctx, m, config, d_a, d_b, d_c_c, n).expect("Kernel execution failed");
+    let elapsed = start.elapsed();
+    println!("GPU execution time: {:?}", elapsed);
 
     d_c.copy_to_host(h_c, min(h_c.len(), n * n), ctx)?;
 
     // Perform CPU side validation
     println!("running on cpu...");
+    let start = std::time::Instant::now();
     cpu_inner_product(h_a, h_b, h_c_cpu, n);
+    let elapsed = start.elapsed();
+    println!("CPU execution time: {:?}", elapsed);
 
     println!("validating...");
     for i in 0..h_c.len() {
         if h_c[i] != h_c_cpu[i] {
-            print!("error: kernel result is wrong at {}. ", i);
+            print!("error: kernel result is wrong at {}. {} != {}", i, h_c_cpu[i], h_c[i]);
             if n <= 10 {
                 println!("printing matrix...");
                 println!("a and b:");

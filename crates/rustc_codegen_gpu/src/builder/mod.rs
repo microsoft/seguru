@@ -57,6 +57,8 @@ pub(crate) struct GpuBuilder<'tcx, 'ml, 'a> {
     pub extra_state: GpuBuilderState<'ml, 'a>,
     san_dummy: Option<mlir_ir::Value<'ml, 'a>>,
     dummy: PhantomData<&'a mlir_ir::operation::Operation<'ml>>,
+    #[cfg(feature = "inplace_bound_check")]
+    valid_mem_access: Option<mlir_ir::Value<'ml, 'a>>,
 }
 
 impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
@@ -141,20 +143,6 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             ));
             Ok(Some(op_ref))
         }
-    }
-
-    fn build_sfi(
-        &mut self,
-        ptr_size: melior::ir::Value<'ml, 'a>,
-        offset: melior::ir::Value<'ml, 'a>,
-    ) {
-        let one = self.mlir_const_val_from_type(1, self.type_i64(), self.cur_block());
-        let index_int = self.sub(offset, one);
-        let oob = self.sub(index_int, ptr_size);
-        let shift = self.emit_constant(63, self.type_i64());
-        let oob_flag = self.ashr(oob, shift);
-
-        self.emit_llvm_volatile_and_load(oob_flag, self.san_dummy.unwrap());
     }
 
     fn call_gpu_builtin_operation(
@@ -443,7 +431,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 //    a.k.a. offset + window - 1 < original size
                 //    The subslice must fit within the range of the original buffer
                 let index_int_upper = self.add(window, offset);
-                self.build_sfi(original_size, index_int_upper);
+                self.emit_bound_check(index_int_upper, original_size, self.san_dummy.unwrap());
 
                 // 2. Build the subslice: Done by transforming memref<1xi8> into the
                 //    strided form using subview. Shortcut to use inbounds_gep
@@ -531,7 +519,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 let size = args[0];
                 let offset = args[1];
 
-                self.build_sfi(size, offset);
+                self.emit_bound_check(offset, size, self.san_dummy.unwrap());
 
                 Ok(None)
             }
@@ -872,6 +860,43 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         }
         ret
     }
+
+    #[cfg(feature = "arith_immediate_bound_check")]
+    fn emit_llvm_volatile_and_load(
+        &mut self,
+        mask: mlir_ir::Value<'ml, 'a>,
+        ptr: mlir_ir::Value<'ml, 'a>,
+    ) {
+        // Only used by the bound check stuff
+        let raw_ptr_op = melior::dialect::ods::memref::extract_aligned_pointer_as_index(
+            self.mlir_ctx,
+            self.type_index(),
+            ptr,
+            self.cur_loc(),
+        )
+        .into();
+        let raw_ptr = self.append_op_res(raw_ptr_op);
+
+        // And Ptr
+        let llvm_raw_ptr_int = self.intcast(raw_ptr, self.type_i64(), false);
+        let llvm_raw_ptr_and = self.and(llvm_raw_ptr_int, mask);
+
+        // Ptr to LLVM
+        let llvm_ptr = self.inttollvmptr(llvm_raw_ptr_and, self.type_llvm_ptr());
+
+        // LLVM store with volatile
+        let llvm_store_op = melior::dialect::llvm::load(
+            self.mlir_ctx,
+            llvm_ptr,
+            self.type_i8(),
+            self.cur_loc(),
+            melior::dialect::llvm::LoadStoreOptions::new()
+                .volatile(true)
+                .align(Some(self.align_to_attr(rustc_abi::Align::EIGHT))),
+        );
+
+        self.append_op(llvm_store_op);
+    }
 }
 
 impl<'tcx, 'ml, 'a> BackendTypes for GpuBuilder<'tcx, 'ml, 'a> {
@@ -924,6 +949,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             span_to_type: HashMap::new(),
             op_to_extra_values: HashMap::new(),
             san_dummy: None,
+            #[cfg(feature = "inplace_bound_check")]
+            valid_mem_access: None,
         }
     }
 
@@ -1417,6 +1444,14 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         } else {
             ptr
         };
+
+        #[cfg(feature = "inplace_bound_check")]
+        let ptr = if let Some(valid_mem_access) = self.valid_mem_access.take() {
+            let nullptr = self.inttoptr(self.const_value(0, self.type_index()), ptr.r#type());
+            self.select(valid_mem_access, ptr, nullptr)
+        } else {
+            ptr
+        };
         let mut loaded =
             self.mlir_load(load_ty, ptr, &[self.const_value(0, self.type_index())], align);
 
@@ -1559,36 +1594,32 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         }
     }
 
-    fn emit_llvm_volatile_and_load(&mut self, mask: Self::Value, ptr: Self::Value) {
-        // Only used by the bound check stuff
-        let raw_ptr_op = melior::dialect::ods::memref::extract_aligned_pointer_as_index(
-            self.mlir_ctx,
-            self.type_index(),
-            ptr,
-            self.cur_loc(),
-        )
-        .into();
-        let raw_ptr = self.append_op_res(raw_ptr_op);
+    #[cfg(all(feature = "inplace_bound_check", feature = "arith_immediate_bound_check"))]
+    compile_error!(
+        "Features `inplace_bound_check` and `arith_immediate_bound_check` are mutually exclusive"
+    );
 
-        // And Ptr
-        let llvm_raw_ptr_int = self.intcast(raw_ptr, self.type_i64(), false);
-        let llvm_raw_ptr_and = self.and(llvm_raw_ptr_int, mask);
+    #[cfg(not(any(feature = "arith_immediate_bound_check", feature = "inplace_bound_check")))]
+    fn emit_bound_check(&mut self, idx: Self::Value, len: Self::Value, ptr: Self::Value) {}
 
-        // Ptr to LLVM
-        let llvm_ptr = self.inttollvmptr(llvm_raw_ptr_and, self.type_llvm_ptr());
+    #[cfg(feature = "inplace_bound_check")]
+    fn emit_bound_check(&mut self, idx: Self::Value, len: Self::Value, ptr: Self::Value) {
+        let cmp = self.icmp(rustc_codegen_ssa_gpu::common::IntPredicate::IntULT, idx, len);
+        if let Some(valid_mem_access) = self.valid_mem_access.as_ref() {
+            self.valid_mem_access = Some(self.and(*valid_mem_access, cmp));
+        } else {
+            self.valid_mem_access = Some(cmp);
+        }
+    }
 
-        // LLVM store with volatile
-        let llvm_store_op = melior::dialect::llvm::load(
-            self.mlir_ctx,
-            llvm_ptr,
-            self.type_i8(),
-            self.cur_loc(),
-            melior::dialect::llvm::LoadStoreOptions::new()
-                .volatile(true)
-                .align(Some(self.align_to_attr(rustc_abi::Align::EIGHT))),
-        );
-
-        self.append_op(llvm_store_op);
+    #[cfg(feature = "arith_immediate_bound_check")]
+    fn emit_bound_check(&mut self, idx: Self::Value, len: Self::Value, ptr: Self::Value) {
+        let one = self.mlir_const_val_from_type(1, self.type_i64(), self.cur_block());
+        let index_int = self.sub(idx, one);
+        let oob = self.sub(index_int, len);
+        let shift = self.emit_constant(63, self.type_i64());
+        let oob_flag = self.ashr(oob, shift);
+        self.emit_llvm_volatile_and_load(oob_flag, self.san_dummy.unwrap());
     }
 
     fn store(
@@ -1618,6 +1649,14 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         let ptr = if self.mlir_element_type(ptr_ty) != store_ty {
             dbg!("Implicit cast {} {}", ptr_ty, store_ty);
             self.mlir_memref_view(ptr, target_memref_ty, None)
+        } else {
+            ptr
+        };
+
+        #[cfg(feature = "inplace_bound_check")]
+        let ptr = if let Some(valid_mem_access) = self.valid_mem_access.take() {
+            let nullptr = self.inttoptr(self.const_value(0, self.type_index()), ptr.r#type());
+            self.select(valid_mem_access, ptr, nullptr)
         } else {
             ptr
         };
@@ -1662,7 +1701,15 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             return ptr;
         }
         let op = self.inbounds_gep_op(ty, ptr, indices);
-        self.append_op_res(op)
+        let ptr = self.append_op_res(op);
+        #[cfg(feature = "inplace_bound_check")]
+        let ptr = if let Some(valid_mem_access) = self.valid_mem_access.take() {
+            let nullptr = self.inttoptr(self.const_value(0, self.type_index()), ptr.r#type());
+            self.select(valid_mem_access, ptr, nullptr)
+        } else {
+            ptr
+        };
+        ptr
     }
 
     fn trunc(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {

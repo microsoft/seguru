@@ -85,7 +85,7 @@ pub trait BuilderMethods<'a, 'tcx>:
         ty: Self::Type,
     ) -> Self::Value;
 
-    fn emit_llvm_volatile_and_load(&mut self, mask: Self::Value, ptr: Self::Value);
+    fn emit_bound_check(&mut self, idx: Self::Value, len: Self::Value, ptr: Self::Value);
 
     fn set_span(&mut self, span: Span);
 

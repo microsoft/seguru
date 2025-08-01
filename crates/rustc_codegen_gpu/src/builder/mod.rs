@@ -57,6 +57,8 @@ pub(crate) struct GpuBuilder<'tcx, 'ml, 'a> {
     pub extra_state: GpuBuilderState<'ml, 'a>,
     san_dummy: Option<mlir_ir::Value<'ml, 'a>>,
     dummy: PhantomData<&'a mlir_ir::operation::Operation<'ml>>,
+    #[cfg(feature = "inplace_bound_check")]
+    valid_mem_access: Option<mlir_ir::Value<'ml, 'a>>,
 }
 
 impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
@@ -947,6 +949,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             span_to_type: HashMap::new(),
             op_to_extra_values: HashMap::new(),
             san_dummy: None,
+            #[cfg(feature = "inplace_bound_check")]
+            valid_mem_access: None,
         }
     }
 
@@ -1440,6 +1444,14 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         } else {
             ptr
         };
+
+        #[cfg(feature = "inplace_bound_check")]
+        let ptr = if let Some(valid_mem_access) = self.valid_mem_access.take() {
+            let nullptr = self.inttoptr(self.const_value(0, self.type_index()), ptr.r#type());
+            self.select(valid_mem_access, ptr, nullptr)
+        } else {
+            ptr
+        };
         let mut loaded =
             self.mlir_load(load_ty, ptr, &[self.const_value(0, self.type_index())], align);
 
@@ -1582,8 +1594,23 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         }
     }
 
-    #[cfg(not(feature = "arith_immediate_bound_check"))]
+    #[cfg(all(feature = "inplace_bound_check", feature = "arith_immediate_bound_check"))]
+    compile_error!(
+        "Features `inplace_bound_check` and `arith_immediate_bound_check` are mutually exclusive"
+    );
+
+    #[cfg(not(any(feature = "arith_immediate_bound_check", feature = "inplace_bound_check")))]
     fn emit_bound_check(&mut self, idx: Self::Value, len: Self::Value, ptr: Self::Value) {}
+
+    #[cfg(feature = "inplace_bound_check")]
+    fn emit_bound_check(&mut self, idx: Self::Value, len: Self::Value, ptr: Self::Value) {
+        let cmp = self.icmp(rustc_codegen_ssa_gpu::common::IntPredicate::IntULT, idx, len);
+        if let Some(valid_mem_access) = self.valid_mem_access.as_ref() {
+            self.valid_mem_access = Some(self.and(*valid_mem_access, cmp));
+        } else {
+            self.valid_mem_access = Some(cmp);
+        }
+    }
 
     #[cfg(feature = "arith_immediate_bound_check")]
     fn emit_bound_check(&mut self, idx: Self::Value, len: Self::Value, ptr: Self::Value) {
@@ -1622,6 +1649,14 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         let ptr = if self.mlir_element_type(ptr_ty) != store_ty {
             dbg!("Implicit cast {} {}", ptr_ty, store_ty);
             self.mlir_memref_view(ptr, target_memref_ty, None)
+        } else {
+            ptr
+        };
+
+        #[cfg(feature = "inplace_bound_check")]
+        let ptr = if let Some(valid_mem_access) = self.valid_mem_access.take() {
+            let nullptr = self.inttoptr(self.const_value(0, self.type_index()), ptr.r#type());
+            self.select(valid_mem_access, ptr, nullptr)
         } else {
             ptr
         };
@@ -1666,7 +1701,15 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             return ptr;
         }
         let op = self.inbounds_gep_op(ty, ptr, indices);
-        self.append_op_res(op)
+        let ptr = self.append_op_res(op);
+        #[cfg(feature = "inplace_bound_check")]
+        let ptr = if let Some(valid_mem_access) = self.valid_mem_access.take() {
+            let nullptr = self.inttoptr(self.const_value(0, self.type_index()), ptr.r#type());
+            self.select(valid_mem_access, ptr, nullptr)
+        } else {
+            ptr
+        };
+        ptr
     }
 
     fn trunc(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {

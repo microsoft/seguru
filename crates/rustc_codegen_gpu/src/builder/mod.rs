@@ -431,7 +431,9 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 //    a.k.a. offset + window - 1 < original size
                 //    The subslice must fit within the range of the original buffer
                 let index_int_upper = self.add(window, offset);
-                self.emit_bound_check(index_int_upper, original_size, self.san_dummy.unwrap());
+                let one = self.mlir_const_val_from_type(1, self.type_i64(), self.cur_block());
+                let index_int = self.sub(index_int_upper, one);
+                self.emit_bound_check(index_int, original_size, self.san_dummy.unwrap());
 
                 // 2. Build the subslice: Done by transforming memref<1xi8> into the
                 //    strided form using subview. Shortcut to use inbounds_gep
@@ -1614,9 +1616,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
 
     #[cfg(feature = "arith_immediate_bound_check")]
     fn emit_bound_check(&mut self, idx: Self::Value, len: Self::Value, ptr: Self::Value) {
-        let one = self.mlir_const_val_from_type(1, self.type_i64(), self.cur_block());
-        let index_int = self.sub(idx, one);
-        let oob = self.sub(index_int, len);
+        let oob = self.sub(idx, len);
         let shift = self.emit_constant(63, self.type_i64());
         let oob_flag = self.ashr(oob, shift);
         self.emit_llvm_volatile_and_load(oob_flag, self.san_dummy.unwrap());

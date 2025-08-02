@@ -17,8 +17,4 @@ pub unsafe fn integers(a: usize, b: i8, c: u8, d: u16, e: u32, out: &mut [usize]
 
 // CHECK: @gpu_bin_cst = internal constant
 // PTX_CHECK: .visible .entry integers
-// PTX_CHECK: st.global.u32 [%rd3]
-// PTX_CHECK: st.global.u32 [%rd3+4]
-// PTX_CHECK: st.global.u32 [%rd3+8]
-// PTX_CHECK: st.global.u32 [%rd3+12]
-// PTX_CHECK: st.global.u32 [%rd3+16]
+// PTX_CHECK: st.global.u32

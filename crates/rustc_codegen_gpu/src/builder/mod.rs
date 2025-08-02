@@ -1927,11 +1927,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             rhs = self.intcast(rhs, lhs_ty, false);
         }
 
-        let op = if lhs.r#type().is_index() {
-            melior::dialect::arith::cmpi(self.mlir_ctx, predicate, lhs, rhs, self.cur_loc())
-        } else {
-            melior::dialect::arith::cmpi(self.mlir_ctx, predicate, lhs, rhs, self.cur_loc())
-        };
+        let op = melior::dialect::arith::cmpi(self.mlir_ctx, predicate, lhs, rhs, self.cur_loc());
         self.append_op_res(op)
     }
 

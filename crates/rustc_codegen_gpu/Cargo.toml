@@ -30,6 +30,6 @@ typed-arena = "2.0"
 rustc_private = true
 
 [features]
-default = ["arith_immediate_bound_check"]
+default = ["inplace_bound_check"]
 arith_immediate_bound_check = [] # force access a dummy ptr
 inplace_bound_check = []

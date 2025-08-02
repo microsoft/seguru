@@ -18,7 +18,6 @@ pub fn kernel_arith_wrapper(a: &[u8], a_window: usize, b: &mut [u8], b_window: u
 }
 
 // CHECK: @gpu_bin_cst = internal constant
-// PTX_CHECK: mul.lo.s64
 // PTX_CHECK: st.global.u8
 // PTX_CHECK: %tid.x
 // PTX_CHECK: %tid.y

@@ -1916,16 +1916,17 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             }
         };
         let lhs = normalized_value(lhs_ty, lhs);
-        let rhs = normalized_value(rhs_ty, rhs);
+        let mut rhs = normalized_value(rhs_ty, rhs);
+
+        let lhs_ty = lhs.r#type();
+        let rhs_ty = rhs.r#type();
+
+        if rhs_ty != lhs_ty {
+            rhs = self.intcast(rhs, lhs_ty, false);
+        }
 
         let op = if lhs.r#type().is_index() {
-            melior::dialect::arith::cmpi(
-                self.mlir_ctx,
-                predicate,
-                lhs,
-                self.intcast(rhs, self.type_index(), false),
-                self.cur_loc(),
-            )
+            melior::dialect::arith::cmpi(self.mlir_ctx, predicate, lhs, rhs, self.cur_loc())
         } else {
             melior::dialect::arith::cmpi(self.mlir_ctx, predicate, lhs, rhs, self.cur_loc())
         };

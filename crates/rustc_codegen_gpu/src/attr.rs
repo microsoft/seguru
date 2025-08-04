@@ -1,5 +1,5 @@
-use rustc_hir::Attribute;
 use rustc_hir::def_id::DefId;
+use rustc_hir::{Attribute, LangItem};
 use rustc_span::Symbol;
 
 // inspired by rust-gpu's attribute handling
@@ -57,6 +57,12 @@ pub enum GpuItem {
     GetLocal2D,
     DynamicShared,
     DeviceIntrinsic(String),
+    Core(LangItem), // for core crate items
+}
+
+fn lang_item_from_str(name: &str) -> Option<LangItem> {
+    tracing::warn!("lang_item_from_str: {}", name);
+    LangItem::from_name(Symbol::intern(name))
 }
 
 impl TryFrom<&str> for GpuItem {
@@ -95,7 +101,9 @@ impl TryFrom<&str> for GpuItem {
             s if s.starts_with("gpu::device_intrinsics::") => {
                 GpuItem::DeviceIntrinsic(s.replace("gpu::device_intrinsics::", ""))
             }
-            _ => return Err(()),
+            s => {
+                lang_item_from_str(s).map(GpuItem::Core).ok_or(()).map_err(|_| ())? // If it is a core lang item, return it as GpuItem::Core
+            }
         };
         Ok(ret)
     }
@@ -135,6 +143,7 @@ impl From<GpuItem> for String {
             GpuItem::DeviceIntrinsic(name) => {
                 format!("gpu::device_intrinsics::{}", name)
             }
+            GpuItem::Core(name) => name.name().to_string(),
         }
     }
 }
@@ -190,6 +199,12 @@ impl GpuAttributes {
     pub fn build(tcx: &rustc_middle::ty::TyCtxt<'_>, def_id: DefId) -> GpuAttributes {
         let attrs = tcx.get_attrs_unchecked(def_id);
         let mut gpu_attr = GpuAttributes::parse(attrs);
+        if tcx.crate_name(def_id.krate).as_str() == "core" {
+            gpu_attr.device = true;
+            if let Some(lang_item) = tcx.lang_items().from_def_id(def_id) {
+                gpu_attr.gpu_item = Some(GpuItem::Core(lang_item));
+            };
+        }
         if let Some(sym) = tcx.all_diagnostic_items(()).id_to_name.get(&def_id) {
             if let Ok(gpu_item) = GpuItem::try_from(*sym) {
                 gpu_attr.gpu_item = Some(gpu_item);

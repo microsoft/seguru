@@ -753,17 +753,20 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
 
         // Generate our SFI only if the code runs on GPU
         if self.is_gpu {
-            match msg {
+            let handled = match msg {
                 AssertKind::BoundsCheck { len, index } => {
                     let len = self.codegen_operand(bx, len).immediate();
                     let index = self.codegen_operand(bx, index).immediate();
-                    bx.emit_bound_check(index, len, self.san_dummy.unwrap());
+                    bx.emit_bound_check(index, len, self.san_dummy.unwrap())
                 }
                 _ => {
-                    ();
+                    // TODO: handle other cases, we should return false here and handle them properly
+                    true
                 }
             };
-            return helper.funclet_br(self, bx, target, mergeable_succ);
+            if handled {
+                return helper.funclet_br(self, bx, target, mergeable_succ);
+            }
         }
 
         // Because we're branching to a panic block (either a `#[cold]` one

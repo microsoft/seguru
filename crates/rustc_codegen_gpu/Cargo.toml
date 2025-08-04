@@ -33,3 +33,4 @@ rustc_private = true
 default = ["inplace_bound_check"]
 arith_immediate_bound_check = [] # force access a dummy ptr
 inplace_bound_check = []
+trap_bound_check = [] # Use standard panic-bound-check: if out-of-bound {trap}

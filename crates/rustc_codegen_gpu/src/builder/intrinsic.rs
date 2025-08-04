@@ -142,7 +142,7 @@ impl<'tcx, 'ml, 'a> IntrinsicCallBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 
     }
 
     fn abort(&mut self) {
-        todo!()
+        self.append_op(melior::dialect::ods::llvm::intr_trap(self.mlir_ctx, self.cur_loc()).into());
     }
 
     fn assume(&mut self, val: Self::Value) {

@@ -58,6 +58,7 @@ pub enum GpuItem {
     DynamicShared,
     DeviceIntrinsic(String),
     Core(LangItem), // for core crate items
+    CoreFn(String), // for core crate functions
 }
 
 fn lang_item_from_str(name: &str) -> Option<LangItem> {
@@ -101,8 +102,19 @@ impl TryFrom<&str> for GpuItem {
             s if s.starts_with("gpu::device_intrinsics::") => {
                 GpuItem::DeviceIntrinsic(s.replace("gpu::device_intrinsics::", ""))
             }
-            s => {
-                lang_item_from_str(s).map(GpuItem::Core).ok_or(()).map_err(|_| ())? // If it is a core lang item, return it as GpuItem::Core
+            s if s.starts_with("core") => {
+                if let Some(i) = lang_item_from_str(s) {
+                    GpuItem::Core(i)
+                } else {
+                    GpuItem::CoreFn(s.to_string())
+                }
+            }
+            _ => {
+                if let Some(i) = lang_item_from_str(s) {
+                    GpuItem::Core(i)
+                } else {
+                    return Err(());
+                }
             }
         };
         Ok(ret)
@@ -144,6 +156,7 @@ impl From<GpuItem> for String {
                 format!("gpu::device_intrinsics::{}", name)
             }
             GpuItem::Core(name) => name.name().to_string(),
+            GpuItem::CoreFn(name) => name,
         }
     }
 }
@@ -203,7 +216,18 @@ impl GpuAttributes {
             gpu_attr.device = true;
             if let Some(lang_item) = tcx.lang_items().from_def_id(def_id) {
                 gpu_attr.gpu_item = Some(GpuItem::Core(lang_item));
-            };
+            } else {
+                let path = tcx.def_path_str(def_id);
+                if [
+                    "core::slice::index::slice_index_order_fail",
+                    "core::slice::index::slice_start_index_len_fail",
+                    "core::slice::index::slice_end_index_len_fail",
+                ]
+                .contains(&path.as_str())
+                {
+                    gpu_attr.gpu_item = Some(GpuItem::CoreFn(tcx.def_path_str(def_id)));
+                }
+            }
         }
         if let Some(sym) = tcx.all_diagnostic_items(()).id_to_name.get(&def_id) {
             if let Ok(gpu_item) = GpuItem::try_from(*sym) {

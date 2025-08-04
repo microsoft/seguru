@@ -21,7 +21,7 @@ use rustc_abi::BackendRepr;
 use rustc_codegen_ssa_gpu::mir::operand::{OperandRef, OperandValue};
 use rustc_codegen_ssa_gpu::traits::{
     BackendTypes, BaseTypeCodegenMethods, BuilderMethods, ConstCodegenMethods,
-    LayoutTypeCodegenMethods, OverflowOp, StaticBuilderMethods,
+    IntrinsicCallBuilderMethods, LayoutTypeCodegenMethods, OverflowOp, StaticBuilderMethods,
 };
 use rustc_hir::LangItem;
 use rustc_span::Span;
@@ -118,7 +118,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                     span,
                 );
             } else {
-                panic!();
+                panic!("{}", builtin_sym.value());
             }
         }
         let mut next_itype = input_types.iter();
@@ -548,7 +548,6 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 Ok(Some(op))
             }
             GpuItem::Core(lang_item) => {
-                use rustc_codegen_ssa_gpu::traits::IntrinsicCallBuilderMethods;
                 // Not a builtin.
                 match lang_item {
                     LangItem::PanicBoundsCheck => {
@@ -559,6 +558,19 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                         todo!();
                     }
                 }
+            }
+            GpuItem::CoreFn(fn_name) => {
+                if [
+                    "core::slice::index::slice_index_order_fail",
+                    "core::slice::index::slice_start_index_len_fail",
+                    "core::slice::index::slice_end_index_len_fail",
+                ]
+                .contains(&fn_name.as_str())
+                {
+                    self.abort();
+                    return Ok(None);
+                }
+                todo!();
             }
         }
     }

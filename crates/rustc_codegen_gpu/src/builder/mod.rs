@@ -23,6 +23,7 @@ use rustc_codegen_ssa_gpu::traits::{
     BackendTypes, BaseTypeCodegenMethods, BuilderMethods, ConstCodegenMethods,
     LayoutTypeCodegenMethods, OverflowOp, StaticBuilderMethods,
 };
+use rustc_hir::LangItem;
 use rustc_span::Span;
 use tracing::{debug, trace, warn};
 
@@ -546,6 +547,19 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 let op = intrinsic::device_intrinsic(self, &name, args, self.cur_loc());
                 Ok(Some(op))
             }
+            GpuItem::Core(lang_item) => {
+                use rustc_codegen_ssa_gpu::traits::IntrinsicCallBuilderMethods;
+                // Not a builtin.
+                match lang_item {
+                    LangItem::PanicBoundsCheck => {
+                        self.abort();
+                        Ok(None)
+                    }
+                    _ => {
+                        todo!();
+                    }
+                }
+            }
         }
     }
 
@@ -862,11 +876,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
     }
 
     #[cfg(feature = "arith_immediate_bound_check")]
-    fn emit_llvm_volatile_and_load(
-        &mut self,
-        mask: mlir_ir::Value<'ml, 'a>,
-        ptr: mlir_ir::Value<'ml, 'a>,
-    ) {
+    fn emit_llvm_volatile_load(&mut self, ptr: mlir_ir::Value<'ml, 'a>) {
         // Only used by the bound check stuff
         let raw_ptr_op = melior::dialect::ods::memref::extract_aligned_pointer_as_index(
             self.mlir_ctx,
@@ -879,10 +889,9 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
 
         // And Ptr
         let llvm_raw_ptr_int = self.intcast(raw_ptr, self.type_i64(), false);
-        let llvm_raw_ptr_and = self.and(llvm_raw_ptr_int, mask);
 
         // Ptr to LLVM
-        let llvm_ptr = self.inttollvmptr(llvm_raw_ptr_and, self.type_llvm_ptr());
+        let llvm_ptr = self.inttollvmptr(llvm_raw_ptr_int, self.type_llvm_ptr());
 
         // LLVM store with volatile
         let llvm_store_op = melior::dialect::llvm::load(
@@ -1599,27 +1608,40 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         "Features `inplace_bound_check` and `arith_immediate_bound_check` are mutually exclusive"
     );
 
-    #[cfg(not(any(feature = "arith_immediate_bound_check", feature = "inplace_bound_check")))]
-    fn emit_bound_check(&mut self, idx: Self::Value, len: Self::Value, ptr: Self::Value) {}
+    #[cfg(not(any(
+        feature = "arith_immediate_bound_check",
+        feature = "inplace_bound_check",
+        feature = "trap_bound_check"
+    )))]
+    fn emit_bound_check(&mut self, idx: Self::Value, len: Self::Value, ptr: Self::Value) -> bool {
+        true
+    }
+
+    #[cfg(feature = "trap_bound_check")]
+    fn emit_bound_check(&mut self, idx: Self::Value, len: Self::Value, ptr: Self::Value) -> bool {
+        // trap-based bound check is handled by assert op.
+        false
+    }
 
     #[cfg(feature = "inplace_bound_check")]
-    fn emit_bound_check(&mut self, idx: Self::Value, len: Self::Value, ptr: Self::Value) {
+    fn emit_bound_check(&mut self, idx: Self::Value, len: Self::Value, ptr: Self::Value) -> bool {
         let cmp = self.icmp(rustc_codegen_ssa_gpu::common::IntPredicate::IntULT, idx, len);
         if let Some(valid_mem_access) = self.valid_mem_access.as_ref() {
             self.valid_mem_access = Some(self.and(*valid_mem_access, cmp));
         } else {
             self.valid_mem_access = Some(cmp);
         }
+        true
     }
 
     #[cfg(feature = "arith_immediate_bound_check")]
-    fn emit_bound_check(&mut self, idx: Self::Value, len: Self::Value, ptr: Self::Value) {
-        let one = self.mlir_const_val_from_type(1, self.type_i64(), self.cur_block());
-        let index_int = self.sub(idx, one);
-        let oob = self.sub(index_int, len);
-        let shift = self.emit_constant(63, self.type_i64());
-        let oob_flag = self.ashr(oob, shift);
-        self.emit_llvm_volatile_and_load(oob_flag, self.san_dummy.unwrap());
+    fn emit_bound_check(&mut self, idx: Self::Value, len: Self::Value, ptr: Self::Value) -> bool {
+        let cmp = self.icmp(rustc_codegen_ssa_gpu::common::IntPredicate::IntULT, idx, len);
+        let nullptr = self.inttoptr(self.const_value(0, self.type_index()), ptr.r#type());
+
+        let ptr = self.select(cmp, self.san_dummy.unwrap(), nullptr);
+        self.emit_llvm_volatile_load(ptr);
+        true
     }
 
     fn store(
@@ -1922,20 +1944,22 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             }
         };
         let lhs = normalized_value(lhs_ty, lhs);
-        let rhs = normalized_value(rhs_ty, rhs);
+        let mut rhs = normalized_value(rhs_ty, rhs);
 
-        let op = if lhs.r#type().is_index() {
-            melior::dialect::arith::cmpi(
-                self.mlir_ctx,
-                predicate,
-                lhs,
-                self.intcast(rhs, self.type_index(), false),
-                self.cur_loc(),
-            )
-        } else {
-            melior::dialect::arith::cmpi(self.mlir_ctx, predicate, lhs, rhs, self.cur_loc())
-        };
-        self.append_op_res(op)
+        let lhs_ty = lhs.r#type();
+        let rhs_ty = rhs.r#type();
+
+        if rhs_ty != lhs_ty {
+            rhs = self.intcast(rhs, lhs_ty, false);
+        }
+
+        self.append_op_res(melior::dialect::arith::cmpi(
+            self.mlir_ctx,
+            predicate,
+            lhs,
+            rhs,
+            self.cur_loc(),
+        ))
     }
 
     fn fcmp(

@@ -177,10 +177,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                     self.scalar_pair_element_backend_type(arg.layout, 1, true)
                 }
                 rustc_target::callconv::PassMode::Cast { pad_i32, cast } => {
-                    return Err(format!(
-                        "Does not support fn abi cast: {:?} pad_i32: {}",
-                        cast, pad_i32
-                    ));
+                    self.cast_to_mlir_type(cast)
                 }
                 rustc_target::callconv::PassMode::Indirect { attrs, meta_attrs, on_stack } => {
                     if is_kernel_entry {
@@ -238,7 +235,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         }
         let mut ret = vec![];
         if !abi.ret.layout.is_zst() {
-            match abi.ret.mode {
+            match &abi.ret.mode {
                 rustc_target::callconv::PassMode::Indirect { .. } => {
                     if is_kernel_entry {
                         return Err(
@@ -259,8 +256,8 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 rustc_target::callconv::PassMode::Ignore => {
                     debug!("Function return is ignored: {:?}", abi.ret.layout);
                 }
-                rustc_target::callconv::PassMode::Cast { .. } => {
-                    panic!("Function return is cast: {:?} for {:?}", abi.ret.layout, abi.ret.mode);
+                rustc_target::callconv::PassMode::Cast { box cast, .. } => {
+                    ret.extend(self.expand_type(self.cast_to_mlir_type(cast)));
                 }
             }
         }

@@ -2,7 +2,6 @@
 #![allow(clippy::too_many_arguments)]
 
 #[allow(non_upper_case_globals)]
-#[gpu_macros::shared_size]
 pub static shared_size_inner_product_kernel: usize = 0;
 
 /// # Safety

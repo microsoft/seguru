@@ -6,7 +6,6 @@ use gpu::GPUDeviceFloatIntrinsics;
 use gpu::{GpuChunkIdx, GpuSharedChunkIdx};
 
 #[allow(non_upper_case_globals)]
-#[gpu_macros::shared_size]
 pub static shared_size_kernel_arith: usize = 0;
 
 /// # Safety

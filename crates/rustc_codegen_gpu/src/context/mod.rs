@@ -39,7 +39,6 @@ pub(crate) struct GPUCodegenContext<'tcx, 'ml, 'a> {
     pub const_name_to_allocid: RwLock<HashMap<String, rustc_const_eval::interpret::AllocId>>,
     pub span_to_types: RwLock<HashMap<rustc_span::Span, mlir_ir::Type<'ml>>>,
     pub fn_shared_memory_size: RwLock<HashMap<String, usize>>,
-    pub expected_shared_memory_size: RwLock<HashMap<String, (rustc_span::Span, usize)>>,
     pub static_shared_count: AtomicUsize,
     pub tcx: rustc_middle::ty::TyCtxt<'tcx>,
 }
@@ -84,7 +83,6 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             const_name_to_allocid: RwLock::new(HashMap::new()),
             span_to_types: RwLock::new(HashMap::new()),
             fn_shared_memory_size: RwLock::new(HashMap::new()),
-            expected_shared_memory_size: RwLock::new(HashMap::new()),
             static_shared_count: AtomicUsize::new(0),
         }
     }

@@ -76,16 +76,3 @@ pub(crate) fn rewrite_gpu_code(
     }
     fun.to_token_stream().into()
 }
-
-pub(crate) fn rewrite_shared_size(input: TokenStream, is_gpu_code: bool) -> TokenStream {
-    if !is_gpu_code {
-        return input; // If not GPU code, return the original input
-    }
-    let mut static_def = syn::parse_macro_input!(input as syn::ItemStatic);
-
-    if !static_def.attrs.iter().any(|a| a.path().is_ident("gpu_codegen::shared_size")) {
-        static_def.attrs.push(parse_quote!(#[gpu_codegen::shared_size]));
-        static_def.attrs.push(parse_quote!(#[allow(non_upper_case_globals)]));
-    }
-    static_def.to_token_stream().into()
-}

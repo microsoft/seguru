@@ -3,36 +3,6 @@ use std::env;
 use std::path::PathBuf;
 use std::process::{Command, exit};
 
-fn extract_string_literal(line: &str) -> String {
-    line[line.find("\"").unwrap() + 1..line.len() - 10].to_string()
-}
-
-fn unescape_llvm_string(s: &str) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    let mut chars = s.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        if ch == '\\' {
-            // We expect two hex digits after '\'
-            let hi = chars.next().expect("Expected hex digit after \\");
-            if hi == '\\' {
-                // If we encounter another backslash, treat it as a literal backslash
-                bytes.push(b'\\');
-                continue;
-            }
-            let lo = chars.next().expect("Expected second hex digit after \\");
-            let hex_str = format!("{}{}", hi, lo);
-            let byte = u8::from_str_radix(&hex_str, 16)
-                .unwrap_or_else(|_| panic!("Invalid hex digits {}", hex_str));
-            bytes.push(byte);
-        } else {
-            // Normal ASCII char
-            bytes.push(ch as u8);
-        }
-    }
-    bytes
-}
-
 fn extract_ptx_check_patterns(file_path: &str) -> Vec<String> {
     let content = std::fs::read_to_string(file_path).expect("Failed to read source file");
 
@@ -62,41 +32,15 @@ fn extract_ptx_check_patterns(file_path: &str) -> Vec<String> {
         .collect()
 }
 
-fn check_ptx_in_llvm_file(rs_path: PathBuf, ll_path: PathBuf) {
-    let content = std::fs::read_to_string(&ll_path).expect("Failed to read .ll file");
-
-    let ptx_data = content
-        .lines()
-        .find(|line| line.contains("@gpu_bin_cst"))
-        .map(extract_string_literal)
-        .unwrap();
-    let bytes = unescape_llvm_string(&ptx_data);
-
-    assert!(ptx_data.contains(".version"));
-    assert!(ptx_data.contains(".target"));
-    let ptx_path = ll_path.with_extension("ptx");
-    std::fs::write(&ptx_path, bytes).expect("Failed to write PTX to file");
-    let output = Command::new("cuobjdump")
-        .arg("-ptx")
-        .arg(&ptx_path)
-        .output()
-        .map_err(|e| format!("Failed to run cuobjdump: {}", e))
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "cuobjdump failed with status: {:?}\nError: {}",
-        output.status,
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let ptx_str = String::from_utf8_lossy(&output.stdout).to_string();
-    std::fs::write(&ptx_path, &ptx_str).expect("Failed to write PTX to file");
+fn check_ptx_in_llvm_file(rs_path: PathBuf, ptx_path: PathBuf) {
+    let ptx_str = std::fs::read_to_string(&ptx_path).expect("Failed to read PTX file");
     let ptx_check_patterns = extract_ptx_check_patterns(rs_path.to_str().unwrap());
     for pattern in ptx_check_patterns {
         assert!(
             ptx_str.contains(&pattern),
             "PTX does not contain expected pattern `{}` in {:?}",
             pattern,
-            ll_path
+            ptx_path
         );
     }
 }
@@ -127,8 +71,9 @@ fn main() {
             check_file = Some(arg);
         }
     }
-    check_ptx_in_llvm_file(
-        PathBuf::from(&check_file.unwrap()),
-        PathBuf::from(&input_file.unwrap()),
-    );
+    let ptx_file = input_file
+        .as_ref()
+        .and_then(|f| f.strip_suffix(".ll").map(|s| format!("{}.ptx", s)))
+        .expect("Input file must have a .ll extension");
+    check_ptx_in_llvm_file(PathBuf::from(&check_file.unwrap()), PathBuf::from(&ptx_file));
 }

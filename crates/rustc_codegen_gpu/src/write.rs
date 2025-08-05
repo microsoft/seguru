@@ -10,7 +10,7 @@ pub(crate) fn codegen(
     cgcx: &CodegenContext<GPUCodegenBackend>,
     dcx: DiagCtxtHandle<'_>,
     module: ModuleCodegen<GPUCodeGenModule>,
-    _config: &ModuleConfig,
+    config: &ModuleConfig,
 ) -> Result<rustc_codegen_ssa_gpu::CompiledModule, rustc_errors::FatalError> {
     let mod_name = module.name.clone();
     let module_name = Some(&mod_name[..]);
@@ -41,6 +41,14 @@ pub(crate) fn codegen(
         mlir_compile::CompileConfig::default()
             .mlir_compile(&out, &out_object)
             .expect("Failed to compile MLIR to object file");
+
+        // When emit-llvmir, we also emit ptx code.
+        if config.emit_ir {
+            let ptx_file = cgcx.output_filenames.with_extension("ptx");
+            let tmp_ptx_file = out_object.with_extension("ptx");
+            std::fs::copy(&tmp_ptx_file, &ptx_file)
+                .expect("Failed to copy object file to ptx file");
+        }
         trace!("copy MLIR obj to {:?}", out_object);
         Some(out_object)
     } else {

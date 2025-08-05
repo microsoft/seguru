@@ -12,6 +12,10 @@ pub struct A {
 
 #[no_mangle]
 #[gpu_codegen::kernel]
-pub fn assign_struct(a: A, b: &mut A) { //~ ERROR Does not support fn abi cast
+pub unsafe fn assign_struct(a: A, b: &mut A) { //~ ERROR Does not support fn abi cast
     *b = a;
 }
+
+
+// CHECK: @gpu_bin_cst = internal constant
+// PTX_CHECK: .visible .entry assign_struct

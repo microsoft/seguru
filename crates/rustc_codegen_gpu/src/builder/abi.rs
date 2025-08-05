@@ -99,7 +99,7 @@ impl<'tcx, 'ml, 'a> ArgAbiBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
         }
         match arg_abi.mode {
             PassMode::Ignore => {}
-            PassMode::Direct(_) => {
+            PassMode::Direct(_) | PassMode::Cast { .. } => {
                 self.store_arg(arg_abi, next(self, idx), dst);
             }
             PassMode::Pair(..) => {
@@ -109,7 +109,7 @@ impl<'tcx, 'ml, 'a> ArgAbiBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
                 )
                 .store(self, dst);
             }
-            PassMode::Cast { .. } | PassMode::Indirect { .. } => {
+            PassMode::Indirect { .. } => {
                 panic!("query hooks should've made this `PassMode` impossible: {:#?}", arg_abi)
             }
         }

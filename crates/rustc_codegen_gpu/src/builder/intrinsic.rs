@@ -1,5 +1,6 @@
 use melior::dialect::ods::{arith as melior_arith, math as melior_math};
 use melior::ir::Value;
+use melior::ir::attribute::DenseI32ArrayAttribute;
 use rustc_codegen_ssa_gpu::traits::{BuilderMethods, IntrinsicCallBuilderMethods};
 use rustc_middle::ty::layout::HasTypingEnv;
 
@@ -146,7 +147,16 @@ impl<'tcx, 'ml, 'a> IntrinsicCallBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 
     }
 
     fn assume(&mut self, val: Self::Value) {
-        todo!()
+        self.append_op(
+            melior::dialect::ods::llvm::intr_assume(
+                self.mlir_ctx,
+                val,
+                &[],
+                DenseI32ArrayAttribute::new(self.mlir_ctx, &[]),
+                self.cur_loc(),
+            )
+            .into(),
+        );
     }
 
     fn expect(&mut self, cond: Self::Value, expected: bool) -> Self::Value {

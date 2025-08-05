@@ -14,7 +14,6 @@ pub fn inner_product_kernel(a: &[f32], b: &[f32], c: gpu::GpuChunkableMut2D<f32>
         + gpu::thread_id(gpu::DimType::Y);
     let mut c = c;
     let c_ref = &mut c;
-
     let mut i = 0;
     while i <= (n - 1) / gpu::dim(gpu::DimType::Y) {
         let mut col = gpu::block_id(gpu::DimType::X) * gpu::block_dim(gpu::DimType::X)
@@ -24,8 +23,9 @@ pub fn inner_product_kernel(a: &[f32], b: &[f32], c: gpu::GpuChunkableMut2D<f32>
             if row < n && col < n {
                 let mut sum = 0.0;
                 let mut k = 0;
+                let aa = &a[row * n..row * n + n];
                 while k < n {
-                    sum += a[row * n + k] * b[k * n + col];
+                    sum += aa[k] * b[k * n + col];
                     k += 1;
                 }
 

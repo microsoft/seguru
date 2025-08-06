@@ -265,8 +265,6 @@ pub(crate) fn extract_strided_metadata_results<'ml: 'a, 'a>(
     memref_ty: MemRefType<'ml>,
     op: melior::ir::OperationRef<'ml, 'a>,
 ) -> StridedMetaDataResults<'ml, 'a> {
-    let layout = crate::mlir::attr::StridedLayoutAttribute::try_from(memref_ty.layout())
-        .expect("expect strided layout attribute");
     let get_metadata = |i: usize| Value::<'ml, 'a>::from(op.result(i).unwrap());
     let base_memref: Value<'ml, 'a> = get_metadata(0); // this is memref<i8> and need to be casted to memref<1xi8>
     let byte_offset: Value<'ml, 'a> = get_metadata(1);
@@ -283,15 +281,19 @@ pub(crate) fn extract_strided_metadata_results<'ml: 'a, 'a>(
             sizes.push(s.into());
         }
     }
+
     let mut strides: Vec<StaticOrDynamic<'ml, 'a>> = vec![];
-    layout.get_strides().iter().for_each(|s| {
-        let val = *s;
-        if val == crate::mlir::memref::dynamic_stride_offset() {
-            strides.push(get_metadata(meta_data_index).into());
-            meta_data_index += 1;
-        } else {
-            strides.push(val.into());
-        }
-    });
+    if let Ok(layout) = crate::mlir::attr::StridedLayoutAttribute::try_from(memref_ty.layout()) {
+        layout.get_strides().iter().for_each(|s| {
+            let val = *s;
+            if val == crate::mlir::memref::dynamic_stride_offset() {
+                strides.push(get_metadata(meta_data_index).into());
+                meta_data_index += 1;
+            } else {
+                strides.push(val.into());
+            }
+        });
+    }
+
     StridedMetaDataResults { base_memref, byte_offset, sizes, strides }
 }

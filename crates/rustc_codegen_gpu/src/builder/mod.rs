@@ -30,7 +30,9 @@ use tracing::{debug, trace, warn};
 use crate::attr::GpuItem;
 use crate::context::GPUCodegenContext;
 use crate::mlir::gpu::{DimFn, NonDimFn, all_reduce, subgroup_reduce};
-use crate::mlir::memref::{extract_strided_metadata, extract_strided_metadata_results};
+use crate::mlir::memref::{
+    StridedMetaDataResults, extract_strided_metadata, extract_strided_metadata_results,
+};
 use crate::mlir::{BUILTIN_SYM, BlockRefWithTime, MLIROpHelpers, ValueToOpRef};
 use crate::rustc_middle::ty::layout::LayoutOf;
 
@@ -740,6 +742,17 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         }
     }
 
+    pub fn extract_strided_metadata(
+        &mut self,
+        val: melior::ir::Value<'ml, 'a>,
+    ) -> StridedMetaDataResults<'ml, 'a> {
+        let ty = val.r#type();
+        let op = extract_strided_metadata(self.cx.mlir_ctx, val, self.cur_loc());
+        let op = self.append_op(op.into());
+        let results = extract_strided_metadata_results(ty.try_into().unwrap(), op);
+        results
+    }
+
     pub fn mlir_memref_view(
         &mut self,
         val: melior::ir::Value<'ml, 'a>,
@@ -766,9 +779,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             Ok(layout) if layout.get_offset() != 0 => {
                 // view cannot work on offset !=0;
                 warn!("mlir_memref_view with offset != 0 casting {} to {}", val, dst_ty);
-                let op = extract_strided_metadata(self.cx.mlir_ctx, val, self.cur_loc());
-                let op = self.append_op(op.into());
-                let results = extract_strided_metadata_results(memref_ty, op);
+                let results = self.extract_strided_metadata(val);
                 let element_ty = self.mlir_element_type(ty);
 
                 if element_ty != self.type_i8() {
@@ -1808,18 +1819,19 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         if val == self.const_null(val.r#type()) {
             return self.const_value(0, dest_ty);
         }
-
-        let ty = val.r#type();
-        let ret = self.append_op_res(
+        let results = self.extract_strided_metadata(val);
+        let base_ptr = self.append_op_res(
             melior::dialect::ods::memref::extract_aligned_pointer_as_index(
                 self.mlir_ctx,
                 self.type_index(),
-                val,
+                results.base_memref,
                 self.cur_loc(),
             )
             .into(),
         );
-        self.intcast(ret, dest_ty, false)
+        let base = self.intcast(base_ptr, dest_ty, false);
+        let offset = self.intcast(results.byte_offset, dest_ty, false);
+        self.add(base, offset)
     }
 
     fn inttoptr(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {

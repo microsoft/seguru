@@ -1,113 +1,60 @@
-# A trial to build safe CPU-GPU programming in Rust
+# Safe GPU Programming via Rust
 
-## Build and Run
+## Building the toolchain
 
-### Dependencies to build
+Currently, the project has been tested on Rust `1.87.0-nightly (3f5502370 2025-03-27)`. It'll likely work with a newer version of Rust.
 
-Somehow the `melior` lib works well with llvm lib installed via homebrew but not the default one via `apt install`. This might be due to configuration differences. Install Homebrew:
+### Install LLVM 20.1.8+
 
-```
+This project requires MLIR which is not yet stable and is under constant evolving. We need at lest LLVM 20.1.8 which unfortunately Ubuntu's APT has yet to catch up. The quickest way to get it is through Homebrew. Install Homebrew via
+
+```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)
 ```
 
 Then install LLVM@20 via 
-```
+```bash
 brew install llvm@20
 ```
 
-### Build codegen backend
+### Build the toolchain
 
-You SHOULD use the Homebrew's LLVM to compile the codegen backend.
+Remember to put the Homebrew LLVM in the `PATH`:
 
 ```bash
 export PATH=`brew --prefix llvm@20`\bin:$PATH
 export LD_LIBRARY_PATH=`brew --prefix`/lib:`brew --prefix llvm@20`\bin:$LD_LIBRARY_PATH
-cd crates/rustc_codegen_gpu
-LLVM_CONFIG="/home/linuxbrew/.linuxbrew/opt/llvm/bin/llvm-config" REAL_LIBRARY_PATH_VAR="$LD_LIBRARY_PATH" CFG_RELEASE_CHANNEL=1.86.0 CFG_RELEASE=1.86.0 RUSTC_BOOTSTRAP=1 cargo build --release
 ```
 
-### Prepare to Run
-
-To run the codegen, you need a custom build of LLVM project. Only 20.1.5 has been tested. CUDA directory must be specified otherwise won't build. Also note that you may want to add the following two lines to `llvm-project/mlir/tools/mlir-shlib/CMakeLists.txt` or it may report compilation error for not linking to the NVIDIA libraries.
-
-```
-  target_link_libraries(MLIR PRIVATE MLIR_NVFATBIN_LIB)
-  target_link_libraries(MLIR PRIVATE MLIR_NVPTXCOMPILER_LIB)
-```
-
-Clone, configure and build:
-
-```
-git clone -b llvm-20.1.5 --depth=1 https://github.com/llvm/llvm-project
-cd llvm-project/
-mkdir build
-cd build
-cmake -G Ninja ../llvm \
-   -DLLVM_ENABLE_PROJECTS="clang;polly;mlir" \
-   -DLLVM_BUILD_EXAMPLES=ON \
-   -DLLVM_TARGETS_TO_BUILD="Native;NVPTX;AMDGPU" \
-   -DCMAKE_BUILD_TYPE=Release \
-   -DLLVM_ENABLE_ASSERTIONS=ON \
-   -DMLIR_ENABLE_CUDA_RUNNER=ON \
-   -DMLIR_ENABLE_CUDA_CONVERSIONS=ON \
-   -DMLIR_ENABLE_NVPTXCOMPILER=ON \
-   -DNVPTX_COMPILER_INCLUDE_DIR=/usr/local/cuda/targets/x86_64-linux/include/ \
-   -DNVPTX_COMPILER_LIB_DIR=/usr/local/cuda/targets/x86_64-linux/lib \
-   -DCUDACXX=/usr/local/cuda/bin/nvcc \
-   -DCUDA_PATH=/usr/local/cuda \
-   -DCUDAToolkit_ROOT=/usr/local/cuda \
-   -DCUDAToolkit_LIBRARY_ROOT=/usr/local/cuda \
-   -DCUDAToolkit_LIBRARY_DIR=/usr/local/cuda/lib64 \
-   -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc \
-   -DMLIR_ENABLE_C_BINDINGS=ON \
-   -DLINK_POLLY_INTO_TOOLS=ON \
-   -DCMAKE_INSTALL_PREFIX=../../llvm-install \
-   -DLLVM_LINK_LLVM_DYLIB=ON
-ninja
-ninja install
-```
-
-### Run
-
-Now use your LLVM as the compiler driver.
-
-```
-export PATH=`realpath ../../llvm-install/bin`:$PATH
-export LD_LIBRARY_PATH=`realpath ../../llvm-install/lib`:$LD_LIBRARY_PATH
-```
-
-Compile your GPU code.
+Build the toolchain:
 
 ```bash
-cd examples/gpu-test-basic
-RUST_LOG=trace RUSTFLAGS="-Zcodegen-backend=`realpath ../../crates/target/debug/librustc_codegen_gpu.so`" cargo build
+cd crates
+cargo build
 ```
 
-You will find target/debug/deps/gpu-xxx.o and it includes a cubin binary in `gpu_bin_cst` symbol.
+## Build GPU apps
 
-The code could be launched by mlir-examples/wrapper.cu.
+### Run examples
 
-### Run with external non-GPU crates
-
-For example, a procedure macro lib should be compiled with standard rust codegen instead of by our gpu codegen. Thus, we need to selectively call our codegen only for the crates for GPU. To do that, `rustc-gpu` is used as a rustc wrapper so that we can pass the GPU_CODEGEN and GPU_TARGETS env variables to tell the rustc wrapper that we only use GPU_CODEGEN when the crate is in GPU_TARGETS. For example,
+There are a few examples under the path `examples`. To run, enter the **host** folder of the corresponding example and do
 
 ```bash
-GPU_CODEGEN=`realpath ../../crates/target/debug/librustc_codegen_gpu.so` RUSTC=`realpath ../../crates/target/debug/rustc-gpu` GPU_TARGETS="gpu-test" cargo build
+cargo run --release
 ```
 
-### Tests
+### Manually test the MLIR generated
 
-Small examples could be found in `rustc_codegen_gpu/tests/codegen/*.rs`.
+While this is not intended for the end user of this project but if you encountered MLIR issue, there's also an `mlir-examples` directory. You can find your MLIR under
 
-`cargo test` for rustc_codegen_gpu will compile them and check both LLVM IR and PTX codes. The generated outputs are under `target/$profile/tests/codegen/`
+```
+examples/target/release/deps/xxx.mir
+```
 
-
-### Examples
-
-Complicated examples are located under `examples/`
-
-To run those examples, directly run `cargo build`. With our .cargo/config.toml, it is equivalent to
+Copy that MLIR content to the `mlir-examples/hello_mlir.mlir` and do
 
 ```bash
-RUST_LOG=trace GPU_CODEGEN=`realpath ../../crates/target/debug/librustc_codegen_gpu.so` RUSTC=`realpath ../../crates/target/debug/rustc-gpu` GPU_TARGETS="manual-test-gpu-arith,gpu-test-arith-basic" RUSTFLAGS="--emit mir" cargo build --release
+make hello
 ```
+
+This allows you to play with the MLIR file.

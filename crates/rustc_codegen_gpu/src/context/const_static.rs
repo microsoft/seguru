@@ -239,7 +239,7 @@ impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
         &self,
         alloc: rustc_const_eval::interpret::ConstAllocation<'_>,
     ) -> Self::Value {
-        todo!();
+        self.const_data_memref_from_alloc(alloc, "const_data_from_alloc")
     }
 
     fn scalar_to_backend(

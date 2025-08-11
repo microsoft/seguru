@@ -620,20 +620,6 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         ))
         .unwrap();
         // base_ty is always i8
-        let ptr = if ty != base_ty {
-            let size = self.static_size_of(ty);
-            let base_size = self.static_size_of(base_ty);
-            if size % base_size != 0 {
-                warn!(
-                    "inbounds_gep_op: size {} is not a multiple of base size {} for type {:?}",
-                    size, base_size, ty
-                );
-            }
-            assert!(size % base_size == 0);
-            self.mlir_memref_view(ptr, target_memref_ty.into(), None)
-        } else {
-            ptr
-        };
         // size on the first stride represents the element size
         let mut sizes = vec![(self.static_size_of(ty) as i64).into()];
         let mut strides = vec![1.into()];
@@ -1903,15 +1889,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn pointercast(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
-        if val.r#type().is_llvm_pointer_type() {
-            self.append_op_res(
-                melior::dialect::ods::llvm::ptrtoint(self.mlir_ctx, dest_ty, val, self.cur_loc())
-                    .into(),
-            )
-        } else {
-            // TODO: Likely wanting an i8 ptr here
-            self.mlir_memref_view(val, dest_ty, None)
-        }
+        val
     }
 
     fn icmp(

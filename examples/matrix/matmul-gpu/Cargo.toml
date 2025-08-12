@@ -6,3 +6,9 @@ edition = "2021"
 [dependencies]
 gpu = {workspace = true}
 gpu_macros = {workspace = true}
+
+[features]
+default = ["v1"]
+v1 = []
+v2 = []
+v3 = []

@@ -558,6 +558,10 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                         self.abort();
                         Ok(None)
                     }
+                    LangItem::PanicNounwind => {
+                        self.abort();
+                        Ok(None)
+                    }
                     _ => {
                         todo!();
                     }

@@ -92,6 +92,7 @@ impl CompileConfig {
             convert-nvvm-to-llvm,\
             convert-func-to-llvm,\
             expand-strided-metadata,\
+            mem2reg,\
             nvvm-attach-target{{triple=nvptx64-nvidia-cuda chip={} features={} O={}}},\
             lower-affine,\
             convert-arith-to-llvm,\

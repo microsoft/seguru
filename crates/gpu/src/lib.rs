@@ -13,6 +13,7 @@ pub mod cg;
 mod chunk;
 mod device_intrinsic;
 mod dim;
+pub mod iter;
 mod print;
 mod shared;
 mod thread;

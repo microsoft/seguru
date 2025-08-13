@@ -33,8 +33,8 @@ pub use shared::{DynamicSharedAlloc, GpuShared};
 pub use thread::{GpuChunksMut, scope, sync_threads};
 
 #[inline(never)]
-#[gpu_codegen::builtin(gpu.build_sfi)]
 #[rustc_diagnostic_item = "gpu::build_sfi"]
+#[gpu_codegen::device]
 pub fn build_sfi(_size: usize, _offset: usize) {
     unimplemented!()
 }

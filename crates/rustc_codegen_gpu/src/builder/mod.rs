@@ -11,11 +11,11 @@ use std::ops::Deref;
 use melior::dialect::memref as mlir_memref;
 use melior::helpers::BuiltinBlockExt;
 use melior::ir::attribute::{IntegerAttribute, StringAttribute};
-use melior::ir::operation::OperationLike;
+use melior::ir::operation::{OperationLike, OperationMutLike};
 use melior::ir::r#type::{self as mlir_type, FunctionType, MemRefType};
 use melior::ir::{
-    self as mlir_ir, BlockLike, Location, RegionLike, RegionRef, ShapedTypeLike, TypeLike, Value,
-    ValueLike,
+    self as mlir_ir, Attribute, BlockLike, Location, RegionLike, RegionRef, ShapedTypeLike,
+    TypeLike, Value, ValueLike,
 };
 use rustc_abi::BackendRepr;
 use rustc_codegen_ssa_gpu::mir::operand::{OperandRef, OperandValue};
@@ -827,6 +827,15 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         self.append_op_res(op)
     }
 
+    #[inline]
+    fn append_fast_op_res(&self, mut op: mlir_ir::Operation<'ml>) -> mlir_ir::Value<'ml, 'a> {
+        op.set_attribute(
+            "fastmath",
+            Attribute::parse(self.mlir_ctx, "#arith.fastmath<fast>").unwrap(),
+        );
+        self.append_op_res(op)
+    }
+
     fn append_op_res(&self, op: mlir_ir::Operation<'ml>) -> mlir_ir::Value<'ml, 'a> {
         trace!("append_op_res: {:?}", op);
         self.cur_block().append_op_result(op).unwrap()
@@ -1228,7 +1237,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
 
     fn fadd(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
         let op = melior::dialect::arith::addf(lhs, rhs, self.cur_loc());
-        self.append_op_res(op)
+        self.append_fast_op_res(op)
     }
 
     // Do we even handle this?
@@ -1250,7 +1259,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
 
     fn fsub(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
         let op = melior::dialect::arith::subf(lhs, rhs, self.cur_loc());
-        self.append_op_res(op)
+        self.append_fast_op_res(op)
     }
 
     fn fsub_fast(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
@@ -1272,7 +1281,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
 
     fn fmul(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
         let op = melior::dialect::arith::mulf(lhs, rhs, self.cur_loc());
-        self.append_op_res(op)
+        self.append_fast_op_res(op)
     }
 
     fn fmul_fast(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
@@ -1303,7 +1312,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
 
     fn fdiv(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
         let op = melior::dialect::arith::divf(lhs, rhs, self.cur_loc());
-        self.append_op_res(op)
+        self.append_fast_op_res(op)
     }
 
     fn fdiv_fast(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
@@ -1326,7 +1335,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
 
     fn frem(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
         let op = melior::dialect::arith::remf(lhs, rhs, self.cur_loc());
-        self.append_op_res(op)
+        self.append_fast_op_res(op)
     }
 
     fn frem_fast(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
@@ -1379,7 +1388,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
 
     fn fneg(&mut self, v: Self::Value) -> Self::Value {
         let op = melior::dialect::arith::negf(v, self.cur_loc());
-        self.append_op_res(op)
+        self.append_fast_op_res(op)
     }
 
     fn not(&mut self, v: Self::Value) -> Self::Value {
@@ -2050,7 +2059,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             self.use_value(rhs),
             self.cur_loc(),
         );
-        self.append_op_res(op)
+        self.append_fast_op_res(op)
     }
 
     fn memcpy(

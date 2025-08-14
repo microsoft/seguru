@@ -93,12 +93,13 @@ impl CompileConfig {
             convert-func-to-llvm,\
             expand-strided-metadata,\
             mem2reg,\
-            nvvm-attach-target{{triple=nvptx64-nvidia-cuda chip={} features={} O={}}},\
+            nvvm-attach-target{{triple=nvptx64-nvidia-cuda fast ftz chip={} features={} O={}}},\
             lower-affine,\
             convert-arith-to-llvm,\
             convert-index-to-llvm{{index-bitwidth=64}},\
             canonicalize,\
             cse,\
+            symbol-dce,\
             reconcile-unrealized-casts,\
             gpu.module(\
                 convert-gpu-to-nvvm{{has-redux=1 use-bare-ptr-memref-call-conv=1}},\

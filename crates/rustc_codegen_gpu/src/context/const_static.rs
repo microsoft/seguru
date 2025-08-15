@@ -1,5 +1,7 @@
 use melior::dialect::memref as mlir_memref;
 use melior::helpers::ArithBlockExt;
+use melior::ir::attribute::StringAttribute;
+use melior::ir::operation::OperationMutLike;
 use melior::ir::{self as mlir_ir, BlockLike, Location, r#type as mlir_type};
 use rustc_abi::Size;
 use rustc_codegen_ssa_gpu::traits::{
@@ -15,6 +17,14 @@ fn get_alloc_name(alloc_id: rustc_const_eval::interpret::AllocId) -> String {
 }
 
 impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
+    fn append_op_outside(
+        &self,
+        mut op: mlir_ir::Operation<'ml>,
+        to_remove_hint: &str,
+    ) -> mlir_ir::OperationRef<'ml, 'a> {
+        op.set_attribute("to_remove", StringAttribute::new(self.mlir_ctx, to_remove_hint).into());
+        self.mlir_body(true).append_operation(op)
+    }
     pub(crate) fn mlir_const_val_from_type(
         &self,
         i: impl std::fmt::Display,
@@ -272,7 +282,13 @@ impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
     }
 
     fn const_ptr_byte_offset(&self, val: Self::Value, offset: rustc_abi::Size) -> Self::Value {
-        todo!()
+        let op = crate::mlir::poison::const_ptr_offset(
+            self.mlir_ctx,
+            val,
+            offset.bytes() as usize,
+            self.unknown_loc(),
+        );
+        self.append_op_outside(op, "const_offset").result(0).unwrap().into()
     }
 }
 
@@ -283,7 +299,7 @@ impl<'tcx, 'ml, 'a> StaticCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
         align: rustc_abi::Align,
         kind: Option<&str>,
     ) -> Self::Value {
-        todo!()
+        cv
     }
 
     fn codegen_static(&self, def_id: rustc_hir::def_id::DefId) {

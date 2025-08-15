@@ -21,6 +21,33 @@ pub fn const_poison<'ml>(
         .expect("valid operation")
 }
 
+pub fn const_ptr_offset<'ml, 'a>(
+    mlir_ctx: &'ml crate::mlir::Context,
+    value: Value<'ml, 'a>,
+    bytes_offset: usize,
+    location: melior::ir::Location<'ml>,
+) -> Operation<'ml> {
+    OperationBuilder::new("poison.const_offset", location)
+        .add_attributes(&[
+            (
+                Identifier::new(mlir_ctx, "to_remove"),
+                StringAttribute::new(mlir_ctx, "poison").into(),
+            ),
+            (
+                Identifier::new(mlir_ctx, "offset"),
+                IntegerAttribute::new(
+                    Type::from(IntegerType::new(mlir_ctx, 64)),
+                    bytes_offset as i64,
+                )
+                .into(),
+            ),
+        ])
+        .add_operands(&[value])
+        .add_results(&[value.r#type()])
+        .build()
+        .expect("valid operation")
+}
+
 /// insert_value is always used after const_poison in immediate_or_packed_pair at rustc_codegen_ssa/src/mir/operand.rs
 /// so it is safe to assume that the decoded value is always a tuple and all fields are inserted by insert_value.
 pub fn insert_value<'ml, 'a>(

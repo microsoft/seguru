@@ -10,7 +10,7 @@ use std::ops::Deref;
 
 use melior::dialect::memref as mlir_memref;
 use melior::helpers::BuiltinBlockExt;
-use melior::ir::attribute::StringAttribute;
+use melior::ir::attribute::{IntegerAttribute, StringAttribute};
 use melior::ir::operation::OperationLike;
 use melior::ir::r#type::{self as mlir_type, FunctionType, MemRefType};
 use melior::ir::{
@@ -706,6 +706,19 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         } else if let Ok(op) = val.is_from_op(Some("memref.get_global")) {
             let op = self.append_op((op).clone());
             op.result(0).unwrap().into()
+        } else if let Ok(op) = val.is_from_op(Some("poison.const_offset")) {
+            let ptr: Value<'ml, 'a> = op.operand(0).unwrap();
+            let offset: IntegerAttribute = op.attribute("offset").unwrap().try_into().unwrap();
+            let ptr = self.use_value(ptr);
+            self.append_op_res(crate::mlir::memref::subview(
+                self.mlir_ctx,
+                self.type_i8(),
+                ptr,
+                &[offset.value().into()],
+                &[1.into()],
+                &[1.into()],
+                self.unknown_loc(),
+            ))
         } else {
             val
         }
@@ -1509,18 +1522,19 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             return OperandRef::zero_sized(place.layout);
         }
 
+        let llval = self.use_value(place.val.llval);
+
         let val = if place.val.llextra.is_some() {
             OperandValue::Ref(place.val)
         } else if self.cx.is_backend_immediate(place.layout) {
-            let llval =
-                self.load(self.mlir_type(place.layout, true), place.val.llval, place.val.align);
+            let llval = self.load(self.mlir_type(place.layout, true), llval, place.val.align);
             OperandValue::Immediate(llval)
         } else if let BackendRepr::ScalarPair(a, b) = place.layout.backend_repr {
             let b_offset = a.primitive().size(self).align_to(b.primitive().align(self).abi);
 
             let mut load = |i, scalar: rustc_abi::Scalar, align| {
                 let base_ty = self.scalar_pair_element_backend_type(place.layout, i, false);
-                let ptr = place.val.llval;
+                let ptr = llval;
                 let offset = if i == 0 {
                     None
                 } else {

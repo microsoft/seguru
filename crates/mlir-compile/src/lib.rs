@@ -9,6 +9,8 @@ pub struct CompileConfig {
     pub cubin_chip: String,
     pub cubin_features: String,
     pub gpu_sym: String,
+    pub use_fast: bool,
+    pub use_ftz: bool,
 }
 
 impl Default for CompileConfig {
@@ -18,6 +20,8 @@ impl Default for CompileConfig {
             cubin_chip: "sm_80".to_string(),
             cubin_features: "+ptx80".to_string(),
             gpu_sym: "gpu_bin_cst".to_string(),
+            use_fast: true,
+            use_ftz: true,
         }
     }
 }
@@ -93,13 +97,12 @@ impl CompileConfig {
             convert-func-to-llvm,\
             expand-strided-metadata,\
             mem2reg,\
-            nvvm-attach-target{{triple=nvptx64-nvidia-cuda fast ftz chip={} features={} O={}}},\
+            nvvm-attach-target{{triple=nvptx64-nvidia-cuda {} {} chip={} features={} O={}}},\
             lower-affine,\
             convert-arith-to-llvm,\
             convert-index-to-llvm{{index-bitwidth=64}},\
             canonicalize,\
             cse,\
-            symbol-dce,\
             reconcile-unrealized-casts,\
             gpu.module(\
                 convert-gpu-to-nvvm{{has-redux=1 use-bare-ptr-memref-call-conv=1}},\
@@ -109,6 +112,8 @@ impl CompileConfig {
             gpu-module-to-binary{{l={}}},\
             convert-math-to-llvm,\
             reconcile-unrealized-casts, canonicalize,cse)'",
+            if self.use_fast { "fast" } else { "" },
+            if self.use_ftz { "ftz" } else { "" },
             self.cubin_chip,
             self.cubin_features,
             self.opt_level,

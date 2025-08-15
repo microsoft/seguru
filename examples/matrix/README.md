@@ -1,10 +1,11 @@
 ### Matrix Multiply
 
-### Baseline: inner_product_kernel(v1) + no-bound-check
+### Runtime costs
 
 | Setup arg(2048, 16)           | Time(s)       |Relative overhead|
 |-------------------------------|---------------|--------|
 |v1 + no-bound-check	        |1.557330589    |baseline|
+|v1 + no-bound-check + fastmath |1.544111987    |--      |
 |v1 + select-bound-check	    |1.574405571	|1%      |
 |v1 + if-else-trap-bound-check	|6.143659647	|294%    |
 |v1 + arith-immed-bound-check	|4.360865864	|180%    |

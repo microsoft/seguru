@@ -3,15 +3,13 @@
 
 #include <cuda_runtime.h>
 
-#define BLOCK_SIZE      1
+__global__ void innerProductKernel(float *A, int64_t a_len, float *B, int64_t b_len, float *C, int64_t c_len, int64_t c_w, int64_t N) {
+    int64_t row = blockIdx.y * blockDim.y + threadIdx.y;
+    int64_t i, j;
 
-__global__ void innerProductKernel(float *A, float *B, float *C, int N) {
-    int row = blockIdx.y * blockDim.y + threadIdx.y;
-    int i, j;
-
-    for (i = 0; i < N / BLOCK_SIZE / blockDim.y; i++) {
-        int col = blockIdx.x * blockDim.x + threadIdx.x;
-        for (j = 0; j < N / BLOCK_SIZE / blockDim.x; j++) {
+    for (i = 0; i < (N - 1) / (blockDim.y * gridDim.y) + 1; i++) {
+        int64_t col = blockIdx.x * blockDim.x + threadIdx.x;
+        for (j = 0; j < (N - 1) / (blockDim.x * gridDim.x) + 1; j++) {
             if(row < N && col < N) {
                 float sum = 0;
                 int64_t a_idx = row * N;
@@ -23,9 +21,9 @@ __global__ void innerProductKernel(float *A, float *B, float *C, int N) {
                 }
                 C[row * N + col] = sum;
             }
-            col += BLOCK_SIZE * blockDim.x;
+            col += blockDim.x * gridDim.x;
         }
-        row += BLOCK_SIZE * blockDim.y;
+        row += blockDim.y * gridDim.y;
     }
 }
 
@@ -43,10 +41,23 @@ void timespec_diff(struct timespec *start, struct timespec *stop,
     return;
 }
 
+void cpu_inner_product(const float *A, const float *B, float *C, int N) {
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < N; j++) {
+            float sum = 0.0;
+            for (int k = 0; k < N; k++) {
+                sum += A[i * N + k] * B[k * N + j];
+            }
+            C[i * N + j] = sum;
+        }
+    }
+}
+
 int main(int argc, char **argv) {
-    int N = 1024;
+    int64_t N = 1024;
     int THREAD_SIZE = 16;
-    float *A, *B, *C;
+    int BLOCK_SIZE = 1;
+    float *A, *B, *C, *D;
     float *d_A, *d_B, *d_C;
     int cudaErrorCode;
 
@@ -57,11 +68,16 @@ int main(int argc, char **argv) {
         if (argc > 2) {
             THREAD_SIZE = atoi(argv[2]);
         }
+
+        if (argc > 3) {
+            BLOCK_SIZE = atoi(argv[3]);
+        }
     }
 
     A = (float *)malloc(N * N * sizeof(float));
     B = (float *)malloc(N * N * sizeof(float));
     C = (float *)malloc(N * N * sizeof(float));
+    D = (float *)malloc(N * N * sizeof(float));
 
     // Initialize matrices A and B here
 
@@ -92,7 +108,7 @@ int main(int argc, char **argv) {
     printf("Now starting kernel...\n");
     clock_gettime(CLOCK_MONOTONIC, &ts1);
     
-    innerProductKernel<<<blocksPerGrid, threadsPerBlock>>>(d_A, d_B, d_C, N);
+    innerProductKernel<<<blocksPerGrid, threadsPerBlock>>>(d_A, N, d_B, N, d_C, N, 1, N);
     cudaDeviceSynchronize();
     
     clock_gettime(CLOCK_MONOTONIC, &ts2);
@@ -109,6 +125,17 @@ int main(int argc, char **argv) {
     cudaFree(d_A);
     cudaFree(d_B);
     cudaFree(d_C);
+
+    cpu_inner_product(A, B, D, N);
+
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < N; j++) {
+            if (C[i * N + j] != D[i * N + j]) {
+                printf("Mismatch at (%d, %d): GPU = %f, CPU = %f\n",
+                       i, j, C[i * N + j], D[i * N + j]);
+            }
+        }
+    }
 
     free(A);
     free(B);

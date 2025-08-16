@@ -17,6 +17,16 @@ fn get_alloc_name(alloc_id: rustc_const_eval::interpret::AllocId) -> String {
 }
 
 impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
+    fn get_name_by_alloc(
+        &self,
+        alloc: &rustc_const_eval::interpret::ConstAllocation<'_>,
+    ) -> String {
+        format!(
+            "const_alloc_{:?}",
+            self.const_alloc_count_no_id.load(std::sync::atomic::Ordering::SeqCst)
+        )
+    }
+
     fn append_op_outside(
         &self,
         mut op: mlir_ir::Operation<'ml>,
@@ -249,7 +259,9 @@ impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
         &self,
         alloc: rustc_const_eval::interpret::ConstAllocation<'_>,
     ) -> Self::Value {
-        self.const_data_memref_from_alloc(alloc, "const_data_from_alloc")
+        let ret = self.const_data_memref_from_alloc(alloc, &self.get_name_by_alloc(&alloc));
+        self.const_alloc_count_no_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        ret
     }
 
     fn scalar_to_backend(

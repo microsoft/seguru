@@ -1,6 +1,7 @@
 use std::any::Any;
 use std::sync::Arc;
 
+use mlir_compile::CompileConfig;
 use rustc_codegen_ssa_gpu::traits::{CodegenBackend, ExtraBackendMethods, WriteBackendMethods};
 use rustc_codegen_ssa_gpu::{CodegenResults, ModuleCodegen};
 use rustc_data_structures::fx::FxIndexMap;
@@ -264,7 +265,7 @@ impl CodegenBackend for GPUCodegenBackend {
         &self,
         ongoing_codegen: Box<dyn Any>,
         sess: &rustc_session::Session,
-        _outputs: &rustc_session::config::OutputFilenames,
+        outputs: &rustc_session::config::OutputFilenames,
     ) -> (CodegenResults, FxIndexMap<WorkProductId, WorkProduct>) {
         eprintln!("join_codegen");
         let (codegen_results, work_products) = ongoing_codegen
@@ -272,6 +273,25 @@ impl CodegenBackend for GPUCodegenBackend {
             .expect("Expected OngoingCodegen, found Box<Any>")
             .join(sess);
         eprintln!("join_codegen");
+        let mut bytecode_paths = vec![];
+        for module in &codegen_results.modules {
+            let Some(object_path) = &module.object else { continue };
+            let bytecode_path = object_path.with_extension("gpu.bc");
+            if bytecode_path.exists() {
+                bytecode_paths.push(bytecode_path.clone());
+            }
+        }
+        let mlir_compile_config = CompileConfig::new();
+        let bc_file = outputs.with_extension("gpu.bc");
+        let bc_lib_file = bc_file
+            .parent()
+            .unwrap()
+            .join(format!("lib{}", bc_file.file_name().unwrap().to_str().unwrap()));
+        if !bytecode_paths.is_empty() {
+            mlir_compile_config
+                .llvm_link(&bytecode_paths, &bc_lib_file)
+                .expect("failed to link bc");
+        }
         (codegen_results, work_products)
     }
 

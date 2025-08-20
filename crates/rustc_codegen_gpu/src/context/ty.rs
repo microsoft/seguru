@@ -532,7 +532,7 @@ impl<'tcx, 'ml, 'a> LayoutTypeCodegenMethods<'tcx> for GPUCodegenContext<'tcx, '
         &self,
         fn_abi: &rustc_target::callconv::FnAbi<'tcx, rustc_middle::ty::Ty<'tcx>>,
     ) -> Self::Type {
-        todo!()
+        self.fn_abi_to_fn_type(fn_abi, false, false).unwrap().0.into()
     }
 
     fn reg_backend_type(&self, ty: &rustc_abi::Reg) -> Self::Type {

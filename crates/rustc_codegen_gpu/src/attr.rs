@@ -209,22 +209,30 @@ fn ret_sync_data() -> Symbol {
 }
 
 impl GpuAttributes {
+    pub fn callee_device() -> Self {
+        GpuAttributes { device: true, ..GpuAttributes::default() }
+    }
+
     pub fn build(tcx: &rustc_middle::ty::TyCtxt<'_>, def_id: DefId) -> GpuAttributes {
         let attrs = tcx.get_attrs_unchecked(def_id);
         let mut gpu_attr = GpuAttributes::parse(attrs);
         if tcx.crate_name(def_id.krate).as_str() == "core" {
-            gpu_attr.device = true;
             if let Some(lang_item) = tcx.lang_items().from_def_id(def_id) {
-                gpu_attr.gpu_item = Some(GpuItem::Core(lang_item));
+                if matches!(lang_item, LangItem::PanicBoundsCheck | LangItem::PanicNounwind) {
+                    gpu_attr.device = true;
+                    gpu_attr.gpu_item = Some(GpuItem::Core(lang_item));
+                }
             } else {
                 let path = tcx.def_path_str(def_id);
+                let path = path.as_str();
                 if [
                     "core::slice::index::slice_index_order_fail",
                     "core::slice::index::slice_start_index_len_fail",
                     "core::slice::index::slice_end_index_len_fail",
                 ]
-                .contains(&path.as_str())
+                .contains(&path)
                 {
+                    gpu_attr.device = true;
                     gpu_attr.gpu_item = Some(GpuItem::CoreFn(tcx.def_path_str(def_id)));
                 }
             }
@@ -256,10 +264,25 @@ impl GpuAttributes {
     }
 
     pub fn is_builtin(&self) -> bool {
-        match self.gpu_item {
+        match &self.gpu_item {
             Some(GpuItem::NewChunk) => false,
             Some(GpuItem::GetLocalMut2D) => false,
             Some(GpuItem::GetLocal2D) => false,
+            Some(GpuItem::Core(item))
+                if !matches!(item, LangItem::PanicBoundsCheck | LangItem::PanicNounwind) =>
+            {
+                false
+            }
+            Some(GpuItem::CoreFn(path))
+                if ![
+                    "core::slice::index::slice_index_order_fail",
+                    "core::slice::index::slice_start_index_len_fail",
+                    "core::slice::index::slice_end_index_len_fail",
+                ]
+                .contains(&path.as_str()) =>
+            {
+                false
+            }
             Some(_) => true,
             _ => false,
         }

@@ -19,6 +19,7 @@ use rustc_codegen_ssa_gpu::traits::BackendTypes;
 use rustc_middle::ty::layout::{HasTyCtxt, HasTypingEnv};
 
 use self::ty::MLIRType;
+use crate::attr::GpuAttributes;
 use crate::mlir::BlockRefWithTime;
 
 type CodegenGPUError = String;
@@ -42,6 +43,7 @@ pub(crate) struct GPUCodegenContext<'tcx, 'ml, 'a> {
     pub fn_shared_memory_size: RwLock<HashMap<String, usize>>,
     pub static_shared_count: AtomicUsize,
     pub tcx: rustc_middle::ty::TyCtxt<'tcx>,
+    pub gpu_attrs: HashMap<rustc_middle::ty::Instance<'tcx>, crate::attr::GpuAttributes>,
 }
 
 impl<'tcx, 'ml, 'a> std::fmt::Debug for GPUCodegenContext<'tcx, 'ml, 'a> {
@@ -86,6 +88,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             span_to_types: RwLock::new(HashMap::new()),
             fn_shared_memory_size: RwLock::new(HashMap::new()),
             static_shared_count: AtomicUsize::new(0),
+            gpu_attrs: HashMap::new(),
         }
     }
 
@@ -105,6 +108,13 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             rustc_const_eval::interpret::alloc_range(rustc_abi::Size::ZERO, alloc.inner().size()),
         );
         bytes
+    }
+
+    pub(crate) fn gpu_attrs(&self, instance: &rustc_middle::ty::Instance<'tcx>) -> GpuAttributes {
+        if self.gpu_attrs.contains_key(instance) {
+            return self.gpu_attrs[instance].clone();
+        }
+        GpuAttributes::build(&self.tcx, instance.def_id())
     }
 }
 

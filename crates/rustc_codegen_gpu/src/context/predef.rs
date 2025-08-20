@@ -25,7 +25,7 @@ impl<'tcx, 'ml, 'a> PreDefineCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'm
         let def_path = self.tcx.def_path_str(def_id);
         let ty = instance.ty(self.tcx, self.typing_env());
         let attrs = self.tcx.get_attrs_unchecked(instance.def_id());
-        let attr = crate::attr::GpuAttributes::build(&self.tcx, instance.def_id());
+        let attr = self.gpu_attrs(&instance);
         let instance = Instance::mono(self.tcx, def_id);
         let ty = instance.ty(self.tcx, self.typing_env());
         let llty = self.mlir_type(self.layout_of(ty), false);
@@ -53,7 +53,7 @@ impl<'tcx, 'ml, 'a> PreDefineCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'm
         visibility: rustc_middle::mir::mono::Visibility,
         symbol_name: &str,
     ) {
-        let attr = crate::attr::GpuAttributes::build(&self.tcx, instance.def_id());
+        let attr = self.gpu_attrs(&instance);
         if !attr.is_gpu_related() {
             return;
         }

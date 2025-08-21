@@ -4,7 +4,6 @@ use rustc_middle::ty::layout::{FnAbiOf, HasTyCtxt};
 use tracing::trace;
 
 use super::GPUCodegenContext;
-use crate::attr::GpuAttributes;
 
 impl<'tcx, 'ml> MiscCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, '_> {
     fn vtables(
@@ -34,7 +33,7 @@ impl<'tcx, 'ml> MiscCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, '_> {
         trace!("[{}]:get_fn({:?}) => {}", self.cgu_name, instance, sym);
         let location = self.to_mlir_loc(instance.def.default_span(tcx));
         let fn_abi = self.fn_abi_of_instance(instance, rustc_middle::ty::List::empty());
-        let gpu_attrs = GpuAttributes::build(&tcx, def_id);
+        let gpu_attrs = self.gpu_attrs(&instance);
         (
             self.to_mir_func_decl(instance, crate::mlir::MLIRVisibility::Private),
             gpu_attrs.kernel || gpu_attrs.device,

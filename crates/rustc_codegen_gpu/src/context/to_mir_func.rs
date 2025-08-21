@@ -14,7 +14,6 @@ use rustc_middle::ty::{AssocItemContainer, Instance};
 use tracing::debug;
 
 use super::GPUCodegenContext;
-use crate::attr::GpuAttributes;
 use crate::builder::GpuBuilder;
 use crate::context::CodegenGPUError;
 use crate::mlir::{MLIRMutOpHelpers, MLIROpHelpers, MLIRVisibility};
@@ -133,7 +132,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         if self.fn_ptr_db.read().unwrap().contains_key(&instance_sym) {
             return self.fn_ptr_db.read().unwrap()[&instance_sym].1;
         }
-        let gpu_attrs = GpuAttributes::build(&self.tcx, def_id);
+        let gpu_attrs = self.gpu_attrs(&instance);
         let op = self.get_fn(instance);
         let sym = StringAttribute::try_from(op.attribute("sym_name").unwrap()).unwrap().value();
         let function = melior::ir::attribute::FlatSymbolRefAttribute::new(self.mlir_ctx, sym);
@@ -404,7 +403,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 return fn_db[&sym];
             }
         }
-        let mut gpu_attrs = GpuAttributes::build(&tcx, def_id);
+        let mut gpu_attrs = self.gpu_attrs(&instance);
         let need_def = gpu_attrs.is_gpu_related();
         let span = instance.def.default_span(tcx);
         let location: melior::ir::Location<'ml> = self.to_mlir_loc(span);

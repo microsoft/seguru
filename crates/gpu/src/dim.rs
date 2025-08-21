@@ -25,14 +25,14 @@ macro_rules! def_dim_fn {
         #[rustc_diagnostic_item = concat!("gpu::", stringify!($name))]
         #[gpu_codegen::device]
         #[inline(never)]
-        fn $priv_name() -> usize {
+        const fn $priv_name() -> usize {
             unimplemented!()
         }
 
         $(#[$meta])*
         #[gpu_codegen::device]
         #[inline(always)]
-        pub fn $pub_name(dim: DimType) -> usize {
+        pub const fn $pub_name(dim: DimType) -> usize {
             match dim {
                 DimType::X => dim_fn!("x", $priv_name),
                 DimType::Y => dim_fn!("y", $priv_name),
@@ -51,7 +51,7 @@ def_dim_fn!(grid_dim, _grid_dim, grid_dim, #[gpu_codegen::ret_sync_data(0)]);
 #[gpu_codegen::device]
 #[gpu_codegen::ret_sync_data(0)]
 #[inline(always)]
-pub fn dim(dim: DimType) -> usize {
+pub const fn dim(dim: DimType) -> usize {
     match dim {
         DimType::X => block_dim(DimType::X) * grid_dim(DimType::X),
         DimType::Y => block_dim(DimType::Y) * grid_dim(DimType::Y),
@@ -74,7 +74,7 @@ impl Default for GpuChunkIdx {
 
 impl GpuChunkIdx {
     #[gpu_codegen::device]
-    pub fn threads_count() -> usize {
+    pub const fn threads_count() -> usize {
         block_dim(DimType::X)
             * grid_dim(DimType::X)
             * block_dim(DimType::Y)
@@ -86,7 +86,7 @@ impl GpuChunkIdx {
     // TODO: optimize the default 3D to 2D or 1D based on the user-specified grid and block dimensions.
     #[gpu_codegen::device]
     #[inline(always)]
-    pub fn new() -> GpuChunkIdx {
+    pub const fn new() -> GpuChunkIdx {
         let block_x = block_dim(DimType::X);
         let grid_x = grid_dim(DimType::X);
         let id_x = block_id(DimType::X) * block_x + thread_id(DimType::X);
@@ -106,7 +106,7 @@ impl GpuChunkIdx {
     #[gpu_codegen::device]
     #[inline(always)]
     #[allow(dead_code)]
-    pub fn as_usize(&self) -> usize {
+    pub const fn as_usize(&self) -> usize {
         self.id
     }
 }
@@ -127,7 +127,7 @@ impl Default for GpuSharedChunkIdx {
 impl GpuSharedChunkIdx {
     #[gpu_codegen::device]
     #[inline(always)]
-    pub fn new() -> GpuSharedChunkIdx {
+    pub const fn new() -> GpuSharedChunkIdx {
         let id_x = thread_id(DimType::X);
         let block_x = block_dim(DimType::X);
         let id_y = thread_id(DimType::Y);
@@ -140,7 +140,7 @@ impl GpuSharedChunkIdx {
     #[gpu_codegen::device]
     #[inline(always)]
     #[allow(dead_code)]
-    pub fn as_usize(&self) -> usize {
+    pub const fn as_usize(&self) -> usize {
         self.id
     }
 }

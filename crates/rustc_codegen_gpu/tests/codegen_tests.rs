@@ -84,6 +84,7 @@ fn run_codegen_tests(src: PathBuf, mode: &str) {
         target: TARGET.into(),
         ..Default::default()
     };
+    std::env::set_var("__CODEGEN_TARGET__", "GPU");
     compiletest::run_tests(&config);
 }
 

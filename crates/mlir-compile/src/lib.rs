@@ -11,6 +11,7 @@ pub struct CompileConfig {
     pub gpu_sym: String,
     pub use_fast: bool,
     pub use_ftz: bool,
+    pub dep_device_bc_files: Vec<PathBuf>,
 }
 
 impl Default for CompileConfig {
@@ -22,6 +23,7 @@ impl Default for CompileConfig {
             gpu_sym: "gpu_bin_cst".to_string(),
             use_fast: true,
             use_ftz: true,
+            dep_device_bc_files: vec![find_libdevice().unwrap()],
         }
     }
 }
@@ -78,6 +80,34 @@ fn find_libdevice() -> Option<PathBuf> {
 }
 
 impl CompileConfig {
+    pub fn new() -> CompileConfig {
+        let mut cconfig = CompileConfig::default();
+        std::env::var("USE_FAST").map(|v| cconfig.use_fast = v == "true").unwrap_or_default();
+        std::env::var("USE_FTZ").map(|v| cconfig.use_ftz = v == "true").unwrap_or_default();
+        std::env::var("NVPTX_ARCH").map(|v| cconfig.cubin_chip = v).unwrap_or_default();
+        std::env::var("NVPTX_FEATURES").map(|v| cconfig.cubin_features = v).unwrap_or_default();
+        std::env::var("PTXAS_OPT_LEVEL")
+            .map(|v| cconfig.opt_level = v.parse().unwrap_or_default())
+            .unwrap_or_default();
+        // TODO(dep): add more gpu device files to dep_device_bc_files
+        cconfig
+    }
+
+    fn opt_flag(&self) -> String {
+        format!("-O{}", self.opt_level)
+    }
+
+    fn gpu_to_bin_args(&self) -> String {
+        let dev_libs = self
+            .dep_device_bc_files
+            .iter()
+            .map(|p| p.to_str().unwrap())
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("format=llvm l={}", dev_libs)
+        //format!("format=fatbin l={}", dev_libs)
+    }
+
     pub fn mlir_opt(&self, inpath: &Path, outpath: &Path) -> std::io::Result<()> {
         // mlir-opt must use "shell" in order to pass correct arguments.
         info!("[mlir-opt] outputs {}", outpath.display());
@@ -85,7 +115,6 @@ impl CompileConfig {
 
         //format!("-gpu-lower-to-nvvm-pipeline='opt-level={} cubin-chip={} cubin-features={}'",self.opt_level, self.cubin_chip, self.cubin_features)
         // mlir/lib/Dialect/GPU/Pipelines/GPUToNVVMPipeline.cpp
-        let dev_lib = find_libdevice().expect("Cannot find libdevice.10.bc");
         let mlir_opt_args = format!(
             "--pass-pipeline=\
             'builtin.module(\
@@ -97,7 +126,7 @@ impl CompileConfig {
             convert-func-to-llvm,\
             expand-strided-metadata,\
             mem2reg,\
-            nvvm-attach-target{{triple=nvptx64-nvidia-cuda {} {} chip={} features={} O={}}},\
+            nvvm-attach-target{{triple=nvptx64-nvidia-gpulibs {} {} chip={} features={} O={}}},\
             lower-affine,\
             convert-arith-to-llvm,\
             convert-index-to-llvm{{index-bitwidth=64}},\
@@ -109,7 +138,7 @@ impl CompileConfig {
                 canonicalize,\
                 cse),\
             gpu-to-llvm,\
-            gpu-module-to-binary{{l={}}},\
+            gpu-module-to-binary{{{}}},\
             convert-math-to-llvm,\
             reconcile-unrealized-casts, canonicalize,cse)'",
             if self.use_fast { "fast" } else { "" },
@@ -117,7 +146,7 @@ impl CompileConfig {
             self.cubin_chip,
             self.cubin_features,
             self.opt_level,
-            dev_lib.display()
+            self.gpu_to_bin_args(),
         );
 
         let cmd = format!(
@@ -148,14 +177,91 @@ impl CompileConfig {
         command("llc", args)
     }
 
-    pub fn objcopy(&self, inpath: &Path, outpath: &Path) -> std::io::Result<()> {
+    pub fn llvm_link(&self, inpath: &[PathBuf], outpath: &Path) -> std::io::Result<()> {
+        info!("[llvm-link] {:?} outputs {}", inpath, outpath.display());
+        let mut args = inpath.iter().map(|p| p.to_str().unwrap()).collect::<Vec<_>>();
+        args.extend(["-o", outpath.to_str().unwrap()]);
+        command("llvm-link", args)
+    }
+
+    fn llc_ptx(&self, inpath: &Path, outpath: &Path) -> std::io::Result<()> {
+        info!("[llc] {:?} outputs {:?}", inpath, outpath);
+        let args = [
+            "-march=nvptx64",
+            &format!("-mcpu={}", self.cubin_chip),
+            &self.opt_flag(),
+            inpath.to_str().unwrap(),
+            "-o",
+            outpath.to_str().unwrap(),
+        ];
+        command("llc", args)
+    }
+
+    fn ptxas(&self, inpath: &Path, outpath: &Path) -> std::io::Result<()> {
+        info!("[ptxas] outputs {}", outpath.display());
+        let args = [
+            &self.opt_flag(),
+            "--gpu-name",
+            &self.cubin_chip,
+            "-o",
+            outpath.to_str().unwrap(),
+            inpath.to_str().unwrap(),
+        ];
+        command("ptxas", args)
+    }
+
+    fn fatbinary(&self, cubin_path: &Path, ptx_path: &Path, outpath: &Path) -> std::io::Result<()> {
+        info!("[fatbinary] outputs {}", outpath.display());
+        let sm = self.cubin_chip.strip_prefix("sm_").unwrap();
+        let args = [
+            "-64",
+            &format!("--image3=kind=elf,sm={},file={}", sm, cubin_path.to_str().unwrap()),
+            &format!("--image3=kind=ptx,sm={},file={}", sm, ptx_path.to_str().unwrap()),
+            &format!("--create={}", outpath.to_str().unwrap()),
+        ];
+        command("fatbinary", args)
+    }
+
+    fn create_obj(&self, inpath: &Path, outpath: &Path) -> std::io::Result<()> {
+        let old_sym =
+            inpath.display().to_string().replace("/", "_").replace("-", "_").replace(".", "_");
+        info!("[objcopy] {} outputs {}", old_sym, outpath.display());
+        let args = [
+            "--input",
+            "binary",
+            "--output",
+            "elf64-x86-64",
+            "--binary-architecture",
+            "i386:x86-64",
+            "--rename-section",
+            ".data=.rodata",
+            "--redefine-sym",
+            &format!("_binary_{}_start={}", old_sym, self.gpu_sym),
+            inpath.to_str().unwrap(),
+            outpath.to_str().unwrap(),
+        ];
+        command("objcopy", args)
+    }
+
+    fn create_static_lib(&self, inpath: &Path, outpath: &Path) -> std::io::Result<()> {
+        info!("[llvm-ar] rcS {} {}", outpath.display(), inpath.display());
+        command("llvm-ar", ["rcS", outpath.to_str().unwrap(), inpath.to_str().unwrap()])
+    }
+
+    pub fn ld(&self, inpath: &[PathBuf], outpath: &Path) -> std::io::Result<()> {
+        let mut args = inpath.iter().map(|p| p.to_str().unwrap()).collect::<Vec<_>>();
+        args.extend(&["-r", "-o", outpath.to_str().unwrap()].to_vec());
+        command("ld", args)
+    }
+
+    pub fn expose_gpu_obj(&self, inpath: &Path, outpath: &Path) -> std::io::Result<()> {
         info!("[objcopy] outputs {}", outpath.display());
         let flag = format!("--globalize-symbol={}", self.gpu_sym);
         let args = [flag.as_str(), inpath.to_str().unwrap(), outpath.to_str().unwrap()];
         command("objcopy", args)
     }
 
-    pub fn objtoptx(&self, ll_path: &Path, ptx_path: &Path) {
+    fn extract_gpu_bin(&self, ll_path: &Path, out_path: &Path) -> bool {
         fn extract_string_literal(line: &str) -> String {
             line[line.find("\"").unwrap() + 1..line.len() - 10].to_string()
         }
@@ -186,19 +292,22 @@ impl CompileConfig {
         }
         let content = std::fs::read_to_string(ll_path).expect("Failed to read .ll file");
 
-        let ptx_data = content
-            .lines()
-            .find(|line| line.contains("@gpu_bin_cst"))
-            .map(extract_string_literal)
-            .unwrap();
-        let bytes = unescape_llvm_string(&ptx_data);
+        let Some(bin_data) =
+            content.lines().find(|line| line.contains("@gpu_bin_cst")).map(extract_string_literal)
+        else {
+            std::fs::write(out_path, vec![]).expect("Failed to write bin to file");
+            return false;
+        };
+        let bytes = unescape_llvm_string(&bin_data);
+        std::fs::write(out_path, bytes).expect("Failed to write bin to file");
+        true
+    }
 
-        assert!(ptx_data.contains(".version"));
-        assert!(ptx_data.contains(".target"));
-        std::fs::write(ptx_path, bytes).expect("Failed to write PTX to file");
+    #[allow(dead_code)]
+    fn cuobjdump(&self, cubin_path: &Path, ptx_path: &Path) {
         let output = Command::new("cuobjdump")
             .arg("-ptx")
-            .arg(ptx_path)
+            .arg(cubin_path)
             .output()
             .map_err(|e| format!("Failed to run cuobjdump: {}", e))
             .unwrap();
@@ -212,19 +321,52 @@ impl CompileConfig {
         std::fs::write(ptx_path, &ptx_str).expect("Failed to write PTX to file");
     }
 
+    /// Create a static library from gpu bitcode files.
+    /// The final cubin will be stored at self.gpu_sym.
+    pub fn gpu_link_and_create_static_lib(
+        &self,
+        bc_files: &[PathBuf],
+        out_path: &Path,
+    ) -> std::io::Result<Option<PathBuf>> {
+        let mut gpu_byte_code_files = vec![];
+        let bitcode_out = out_path.with_extension("gpu.bc");
+        let cubin_out = out_path.with_extension("cubin");
+        let fatbin_out = out_path.with_extension("fatbin");
+        let ptx_out = out_path.with_extension("ptx");
+        let tmp_obj = out_path.with_extension("tmp.o");
+        for bc_file in bc_files {
+            gpu_byte_code_files.push(bc_file.clone());
+        }
+        self.llvm_link(&gpu_byte_code_files, &bitcode_out)?;
+        self.llc_ptx(&bitcode_out, &ptx_out)?;
+        self.ptxas(&ptx_out, &cubin_out)?;
+        self.fatbinary(&cubin_out, &ptx_out, &fatbin_out)?;
+        self.create_obj(&fatbin_out, &tmp_obj)?;
+        self.create_static_lib(&tmp_obj, out_path)?;
+        assert!(bitcode_out.exists());
+        Ok(Some(bitcode_out))
+    }
+
     pub fn mlir_compile(&self, inpath: &Path, outpath: &Path) -> std::io::Result<()> {
         let opt_out = inpath.with_extension("opt.mlir.mir");
-        self.mlir_opt(inpath, &opt_out)?;
         let llvmir_out = inpath.with_extension("ll");
-        self.mlir_translate(&opt_out, &llvmir_out)?;
         let bitcode_out = inpath.with_extension("bc");
-        self.llvm_as(&llvmir_out, &bitcode_out)?;
-        let obj_out = inpath.with_extension("tmp.o");
-        self.llc(&bitcode_out, &obj_out)?;
-        let final_out = outpath.with_extension("o");
-        self.objcopy(&obj_out, &final_out)?;
+        let gpu_obj_out = inpath.with_extension("o");
+        let gpu_bitcode_out = inpath.with_extension("gpu.bc");
         let ptx_out = inpath.with_extension("ptx");
-        self.objtoptx(&llvmir_out, &ptx_out);
-        Ok(())
+        let final_out = outpath.with_extension("o");
+
+        self.mlir_opt(inpath, &opt_out)?;
+        self.mlir_translate(&opt_out, &llvmir_out)?;
+        self.llvm_as(&llvmir_out, &bitcode_out)?;
+        self.llc(&bitcode_out, &gpu_obj_out)?;
+
+        // extract the bc, since fmt is llvm
+        let has_gpu_code = self.extract_gpu_bin(&llvmir_out, &gpu_bitcode_out);
+        if has_gpu_code {
+            self.llc_ptx(&gpu_bitcode_out, &ptx_out)?;
+        }
+
+        self.expose_gpu_obj(&gpu_obj_out, &final_out)
     }
 }

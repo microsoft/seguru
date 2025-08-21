@@ -43,7 +43,7 @@ pub fn build_sfi(_size: usize, _offset: usize) {
 #[rustc_diagnostic_item = "gpu::add_mlir_string_attr"]
 #[gpu_codegen::device]
 #[inline(never)]
-pub fn add_mlir_string_attr(_: &'static str) -> usize {
+pub const fn add_mlir_string_attr(_: &'static str) -> usize {
     unimplemented!()
 }
 

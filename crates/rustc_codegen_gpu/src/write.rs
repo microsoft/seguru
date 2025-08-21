@@ -7,18 +7,6 @@ use tracing::{debug, trace};
 
 use crate::backend::{GPUCodeGenModule, GPUCodegenBackend};
 
-fn get_compile_config() -> CompileConfig {
-    let mut cconfig = CompileConfig::default();
-    std::env::var("USE_FAST").map(|v| cconfig.use_fast = v == "true").unwrap_or_default();
-    std::env::var("USE_FTZ").map(|v| cconfig.use_ftz = v == "true").unwrap_or_default();
-    std::env::var("NVPTX_ARCH").map(|v| cconfig.cubin_chip = v).unwrap_or_default();
-    std::env::var("NVPTX_FEATURES").map(|v| cconfig.cubin_features = v).unwrap_or_default();
-    std::env::var("PTXAS_OPT_LEVEL")
-        .map(|v| cconfig.opt_level = v.parse().unwrap_or_default())
-        .unwrap_or_default();
-    cconfig
-}
-
 pub(crate) fn codegen(
     cgcx: &CodegenContext<GPUCodegenBackend>,
     dcx: DiagCtxtHandle<'_>,
@@ -51,7 +39,7 @@ pub(crate) fn codegen(
         std::fs::write(&out, &content).unwrap();
         debug!("[Done]write MLIR module to {:?}", out);
         // mlir-opt must use "shell" in order to pass correct arguments.
-        get_compile_config()
+        CompileConfig::new()
             .mlir_compile(&out, &out_object)
             .expect("Failed to compile MLIR to object file");
 

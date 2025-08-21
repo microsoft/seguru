@@ -7,20 +7,37 @@ mod gpu_syntax;
 mod host_rewriter;
 mod kernel_rewriter;
 
-fn is_gpu_code() -> bool {
-    #[cfg(gpu_codegen)]
-    {
-        true
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
+pub(crate) enum CodegenTarget {
+    Cpu,
+    Gpu,
+    GpuClippy,
+}
+
+impl CodegenTarget {
+    fn erase_func_body(&self) -> bool {
+        matches!(self, CodegenTarget::Cpu)
     }
-    #[cfg(not(gpu_codegen))]
-    {
-        false
+
+    fn need_register_tool(&self) -> bool {
+        matches!(self, CodegenTarget::Gpu)
+    }
+}
+
+fn target() -> CodegenTarget {
+    let target = std::env::var("__CODEGEN_TARGET__")
+        .expect("Failed to get __CODEGEN_TARGET__. Please use rustc-gpu to replace rustc");
+    match target.as_str() {
+        "CPU" => CodegenTarget::Cpu,
+        "GPU" => CodegenTarget::Gpu,
+        "GPU-CLIPPY" => CodegenTarget::GpuClippy,
+        _ => panic!("Unexpected __CODEGEN_TARGET__: {}", target),
     }
 }
 
 #[proc_macro_attribute]
 pub fn kernel(attr: TokenStream, item: TokenStream) -> TokenStream {
-    kernel_rewriter::rewrite(attr, item, is_gpu_code())
+    kernel_rewriter::rewrite(attr, item, target())
 }
 
 #[proc_macro_attribute]
@@ -30,10 +47,10 @@ pub fn host(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 #[proc_macro_attribute]
 pub fn device(attr: TokenStream, item: TokenStream) -> TokenStream {
-    gpu_syntax::rewrite_gpu_code(attr, item, false, is_gpu_code())
+    gpu_syntax::rewrite_gpu_code(attr, item, false, target())
 }
 
 #[proc_macro_attribute]
 pub fn kernel_v2(attr: TokenStream, item: TokenStream) -> TokenStream {
-    gpu_syntax::rewrite_gpu_code(attr, item, true, is_gpu_code())
+    gpu_syntax::rewrite_gpu_code(attr, item, true, target())
 }

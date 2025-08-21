@@ -58,8 +58,7 @@ fn main() -> std::io::Result<()> {
     let crate_names = get_value(&args, "--crate-name");
     debug!("gpu_targets = {:#?}, crate  = {:#?}", gpu_targets, crate_names);
     if let Some(crate_name) = crate_names {
-        args.push("--cfg".to_string());
-        args.push("gpu_codegen".to_string());
+        let mut host_args = args.clone();
         if gpu_targets.contains(&crate_name) {
             let extra_args = vec![
                 "-Zcrate-attr=feature(register_tool)".into(),
@@ -73,9 +72,8 @@ fn main() -> std::io::Result<()> {
                 }
             }
 
-            // Compile the code with standard rust backend.
+            // Compile the code with GPU backend.
             // Only generating obj files.
-            let mut host_args = args.clone();
             set_value_c(&mut args, "--emit=", "obj");
             let out_dir = get_value(&args, "--out-dir").unwrap();
             let out_dir = std::path::Path::new(&out_dir);
@@ -92,7 +90,7 @@ fn main() -> std::io::Result<()> {
             unsafe {
                 env::set_var("GPU_HOST_OBJ", format!("{}{}.o", crate_name, extra_filename));
             }
-            run_rustc(&args, &rust_flags)?;
+            run_rustc(&args, &rust_flags, "GPU")?;
             let crate_type = &get_value(&args, "--crate-type").unwrap();
             let externs = get_values(&args, "--extern");
             let extern_gpu_bc_files = externs.iter().map(|s| {
@@ -119,22 +117,23 @@ fn main() -> std::io::Result<()> {
                     libname,
                 ]);
             }
-            run_rustc(&host_args, &rust_flags)?;
+            run_rustc(&host_args, &rust_flags, "CPU")?;
         } else {
-            run_rustc(&args, &rust_flags)?;
+            run_rustc(&args, &rust_flags, "CPU")?;
         }
     } else {
-        run_rustc(&args, &rust_flags)?;
+        run_rustc(&args, &rust_flags, "CPU")?;
     }
 
     Ok(())
 }
 
-fn run_rustc(args: &[String], rust_flags: &str) -> std::io::Result<()> {
+fn run_rustc(args: &[String], rust_flags: &str, target: &str) -> std::io::Result<()> {
     let mut command = Command::new("rustc");
     command.args(args);
     command.env("RUSTFLAGS", rust_flags);
     command.env("RUSTC_BOOTSTRAP", "1");
+    command.env("__CODEGEN_TARGET__", target);
     debug!("cmd: {:?}", command);
     let status = command.status()?;
     if !status.success() {

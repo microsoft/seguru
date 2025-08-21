@@ -233,24 +233,25 @@ fn kernel_rewrite_func(func: &mut syn::ItemFn, span: Span) {
     func.block.stmts.splice(0..0, stmts.iter().cloned());
 }
 
-pub(crate) fn rewrite(_: TokenStream, input: TokenStream, use_gpu_codegen: bool) -> TokenStream {
+pub(crate) fn rewrite(
+    _: TokenStream,
+    input: TokenStream,
+    target: crate::CodegenTarget,
+) -> TokenStream {
     let mut fun = syn::parse_macro_input!(input as syn::ItemFn);
     let fun_span = fun.span();
 
     let mut new_stream = proc_macro2::TokenStream::new();
 
-    // The newly generated function uses the same span as the attributes
     kernel_rewrite_func(&mut fun, fun_span);
 
     // Add proper device/kernel attributes to function signature and all closures inside the body.
-    if use_gpu_codegen {
-        crate::gpu_syntax::basic_rewrite_kernel_entry(&mut fun);
-    }
+    crate::gpu_syntax::basic_rewrite_gpu_func(&mut fun, true, target);
 
     fun.to_tokens(&mut new_stream);
 
     // let source_code = new_stream.to_string();
-    println!("{}", new_stream);
+    // println!("{}", new_stream);
 
     proc_macro::TokenStream::from(new_stream)
 }

@@ -4,5 +4,5 @@ rustflags = ["--emit=mir", "-Zmir-opt-level=3"]
 
 [env]
 GPU_CODEGEN = "../crates/target/debug/librustc_codegen_gpu.so"
-GPU_TARGETS = "gpu-test-arith-basic,gpu_test_kernel,manual-test-gpu-arith,llm-rs-gpu,matmul-gpu,matmul-host"
+GPU_TARGETS = "gpu-test-arith-basic,gpu_test_kernel,manual-test-gpu-arith,llm-rs-gpu,matmul-gpu,matmul-host,manual-test-host-arith"
 REAL_LIBRARY_PATH_VAR = { value = "$LD_LIBRARY_PATH", force = true }

@@ -207,6 +207,30 @@ impl Callbacks for GpuOrCpuRustCallback {
         config.opts.unstable_opts.codegen_backend =
             Some(crate::codegen::get_codegen_dylib(config.output_dir.as_ref().unwrap()));
 
+        // Do not inline mir which is necessary to allow cross-crate
+        // GPU kernel function monomorphization.
+        // Example:
+        /*
+        // crate A:
+        #[no_mangle]
+        fn dummy_kernel_call() {
+            kernel_call::<1024>();
+        }
+        // crate B:
+        #[gpu_macros::kernel]
+        fn kernel_call<const N: usize>() {
+            gpu::printf("this is from gpu call with %d", N);
+        }
+        */
+        // Without this, crate A will not see kernel_call::<1024> in
+        // its mono_items, and instead will inline it in dummy_kernel_call.
+        // This may change some translation behavior
+        // config.opts.unstable_opts.inline_mir = Some(false);
+        // inline_mir_threshold is a default threshold for all functions.
+        // inline_mir_hint_threshold becomes a relaxed threshold for fn if the fn has inline hint
+        // Thus, function marked as inline will still be inlined when needed.
+        config.opts.unstable_opts.inline_mir_threshold = Some(0);
+
         // Enable tool features
         config.override_queries = Some(|_sess, providers| {
             // Save old provider if you want to call it

@@ -731,6 +731,7 @@ name = "rustc-gpu"
 version = "0.1.0"
 dependencies = [
  "mlir-compile",
+ "rustc_codegen_gpu",
  "tracing",
  "tracing-subscriber",
 ]

@@ -268,7 +268,7 @@ impl CodegenBackend for GPUCodegenBackend {
         outputs: &rustc_session::config::OutputFilenames,
     ) -> (CodegenResults, FxIndexMap<WorkProductId, WorkProduct>) {
         eprintln!("join_codegen");
-        let (codegen_results, work_products) = ongoing_codegen
+        let (mut codegen_results, work_products) = ongoing_codegen
             .downcast::<rustc_codegen_ssa_gpu::back::write::OngoingCodegen<Self>>()
             .expect("Expected OngoingCodegen, found Box<Any>")
             .join(sess);
@@ -292,6 +292,12 @@ impl CodegenBackend for GPUCodegenBackend {
                 .llvm_link(&bytecode_paths, &bc_lib_file)
                 .expect("failed to link bc");
         }
+        // GPU code should always be treated as lib.
+        codegen_results
+            .crate_info
+            .crate_types
+            .iter_mut()
+            .for_each(|t| *t = rustc_session::config::CrateType::Rlib);
         (codegen_results, work_products)
     }
 

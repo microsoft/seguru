@@ -57,6 +57,7 @@ pub(crate) fn basic_rewrite_gpu_func(
     target: crate::CodegenTarget,
 ) {
     if target.erase_func_body() {
+        fun.attrs.push(parse_quote!(#[allow(unused_variables)]));
         fun.block.stmts.clear();
         fun.block.stmts.push(parse_quote! {
             unimplemented!();

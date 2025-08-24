@@ -2,6 +2,7 @@ use std::collections::btree_map::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use rustc_ast::Crate;
 use rustc_driver::{Callbacks, Compilation};
 use rustc_interface::interface::{Compiler, Config};
 use rustc_middle::query::queries::registered_tools;
@@ -45,6 +46,25 @@ impl From<CompilerStage> for String {
             CompilerStage::GpuForCpu => "gpu2cpu".into(),
         }
     }
+}
+
+pub const GPU_MAIN_RUST: &str = r#"
+#[allow(dead_code)]
+fn main() {}
+"#;
+
+fn parse_item_by_str(
+    psess: &rustc_session::parse::ParseSess,
+    input: &str,
+) -> Option<rustc_ast::ptr::P<rustc_ast::Item>> {
+    rustc_parse::new_parser_from_source_str(
+        psess,
+        rustc_span::FileName::Custom("gpu-tmp.rs".into()),
+        input.into(),
+    )
+    .expect("failed to create parser")
+    .parse_item(rustc_parse::parser::ForceCollect::No)
+    .expect("cannot parse as item")
 }
 
 #[derive(Default)]
@@ -172,6 +192,8 @@ impl Callbacks for GpuOrCpuRustCallback {
             }
         }
 
+        //config.opts.lint_opts.push(("dead_code".into(), rustc_lint_defs::Level::Allow));
+
         // Change to GPU codegen backend, this does not work well
         // When using rustc_codegen_gpu here, it has a conflict with original
         // LLVM passes and cause error
@@ -241,6 +263,20 @@ impl Callbacks for GpuOrCpuRustCallback {
             *crate_type = CrateType::Rlib;
         }
         config.opts.externs = new_externs_with_new_path(&config.opts.externs, new_extern_file);
+    }
+
+    fn after_crate_root_parsing(&mut self, compiler: &Compiler, krate: &mut Crate) -> Compilation {
+        if matches!(self.stage, CompilerStage::GpuForGpu) {
+            krate.items.iter_mut().for_each(|item| {
+                if item.ident.name == rustc_span::Symbol::intern("main") {
+                    let tmp_item = parse_item_by_str(&compiler.sess.psess, GPU_MAIN_RUST)
+                        .expect("failed to create parser");
+                    item.attrs.extend(tmp_item.attrs.clone());
+                }
+            });
+        }
+
+        Compilation::Continue
     }
 
     fn after_expansion<'tcx>(&mut self, _compiler: &Compiler, tcx: TyCtxt<'tcx>) -> Compilation {

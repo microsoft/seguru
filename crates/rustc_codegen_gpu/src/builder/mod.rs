@@ -580,6 +580,9 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 }
                 todo!();
             }
+            GpuItem::DiagnoseOnly(name) => {
+                unreachable!();
+            }
         }
     }
 

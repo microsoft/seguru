@@ -29,6 +29,6 @@ mod write;
 
 #[no_mangle]
 pub fn __rustc_codegen_backend() -> Box<dyn rustc_codegen_ssa_gpu::traits::CodegenBackend> {
-    let _ = tracing_subscriber::fmt::try_init();
+    //let _ = tracing_subscriber::fmt::try_init();
     Box::new(backend::GPUCodegenBackend::new())
 }

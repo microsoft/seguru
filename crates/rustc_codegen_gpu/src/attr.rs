@@ -59,6 +59,7 @@ pub enum GpuItem {
     DeviceIntrinsic(String),
     Core(LangItem), // for core crate items
     CoreFn(String), // for core crate functions
+    DiagnoseOnly(String),
 }
 
 fn lang_item_from_str(name: &str) -> Option<LangItem> {
@@ -157,6 +158,7 @@ impl From<GpuItem> for String {
             }
             GpuItem::Core(name) => name.name().to_string(),
             GpuItem::CoreFn(name) => name,
+            GpuItem::DiagnoseOnly(name) => name,
         }
     }
 }
@@ -240,6 +242,8 @@ impl GpuAttributes {
         if let Some(sym) = tcx.all_diagnostic_items(()).id_to_name.get(&def_id) {
             if let Ok(gpu_item) = GpuItem::try_from(*sym) {
                 gpu_attr.gpu_item = Some(gpu_item);
+            } else {
+                gpu_attr.gpu_item = Some(GpuItem::DiagnoseOnly(sym.as_str().into()));
             }
         }
 
@@ -260,7 +264,11 @@ impl GpuAttributes {
     }
 
     pub fn is_gpu_related(&self) -> bool {
-        self.kernel || self.host || self.device || self.gpu_item.is_some() || self.shared_size
+        self.kernel
+            || self.host
+            || self.device
+            || !matches!(self.gpu_item, Some(GpuItem::DiagnoseOnly(_)) | None)
+            || self.shared_size
     }
 
     pub fn is_builtin(&self) -> bool {
@@ -283,6 +291,7 @@ impl GpuAttributes {
             {
                 false
             }
+            Some(GpuItem::DiagnoseOnly(_)) => false,
             Some(_) => true,
             _ => false,
         }

@@ -183,14 +183,19 @@ impl<'tcx> Visitor<'tcx> for ReadWriteVistor<'_, 'tcx> {
                 let attr = crate::attr::GpuAttributes::build(&self.tcx, def_id);
                 // Skip the chunk function to allow the trusted GPU memory partition.
                 let mut is_trusted_chunk_function = false;
-                if let Some(
-                    GpuItem::SubsliceMut
-                    | GpuItem::NewChunk
-                    | GpuItem::AtomicAdd
-                    | GpuItem::GetLocalMut2D,
-                ) = attr.gpu_item
-                {
-                    is_trusted_chunk_function = true;
+                match &attr.gpu_item {
+                    Some(GpuItem::DiagnoseOnly(name)) if name == "gpu::chunk_mut" => {
+                        is_trusted_chunk_function = true;
+                    }
+                    Some(
+                        GpuItem::SubsliceMut
+                        | GpuItem::NewChunk
+                        | GpuItem::AtomicAdd
+                        | GpuItem::GetLocalMut2D,
+                    ) => {
+                        is_trusted_chunk_function = true;
+                    }
+                    _ => {}
                 }
                 if is_trusted_chunk_function {
                     self.visit_span(*fn_span);

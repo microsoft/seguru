@@ -183,7 +183,7 @@ impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
     }
 
     fn const_bool(&self, val: bool) -> Self::Value {
-        todo!()
+        self.mlir_global_const_int_from_type(val as i64, self.type_i1())
     }
 
     fn const_i8(&self, i: i8) -> Self::Value {

@@ -4,7 +4,14 @@ mod internal {
     /// Manually inserted function to test the host side API matches the GPU side API.
     /// This should be generated automatically by the macro.
     /// This is needed in order to force the compiler to link the GPU code.
-    #[allow(dead_code)]
+    #[used]
+    static FORCE_LINK: fn(
+        a: gpu::GpuChunkable2D<u32>,
+        b: gpu::GpuChunkableMut2D<u32>,
+        c: &gpu_host::CudaMemBox<[u32]>,
+        f: gpu::GpuChunkableMut<f32>,
+        g: &gpu_host::CudaMemBox<[f32]>,
+    ) = dummy_api_checker_kernel_launch_wrapper;
     fn dummy_api_checker_kernel_launch_wrapper(
         a: gpu::GpuChunkable2D<u32>,
         b: gpu::GpuChunkableMut2D<u32>,
@@ -12,7 +19,7 @@ mod internal {
         f: gpu::GpuChunkableMut<f32>,
         g: &gpu_host::CudaMemBox<[f32]>,
     ) {
-        manual_test_gpu_arith::kernel_arith(a, b, c, f, g);
+        manual_test_gpu_arith::kernel_arith::<30>(a, b, c, f, g);
     }
 }
 

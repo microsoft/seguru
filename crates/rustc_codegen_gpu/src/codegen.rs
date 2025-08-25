@@ -6,8 +6,7 @@ use rustc_data_structures::fx::FxHashSet;
 use rustc_middle::mir::Terminator;
 use rustc_middle::mir::mono::MonoItem;
 use rustc_middle::mir::visit::Visitor;
-use rustc_middle::ty::Instance;
-use rustc_middle::ty::layout::HasTypingEnv;
+use rustc_middle::ty::{Instance, InstanceKind};
 use rustc_span::Symbol;
 use tracing::trace;
 
@@ -17,6 +16,7 @@ use crate::context::GPUCodegenContext;
 
 struct FindCallee<'tcx, 'ml, 'a, 'b> {
     cx: &'b GPUCodegenContext<'tcx, 'ml, 'a>,
+    ty_env: rustc_middle::ty::TypingEnv<'tcx>,
     callees: Vec<Instance<'tcx>>,
 }
 
@@ -30,9 +30,7 @@ impl<'tcx, 'ml, 'a> Visitor<'tcx> for FindCallee<'tcx, 'ml, 'a, '_> {
         // Visit the terminator to find reads/writes
         if let rustc_middle::mir::TerminatorKind::Call { func, .. } = &terminator.kind {
             if let Some((def_id, substs)) = func.const_fn_def() {
-                if let Ok(Some(callee)) =
-                    Instance::try_resolve(tcx, self.cx.typing_env(), def_id, substs)
-                {
+                if let Ok(Some(callee)) = Instance::try_resolve(tcx, self.ty_env, def_id, substs) {
                     self.callees.push(callee);
                 }
             }
@@ -45,9 +43,24 @@ fn callees_of_instance<'tcx>(
     instance: Instance<'tcx>,
 ) -> Vec<Instance<'tcx>> {
     let tcx = cx.tcx;
-    let body = tcx.instance_mir(instance.def);
-    let mut visit_calless = FindCallee { cx, callees: Vec::new() };
-    visit_calless.visit_body(body);
+    if !matches!(instance.def, InstanceKind::Item(_)) {
+        return vec![];
+    }
+    let generic_body = tcx.instance_mir(instance.def).clone();
+    // Instantiate/monomorphize the generic MIR body for this instance.
+    // Applies the instance's type substitutions and normalizes/erases region (lifetime)
+    // information so the resulting MIR body is specialized and ready for analysis.
+    let body = instance.instantiate_mir_and_normalize_erasing_regions(
+        tcx,
+        generic_body.typing_env(tcx),
+        rustc_middle::ty::EarlyBinder::bind(generic_body),
+    );
+    /*let mut out = Vec::new();
+    rustc_middle::mir::write_mir_pretty(tcx, Some(instance.def_id()), &mut out).unwrap();
+    tracing::warn!("analyzing body {}", String::from_utf8_lossy(&out));
+    */
+    let mut visit_calless = FindCallee { cx, callees: Vec::new(), ty_env: body.typing_env(tcx) };
+    visit_calless.visit_body(&body);
     visit_calless.callees
 }
 
@@ -59,7 +72,6 @@ fn find_gpu_related_mono_items<'tcx>(
     let mut gpu_items = FxHashSet::default();
     let mut results = vec![];
     let mut worklist = VecDeque::new();
-
     // Start from roots
     for (item, data) in all_mono_items {
         let attr = crate::attr::GpuAttributes::build(&tcx, item.def_id());

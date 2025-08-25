@@ -580,6 +580,9 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 }
                 todo!();
             }
+            GpuItem::DiagnoseOnly(name) => {
+                unreachable!();
+            }
         }
     }
 
@@ -737,8 +740,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         } else if ty.is_mem_ref() && dst_ty.is_mem_ref() {
             // Should be i8 to i8 here
             self.mlir_memref_view(val, dst_ty, None)
-        } else if ty.is_index() || dst_ty.is_index() {
-            assert!(ty.is_integer() || dst_ty.is_integer());
+        } else if ty.is_index() || ty.is_integer() || dst_ty.is_index() || dst_ty.is_integer() {
             self.intcast(val, dst_ty, false)
         } else {
             panic!("Cannot use value {:?} as type {:?}", val, dst_ty);
@@ -1121,6 +1123,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         if self.is_unreachable() {
             return;
         }
+        let cond = self.use_value_as_ty(cond, self.type_i1());
         let op = melior::dialect::cf::cond_br(
             self.mlir_ctx,
             cond,

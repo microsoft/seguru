@@ -8,5 +8,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3" }
 mlir-compile = {path = "../mlir-compile"}
 
+[build-dependencies]
 # To embed librustc_codegen_gpu.so bytes
 rustc_codegen_gpu = {path = "../rustc_codegen_gpu"}

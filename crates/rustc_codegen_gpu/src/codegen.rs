@@ -6,7 +6,7 @@ use rustc_data_structures::fx::FxHashSet;
 use rustc_middle::mir::Terminator;
 use rustc_middle::mir::mono::MonoItem;
 use rustc_middle::mir::visit::Visitor;
-use rustc_middle::ty::Instance;
+use rustc_middle::ty::{Instance, InstanceKind};
 use rustc_span::Symbol;
 use tracing::trace;
 
@@ -43,6 +43,9 @@ fn callees_of_instance<'tcx>(
     instance: Instance<'tcx>,
 ) -> Vec<Instance<'tcx>> {
     let tcx = cx.tcx;
+    if !matches!(instance.def, InstanceKind::Item(_)) {
+        return vec![];
+    }
     let generic_body = tcx.instance_mir(instance.def).clone();
     // Instantiate/monomorphize the generic MIR body for this instance.
     // Applies the instance's type substitutions and normalizes/erases region (lifetime)

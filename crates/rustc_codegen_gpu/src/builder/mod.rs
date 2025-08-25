@@ -1710,7 +1710,6 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         let dst_memref_ty = MemRefType::try_from(ptr_ty).unwrap();
         let target_memref_ty = self.type_memref(store_ty, &[1], None, dst_memref_ty.memory_space());
         let ptr = if self.mlir_element_type(ptr_ty) != store_ty {
-            dbg!("Implicit cast {} {}", ptr_ty, store_ty);
             self.mlir_memref_view(ptr, target_memref_ty, None)
         } else {
             ptr
@@ -2155,7 +2154,6 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             );
             self.append_op_res(op.into())
         } else if agg_val.r#type().is_tuple() {
-            dbg!(agg_val);
             todo!()
         } else {
             let Ok(op_val) = mlir_ir::operation::OperationResult::<'ml, 'a>::try_from(agg_val)

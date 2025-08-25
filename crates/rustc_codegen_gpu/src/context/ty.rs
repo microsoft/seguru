@@ -394,7 +394,6 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                     self.type_array(elem, *count)
                 }
                 rustc_abi::FieldsShape::Arbitrary { offsets, memory_index } => {
-                    dbg!(layout.ty);
                     self.arbitrary_mlir_type(&layout, immediate)
                 }
             },

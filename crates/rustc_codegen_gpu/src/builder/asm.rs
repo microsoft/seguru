@@ -87,8 +87,6 @@ impl<'tcx: 'a, 'ml: 'a, 'a> AsmBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a
             }
         }
 
-        dbg!(&op_idx);
-
         // Collect input operands
         for (idx, op) in operands.iter().enumerate() {
             match *op {
@@ -122,8 +120,6 @@ impl<'tcx: 'a, 'ml: 'a, 'a> AsmBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a
                 _ => {}
             }
         }
-
-        dbg!(&op_idx);
 
         // Build the template string
         let mut template_str = String::new();

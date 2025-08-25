@@ -251,7 +251,6 @@ impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
     }
 
     fn const_to_opt_u128(&self, v: Self::Value, sign_ext: bool) -> Option<u128> {
-        dbg!(v);
         crate::mlir::mlir_val_to_const_int(v)
     }
 

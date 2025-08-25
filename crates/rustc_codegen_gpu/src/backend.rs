@@ -116,7 +116,6 @@ impl WriteBackendMethods for GPUCodegenBackend {
         module: &mut rustc_codegen_ssa_gpu::ModuleCodegen<Self::Module>,
         config: &rustc_codegen_ssa_gpu::back::write::ModuleConfig,
     ) -> Result<(), rustc_errors::FatalError> {
-        eprintln!("optimize starts");
         Ok(())
     }
 
@@ -124,7 +123,6 @@ impl WriteBackendMethods for GPUCodegenBackend {
         cgcx: &rustc_codegen_ssa_gpu::back::write::CodegenContext<Self>,
         llmod: &mut rustc_codegen_ssa_gpu::ModuleCodegen<Self::Module>,
     ) -> Result<(), rustc_errors::FatalError> {
-        eprintln!("optimize_fat starts");
         Ok(())
     }
 
@@ -153,10 +151,7 @@ impl WriteBackendMethods for GPUCodegenBackend {
         module: rustc_codegen_ssa_gpu::ModuleCodegen<Self::Module>,
         config: &rustc_codegen_ssa_gpu::back::write::ModuleConfig,
     ) -> Result<rustc_codegen_ssa_gpu::CompiledModule, rustc_errors::FatalError> {
-        eprintln!("codegen starts");
-        let ret = crate::write::codegen(cgcx, dcx, module, config);
-        eprintln!("codegen end");
-        ret
+        crate::write::codegen(cgcx, dcx, module, config)
     }
 
     fn prepare_thin(
@@ -182,7 +177,6 @@ impl WriteBackendMethods for GPUCodegenBackend {
         diff_fncs: Vec<rustc_ast::expand::autodiff_attrs::AutoDiffItem>,
         config: &rustc_codegen_ssa_gpu::back::write::ModuleConfig,
     ) -> Result<(), rustc_errors::FatalError> {
-        eprintln!("autodiff");
         Ok(())
     }
 }
@@ -217,7 +211,6 @@ impl ExtraBackendMethods for GPUCodegenBackend {
             )
         });
         let time_to_codegen = start_time.elapsed();
-        eprintln!("compile_codegen_unit {}", cgu_name);
         let cost = time_to_codegen.as_nanos() as u64;
         (module, cost)
     }
@@ -250,15 +243,13 @@ impl CodegenBackend for GPUCodegenBackend {
         need_metadata_module: bool,
     ) -> Box<dyn std::any::Any> {
         // Provide a dummy implementation or actual logic
-        let x = Box::new(rustc_codegen_ssa_gpu::base::codegen_crate(
+        Box::new(rustc_codegen_ssa_gpu::base::codegen_crate(
             GPUCodegenBackend::new(),
             tcx,
             tcx.sess.opts.cg.target_cpu.clone().unwrap_or_else(|| tcx.sess.target.cpu.to_string()),
             metadata,
             need_metadata_module,
-        ));
-        eprintln!("codegen_crate starts");
-        x
+        ))
     }
 
     fn join_codegen(
@@ -267,12 +258,10 @@ impl CodegenBackend for GPUCodegenBackend {
         sess: &rustc_session::Session,
         outputs: &rustc_session::config::OutputFilenames,
     ) -> (CodegenResults, FxIndexMap<WorkProductId, WorkProduct>) {
-        eprintln!("join_codegen");
         let (mut codegen_results, work_products) = ongoing_codegen
             .downcast::<rustc_codegen_ssa_gpu::back::write::OngoingCodegen<Self>>()
             .expect("Expected OngoingCodegen, found Box<Any>")
             .join(sess);
-        eprintln!("join_codegen");
         let mut bytecode_paths = vec![];
         for module in &codegen_results.modules {
             let Some(object_path) = &module.object else { continue };

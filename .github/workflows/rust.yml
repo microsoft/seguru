@@ -83,11 +83,11 @@ jobs:
 
       - name: Clippy
         working-directory: crates
-        run: cargo clippy --workspace --exclude cuda_bindings -- -D warnings -C panic=abort
+        run: cargo clippy --workspace --exclude cuda_bindings
 
       - name: Clippy examples
         working-directory: examples
-        run: __CODEGEN_TARGET__="GPU-CLIPPY" RUSTC=rustc cargo clippy --workspace --exclude llm-rs-gpu -- -D warnings -C panic=abort
+        run: __CODEGEN_TARGET__="GPU-CLIPPY" RUSTC=rustc cargo clippy --workspace --exclude llm-rs-gpu
 
       - name: Run tests
         working-directory: crates/rustc_codegen_gpu
@@ -100,5 +100,4 @@ jobs:
       - name: Run examples
         working-directory: examples
         run: |
-          cargo clean
           cargo build

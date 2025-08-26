@@ -8,7 +8,7 @@ use typed_arena::Arena;
 
 use super::unsafe_bindings::*;
 use super::{CUDA_SUCCESS, CudaError};
-use crate::{AsHostKernelParams, GPUConfig};
+use crate::{AsHostKernelParams, GPUConfig, GPUConfigMethods};
 
 macro_rules! eprintln {
     () => {
@@ -293,18 +293,17 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
     /// This is safe if the argument types match the kernel's expected types.
     /// To make it safe, use the gpu_macros::host to generate dummy api checking code.
     #[allow(clippy::too_many_arguments)]
-    pub unsafe fn launch_coop_kernel(
+    pub unsafe fn launch_coop_kernel<C: GPUConfig>(
         &self,
         m: &GpuModule<N>,
         func_name: &str,
-        config: GPUConfig,
-        shared_mem_size: usize,
+        config: C,
         host_args: &Vec<&dyn AsHostKernelParams>,
         stream: Option<&CudaStream>,
         is_async: bool,
     ) -> Result<(), CudaError> {
         let f = self.get_func(m, func_name)?;
-        self.launch_coop_fn(&f, config, shared_mem_size, host_args, stream, is_async)
+        self.launch_coop_fn(&f, config, host_args, stream, is_async)
     }
 
     /// The host must use arguments that implement `AsHostKernelParams`.
@@ -312,28 +311,26 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
     /// This is safe if the argument types match the kernel's expected types.
     /// To make it safe, use the gpu_macros::host to generate dummy api checking code.
     #[allow(clippy::too_many_arguments)]
-    pub unsafe fn launch_kernel(
+    pub unsafe fn launch_kernel<C: GPUConfig>(
         &self,
         m: &GpuModule<N>,
         func_name: &str,
-        config: GPUConfig,
-        shared_mem_size: usize,
+        config: C,
         host_args: &Vec<&dyn AsHostKernelParams>,
         stream: Option<&CudaStream>,
         is_async: bool,
     ) -> Result<(), CudaError> {
         let f = self.get_func(m, func_name)?;
-        self.launch_fn(&f, config, shared_mem_size, host_args, stream, is_async)
+        self.launch_fn(&f, config, host_args, stream, is_async)
     }
 
     /// # Safety
     /// This is safe if the argument types match the kernel's expected types.
     /// To make it safe, use the gpu_macros::host to generate dummy api checking code.
-    pub unsafe fn launch_coop_fn(
+    pub unsafe fn launch_coop_fn<C: GPUConfig>(
         &self,
         f: &GpuFunction<'ctx, N>,
-        config: GPUConfig,
-        shared_mem_size: usize,
+        config: C,
         host_args: &Vec<&dyn AsHostKernelParams>,
         stream: Option<&CudaStream>,
         is_async: bool,
@@ -348,17 +345,21 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
             .into_iter()
             .map(|data| Box::into_raw(data) as *mut core::ffi::c_void)
             .collect::<Vec<_>>();
+        if config.shared_size() != 0 {
+            kernel_args
+                .push(Box::into_raw(Box::new(config.shared_size())) as *mut core::ffi::c_void);
+        }
 
         let res = unsafe {
             cuLaunchCooperativeKernel(
                 f.func,
-                config.grid_dim_x,
-                config.grid_dim_y,
-                config.grid_dim_z,
-                config.block_dim_x,
-                config.block_dim_y,
-                config.block_dim_z,
-                shared_mem_size as u32,
+                config.grid_dim_x(),
+                config.grid_dim_y(),
+                config.grid_dim_z(),
+                config.block_dim_x(),
+                config.block_dim_y(),
+                config.block_dim_z(),
+                config.shared_size(),
                 stream.map_or(core::ptr::null_mut(), |s| s.raw),
                 kernel_args.as_mut_ptr() as _,
             )
@@ -377,11 +378,10 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
     /// # Safety
     /// This is safe if the argument types match the kernel's expected types.
     /// To make it safe, use the gpu_macros::host to generate dummy api checking code.
-    pub unsafe fn launch_fn(
+    pub unsafe fn launch_fn<C: GPUConfig>(
         &self,
         f: &GpuFunction<'ctx, N>,
-        config: GPUConfig,
-        shared_mem_size: usize,
+        config: C,
         host_args: &Vec<&dyn AsHostKernelParams>,
         stream: Option<&CudaStream>,
         is_async: bool,
@@ -400,13 +400,13 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
         let res = unsafe {
             cuLaunchKernel(
                 f.func,
-                config.grid_dim_x,
-                config.grid_dim_y,
-                config.grid_dim_z,
-                config.block_dim_x,
-                config.block_dim_y,
-                config.block_dim_z,
-                shared_mem_size as u32,
+                config.grid_dim_x(),
+                config.grid_dim_y(),
+                config.grid_dim_z(),
+                config.block_dim_x(),
+                config.block_dim_y(),
+                config.block_dim_z(),
+                config.shared_size(),
                 stream.map_or(core::ptr::null_mut(), |s| s.raw),
                 kernel_args.as_mut_ptr() as _,
                 core::ptr::null_mut(),

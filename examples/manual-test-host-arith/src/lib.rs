@@ -36,15 +36,8 @@ pub fn run_host_arith(
     let d_f_c = gpu::GpuChunkableMut::<f32>::new(d_f, w);
 
     // Now do the kernel
-    let config = gpu_host::GPUConfig {
-        grid_dim_x: 1,
-        grid_dim_y: 1,
-        grid_dim_z: 1,
-        block_dim_x: 1,
-        block_dim_y: 4,
-        block_dim_z: 1,
-    };
-    kernel_arith(ctx, m, config, d_a_c, d_b_c, d_c, d_f_c, d_g).expect("Kernel execution failed");
+    let config = gpu_host::gpu_config!(1, 1, 1, 1, 4, 1, 0);
+    kernel_arith(config, ctx, m, d_a_c, d_b_c, d_c, d_f_c, d_g).expect("Kernel execution failed");
     d_b.copy_to_host(h_b, min(h_b.len(), len), ctx)?;
     d_f.copy_to_host(h_f, min(h_f.len(), len), ctx)?;
 

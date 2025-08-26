@@ -28,7 +28,9 @@ pub use ctx::{
     GpuCtxToken, GpuCtxZeroGuard, GpuFunction, GpuModule, GpuToken,
 };
 pub use mem::CudaMemBox;
-pub use params::{AsHostKernelParams, GPUConfig};
+pub use params::{
+    AsHostKernelParams, GPUConfig, GPUConfigMethods, GPUDynamicConfig, GPUStaticConfig,
+};
 pub use unsafe_bindings::CUctx_flags;
 
 #[allow(unused_imports)]

@@ -1,9 +1,6 @@
 #![no_std]
 #![allow(clippy::too_many_arguments)]
 
-#[allow(non_upper_case_globals)]
-pub static shared_size_inner_product_kernel: usize = 0;
-
 /// # Safety
 /// This kernel might be unsafe because it uses Chunkable::new that is not defined as trusted chunking func.
 #[cfg(feature = "v1")]

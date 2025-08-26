@@ -2,10 +2,39 @@ use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::{ToTokens, quote, quote_spanned};
 use syn::spanned::Spanned;
-use syn::{Expr, PatType, Stmt};
+use syn::{Expr, PatType, Stmt, Type, TypeImplTrait};
 
 use crate::CodegenTarget;
 
+fn generic_ctxspace_bound(ident: syn::Ident, has_default: bool, span: Span) -> syn::GenericParam {
+    let mut bounds = syn::punctuated::Punctuated::new();
+    bounds.push(syn::parse_quote! { ::gpu_host::GpuCtxSpace });
+    bounds.push(syn::parse_quote! { 'static });
+    syn::GenericParam::Type(syn::TypeParam {
+        attrs: vec![],
+        ident,
+        colon_token: Some(syn::Token![:](span)),
+        bounds,
+        eq_token: if has_default { Some(syn::Token![=](span)) } else { None },
+        default: if has_default {
+            Some(syn::parse_quote! { ::gpu_host::CtxSpaceZero })
+        } else {
+            None
+        },
+    })
+}
+
+/// generate a host function
+/*
+fn kernel<..., Config: gpu_host::GPUConfig, C: gpu_host::GpuCtxSpace>(
+    config: Config,
+    ctx: &::gpu_host::GpuCtxGuard<'_, '_, C>,
+    module: &::gpu_host::GpuModule<C>,
+    args: Vec<&dyn gpu_host::AsHostKernelParams>,
+) -> Result<(), gpu_host::CudaError> {
+    Ok(())
+}
+*/
 fn host_rewrite(
     host_func: &mut syn::ItemFn,
     kernel_fn_path: syn::Path,
@@ -14,6 +43,7 @@ fn host_rewrite(
 ) {
     let is_gpu_only = target.is_gpu_only();
     let is_async = host_func.sig.asyncness.is_some();
+
     host_func.sig.output = syn::ReturnType::Type(
         syn::token::RArrow::default(),                                   // ->
         Box::new(syn::parse_quote! { Result<(), gpu_host::CudaError> }), // u32
@@ -27,6 +57,7 @@ fn host_rewrite(
     let mod_arg = syn::Ident::new(if is_gpu_only { "_host_module" } else { "host_module" }, span);
     let ctx_arg = syn::Ident::new(if is_gpu_only { "_ctx" } else { "ctx" }, span);
     let config_arg = syn::Ident::new(if is_gpu_only { "_config" } else { "config" }, span);
+    let ctx_type_arg = syn::Ident::new("CN", span);
 
     stmts.push(Stmt::Expr(
         Expr::Verbatim(quote_spanned! {span =>let mut #host_args = Vec::<&dyn gpu_host::AsHostKernelParams>::new();}),
@@ -44,32 +75,11 @@ fn host_rewrite(
             }
         }
     });
-    let mut bounds = syn::punctuated::Punctuated::new();
-    bounds.push(syn::parse_quote! { gpu_host::GpuCtxSpace });
-    bounds.push(syn::parse_quote! { 'static });
-    host_func.sig.generics.params.push(syn::GenericParam::Type(syn::TypeParam {
-        attrs: vec![],
-        ident: syn::Ident::new("N", span),
-        colon_token: Some(syn::Token![:](span)),
-        bounds,
-        eq_token: None,
-        default: None,
-    }));
-    host_func.sig.inputs.insert(
-        0,
-        syn::FnArg::Typed(PatType {
-            attrs: vec![],
-            pat: Box::new(syn::Pat::Ident(syn::PatIdent {
-                attrs: vec![],
-                by_ref: None,
-                mutability: None,
-                ident: config_arg.clone(),
-                subpat: None,
-            })),
-            colon_token: syn::token::Colon::default(),
-            ty: Box::new(syn::parse_quote! { gpu_host::GPUConfig }),
-        }),
-    );
+
+    // Add generic param for context namespace.
+    host_func.sig.generics.params.push(generic_ctxspace_bound(ctx_type_arg.clone(), false, span));
+
+    // Add module arg
     host_func.sig.inputs.insert(
         0,
         syn::FnArg::Typed(PatType {
@@ -82,9 +92,11 @@ fn host_rewrite(
                 subpat: None,
             })),
             colon_token: syn::token::Colon::default(),
-            ty: Box::new(syn::parse_quote! { &gpu_host::GpuModule<N> }),
+            ty: Box::new(syn::parse_quote! { &::gpu_host::GpuModule<#ctx_type_arg> }),
         }),
     );
+
+    // Add ctx arg
     host_func.sig.inputs.insert(
         0,
         syn::FnArg::Typed(PatType {
@@ -97,7 +109,29 @@ fn host_rewrite(
                 subpat: None,
             })),
             colon_token: syn::token::Colon::default(),
-            ty: Box::new(syn::parse_quote! { &gpu_host::GpuCtxGuard<'_, '_, N> }),
+            ty: Box::new(syn::parse_quote! { &::gpu_host::GpuCtxGuard<'_, '_, #ctx_type_arg> }),
+        }),
+    );
+
+    // Add dynamic config params
+    let mut bounds = syn::punctuated::Punctuated::new();
+    bounds.push(syn::parse_quote! { gpu_host::GPUConfig});
+    host_func.sig.inputs.insert(
+        0,
+        syn::FnArg::Typed(PatType {
+            attrs: vec![],
+            pat: Box::new(syn::Pat::Ident(syn::PatIdent {
+                attrs: vec![],
+                by_ref: None,
+                mutability: None,
+                ident: config_arg.clone(),
+                subpat: None,
+            })),
+            colon_token: syn::token::Colon::default(),
+            ty: Box::new(Type::ImplTrait(TypeImplTrait {
+                impl_token: syn::Token![impl](span),
+                bounds,
+            })),
         }),
     );
 
@@ -139,7 +173,6 @@ fn host_rewrite(
                 #mod_arg,
                 &::gpu_host::get_fn_name(#kernel_fn_path),
                 config,
-                0,
                 &#host_args,
                 None,
                 #is_async,

@@ -13,7 +13,6 @@ pub fn kernel_arith(a: &[u8], b: &[u8]) {
     gpu::println!("Hello from GPU! Value: %u %d at %d", a[0], b[0] as u32, id);
 }
 
-
 // CHECK: @gpu_bin_cst = internal constant
-// PTX_CHECK: .visible .entry kernel_arith
+// PTX_CHECK: .visible .entry print_3A__3A_kernel_5F_arith
 // PTX_CHECK: vprintf,

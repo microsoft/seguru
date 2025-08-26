@@ -26,5 +26,5 @@ pub fn test_valid_chunk_size(a: &mut [f32]) {
 }
 
 // CHECK: @gpu_bin_cst = internal constant
-// PTX_CHECK: .visible .entry test_valid_conditional_chunk
-// PTX_CHECK: .visible .entry test_valid_chunk_size
+// PTX_CHECK: .visible .entry conditional_5F_chunk_3A__3A_test_5F_valid_5F_conditional_5F_chunk
+// PTX_CHECK: .visible .entry conditional_5F_chunk_3A__3A_test_5F_valid_5F_chunk_5F_size

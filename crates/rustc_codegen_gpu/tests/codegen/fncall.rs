@@ -18,4 +18,4 @@ pub unsafe fn assign(a: i32, b: &mut i32) {
 }
 
 // CHECK: @gpu_bin_cst = internal constant
-// PTX_CHECK: .visible .entry assign
+// PTX_CHECK: .visible .entry fncall

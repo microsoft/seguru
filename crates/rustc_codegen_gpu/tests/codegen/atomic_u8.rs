@@ -14,5 +14,5 @@ pub fn test_atomic(b: &mut [u8]) {
 }
 
 // CHECK: @gpu_bin_cst = internal constant
-// PTX_CHECK: .visible .entry test_atomic
+// PTX_CHECK: .visible .entry atomic_
 // PTX_CHECK: atom.global.cas.b32

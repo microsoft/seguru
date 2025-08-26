@@ -16,5 +16,5 @@ pub fn subgroup_reduce(a: &[u32], _a_window: usize, b: &mut [u32], _b_window: us
 }
 
 // CHECK: @gpu_bin_cst = internal constant
-// PTX_CHECK: .visible .entry subgroup_reduce
+// PTX_CHECK: .visible .entry subgroup_
 // PTX_CHECK: redux.sync.add.s32

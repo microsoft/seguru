@@ -15,5 +15,5 @@ pub fn reduce_max(a: &[u32], _a_window: usize, b: &mut [u32], _b_window: usize) 
 }
 
 // CHECK: @gpu_bin_cst = internal constant
-// PTX_CHECK: .visible .entry reduce_max
+// PTX_CHECK: .visible .entry redux_3A__3A_reduce_5F_max
 // PTX_CHECK: redux.sync.max.s32

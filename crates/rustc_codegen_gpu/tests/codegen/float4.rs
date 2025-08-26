@@ -29,6 +29,6 @@ pub fn test_float4(out: &mut [float4], in1: &float4, in2: &float4) {
 }
 
 // CHECK: @gpu_bin_cst = internal constant
-// PTX_CHECK: .visible .entry test_float4
+// PTX_CHECK: .visible .entry float4
 // PTX_CHECK: add.rn.f32
 // PTX_CHECK: 0f3F9DF3B6

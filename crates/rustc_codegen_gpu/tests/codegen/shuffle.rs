@@ -24,6 +24,6 @@ pub fn shuffle_reduce_max(a: &[f32], _a_window: usize, b: &mut [f32], _b_window:
 }
 
 // CHECK: @gpu_bin_cst = internal constant
-// PTX_CHECK: .visible .entry shuffle_reduce
+// PTX_CHECK: .visible .entry shuffle
 // PTX_CHECK: shfl.sync.bfly.b32
 // PTX_CHECK: add.rn.f32

@@ -5,9 +5,6 @@ use syn::spanned::Spanned;
 
 fn kernel_rewrite_func(func: &mut syn::ItemFn, span: Span) {
     // Rewrite:
-    // 1. Replace the function's attributes
-    func.attrs.push(syn::parse_quote! {#[unsafe(no_mangle)]});
-
     let mut stmts = vec![];
 
     // 2. Add window to the argument list (also build the slices along the way)

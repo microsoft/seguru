@@ -33,6 +33,6 @@ pub unsafe fn assign_struct(a: A, b: C<'_>, c: C2<'_>) { //~ ERROR Kernel entry 
 }
 
 // CHECK: @gpu_bin_cst = internal constant
-// PTX_CHECK: .visible .entry assign_struct
+// PTX_CHECK: .visible .entry indirect
 // PTX_CHECK: ld.global.u32
 // PTX_CHECK: st.global.u32

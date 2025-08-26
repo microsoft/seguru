@@ -1,5 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 
+/*
 mod internal {
     /// Manually inserted function to test the host side API matches the GPU side API.
     /// This should be generated automatically by the macro.
@@ -22,8 +23,9 @@ mod internal {
         manual_test_gpu_arith::kernel_arith::<30>(a, b, c, f, g);
     }
 }
-
-#[gpu_macros::host(manual_test_gpu_arith::kernel_arith)]
+*/
+use manual_test_gpu_arith::kernel_arith as kernel_arith_gpu;
+#[gpu_macros::host(kernel_arith_gpu::<30>)]
 pub fn kernel_arith(
     a: gpu::GpuChunkable2D<u32>,
     b: gpu::GpuChunkableMut2D<u32>,

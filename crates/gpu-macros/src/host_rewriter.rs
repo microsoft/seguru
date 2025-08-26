@@ -6,7 +6,13 @@ use syn::{Expr, PatType, Stmt};
 
 use crate::CodegenTarget;
 
-fn host_rewrite(host_func: &mut syn::ItemFn, kernel_fn_path: syn::Path, span: Span) {
+fn host_rewrite(
+    host_func: &mut syn::ItemFn,
+    kernel_fn_path: syn::Path,
+    span: Span,
+    target: CodegenTarget,
+) {
+    let is_gpu_only = target.is_gpu_only();
     let is_async = host_func.sig.asyncness.is_some();
     host_func.sig.output = syn::ReturnType::Type(
         syn::token::RArrow::default(),                                   // ->
@@ -18,9 +24,9 @@ fn host_rewrite(host_func: &mut syn::ItemFn, kernel_fn_path: syn::Path, span: Sp
     // 2. Build up argument list and add ctx, module, config to wrapper
     let wrapper_args = &host_func.sig.inputs;
     let host_args = syn::Ident::new("args_for_launching", span);
-    let mod_arg = syn::Ident::new("host_module", span);
-    let ctx_arg = syn::Ident::new("ctx", span);
-    let config_arg = syn::Ident::new("config", span);
+    let mod_arg = syn::Ident::new(if is_gpu_only { "_host_module" } else { "host_module" }, span);
+    let ctx_arg = syn::Ident::new(if is_gpu_only { "_ctx" } else { "ctx" }, span);
+    let config_arg = syn::Ident::new(if is_gpu_only { "_config" } else { "config" }, span);
 
     stmts.push(Stmt::Expr(
         Expr::Verbatim(quote_spanned! {span =>let mut #host_args = Vec::<&dyn gpu_host::AsHostKernelParams>::new();}),
@@ -95,6 +101,37 @@ fn host_rewrite(host_func: &mut syn::ItemFn, kernel_fn_path: syn::Path, span: Sp
         }),
     );
 
+    if target.is_gpu_only() {
+        host_func.attrs.push(syn::parse_quote! { #[allow(clippy::extra_unused_type_parameters)] });
+        host_func.block.stmts.clear();
+        let args = host_func
+            .sig
+            .inputs
+            .iter()
+            .skip(3)
+            .map(|arg| {
+                if let syn::FnArg::Typed(pat_type) = arg {
+                    if let syn::Pat::Ident(pat_ident) = *pat_type.pat.clone() {
+                        pat_ident.ident.clone()
+                    } else {
+                        panic!("You don't have a name for your arg");
+                    }
+                } else {
+                    panic!("Unexpected receiver argument");
+                }
+            })
+            .collect::<Vec<_>>();
+        // Add call to kernel function so that gpu2gpu will be able to monomorphize the kernel.
+        host_func.block.stmts.push(Stmt::Expr(
+            Expr::Verbatim(quote!(
+                #kernel_fn_path(#(#args,)*);
+            )),
+            None,
+        ));
+        host_func.block.stmts.push(Stmt::Expr(Expr::Verbatim(quote!(Ok(()))), None));
+        return;
+    }
+
     let t = quote_spanned! {span =>
         // #Safety: this is safe if the argument types match the kernel's expected types.
         unsafe {
@@ -122,10 +159,6 @@ pub(crate) fn rewrite(attr: TokenStream, input: TokenStream, target: CodegenTarg
     let kernel_fn_path = syn::parse_macro_input!(attr as syn::Path);
 
     // The newly generated function uses the same span as the attributes
-    host_rewrite(&mut fun, kernel_fn_path, fun_span);
-    if target.is_gpu_only() {
-        fun.block.stmts.clear();
-        fun.block.stmts.push(Stmt::Expr(Expr::Verbatim(quote!(Ok(()))), None));
-    }
+    host_rewrite(&mut fun, kernel_fn_path.clone(), fun_span, target);
     fun.to_token_stream().into()
 }

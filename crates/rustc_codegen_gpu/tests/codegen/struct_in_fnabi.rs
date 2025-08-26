@@ -18,4 +18,4 @@ pub unsafe fn assign_struct(a: A, b: &mut A) { //~ ERROR Does not support fn abi
 
 
 // CHECK: @gpu_bin_cst = internal constant
-// PTX_CHECK: .visible .entry assign_struct
+// PTX_CHECK: .visible .entry struct_

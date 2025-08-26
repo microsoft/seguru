@@ -15,6 +15,10 @@ pub(crate) enum CodegenTarget {
 }
 
 impl CodegenTarget {
+    fn is_gpu_only(&self) -> bool {
+        matches!(self, CodegenTarget::Gpu)
+    }
+
     fn erase_func_body(&self) -> bool {
         matches!(self, CodegenTarget::Cpu)
     }
@@ -42,7 +46,7 @@ pub fn kernel(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 #[proc_macro_attribute]
 pub fn host(attr: TokenStream, item: TokenStream) -> TokenStream {
-    host_rewriter::rewrite(attr, item)
+    host_rewriter::rewrite(attr, item, target())
 }
 
 #[proc_macro_attribute]

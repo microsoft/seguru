@@ -113,6 +113,7 @@ name = "gpu_host"
 version = "0.1.0"
 dependencies = [
  "cuda_bindings",
+ "gpu_name",
 ]
 
 [[package]]
@@ -123,6 +124,10 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "gpu_name"
+version = "0.1.0"
 
 [[package]]
 name = "itertools"

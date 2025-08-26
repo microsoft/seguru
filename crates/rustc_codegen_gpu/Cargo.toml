@@ -12,6 +12,7 @@ mlir-sys = "0.5.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3" }
 mlir-compile = {path = "../mlir-compile"}
+gpu_name = {path = "../gpu-name"}
 
 [lib]
 crate-type = ["dylib"]

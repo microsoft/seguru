@@ -31,7 +31,7 @@ pub fn alloc_shared(a: &[u8], _a_window: usize, b: &mut [u8], b_window: usize, f
 
 
 // CHECK: @gpu_bin_cst = internal constant
-// PTX_CHECK: .visible .entry alloc_shared
+// PTX_CHECK: .visible .entry shared
 // PTX_CHECK: bar.sync
 // PTX_CHECK: st.shared
 // PTX_CHECK: ld.shared

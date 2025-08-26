@@ -3,6 +3,12 @@ mod ctx;
 pub use ctx::{cuda_ctx, cuda_scope};
 pub use cuda_bindings::*;
 
+pub fn get_fn_name<T>(_: T) -> String {
+    let name = std::any::type_name::<T>();
+
+    gpu_name::convert_type_name_to_gpu_sym_name(name)
+}
+
 #[test]
 fn test_cuda_mem_single_ctx() {
     let value1: [f32; 10] = [123f32; 10];

@@ -8,7 +8,6 @@ pub static shared_size_inner_product_kernel: usize = 0;
 /// This kernel might be unsafe because it uses Chunkable::new that is not defined as trusted chunking func.
 #[cfg(feature = "v1")]
 #[gpu_macros::kernel_v2]
-#[no_mangle]
 pub fn inner_product_kernel(a: &[f32], b: &[f32], c: gpu::GpuChunkableMut2D<f32>, n: usize) {
     let mut row = gpu::block_id(gpu::DimType::Y) * gpu::block_dim(gpu::DimType::Y)
         + gpu::thread_id(gpu::DimType::Y);
@@ -42,7 +41,6 @@ pub fn inner_product_kernel(a: &[f32], b: &[f32], c: gpu::GpuChunkableMut2D<f32>
 /// This kernel might be unsafe because it uses Chunkable::new that is not defined as trusted chunking func.
 #[cfg(feature = "v2")]
 #[gpu_macros::kernel_v2]
-#[no_mangle]
 pub fn inner_product_kernel(a: &[f32], b: &[f32], c: gpu::GpuChunkableMut2D<f32>, n: usize) {
     let mut row = gpu::block_id(gpu::DimType::Y) * gpu::block_dim(gpu::DimType::Y)
         + gpu::thread_id(gpu::DimType::Y);
@@ -74,7 +72,6 @@ pub fn inner_product_kernel(a: &[f32], b: &[f32], c: gpu::GpuChunkableMut2D<f32>
 /// This kernel might be unsafe because it uses Chunkable::new that is not defined as trusted chunking func.
 #[cfg(feature = "v3")]
 #[gpu_macros::kernel_v2]
-#[no_mangle]
 pub fn inner_product_kernel(a: &[f32], b: &[f32], c: gpu::GpuChunkableMut2D<f32>, n: usize) {
     let mut row = gpu::block_id(gpu::DimType::Y) * gpu::block_dim(gpu::DimType::Y)
         + gpu::thread_id(gpu::DimType::Y);

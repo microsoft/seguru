@@ -16,5 +16,5 @@ pub unsafe fn test(a: &[i16], b: &mut [i16]) {
 }
 
 // CHECK: @gpu_bin_cst = internal constant
-// PTX_CHECK: .visible .entry
+// PTX_CHECK: .visible .entry closure
 // PTX_CHECK: add.s16

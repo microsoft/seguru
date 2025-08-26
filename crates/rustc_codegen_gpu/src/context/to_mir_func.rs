@@ -61,47 +61,14 @@ fn is_impl_of_trait_method(
 
 impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     pub(crate) fn sanitized_symbol_name(&self, instance: Instance<'tcx>) -> String {
-        let input = self.tcx.symbol_name(instance).name.to_string();
-        let mut out = String::with_capacity(input.len());
-        let mut chars = input.chars().peekable();
-
-        while let Some(c) = chars.next() {
-            match c {
-                // Replace known mangling patterns
-                '$' => {
-                    let mut token = String::new();
-                    while let Some(&next) = chars.peek() {
-                        if next == '$' || next == '.' {
-                            break;
-                        }
-                        token.push(chars.next().unwrap());
-                    }
-                    out.push('_');
-                    out.push_str(&token.to_lowercase());
-                    out.push('_');
-                }
-                // Replace or remove common invalid characters
-                '<' | '>' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ':' | ';' | ' ' | '-'
-                | '.' => {
-                    out.push('_');
-                }
-                // Allow letters, digits, and underscore
-                c if c.is_ascii_alphanumeric() || c == '_' => {
-                    out.push(c);
-                }
-                // Fallback: underscore for anything else
-                _ => {
-                    out.push('_');
-                }
-            }
-        }
-
-        // Avoid starting with a digit
-        if out.chars().next().is_some_and(|c| c.is_ascii_digit()) {
-            out.insert(0, '_');
-        }
-
-        out
+        let crate_name = self.tcx.crate_name(instance.def_id().krate);
+        let path_name = self.tcx.def_path_str_with_args(instance.def_id(), instance.args);
+        let path_name = if !path_name.starts_with(crate_name.as_str()) {
+            format!("{}::{}", crate_name, path_name)
+        } else {
+            path_name
+        };
+        gpu_name::convert_def_path_to_gpu_sym_name(&path_name)
     }
 
     pub fn gpu_return(

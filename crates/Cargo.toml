@@ -7,4 +7,5 @@ members = [
     "gpu-host",
     "mlir-compile",
     "cuda_bindings",
+    "gpu-name",
 ]

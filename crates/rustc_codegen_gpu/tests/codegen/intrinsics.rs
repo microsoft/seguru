@@ -17,4 +17,4 @@ pub fn test_call_devicelib_func(out: &mut [f32], in1: f32, in2: f32) {
 }
 
 // CHECK: @gpu_bin_cst = internal constant
-// PTX_CHECK: .visible .entry test_call_devicelib_func
+// PTX_CHECK: .visible .entry intrinsics

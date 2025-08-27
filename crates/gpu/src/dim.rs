@@ -144,3 +144,22 @@ impl GpuSharedChunkIdx {
         self.id
     }
 }
+
+/// Users should not use it directly. It should only used from gpu_macros.
+/// # Safety
+/// This function is safe when Config is properly instantiated from host side.
+#[doc(hidden)]
+#[inline(always)]
+#[gpu_codegen::device]
+#[cfg(not(feature = "codegen_tests"))]
+pub unsafe fn assume_dim_with_config<Config: crate::GPUConfig>() {
+    use core::intrinsics::assume;
+    unsafe {
+        assume(Config::GRID_DIM_X == 0 || Config::GRID_DIM_X as usize == grid_dim(DimType::X));
+        assume(Config::GRID_DIM_Y == 0 || Config::GRID_DIM_Y as usize == grid_dim(DimType::Y));
+        assume(Config::GRID_DIM_Z == 0 || Config::GRID_DIM_Z as usize == grid_dim(DimType::Z));
+        assume(Config::BLOCK_DIM_X == 0 || Config::BLOCK_DIM_X as usize == block_dim(DimType::X));
+        assume(Config::BLOCK_DIM_Y == 0 || Config::BLOCK_DIM_Y as usize == block_dim(DimType::Y));
+        assume(Config::BLOCK_DIM_Z == 0 || Config::BLOCK_DIM_Z as usize == block_dim(DimType::Z));
+    }
+}

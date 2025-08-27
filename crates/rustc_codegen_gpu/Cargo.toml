@@ -23,7 +23,7 @@ path = "tests/bin/filecheck.rs"
 
 [dev-dependencies]
 compiletest_rs = "0.9.0"
-gpu_macros = {path = "../gpu-macros"}
+gpu_macros = {path = "../gpu-macros", features = ["codegen_tests"]}
 cuda_bindings = {path = "../cuda_bindings"}
 typed-arena = "2.0"
 

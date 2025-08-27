@@ -33,6 +33,16 @@ impl VisitMut for GpuFunctionRewriter {
 
     fn visit_item_fn_mut(&mut self, f: &mut syn::ItemFn) {
         syn::visit_mut::visit_item_fn_mut(self, f);
+        #[cfg(not(feature = "codegen_tests"))]
+        {
+            if self.is_kernel_entry {
+                // Add dynamic config params
+                f.sig.generics.params.insert(0, syn::parse_quote! { Config: ::gpu::GPUConfig});
+                f.block.stmts.push(parse_quote! {
+                    unsafe {::gpu::assume_dim_with_config::<Config>();}
+                });
+            }
+        }
         if !self.target.need_register_tool() {
             return;
         }
@@ -61,7 +71,6 @@ pub(crate) fn basic_rewrite_gpu_func(
         fun.block.stmts.push(parse_quote! {
             unimplemented!();
         });
-        return;
     }
     let mut dev_rewriter = crate::gpu_syntax::GpuFunctionRewriter::new(is_kernel_entry, target);
     dev_rewriter.visit_item_fn_mut(fun);

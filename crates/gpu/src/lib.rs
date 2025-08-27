@@ -22,8 +22,12 @@ pub use chunk::{chunk, chunk_mut};
 #[cfg(not(feature = "codegen_tests"))]
 pub use chunk::{get_local_2d, get_local_mut_2d};
 #[cfg(not(feature = "codegen_tests"))]
-pub use cuda_bindings::{GpuChunkable, GpuChunkable2D, GpuChunkableMut, GpuChunkableMut2D};
+pub use cuda_bindings::{
+    GPUConfig, GpuChunkable, GpuChunkable2D, GpuChunkableMut, GpuChunkableMut2D,
+};
 pub use device_intrinsic::GPUDeviceFloatIntrinsics;
+#[cfg(not(feature = "codegen_tests"))]
+pub use dim::assume_dim_with_config;
 pub use dim::{
     DimType, GpuChunkIdx, GpuSharedChunkIdx, block_dim, block_id, dim, global_id, grid_dim,
     thread_id,

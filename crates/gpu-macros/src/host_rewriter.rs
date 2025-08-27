@@ -2,7 +2,7 @@ use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::{ToTokens, quote, quote_spanned};
 use syn::spanned::Spanned;
-use syn::{Expr, PatType, Stmt, Type, TypeImplTrait};
+use syn::{Expr, PatType, Stmt};
 
 use crate::CodegenTarget;
 
@@ -24,6 +24,23 @@ fn generic_ctxspace_bound(ident: syn::Ident, has_default: bool, span: Span) -> s
     })
 }
 
+fn generic_config_bound(ident: syn::Ident, has_default: bool, span: Span) -> syn::GenericParam {
+    let mut bounds = syn::punctuated::Punctuated::new();
+    bounds.push(syn::parse_quote! { ::gpu_host::GPUConfig });
+    syn::GenericParam::Type(syn::TypeParam {
+        attrs: vec![],
+        ident,
+        colon_token: Some(syn::Token![:](span)),
+        bounds,
+        eq_token: if has_default { Some(syn::Token![=](span)) } else { None },
+        default: if has_default {
+            Some(syn::parse_quote! { ::gpu_host::GPUStaticConfig })
+        } else {
+            None
+        },
+    })
+}
+
 /// generate a host function
 /*
 fn kernel<..., Config: gpu_host::GPUConfig, C: gpu_host::GpuCtxSpace>(
@@ -37,7 +54,7 @@ fn kernel<..., Config: gpu_host::GPUConfig, C: gpu_host::GpuCtxSpace>(
 */
 fn host_rewrite(
     host_func: &mut syn::ItemFn,
-    kernel_fn_path: syn::Path,
+    mut kernel_fn_path: syn::Path,
     span: Span,
     target: CodegenTarget,
 ) {
@@ -58,6 +75,7 @@ fn host_rewrite(
     let ctx_arg = syn::Ident::new(if is_gpu_only { "_ctx" } else { "ctx" }, span);
     let config_arg = syn::Ident::new(if is_gpu_only { "_config" } else { "config" }, span);
     let ctx_type_arg = syn::Ident::new("CN", span);
+    let config_type_arg = syn::Ident::new("Config", span);
 
     stmts.push(Stmt::Expr(
         Expr::Verbatim(quote_spanned! {span =>let mut #host_args = Vec::<&dyn gpu_host::AsHostKernelParams>::new();}),
@@ -77,8 +95,8 @@ fn host_rewrite(
     });
 
     // Add generic param for context namespace.
+    host_func.sig.generics.params.push(generic_config_bound(config_type_arg.clone(), false, span));
     host_func.sig.generics.params.push(generic_ctxspace_bound(ctx_type_arg.clone(), false, span));
-
     // Add module arg
     host_func.sig.inputs.insert(
         0,
@@ -114,8 +132,6 @@ fn host_rewrite(
     );
 
     // Add dynamic config params
-    let mut bounds = syn::punctuated::Punctuated::new();
-    bounds.push(syn::parse_quote! { gpu_host::GPUConfig});
     host_func.sig.inputs.insert(
         0,
         syn::FnArg::Typed(PatType {
@@ -128,12 +144,17 @@ fn host_rewrite(
                 subpat: None,
             })),
             colon_token: syn::token::Colon::default(),
-            ty: Box::new(Type::ImplTrait(TypeImplTrait {
-                impl_token: syn::Token![impl](span),
-                bounds,
-            })),
+            ty: Box::new(syn::parse_quote! { #config_type_arg }),
         }),
     );
+
+    let last_segment = kernel_fn_path.segments.last_mut().unwrap();
+    if let syn::PathArguments::AngleBracketed(bracketed_args) = &mut last_segment.arguments {
+        bracketed_args.args.insert(0, syn::parse_quote! { #config_type_arg });
+    } else {
+        last_segment.arguments =
+            syn::PathArguments::AngleBracketed(syn::parse_quote! { ::<#config_type_arg> });
+    }
 
     if target.is_gpu_only() {
         host_func.attrs.push(syn::parse_quote! { #[allow(clippy::extra_unused_type_parameters)] });

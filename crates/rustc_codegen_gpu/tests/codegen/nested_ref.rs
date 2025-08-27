@@ -15,4 +15,4 @@ pub unsafe fn assign(a: &X<'_>, b: &mut i32) {
 }
 
 // CHECK: @gpu_bin_cst = internal constant
-// PTX_CHECK: .visible .entry nested_5F_ref_3A__3A_assign
+// PTX_CHECK: .visible .entry nested_ref_3A__3A_assign

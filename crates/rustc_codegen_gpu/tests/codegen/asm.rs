@@ -18,6 +18,6 @@ pub unsafe fn test_asm(a: u32, b: &mut u32) {
 }
 
 // CHECK: @gpu_bin_cst = internal constant
-// PTX_CHECK: .visible .entry asm_3A__3A_test_5F_asm
+// PTX_CHECK: .visible .entry asm_3A__3A_test_asm
 // PTX_CHECK: mov.u32
 // PTX_CHECK: membar.gl

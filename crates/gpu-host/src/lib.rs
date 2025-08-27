@@ -5,8 +5,7 @@ pub use cuda_bindings::*;
 
 pub fn get_fn_name<T>(_: T) -> String {
     let name = std::any::type_name::<T>();
-
-    gpu_name::convert_type_name_to_gpu_sym_name(name)
+    gpu_name::convert_def_path_to_gpu_sym_name(name)
 }
 
 #[test]

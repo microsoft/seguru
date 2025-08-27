@@ -9,7 +9,7 @@ use rustc_codegen_ssa_gpu::traits::{
 };
 use rustc_hir::def_id::DefId;
 use rustc_middle::query::Key;
-use rustc_middle::ty::layout::{FnAbiOf, HasTyCtxt, LayoutOf};
+use rustc_middle::ty::layout::{FnAbiOf, HasTyCtxt, HasTypingEnv, LayoutOf};
 use rustc_middle::ty::{AssocItemContainer, Instance};
 use tracing::debug;
 
@@ -61,14 +61,14 @@ fn is_impl_of_trait_method(
 
 impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     pub(crate) fn sanitized_symbol_name(&self, instance: Instance<'tcx>) -> String {
-        let crate_name = self.tcx.crate_name(instance.def_id().krate);
-        let path_name = self.tcx.def_path_str_with_args(instance.def_id(), instance.args);
-        let path_name = if !path_name.starts_with(crate_name.as_str()) {
-            format!("{}::{}", crate_name, path_name)
-        } else {
-            path_name
-        };
-        gpu_name::convert_def_path_to_gpu_sym_name(&path_name)
+        let ty = self.tcx.type_of(instance.def_id());
+        let mono_ty = self
+            .tcx
+            .try_instantiate_and_normalize_erasing_regions(instance.args, self.typing_env(), ty)
+            .expect("failed to instantiate and normalize");
+        gpu_name::convert_def_path_to_gpu_sym_name(&rustc_const_eval::util::type_name(
+            self.tcx, mono_ty,
+        ))
     }
 
     pub fn gpu_return(

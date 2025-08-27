@@ -35,11 +35,11 @@ pub fn kernel_arith(a: &[u8], b: &mut [u8], window: usize) {
 }
 
 // CHECK: @gpu_bin_cst = internal constant
-// PTX_CHECK: .visible .entry thread_5F_scope_3A__3A_kernel_5F_arith
-// PTX_CHECK: [thread_5F_scope_3A__3A_kernel_5F_arith_param_0];
-// PTX_CHECK: [thread_5F_scope_3A__3A_kernel_5F_arith_param_1];
-// PTX_CHECK: [thread_5F_scope_3A__3A_kernel_5F_arith_param_2];
-// PTX_CHECK: [thread_5F_scope_3A__3A_kernel_5F_arith_param_4];
+// PTX_CHECK: .visible .entry thread_scope_3A__3A_kernel_arith
+// PTX_CHECK: [thread_scope_3A__3A_kernel_arith_param_0];
+// PTX_CHECK: [thread_scope_3A__3A_kernel_arith_param_1];
+// PTX_CHECK: [thread_scope_3A__3A_kernel_arith_param_2];
+// PTX_CHECK: [thread_scope_3A__3A_kernel_arith_param_4];
 // PTX_CHECK: tid.x;
 // PTX_CHECK: tid.y;
 // PTX_CHECK: tid.z;

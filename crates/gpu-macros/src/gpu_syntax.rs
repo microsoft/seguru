@@ -40,7 +40,6 @@ impl VisitMut for GpuFunctionRewriter {
             // If we are inside a host function, we need to ensure it has the #[gpu_codegen::host] attribute
             if !f.attrs.iter().any(|a| a.path().is_ident("gpu_codegen::kernel")) {
                 f.attrs.push(parse_quote!(#[gpu_codegen::kernel]));
-                f.attrs.push(parse_quote!(#[unsafe(no_mangle)]));
             }
         } else {
             // If we are inside a device function, we need to ensure it has the #[gpu_codegen::device] attribute

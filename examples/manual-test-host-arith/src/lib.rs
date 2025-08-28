@@ -43,10 +43,18 @@ pub fn run_host_arith(
 
     for (i, bi) in h_b.iter().enumerate().take(len) {
         println!("b[{}] = {}", i, bi);
+        assert!(*bi == 42 + i as u32 * 2);
     }
 
     for (i, fi) in h_f.iter().enumerate().take(len) {
         println!("f[{}] = {}", i, fi);
+        match i {
+            0 => assert!(*fi == 13.391208),
+            1 => assert!(*fi == 11.808496),
+            2 => assert!(*fi == 10.842255),
+            3 => assert!(*fi == 10.048399),
+            _ => unreachable!(),
+        }
     }
     Ok(())
 }

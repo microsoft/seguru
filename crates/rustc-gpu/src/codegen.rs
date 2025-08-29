@@ -16,7 +16,7 @@ pub(crate) fn get_codegen_dylib(out_dir: &Path) -> String {
             let mut file = OpenOptions::new()
                 .write(true)
                 .read(true)
-                .create_new(!so_path.exists()) // <-- atomic: fails if file exists
+                .create(true)
                 .open(&so_path)
                 .expect("Failed to open file");
 

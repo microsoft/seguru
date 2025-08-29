@@ -17,6 +17,7 @@ pub(crate) fn get_codegen_dylib(out_dir: &Path) -> String {
                 .write(true)
                 .read(true)
                 .create(true)
+                .truncate(false)
                 .open(&so_path)
                 .expect("Failed to open file");
 

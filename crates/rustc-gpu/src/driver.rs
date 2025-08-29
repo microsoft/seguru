@@ -132,45 +132,53 @@ fn gpu_register_tool<'tcx>(tcx: TyCtxt<'tcx>, id: ()) -> registered_tools::Provi
 
 fn config_link_gpu_code(config: &mut Config) {
     // Link to gpu code
+    let mut need_link_gpu = config.opts.test;
+
     for crate_type in &mut config.opts.crate_types {
         if !matches!(crate_type, CrateType::Executable) {
             continue;
         }
-        let mut bc_files: Vec<PathBuf> = Vec::new();
-        let _ = new_externs_with_new_path(&config.opts.externs, |p| {
-            let fname = p.file_stem().unwrap().to_str().unwrap();
-            assert!(p.exists());
-            let new_path =
-                new_gpu_dir(p.parent().unwrap()).join(format!("{fname}{GPU_SUFFIX}.{GPU_BC_EXT}"));
-            if new_path.exists() {
-                bc_files.push(new_path)
-            }
-            None
-        });
+        need_link_gpu = true;
+    }
 
-        if let Some(output_dir) = &config.output_dir {
-            let crate_name = config.opts.crate_name.as_ref().unwrap().clone();
-            let bc_file = new_gpu_dir(output_dir)
-                .join(format!("lib{crate_name}{GPU_SUFFIX}.{GPU_BC_EXT}"))
-                .with_extension(GPU_BC_EXT);
-            if bc_file.exists() {
-                bc_files.push(bc_file.clone());
-            }
-            debug!("link gpu bc_files {:?}", bc_files);
-            if !bc_files.is_empty() {
-                let gpu_obj_file = bc_file.with_extension(GPU_LIB_EXT);
-                mlir_compile::CompileConfig::new()
-                    .gpu_link_and_create_static_lib(&bc_files, &gpu_obj_file)
-                    .expect("failed to compile gpu lib");
-                assert!(gpu_obj_file.exists());
-                debug!("link to {:?}", gpu_obj_file);
-                config.opts.libs.push(NativeLib {
-                    name: gpu_obj_file.as_os_str().to_str().unwrap().to_string(),
-                    new_name: None,
-                    kind: NativeLibKind::LinkArg,
-                    verbatim: None,
-                });
-            }
+    if !need_link_gpu {
+        return;
+    }
+
+    let mut bc_files: Vec<PathBuf> = Vec::new();
+    let _ = new_externs_with_new_path(&config.opts.externs, |p| {
+        let fname = p.file_stem().unwrap().to_str().unwrap();
+        assert!(p.exists());
+        let new_path =
+            new_gpu_dir(p.parent().unwrap()).join(format!("{fname}{GPU_SUFFIX}.{GPU_BC_EXT}"));
+        if new_path.exists() {
+            bc_files.push(new_path)
+        }
+        None
+    });
+
+    if let Some(output_dir) = &config.output_dir {
+        let crate_name = config.opts.crate_name.as_ref().unwrap().clone();
+        let bc_file = new_gpu_dir(output_dir)
+            .join(format!("lib{crate_name}{GPU_SUFFIX}.{GPU_BC_EXT}"))
+            .with_extension(GPU_BC_EXT);
+        if bc_file.exists() {
+            bc_files.push(bc_file.clone());
+        }
+        debug!("link gpu bc_files {:?}", bc_files);
+        if !bc_files.is_empty() {
+            let gpu_obj_file = bc_file.with_extension(GPU_LIB_EXT);
+            mlir_compile::CompileConfig::new()
+                .gpu_link_and_create_static_lib(&bc_files, &gpu_obj_file)
+                .expect("failed to compile gpu lib");
+            assert!(gpu_obj_file.exists());
+            debug!("link to {:?}", gpu_obj_file);
+            config.opts.libs.push(NativeLib {
+                name: gpu_obj_file.as_os_str().to_str().unwrap().to_string(),
+                new_name: None,
+                kind: NativeLibKind::LinkArg,
+                verbatim: None,
+            });
         }
     }
 }

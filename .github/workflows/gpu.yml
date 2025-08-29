@@ -1,0 +1,48 @@
+name: GPU
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:  # manual trigger
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  tests:
+    name: Run Tests
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Set up Cuda and LLVM environment
+        id: llvm
+        run: |
+          LLVM_PREFIX=$(/home/linuxbrew/.linuxbrew/bin/brew --prefix llvm@20)
+          BINUTILS_PREFIX=$(/home/linuxbrew/.linuxbrew/bin/brew --prefix binutils)
+          echo "PATH=/usr/local/cuda/bin:${PATH}" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+          echo "LLVM_PREFIX=$LLVM_PREFIX" >> $GITHUB_ENV
+          echo "$LLVM_PREFIX/bin" >> $GITHUB_PATH
+          echo "LD_LIBRARY_PATH=$LLVM_PREFIX/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+          echo "$BINUTILS_PREFIX/bin" >> $GITHUB_PATH
+
+      - name: Confirm CUDA tools
+        run: |
+          nvcc --version
+          ptxas --version
+          cuobjdump --version
+
+      - name: Build tools
+        working-directory: crates
+        run: cargo build
+
+      - name: Run examples
+        working-directory: examples
+        run: |
+          cargo build
+          cargo run --bin manual-test-host-arith
+          cargo run --bin matmul-host

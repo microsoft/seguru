@@ -73,31 +73,50 @@ jobs:
           which llvm-config
           llvm-config --version
 
+      - name: Check which folders changed
+        id: check_changes
+        run: |
+          echo "crates_changed=false" >> $GITHUB_OUTPUT
+          echo "crates_or_examples_changed=false" >> $GITHUB_OUTPUT
+          if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q '^crates/'; then
+            echo "crates_changed=true" >> $GITHUB_OUTPUT
+          fi
+          if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -Eq '^(crates|examples)/'; then
+            echo "crates_or_examples_changed=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: Format
         working-directory: crates
+        if: ${{ steps.check_changes.outputs.crates_changed == 'true' }}
         run: cargo fmt --all -- --check
 
       - name: Format examples
         working-directory: examples
+        if: ${{ steps.check_changes.outputs.crates_or_examples_changed == 'true' }}
         run: cargo fmt --all -- --check
 
       - name: Clippy
         working-directory: crates
-        run: cargo clippy --workspace --exclude cuda_bindings
+        if: ${{ steps.check_changes.outputs.crates_changed == 'true' }}
+        run: cargo clippy -- -D warnings
 
       - name: Clippy examples
         working-directory: examples
-        run: __CODEGEN_TARGET__="GPU-CLIPPY" RUSTC=rustc cargo clippy --workspace --exclude llm-rs-gpu
+        if: ${{ steps.check_changes.outputs.crates_or_examples_changed == 'true' }}
+        run: __CODEGEN_TARGET__="GPU-CLIPPY" RUSTC=rustc cargo clippy --workspace --exclude llm-rs-gpu -- -D warnings
 
       - name: Run tests
         working-directory: crates/rustc_codegen_gpu
+        if: ${{ steps.check_changes.outputs.crates_changed == 'true' }}
         run: cargo test
 
       - name: Build
         working-directory: crates
+        if: ${{ steps.check_changes.outputs.crates_or_examples_changed == 'true' }}
         run: cargo build --workspace
 
       - name: Run examples
         working-directory: examples
+        if: ${{ steps.check_changes.outputs.crates_or_examples_changed == 'true' }}
         run: |
           cargo build

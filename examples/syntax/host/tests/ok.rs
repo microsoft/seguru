@@ -1,5 +1,5 @@
 use cuda_bindings::cuda_ctx;
-use manual_test_host_arith::run_host_arith;
+use syntax_gpu::run_host_arith;
 #[test]
 fn test_ok() {
     cuda_ctx(0, |ctx| {

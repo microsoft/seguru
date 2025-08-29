@@ -1,10 +1,10 @@
 [package]
-name = "manual-test-host-arith"
+name = "syntax_host"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 gpu_host = {workspace = true}
-manual-test-gpu-arith = {path = "../manual-test-gpu-arith"}
+syntax_gpu = {workspace = true}
 gpu_macros = {workspace = true}
 gpu = {workspace = true}

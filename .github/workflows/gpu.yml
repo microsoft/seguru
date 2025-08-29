@@ -44,5 +44,5 @@ jobs:
         working-directory: examples
         run: |
           cargo build
-          cargo run --bin manual-test-host-arith
+          cargo run --bin syntax_host
           cargo run --bin matmul-host

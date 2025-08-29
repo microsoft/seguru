@@ -24,7 +24,7 @@ mod internal {
     }
 }
 */
-use manual_test_gpu_arith::kernel_arith as kernel_arith_gpu;
+use syntax_gpu::kernel_arith as kernel_arith_gpu;
 #[gpu_macros::host(kernel_arith_gpu::<30>)]
 pub fn kernel_arith(
     a: gpu::GpuChunkable2D<u32>,

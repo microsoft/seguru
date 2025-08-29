@@ -12,6 +12,6 @@ fn main() {
         println!("{}: length set to {}", args[0], len);
     }
     cuda_ctx(0, |ctx| {
-        manual_test_host_arith::run_host_arith(ctx, len, w).expect("Failed to run host arithmetic");
+        syntax_host::run_host_arith(ctx, len, w).expect("Failed to run host arithmetic");
     });
 }

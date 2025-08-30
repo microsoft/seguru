@@ -1,6 +1,5 @@
 mod host;
 
-use gpu_host::load_module_from_extern;
 use host::inner_product_kernel;
 
 fn cpu_inner_product(a: &[f32], b: &[f32], c: &mut [f32], n: usize) {
@@ -36,13 +35,12 @@ fn print_square_matrix(m: &[f32], n: usize) {
     }
 }
 
-pub fn run_host_matmul(
-    ctx: &gpu_host::GpuCtxZeroGuard<'_, '_>,
+pub fn run_host_matmul<'ctx>(
+    ctx: &gpu_host::GpuCtxZeroGuard<'ctx, '_>,
+    m: &'ctx gpu_host::GpuModule<gpu_host::CtxSpaceZero>,
     n: usize,
     dim: u32,
 ) -> Result<(), gpu_host::CudaError> {
-    let m = unsafe { load_module_from_extern!(ctx, gpu_bin_cst)? };
-
     let mut initial_array = vec![];
     for i in 0..(n * n) {
         initial_array.push((i % 32) as f32);

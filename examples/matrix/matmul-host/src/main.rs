@@ -18,7 +18,7 @@ fn main() {
             println!("{}: n set to {}, dim set to {}", args[0], n, dim);
         }
     }
-    cuda_ctx(0, |ctx| {
-        matmul_host::run_host_matmul(ctx, n, dim).expect("Failed to run host arithmetic");
+    cuda_ctx(0, |ctx, m| {
+        matmul_host::run_host_matmul(ctx, m, n, dim).expect("Failed to run host arithmetic");
     });
 }

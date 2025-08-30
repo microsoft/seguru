@@ -2,14 +2,12 @@ mod host;
 
 use host::kernel_arith;
 
-use gpu_host::load_module_from_extern;
-
-pub fn run_host_arith(
-    ctx: &gpu_host::GpuCtxZeroGuard<'_, '_>,
+pub fn run_host_arith<'ctx>(
+    ctx: &gpu_host::GpuCtxZeroGuard<'ctx, '_>,
+    m: &'ctx gpu_host::GpuModule<gpu_host::CtxSpaceZero>,
     len: usize,
     w: usize,
 ) -> Result<(), gpu_host::CudaError> {
-    let m = unsafe { load_module_from_extern!(ctx, gpu_bin_cst)? };
     // Allocate the two host-side arrays
     // TODO: Make h_a non-mutable
     let h_a: &[u32] = &[1, 2, 3, 4];

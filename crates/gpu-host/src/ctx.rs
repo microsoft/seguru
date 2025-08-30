@@ -1,6 +1,6 @@
 use cuda_bindings::{
     CUctx_flags, CtxSpaceZero, GpuActiveToken, GpuCtxCreateAndUseToken, GpuCtxHandle, GpuCtxToken,
-    GpuCtxZeroGuard, GpuToken,
+    GpuCtxZeroGuard, GpuModule, GpuToken,
 };
 
 static GPU: std::sync::OnceLock<GpuToken> = std::sync::OnceLock::new();
@@ -49,7 +49,7 @@ pub fn cuda_scope<T>(
 /// It is useful in most cases where a process only needs a single GPU context.
 pub fn cuda_ctx<T>(
     dev_id: u32,
-    f: impl for<'ctx, 'a> FnOnce(&GpuCtxZeroGuard<'ctx, 'a>) -> T,
+    f: impl for<'ctx, 'a> FnOnce(&GpuCtxZeroGuard<'ctx, 'a>, &'ctx GpuModule<CtxSpaceZero>) -> T,
 ) -> T {
     // SAFETY: This function is safe since no more than one GPU context is created
     let instance = GPU.get_or_init(|| unsafe { GpuToken::new() });
@@ -63,11 +63,14 @@ pub fn cuda_ctx<T>(
             };
             let (ctx_h, _) = GpuCtxHandle::<CtxSpaceZero>::new(ct, dev_id, CUctx_flags::CU_CTX_SCHED_AUTO);
             let ctx = ctx_h.activate(&mut active);
-            f(&ctx)
+            // This is safe since our rustc-gpu will generate gpu_bin_cst
+            let m = unsafe { crate::load_module_from_extern!(ctx, gpu_bin_cst).expect("Failed to load default gpu_bin_cst module. Please use gpu_macros + rustc_gpu to compile.") };
+            f(&ctx, m)
         } else {
             panic!("No active GPU context found. Ensure cuda_scope is not called inside another cuda_scope.");
         };
+        // This is safe since the above session ends and so function is executed at current ctx.
         token.borrow_mut().replace(unsafe{GpuCtxCreateAndUseToken::new()});
-    ret
+        ret
     })
 }

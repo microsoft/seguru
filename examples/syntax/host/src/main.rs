@@ -11,7 +11,7 @@ fn main() {
         len = i32::from_str(&args[1]).unwrap() as usize;
         println!("{}: length set to {}", args[0], len);
     }
-    cuda_ctx(0, |ctx| {
-        syntax_host::run_host_arith(ctx, len, w).expect("Failed to run host arithmetic");
+    cuda_ctx(0, |ctx, m| {
+        syntax_host::run_host_arith(ctx, m, len, w).expect("Failed to run host arithmetic");
     });
 }

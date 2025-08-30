@@ -78,10 +78,11 @@ jobs:
         run: |
           echo "crates_changed=false" >> $GITHUB_OUTPUT
           echo "crates_or_examples_changed=false" >> $GITHUB_OUTPUT
-          if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q '^crates/'; then
+          git fetch origin ${{ github.base_ref }}
+          if git diff --name-only origin/${{ github.base_ref }} ${{ github.sha }} | grep -q '^crates/'; then
             echo "crates_changed=true" >> $GITHUB_OUTPUT
           fi
-          if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -Eq '^(crates|examples)/'; then
+          if git diff --name-only origin/${{ github.base_ref }} ${{ github.sha }} | grep -Eq '^(crates|examples)/'; then
             echo "crates_or_examples_changed=true" >> $GITHUB_OUTPUT
           fi
 

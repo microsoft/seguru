@@ -137,8 +137,12 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         mlir_ir::Type::index(self.mlir_ctx)
     }
 
+    fn type_i_bits(&self, n: u32) -> MLIRType<'ml> {
+        MLIRType::from(mlir_type::IntegerType::new(self.mlir_ctx, n))
+    }
+
     pub(crate) fn type_i1(&self) -> MLIRType<'ml> {
-        MLIRType::from(mlir_type::IntegerType::new(self.mlir_ctx, 1))
+        self.type_i_bits(1)
     }
 
     pub(crate) fn type_tensor(&self, ty: MLIRType<'ml>, len: u64) -> MLIRType<'ml> {
@@ -407,23 +411,23 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
 
 impl<'tcx, 'ml, 'a> BaseTypeCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
     fn type_i8(&self) -> Self::Type {
-        MLIRType::from(mlir_type::IntegerType::new(self.mlir_ctx, 8))
+        self.type_i_bits(8)
     }
 
     fn type_i16(&self) -> Self::Type {
-        MLIRType::from(mlir_type::IntegerType::new(self.mlir_ctx, 16))
+        self.type_i_bits(16)
     }
 
     fn type_i32(&self) -> Self::Type {
-        MLIRType::from(mlir_type::IntegerType::new(self.mlir_ctx, 32))
+        self.type_i_bits(32)
     }
 
     fn type_i64(&self) -> Self::Type {
-        MLIRType::from(mlir_type::IntegerType::new(self.mlir_ctx, 64))
+        self.type_i_bits(64)
     }
 
     fn type_i128(&self) -> Self::Type {
-        MLIRType::from(mlir_type::IntegerType::new(self.mlir_ctx, 128))
+        self.type_i_bits(128)
     }
 
     fn type_isize(&self) -> Self::Type {
@@ -512,7 +516,10 @@ impl<'tcx, 'ml, 'a> LayoutTypeCodegenMethods<'tcx> for GPUCodegenContext<'tcx, '
     }
 
     fn cast_backend_type(&self, ty: &rustc_target::callconv::CastTarget) -> Self::Type {
-        todo!()
+        assert!(ty.prefix == [None; 8]);
+        assert!(ty.rest.unit.kind == rustc_abi::RegKind::Integer);
+        let size = ty.rest.total;
+        self.type_i_bits(size.bits() as u32)
     }
 
     fn fn_decl_backend_type(

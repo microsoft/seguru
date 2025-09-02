@@ -49,15 +49,15 @@ def_push_printf_arg!(bool);
 #[macro_export]
 macro_rules! println {
     ($fmt:literal) => {{
-        gpu::add_mlir_string_attr(concat!("\"", $fmt, "\""));
-        gpu::printf();
+        $crate::add_mlir_string_attr(concat!("\"", $fmt, "\""));
+        $crate::printf();
     }};
     ($fmt:literal, $($arg:expr),+ $(,)?) => {{
-        gpu::add_mlir_string_attr(concat!("\"", $fmt, "\""));
-        use gpu::PushPrintfArg;
+        $crate::add_mlir_string_attr(concat!("\"", $fmt, "\""));
+        use $crate::PushPrintfArg;
         $(
             ($arg).push_printf_arg();
         )+
-        gpu::printf();
+        $crate::printf();
     }};
 }

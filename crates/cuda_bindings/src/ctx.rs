@@ -10,13 +10,9 @@ use super::unsafe_bindings::*;
 use super::{CUDA_SUCCESS, CudaError};
 use crate::{AsHostKernelParams, GPUConfig, GPUConfigMethods};
 
+#[cfg(feature = "gpu")]
 macro_rules! eprintln {
-    () => {
-        panic!()
-    };
-    ($($arg:tt)*) => {{
-        panic!($($arg)*);
-    }};
+    ($($arg:tt)*) => {{}};
 }
 
 /// CtxSpace is a trait to ensure that we can create a GPU context per context space N.

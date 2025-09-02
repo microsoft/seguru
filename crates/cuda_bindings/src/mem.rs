@@ -5,13 +5,9 @@ use super::unsafe_bindings::*;
 use super::{CUDA_SUCCESS, CudaError};
 use crate::ctx::{CtxSpaceZero, GpuCtxArenaTrait, GpuCtxGuard, GpuCtxSpace};
 
+#[cfg(feature = "gpu")]
 macro_rules! eprintln {
-    () => {
-        panic!()
-    };
-    ($($arg:tt)*) => {{
-        panic!($($arg)*);
-    }};
+    ($($arg:tt)*) => {{}};
 }
 
 /// N is the namespace ID for the GPU context.

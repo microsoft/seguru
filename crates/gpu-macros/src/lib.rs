@@ -29,8 +29,7 @@ impl CodegenTarget {
 }
 
 fn target() -> CodegenTarget {
-    let target = std::env::var("__CODEGEN_TARGET__")
-        .expect("Failed to get __CODEGEN_TARGET__. Please use rustc-gpu to replace rustc");
+    let target = std::env::var("__CODEGEN_TARGET__").unwrap_or_else(|_| "CPU".into());
     match target.as_str() {
         "CPU" => CodegenTarget::Cpu,
         "GPU" => CodegenTarget::Gpu,

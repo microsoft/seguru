@@ -51,6 +51,19 @@ pub fn cuda_ctx<T>(
     dev_id: u32,
     f: impl for<'ctx, 'a> FnOnce(&GpuCtxZeroGuard<'ctx, 'a>, &'ctx GpuModule<CtxSpaceZero>) -> T,
 ) -> T {
+    cuda_ctx_no_mod(dev_id, |ctx| {
+        // This is safe since our rustc-gpu will generate gpu_bin_cst
+        let m = unsafe {
+            crate::load_module_from_extern!(ctx, gpu_bin_cst).expect("Failed to load default gpu_bin_cst module. Please use gpu_macros + rustc_gpu to compile.")
+        };
+        f(ctx, m)
+    })
+}
+
+pub fn cuda_ctx_no_mod<T>(
+    dev_id: u32,
+    f: impl for<'ctx, 'a> FnOnce(&GpuCtxZeroGuard<'ctx, 'a>) -> T,
+) -> T {
     // SAFETY: This function is safe since no more than one GPU context is created
     let instance = GPU.get_or_init(|| unsafe { GpuToken::new() });
     CTX_TOKEN.with(|token| {
@@ -63,9 +76,7 @@ pub fn cuda_ctx<T>(
             };
             let (ctx_h, _) = GpuCtxHandle::<CtxSpaceZero>::new(ct, dev_id, CUctx_flags::CU_CTX_SCHED_AUTO);
             let ctx = ctx_h.activate(&mut active);
-            // This is safe since our rustc-gpu will generate gpu_bin_cst
-            let m = unsafe { crate::load_module_from_extern!(ctx, gpu_bin_cst).expect("Failed to load default gpu_bin_cst module. Please use gpu_macros + rustc_gpu to compile.") };
-            f(&ctx, m)
+            f(&ctx)
         } else {
             panic!("No active GPU context found. Ensure cuda_scope is not called inside another cuda_scope.");
         };

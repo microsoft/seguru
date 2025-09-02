@@ -50,7 +50,7 @@ impl From<CompilerStage> for String {
 
 pub const GPU_MAIN_RUST: &str = r#"
 #[allow(dead_code)]
-fn main() {}
+pub fn dev_main() {}
 "#;
 
 fn parse_item_by_str(
@@ -149,8 +149,9 @@ fn config_link_gpu_code(config: &mut Config) {
     let _ = new_externs_with_new_path(&config.opts.externs, |p| {
         let fname = p.file_stem().unwrap().to_str().unwrap();
         assert!(p.exists());
-        let new_path =
-            new_gpu_dir(p.parent().unwrap()).join(format!("{fname}{GPU_SUFFIX}.{GPU_BC_EXT}"));
+        let new_path = new_gpu_dir(p.parent().unwrap())
+            .join(format!("{fname}{GPU_SUFFIX}"))
+            .with_extension(GPU_BC_EXT);
         if new_path.exists() {
             bc_files.push(new_path)
         }
@@ -159,8 +160,9 @@ fn config_link_gpu_code(config: &mut Config) {
 
     if let Some(output_dir) = &config.output_dir {
         let crate_name = config.opts.crate_name.as_ref().unwrap().clone();
+        let extra = config.opts.cg.extra_filename.clone();
         let bc_file = new_gpu_dir(output_dir)
-            .join(format!("lib{crate_name}{GPU_SUFFIX}.{GPU_BC_EXT}"))
+            .join(format!("lib{crate_name}{extra}{GPU_SUFFIX}"))
             .with_extension(GPU_BC_EXT);
         if bc_file.exists() {
             bc_files.push(bc_file.clone());
@@ -303,7 +305,7 @@ impl Callbacks for GpuOrCpuRustCallback {
                 if item.ident.name == rustc_span::Symbol::intern("main") {
                     let tmp_item = parse_item_by_str(&compiler.sess.psess, GPU_MAIN_RUST)
                         .expect("failed to create parser");
-                    item.attrs.extend(tmp_item.attrs.clone());
+                    item.vis = tmp_item.vis.clone();
                 }
             });
         }

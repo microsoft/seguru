@@ -50,6 +50,18 @@ impl<'ml, 'a> GpuBuilderState<'ml, 'a> {
 }
 
 #[derive(Debug)]
+struct InplaceBoundCheckData<'ml, 'a> {
+    pub cond: mlir_ir::Value<'ml, 'a>,
+    pub idx: Vec<mlir_ir::Value<'ml, 'a>>,
+}
+
+impl<'ml, 'a> InplaceBoundCheckData<'ml, 'a> {
+    pub fn new(cond: mlir_ir::Value<'ml, 'a>, idx: mlir_ir::Value<'ml, 'a>) -> Self {
+        Self { cond, idx: vec![idx] }
+    }
+}
+
+#[derive(Debug)]
 pub(crate) struct GpuBuilder<'tcx, 'ml, 'a> {
     pub cx: &'a GPUCodegenContext<'tcx, 'ml, 'a>,
     pub name: String,
@@ -61,9 +73,18 @@ pub(crate) struct GpuBuilder<'tcx, 'ml, 'a> {
     san_dummy: Option<mlir_ir::Value<'ml, 'a>>,
     dummy: PhantomData<&'a mlir_ir::operation::Operation<'ml>>,
     #[cfg(feature = "inplace_bound_check")]
-    valid_mem_access: Option<mlir_ir::Value<'ml, 'a>>,
+    valid_mem_access: Option<InplaceBoundCheckData<'ml, 'a>>,
 }
 
+impl<'tcx, 'ml, 'a> Drop for GpuBuilder<'tcx, 'ml, 'a> {
+    fn drop(&mut self) {
+        assert!(
+            self.valid_mem_access.is_none(),
+            "valid_mem_access should be None {:?}",
+            self.valid_mem_access
+        );
+    }
+}
 impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
     pub fn cur_loc(&self) -> Location<'ml> {
         self.cx.to_mlir_loc(self.cur_span)
@@ -434,9 +455,10 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 //    a.k.a. offset + window - 1 < original size
                 //    The subslice must fit within the range of the original buffer
                 let index_int_upper = self.add(window, offset);
-                let one = self.mlir_const_val_from_type(1, self.type_i64(), self.cur_block());
-                let index_int = self.sub(index_int_upper, one);
-                self.emit_bound_check(index_int, original_size, self.san_dummy.unwrap());
+                let one = self.const_value(1, self.type_index());
+                let index_int_upper = self.sub(index_int_upper, one);
+                self.emit_bound_check(index_int_upper, original_size, self.san_dummy.unwrap());
+                self.emit_bound_check(offset, original_size, self.san_dummy.unwrap());
 
                 // 2. Build the subslice: Done by transforming memref<1xi8> into the
                 //    strided form using subview. Shortcut to use inbounds_gep
@@ -447,19 +469,14 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 let slice_type = self.mlir_type(slice_ty_layout, false);
 
                 // offset needs to time size of slice_type
-                let element_size =
-                    self.emit_constant(self.static_size_of(slice_type) as u64, self.type_index());
-                let byte_based_offset = self.mul(offset, element_size);
                 let indices = vec![offset; 1];
 
-                let subview_op = self.inbounds_gep_op(slice_type, original, &indices);
-                let op_ref = self.append_op(subview_op);
+                let res = self.inbounds_gep(slice_type, original, &indices);
 
                 // 3. Build the 'pair' of memref and i64
                 //    IMPORTANT: WINDOW HERE IS STILL ELEMENT-BASED. BYTE-BASDE IS ONLY
                 //               USED FOR MEMREF!
-                let res = op_ref.result(0).unwrap().into();
-                self.op_to_extra_values.insert(op_ref.location().to_string(), vec![res, window]);
+                self.op_to_extra_values.insert(self.cur_loc().to_string(), vec![res, window]);
 
                 Ok(None)
             }
@@ -985,6 +1002,94 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         let rhs = self.intcast(rhs, ty, false);
         (lhs, rhs)
     }
+
+    #[cfg(feature = "inplace_bound_check")]
+    fn select_ptr(
+        &mut self,
+        ptr: mlir_ir::Value<'ml, 'a>,
+        idx: Option<mlir_ir::Value<'ml, 'a>>,
+    ) -> mlir_ir::Value<'ml, 'a> {
+        let need_insert =
+            |idx1: Option<mlir_ir::Value<'ml, 'a>>, idxes: &Vec<mlir_ir::Value<'ml, 'a>>| -> bool {
+                if idx1.is_none() {
+                    return true;
+                }
+                let idx1 = idx1.unwrap();
+                for idx2 in idxes {
+                    if idx1 == *idx2 {
+                        return true;
+                    }
+                    let Some(v1) = crate::mlir::mlir_val_to_const_int(idx1) else {
+                        continue;
+                    };
+                    let Some(v2) = crate::mlir::mlir_val_to_const_int(*idx2) else {
+                        continue;
+                    };
+                    if v1 == v2 {
+                        return true;
+                    }
+                }
+                false
+            };
+        if let Some(valid_mem_access) = self.valid_mem_access.take() {
+            if need_insert(idx, &valid_mem_access.idx) {
+                debug!(
+                    "select_ptr {:?}  != {:?} at {:?}",
+                    idx, &valid_mem_access.idx, self.cur_span
+                );
+                let null_ptr = self.inttoptr(self.const_value(0, self.type_index()), ptr.r#type());
+                self.select(valid_mem_access.cond, ptr, null_ptr)
+            } else {
+                eprintln!(
+                    "skip select_ptr {:?}  != {:?} at {:?}",
+                    idx, &valid_mem_access.idx, self.cur_span
+                );
+                self.valid_mem_access = Some(valid_mem_access);
+                ptr
+            }
+        } else {
+            ptr
+        }
+    }
+
+    fn assert(&mut self, cond: mlir_ir::Value<'ml, 'a>, msg: &str) {
+        // trap-based bound check is handled by assert op.
+        let op = melior::dialect::cf::assert(self.mlir_ctx, cond, msg, self.cur_loc());
+    }
+
+    #[cfg(not(any(
+        feature = "arith_immediate_bound_check",
+        feature = "inplace_bound_check",
+        feature = "trap_bound_check"
+    )))]
+    fn assert_before_index(&mut self, cond: mlir_ir::Value<'ml, 'a>, idx: mlir_ir::Value<'ml, 'a>) {
+    }
+
+    #[cfg(feature = "trap_bound_check")]
+    fn assert_before_index(&mut self, cond: mlir_ir::Value<'ml, 'a>, idx: mlir_ir::Value<'ml, 'a>) {
+        // trap-based bound check is handled by assert op.
+        self.assert(cond, "assert_before_index");
+    }
+
+    #[cfg(feature = "inplace_bound_check")]
+    fn assert_before_index(&mut self, cond: mlir_ir::Value<'ml, 'a>, idx: mlir_ir::Value<'ml, 'a>) {
+        if let Some(mut valid_mem_access) = self.valid_mem_access.take() {
+            valid_mem_access.idx.push(idx);
+            let old_cond = valid_mem_access.cond;
+            valid_mem_access.cond = self.and(old_cond, cond);
+            self.valid_mem_access = Some(valid_mem_access);
+        } else {
+            self.valid_mem_access = Some(InplaceBoundCheckData::new(cond, idx));
+        }
+    }
+
+    #[cfg(feature = "arith_immediate_bound_check")]
+    fn assert_before_index(&mut self, cond: mlir_ir::Value<'ml, 'a>, idx: mlir_ir::Value<'ml, 'a>) {
+        let ty = self.san_dummy.unwrap().r#type();
+        let nullptr = self.inttoptr(self.const_value(0, self.type_index()), ty);
+        let ptr = self.select(cond, self.san_dummy.unwrap(), nullptr);
+        self.emit_llvm_volatile_load(ptr);
+    }
 }
 
 impl<'tcx, 'ml, 'a> BackendTypes for GpuBuilder<'tcx, 'ml, 'a> {
@@ -1259,13 +1364,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         self.br(block);
         let cur = self.cur_block;
         self.switch_to_block(block);
-        let op = melior::dialect::cf::assert(
-            self.mlir_ctx,
-            self.const_value(0, self.type_i1()),
-            "unreachable",
-            self.cur_loc(),
-        );
-        self.append_op(op);
+        self.assert(self.const_value(0, self.type_i1()), "unreachable");
         self.br(self.cur_block);
         self.switch_to_block(cur);
     }
@@ -1523,15 +1622,9 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         };
 
         #[cfg(feature = "inplace_bound_check")]
-        let ptr = if let Some(valid_mem_access) = self.valid_mem_access.take() {
-            let nullptr = self.inttoptr(self.const_value(0, self.type_index()), ptr.r#type());
-            self.select(valid_mem_access, ptr, nullptr)
-        } else {
-            ptr
-        };
+        let ptr = self.select_ptr(ptr, None);
         let mut loaded =
             self.mlir_load(load_ty, ptr, &[self.const_value(0, self.type_index())], align);
-
         // If the type is memref, we need to cast the address to the correct type.
         if ty.is_mem_ref() {
             loaded = self.inttoptr(loaded, ty);
@@ -1677,39 +1770,24 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         "Features `inplace_bound_check` and `arith_immediate_bound_check` are mutually exclusive"
     );
 
-    #[cfg(not(any(
-        feature = "arith_immediate_bound_check",
-        feature = "inplace_bound_check",
-        feature = "trap_bound_check"
-    )))]
-    fn emit_bound_check(&mut self, idx: Self::Value, len: Self::Value, ptr: Self::Value) -> bool {
-        true
-    }
-
     #[cfg(feature = "trap_bound_check")]
     fn emit_bound_check(&mut self, idx: Self::Value, len: Self::Value, ptr: Self::Value) -> bool {
         // trap-based bound check is handled by assert op.
         false
     }
 
-    #[cfg(feature = "inplace_bound_check")]
+    #[cfg(not(feature = "trap_bound_check"))]
     fn emit_bound_check(&mut self, idx: Self::Value, len: Self::Value, ptr: Self::Value) -> bool {
+        // Constant index can be evaluated at compile time
+        if let Some(v1) = crate::mlir::mlir_val_to_const_int(idx) {
+            if let Some(v2) = crate::mlir::mlir_val_to_const_int(len) {
+                if v1 < v2 {
+                    return true;
+                }
+            }
+        };
         let cmp = self.icmp(rustc_codegen_ssa_gpu::common::IntPredicate::IntULT, idx, len);
-        if let Some(valid_mem_access) = self.valid_mem_access.as_ref() {
-            self.valid_mem_access = Some(self.and(*valid_mem_access, cmp));
-        } else {
-            self.valid_mem_access = Some(cmp);
-        }
-        true
-    }
-
-    #[cfg(feature = "arith_immediate_bound_check")]
-    fn emit_bound_check(&mut self, idx: Self::Value, len: Self::Value, ptr: Self::Value) -> bool {
-        let cmp = self.icmp(rustc_codegen_ssa_gpu::common::IntPredicate::IntULT, idx, len);
-        let nullptr = self.inttoptr(self.const_value(0, self.type_index()), ptr.r#type());
-
-        let ptr = self.select(cmp, self.san_dummy.unwrap(), nullptr);
-        self.emit_llvm_volatile_load(ptr);
+        self.assert_before_index(cmp, idx);
         true
     }
 
@@ -1744,12 +1822,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         };
 
         #[cfg(feature = "inplace_bound_check")]
-        let ptr = if let Some(valid_mem_access) = self.valid_mem_access.take() {
-            let nullptr = self.inttoptr(self.const_value(0, self.type_index()), ptr.r#type());
-            self.select(valid_mem_access, ptr, nullptr)
-        } else {
-            ptr
-        };
+        let ptr = self.select_ptr(ptr, None);
         self.append_op(mlir_memref::store(val, ptr, &[const_idx], self.cur_loc()));
         val
     }
@@ -1793,12 +1866,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         let op = self.inbounds_gep_op(ty, ptr, indices);
         let ptr = self.append_op_res(op);
         #[cfg(feature = "inplace_bound_check")]
-        let ptr = if let Some(valid_mem_access) = self.valid_mem_access.take() {
-            let nullptr = self.inttoptr(self.const_value(0, self.type_index()), ptr.r#type());
-            self.select(valid_mem_access, ptr, nullptr)
-        } else {
-            ptr
-        };
+        let ptr = self.select_ptr(ptr, Some(indices[0]));
         ptr
     }
 

@@ -122,6 +122,15 @@ name = "gpu_name"
 version = "0.1.0"
 
 [[package]]
+name = "hello"
+version = "0.1.0"
+dependencies = [
+ "gpu",
+ "gpu_host",
+ "gpu_macros",
+]
+
+[[package]]
 name = "itertools"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

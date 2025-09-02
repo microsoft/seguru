@@ -7,10 +7,12 @@
 #![feature(asm_experimental_arch)]
 #![feature(core_intrinsics)]
 
+extern crate alloc;
 use core::arch::asm;
 
 pub mod cg;
 mod chunk;
+mod chunk_impl;
 mod device_intrinsic;
 mod dim;
 pub mod iter;
@@ -18,9 +20,10 @@ mod print;
 mod shared;
 mod thread;
 
-pub use chunk::{chunk, chunk_mut};
+pub use chunk::GlobalThreadChunk;
 #[cfg(not(feature = "codegen_tests"))]
 pub use chunk::{get_local_2d, get_local_mut_2d};
+pub use chunk_impl::{MapLinear, MapLinearWithDim, chunk_mut};
 #[cfg(not(feature = "codegen_tests"))]
 pub use cuda_bindings::{
     GPUConfig, GpuChunkable, GpuChunkable2D, GpuChunkableMut, GpuChunkableMut2D,
@@ -29,8 +32,8 @@ pub use device_intrinsic::GPUDeviceFloatIntrinsics;
 #[cfg(not(feature = "codegen_tests"))]
 pub use dim::assume_dim_with_config;
 pub use dim::{
-    DimType, GpuChunkIdx, GpuSharedChunkIdx, block_dim, block_id, dim, global_id, grid_dim,
-    thread_id,
+    DimType, GpuChunkIdx, GpuSharedChunkIdx, block_dim, block_id, block_thread_ids, dim, global_id,
+    grid_dim, thread_id,
 };
 pub use print::{PushPrintfArg, printf};
 pub use shared::{DynamicSharedAlloc, GpuShared};
@@ -61,6 +64,7 @@ pub const fn add_mlir_string_attr(_: &'static str) -> usize {
 #[inline(never)]
 #[rustc_diagnostic_item = "gpu::subslice"]
 #[gpu_codegen::device]
+#[allow(dead_code)]
 pub(crate) fn subslice<T>(_original: &[T], _offset: usize, _window: usize) -> &[T] {
     unimplemented!()
 }

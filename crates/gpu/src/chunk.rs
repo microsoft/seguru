@@ -1,22 +1,118 @@
-use crate::{DimType, assert_before_index, block_dim, block_id, dim, grid_dim, thread_id};
+use core::marker::PhantomData;
+use core::ops::{Index, IndexMut};
+
+use crate::{
+    DimType, assert_before_index, block_dim, block_id, block_thread_ids, dim, grid_dim, thread_id,
+};
 #[cfg(not(feature = "codegen_tests"))]
 use crate::{GpuChunkable2D, GpuChunkableMut2D};
 
-#[inline(always)]
-#[gpu_codegen::device]
-#[rustc_diagnostic_item = "gpu::chunk_mut"]
-#[gpu_codegen::sync_data(0, 1)]
-pub fn chunk_mut<T>(original: &mut [T], window: usize, idx: crate::GpuChunkIdx) -> &mut [T] {
-    let offset = idx.as_usize() * window;
-    // SAFETY: This is safe since GpuChunkIdx is unique per GPU thread.
-    unsafe { crate::subslice_mut(original, offset, window) }
+/// Thread unique mapping trait
+/// N: number of index dimensions.
+/// N can be different from GPU thread dimensions.
+/// # Safety
+/// requires idx -> thread-unique idx
+/// forall |idx1, idx2, thread_ids1, thread_ids2| thread_ids1 != thread_ids2 ==> map(idx1, thread_ids1) !=  map(idx2, thread_ids2)
+pub(crate) unsafe trait ThreadUniqueMap<const N: usize>: Clone {
+    #[inline]
+    #[gpu_codegen::device]
+    fn precondition(&self) -> bool {
+        true
+    }
+    #[gpu_codegen::device]
+    fn map(&self, idx: [usize; N], thread_ids: [usize; 6]) -> usize;
 }
 
-#[inline(always)]
-#[gpu_codegen::device]
-pub fn chunk<T>(original: &[T], window: usize, idx: crate::GpuChunkIdx) -> &[T] {
-    let offset = idx.as_usize() * window;
-    crate::subslice(original, offset, window)
+/// N: Index dimension, 1, 2, 3
+/// Map: Mapping strategy
+#[allow(private_bounds)]
+pub struct GlobalThreadChunk<'a, T, const N: usize, Map: ThreadUniqueMap<N>> {
+    data: &'a mut [T], // Must be private.
+    pub map_params: Map,
+    dummy: PhantomData<[u8; N]>,
+}
+
+#[expect(private_bounds)]
+impl<'a, T, const N: usize, Map: ThreadUniqueMap<N>> GlobalThreadChunk<'a, T, N, Map> {
+    #[inline]
+    #[rustc_diagnostic_item = "gpu::chunk_mut"]
+    #[gpu_codegen::device]
+    #[gpu_codegen::sync_data(0, 1)]
+    pub fn new(data: &'a mut [T], map_params: Map) -> Self {
+        if !map_params.precondition() {
+            core::intrinsics::abort();
+        }
+        Self { data, map_params, dummy: PhantomData }
+    }
+
+    #[inline]
+    #[gpu_codegen::device]
+    fn local_to_global_index(&self, i: [usize; N]) -> usize {
+        let ids = block_thread_ids();
+        self.map_params.map(i, ids)
+    }
+}
+
+impl<'a, T, Map: ThreadUniqueMap<1>> Index<usize> for GlobalThreadChunk<'a, T, 1, Map> {
+    type Output = T;
+
+    #[inline(always)]
+    #[gpu_codegen::device]
+    fn index(&self, idx: usize) -> &Self::Output {
+        //crate::subslice(self.data, self.local_to_global_index([idx]), 1)[0]
+        &self.data[self.local_to_global_index([idx])]
+    }
+}
+
+impl<'a, T, Map: ThreadUniqueMap<1>> IndexMut<usize> for GlobalThreadChunk<'a, T, 1, Map> {
+    #[inline(always)]
+    #[gpu_codegen::device]
+    fn index_mut(&mut self, idx: usize) -> &mut Self::Output {
+        &mut self.data[self.local_to_global_index([idx])]
+        /*unsafe {
+            &mut crate::subslice_mut(self.data, self.local_to_global_index([idx]), 1)[0]
+        }*/
+    }
+}
+
+impl<'a, T, Map: ThreadUniqueMap<2>> Index<(usize, usize)> for GlobalThreadChunk<'a, T, 2, Map> {
+    type Output = T;
+
+    #[inline(always)]
+    #[gpu_codegen::device]
+    fn index(&self, idx: (usize, usize)) -> &Self::Output {
+        &self.data[self.local_to_global_index([idx.0, idx.1])]
+    }
+}
+
+impl<'a, T, Map: ThreadUniqueMap<2>> IndexMut<(usize, usize)> for GlobalThreadChunk<'a, T, 2, Map> {
+    #[inline(always)]
+    #[gpu_codegen::device]
+    fn index_mut(&mut self, idx: (usize, usize)) -> &mut Self::Output {
+        &mut self.data[self.local_to_global_index([idx.0, idx.1])]
+    }
+}
+
+impl<'a, T, Map: ThreadUniqueMap<3>> Index<(usize, usize, usize)>
+    for GlobalThreadChunk<'a, T, 3, Map>
+{
+    type Output = T;
+
+    #[inline(always)]
+    #[gpu_codegen::device]
+    fn index(&self, idx: (usize, usize, usize)) -> &Self::Output {
+        &self.data[self.local_to_global_index([idx.0, idx.1, idx.2])]
+    }
+}
+
+impl<'a, T, Map: ThreadUniqueMap<3>> IndexMut<(usize, usize, usize)>
+    for GlobalThreadChunk<'a, T, 3, Map>
+{
+    #[inline(always)]
+    #[gpu_codegen::device]
+    fn index_mut(&mut self, idx: (usize, usize, usize)) -> &mut Self::Output {
+        &mut self.data[self.local_to_global_index([idx.0, idx.1, idx.2])]
+    }
 }
 
 #[cfg(not(feature = "codegen_tests"))]

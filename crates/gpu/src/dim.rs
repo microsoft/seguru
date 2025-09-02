@@ -59,6 +59,19 @@ pub const fn dim(dim: DimType) -> usize {
     }
 }
 
+#[gpu_codegen::device]
+#[inline(always)]
+pub fn block_thread_ids() -> [usize; 6] {
+    [
+        thread_id(DimType::X),
+        thread_id(DimType::Y),
+        thread_id(DimType::Z),
+        block_id(DimType::X),
+        block_id(DimType::Y),
+        block_id(DimType::Z),
+    ]
+}
+
 #[derive(Clone, Copy)]
 pub struct GpuChunkIdx {
     id: usize,

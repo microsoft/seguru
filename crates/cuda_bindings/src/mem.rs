@@ -33,14 +33,20 @@ pub(crate) unsafe fn gpu_memalloc(size: usize) -> Result<*mut c_void, CudaError>
 }
 
 impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
-    pub fn new_gmem<T: 'static>(&self) -> Result<&'ctx mut CudaMemBox<T, N>, CudaError> {
+    unsafe fn __new_gmem<T: 'static>(&self) -> Result<&'ctx mut CudaMemBox<T, N>, CudaError> {
         let size = core::mem::size_of::<T>();
         let ptr = unsafe { crate::mem::gpu_memalloc(size)? as *mut T };
         let m = CudaMemBox::<T, N> { ptr, _marker: PhantomData };
         Ok(self.ctx.alloc_typed(m))
     }
 
-    pub fn new_gmem_with_len<T: 'static>(
+    pub fn new_gmem<T: 'static>(&self, init: T) -> Result<&'ctx mut CudaMemBox<T, N>, CudaError> {
+        let ret: &'ctx mut CudaMemBox<T, N> = unsafe { self.__new_gmem() }?;
+        ret.copy_from_host(&init, self)?;
+        Ok(ret)
+    }
+
+    unsafe fn __new_gmem_with_len<T: 'static>(
         &self,
         len: usize,
     ) -> Result<&'ctx mut CudaMemBox<[T], N>, CudaError> {
@@ -51,6 +57,16 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
         };
         let m = CudaMemBox::<[T], N> { ptr, _marker: PhantomData };
         Ok(self.ctx.alloc_typed(m))
+    }
+
+    pub fn new_gmem_with_len<T: 'static>(
+        &self,
+        len: usize,
+        init: &[T],
+    ) -> Result<&'ctx mut CudaMemBox<[T], N>, CudaError> {
+        let ret: &'ctx mut CudaMemBox<[T], N> = unsafe { self.__new_gmem_with_len(len) }?;
+        ret.copy_from_host(init, len, self)?;
+        Ok(ret)
     }
 }
 

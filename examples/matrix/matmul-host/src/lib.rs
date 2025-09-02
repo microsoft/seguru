@@ -53,13 +53,9 @@ pub fn run_host_matmul<'ctx>(
     let h_c: &mut [f32] = &mut initial_c.clone();
     let h_c_cpu: &mut [f32] = &mut initial_c;
 
-    let d_a = ctx.new_gmem_with_len::<f32>(n * n)?;
-    let d_b = ctx.new_gmem_with_len::<f32>(n * n)?;
-    let d_c = ctx.new_gmem_with_len::<f32>(n * n)?;
-    use std::cmp::min;
-    d_a.copy_from_host(h_a, min(h_a.len(), n * n), ctx)?;
-    d_b.copy_from_host(h_b, min(h_b.len(), n * n), ctx)?;
-    d_c.copy_from_host(h_c, min(h_c.len(), n * n), ctx)?;
+    let d_a = ctx.new_gmem_with_len::<f32>(n * n, h_a)?;
+    let d_b = ctx.new_gmem_with_len::<f32>(n * n, h_b)?;
+    let d_c = ctx.new_gmem_with_len::<f32>(n * n, h_c)?;
 
     let d_c_c = gpu::GpuChunkableMut2D::<f32>::new(d_c, n);
 
@@ -74,7 +70,7 @@ pub fn run_host_matmul<'ctx>(
     let elapsed = start.elapsed();
     println!("GPU execution time: {:?}", elapsed);
 
-    d_c.copy_to_host(h_c, min(h_c.len(), n * n), ctx)?;
+    d_c.copy_to_host(h_c, n * n, ctx)?;
 
     // Perform CPU side validation
     println!("running on cpu...");

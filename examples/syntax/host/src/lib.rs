@@ -12,6 +12,7 @@ pub fn run_host_arith<'ctx>(
     // TODO: Make h_a non-mutable
     let h_a = (1u32..(1 + len as u32)).collect::<Vec<u32>>();
     let mut h_b = (5..(5 + len as u32)).collect::<Vec<u32>>();
+    assert!(h_b.len() == len);
     let h_c = (10..(10 + len as u32)).collect::<Vec<u32>>();
     let mut h_f = vec![0.0f32; len];
     let h_g = (1..(1 + len)).map(|x| x as f32 * 1.1).collect::<Vec<f32>>();
@@ -23,11 +24,10 @@ pub fn run_host_arith<'ctx>(
     let d_g = ctx.new_gmem_with_len::<f32>(len, &h_g)?;
     let d_a_c = gpu::GpuChunkable2D::<u32>::new(d_a, 1);
     let d_b_c = gpu::GpuChunkableMut2D::<u32>::new(d_b, 1);
-    let d_f_c = gpu::GpuChunkableMut::<f32>::new(d_f, w);
 
     // Now do the kernel
     let config = gpu_host::gpu_config!(1, 1, 1, 1, 4, 1, 0);
-    kernel_arith(config, ctx, m, d_a_c, d_b_c, d_c, d_f_c, d_g).expect("Kernel execution failed");
+    kernel_arith(config, ctx, m, d_a_c, d_b_c, d_c, d_f, w, d_g).expect("Kernel execution failed");
     d_b.copy_to_host(&mut h_b, len, ctx)?;
     d_f.copy_to_host(&mut h_f, len, ctx)?;
 

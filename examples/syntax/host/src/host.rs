@@ -30,7 +30,8 @@ pub fn kernel_arith(
     a: gpu::GpuChunkable2D<u32>,
     b: gpu::GpuChunkableMut2D<u32>,
     c: &gpu_host::CudaMemBox<[u32]>,
-    f: gpu::GpuChunkableMut<f32>,
+    f: &mut gpu_host::CudaMemBox<[f32]>,
+    f_width: usize,
     g: &gpu_host::CudaMemBox<[f32]>,
 ) {
 }

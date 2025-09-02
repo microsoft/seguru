@@ -40,6 +40,11 @@ jobs:
         working-directory: crates
         run: cargo build
 
+      - name: Run tool and lib tests
+        working-directory: crates
+        run: |
+          cargo test
+
       - name: Run examples tests
         working-directory: examples
         run: |

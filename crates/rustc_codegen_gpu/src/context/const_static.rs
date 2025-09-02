@@ -173,7 +173,7 @@ impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
     }
 
     fn const_undef(&self, t: Self::Type) -> Self::Value {
-        todo!()
+        self.const_poison(t)
     }
 
     fn const_poison(&self, t: Self::Type) -> Self::Value {

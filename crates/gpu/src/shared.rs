@@ -58,12 +58,14 @@ pub struct DynamicSharedAlloc {
 impl DynamicSharedAlloc {
     #[rustc_diagnostic_item = "gpu::base_dynamic_shared"]
     #[inline(never)]
+    #[gpu_codegen::ret_shared]
     unsafe fn base_ptr() -> *const u8 {
         unimplemented!()
     }
 
     #[gpu_codegen::device]
     #[inline(always)]
+    #[gpu_codegen::ret_shared]
     pub fn alloc<T: Sized>(&mut self, len: usize) -> &mut GpuShared<[T]> {
         let size = core::mem::size_of::<T>() * len;
         let (remain_size, len) =

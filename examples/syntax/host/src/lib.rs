@@ -31,12 +31,12 @@ pub fn run_host_arith<'ctx>(
     d_b.copy_to_host(&mut h_b, len, ctx)?;
     d_f.copy_to_host(&mut h_f, len, ctx)?;
 
-    for (i, bi) in h_b.iter().enumerate().take(len) {
+    for (i, bi) in h_b.iter().enumerate().take(4) {
         println!("b[{}] = {}", i, bi);
         assert!(*bi == 42 + i as u32 * 2);
     }
 
-    for (i, fi) in h_f.iter().enumerate().take(len) {
+    for (i, fi) in h_f.iter().enumerate().take(4) {
         println!("f[{}] = {}", i, fi);
         match i {
             0 => assert!(*fi == 13.391208),

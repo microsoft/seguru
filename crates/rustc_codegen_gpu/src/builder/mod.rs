@@ -536,10 +536,25 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                     None,
                     Some(crate::mlir::memref::MemorySpace::DynamicShared.to_attr(self.mlir_ctx)),
                 );
-                let op_ref = self.append_op(
+                let final_ret_type = self.type_memref(
+                    self.type_i8(),
+                    &[crate::mlir::memref::dynamic_size()],
+                    None,
+                    Some(crate::mlir::memref::MemorySpace::Shared.to_attr(self.mlir_ctx)),
+                );
+                let ret = self.append_op_res(
                     melior::dialect::ods::gpu::dynamic_shared_memory(
                         self.mlir_ctx,
                         ret_type,
+                        self.cur_loc(),
+                    )
+                    .into(),
+                );
+                let op_ref = self.append_op(
+                    melior::dialect::ods::memref::memory_space_cast(
+                        self.mlir_ctx,
+                        final_ret_type,
+                        ret,
                         self.cur_loc(),
                     )
                     .into(),

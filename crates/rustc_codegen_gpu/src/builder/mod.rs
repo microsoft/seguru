@@ -12,7 +12,7 @@ use melior::dialect::memref as mlir_memref;
 use melior::helpers::BuiltinBlockExt;
 use melior::ir::attribute::{IntegerAttribute, StringAttribute};
 use melior::ir::operation::{OperationLike, OperationMutLike};
-use melior::ir::r#type::{self as mlir_type, FunctionType, MemRefType};
+use melior::ir::r#type::{self as mlir_type, FunctionType, IntegerType, MemRefType};
 use melior::ir::{
     self as mlir_ir, Attribute, BlockLike, Location, RegionLike, RegionRef, ShapedTypeLike,
     TypeLike, Value, ValueLike,
@@ -945,6 +945,31 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
 
         self.append_op(llvm_store_op);
     }
+
+    fn int_val_pair_cast(
+        &mut self,
+        lhs: mlir_ir::Value<'ml, 'a>,
+        rhs: mlir_ir::Value<'ml, 'a>,
+    ) -> (mlir_ir::Value<'ml, 'a>, mlir_ir::Value<'ml, 'a>) {
+        let lhs_ty = lhs.r#type();
+        let rhs_ty = rhs.r#type();
+        let get_width = |t: melior::ir::Type<'ml>| {
+            if let Ok(t) = IntegerType::try_from(t) {
+                t.width()
+            } else if t.is_index() {
+                usize::BITS
+            } else {
+                0
+            }
+        };
+
+        let ty = if get_width(rhs_ty) < get_width(lhs_ty) { rhs_ty } else { lhs_ty };
+        let lhs = self.use_value(lhs);
+        let lhs = self.intcast(lhs, ty, false);
+        let rhs = self.use_value(rhs);
+        let rhs = self.intcast(rhs, ty, false);
+        (lhs, rhs)
+    }
 }
 
 impl<'tcx, 'ml, 'a> BackendTypes for GpuBuilder<'tcx, 'ml, 'a> {
@@ -1231,9 +1256,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn add(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        let lhs = self.use_value(lhs);
-        let rhs = self.use_value(rhs);
-        let rhs = self.intcast(rhs, lhs.r#type(), false);
+        let (lhs, rhs) = self.int_val_pair_cast(lhs, rhs);
         let op = melior::dialect::arith::addi(lhs, rhs, self.cur_loc());
         self.append_op_res(op)
     }
@@ -1254,9 +1277,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn sub(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        // TODO: Currently casting rhs to lhs. A better way is to see who's longer...
-        let rhs_casted = self.intcast(rhs, lhs.r#type(), false);
-        let op = melior::dialect::arith::subi(lhs, rhs_casted, self.cur_loc());
+        let (lhs, rhs) = self.int_val_pair_cast(lhs, rhs);
+        let op = melior::dialect::arith::subi(lhs, rhs, self.cur_loc());
         self.append_op_res(op)
     }
 
@@ -1274,11 +1296,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn mul(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        // TODO: Currently casting rhs to lhs. A better way is to see who's longer...
-        let lhs = self.use_value(lhs);
-        let rhs = self.use_value(rhs);
-        let rhs_casted = self.intcast(rhs, lhs.r#type(), false);
-        let op = melior::dialect::arith::muli(lhs, rhs_casted, self.cur_loc());
+        let (lhs, rhs) = self.int_val_pair_cast(lhs, rhs);
+        let op = melior::dialect::arith::muli(lhs, rhs, self.cur_loc());
         self.append_op_res(op)
     }
 
@@ -1366,10 +1385,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn and(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        let lhs = self.use_value(lhs);
-        let rhs = self.use_value(rhs);
-        let rhs_casted = self.intcast(rhs, lhs.r#type(), false);
-        let op = melior::dialect::arith::andi(lhs, rhs_casted, self.cur_loc());
+        let (lhs, rhs) = self.int_val_pair_cast(lhs, rhs);
+        let op = melior::dialect::arith::andi(lhs, rhs, self.cur_loc());
         self.append_op_res(op)
     }
 
@@ -1399,11 +1416,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         // There is no bitwise not in MLIR and therefore it's going to be an
         // xor to 0xFFFFFFFF which is -1
 
-        let op = melior::dialect::arith::xori(
-            v,
-            self.const_value(-1, self.type_index()),
-            self.cur_loc(),
-        );
+        let op = melior::dialect::arith::xori(v, self.const_value(-1, v.r#type()), self.cur_loc());
         self.append_op_res(op)
     }
 

@@ -37,7 +37,7 @@ pub use dim::{
 };
 pub use print::{PushPrintfArg, printf};
 pub use shared::{DynamicSharedAlloc, GpuShared};
-pub use thread::{GpuChunksMut, scope, sync_threads};
+pub use thread::sync_threads;
 
 /// Add an extra assertion before indexing operation.
 /// This is used to ensure that some indexing operation is safe,

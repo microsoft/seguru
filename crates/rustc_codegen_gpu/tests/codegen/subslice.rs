@@ -4,17 +4,17 @@
 
 #[gpu_codegen::device]
 #[inline(always)]
-pub fn kernel_arith(a: &[u8], b: &mut [u8]) {
-    b[0] = a[0];
+pub fn kernel_arith(a: &[u8], b: &mut u8) {
+    *b = a[0];
 }
 
 #[gpu_codegen::kernel]
 pub fn kernel_arith_wrapper(a: &[u8], a_window: usize, b: &mut [u8], b_window: usize) {
     let c = gpu::GpuChunkIdx::new().as_usize();
 
-    let b_local: &mut [u8] = gpu::chunk_mut(b, b_window, gpu::GpuChunkIdx::new());
+    let mut b_local = gpu::chunk_mut(b, b_window, gpu::GpuChunkIdx::new());
 
-    kernel_arith(a, b_local);
+    kernel_arith(a, &mut b_local[0]);
 }
 
 // CHECK: @gpu_bin_cst = internal constant

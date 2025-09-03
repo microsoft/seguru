@@ -7,8 +7,8 @@
 
 #[gpu_macros::kernel_v2]
 #[no_mangle]
-pub fn subgroup_reduce(a: &[u32], _a_window: usize, b: &mut [u32], _b_window: usize) {
-    let chunked_b = gpu::chunk_mut(b, 1, gpu::GpuChunkIdx::new());
+pub fn subgroup_reduce(a: &[u32], _a_window: usize, b: &mut [u32], b_window: usize) {
+    let mut chunked_b = gpu::GlobalThreadChunk::new(b, gpu::MapLinear::new(b_window));
     let warp = gpu::cg::ThreadWarpTile::<32, 1>();
     let val = a[gpu::thread_id(gpu::DimType::X)];
     gpu::add_mlir_string_attr("#gpu<all_reduce_op add>");

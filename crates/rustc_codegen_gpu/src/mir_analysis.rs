@@ -39,8 +39,12 @@ fn check_terminator_call<'tcx>(
             inlines = Some(gpu_attr);
         }
         if let Some((def_id, generic_args)) = func.const_fn_def() {
-            let gpu_attr = crate::attr::GpuAttributes::build(&tcx, def_id);
-            real = Some(gpu_attr);
+            if let Ok(Some(instance)) =
+                Instance::try_resolve(tcx, body.typing_env(tcx), def_id, generic_args)
+            {
+                let gpu_attr = crate::attr::GpuAttributes::build(&tcx, instance.def_id());
+                real = Some(gpu_attr);
+            }
         }
     }
     (inlines, real)

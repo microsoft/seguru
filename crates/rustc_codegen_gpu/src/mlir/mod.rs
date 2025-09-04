@@ -321,6 +321,16 @@ pub(crate) fn float_width(ty: melior::ir::r#type::Type<'_>) -> Option<usize> {
     }
 }
 
+pub(crate) fn int_width(ty: melior::ir::r#type::Type<'_>) -> Option<u32> {
+    if let Ok(t) = IntegerType::try_from(ty) {
+        Some(t.width())
+    } else if ty.is_index() {
+        Some(usize::BITS)
+    } else {
+        None
+    }
+}
+
 pub(crate) fn static_size_of(ty: Type<'_>) -> usize {
     if ty.is_integer() {
         let int_ty = IntegerType::try_from(ty).unwrap();

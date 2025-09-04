@@ -12,7 +12,7 @@ use melior::dialect::memref as mlir_memref;
 use melior::helpers::BuiltinBlockExt;
 use melior::ir::attribute::{IntegerAttribute, StringAttribute};
 use melior::ir::operation::{OperationLike, OperationMutLike};
-use melior::ir::r#type::{self as mlir_type, FunctionType, IntegerType, MemRefType};
+use melior::ir::r#type::{self as mlir_type, FunctionType, MemRefType};
 use melior::ir::{
     self as mlir_ir, Attribute, BlockLike, Location, RegionLike, RegionRef, ShapedTypeLike,
     TypeLike, Value, ValueLike,
@@ -33,7 +33,7 @@ use crate::mlir::gpu::{DimFn, NonDimFn, all_reduce, subgroup_reduce};
 use crate::mlir::memref::{
     StridedMetaDataResults, extract_strided_metadata, extract_strided_metadata_results,
 };
-use crate::mlir::{BUILTIN_SYM, BlockRefWithTime, MLIROpHelpers, ValueToOpRef};
+use crate::mlir::{BUILTIN_SYM, BlockRefWithTime, MLIROpHelpers, ValueToOpRef, int_width};
 use crate::rustc_middle::ty::layout::LayoutOf;
 
 #[derive(Debug)]
@@ -985,17 +985,8 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
     ) -> (mlir_ir::Value<'ml, 'a>, mlir_ir::Value<'ml, 'a>) {
         let lhs_ty = lhs.r#type();
         let rhs_ty = rhs.r#type();
-        let get_width = |t: melior::ir::Type<'ml>| {
-            if let Ok(t) = IntegerType::try_from(t) {
-                t.width()
-            } else if t.is_index() {
-                usize::BITS
-            } else {
-                0
-            }
-        };
 
-        let ty = if get_width(rhs_ty) < get_width(lhs_ty) { rhs_ty } else { lhs_ty };
+        let ty = if int_width(rhs_ty) < int_width(lhs_ty) { rhs_ty } else { lhs_ty };
         let lhs = self.use_value(lhs);
         let lhs = self.intcast(lhs, ty, false);
         let rhs = self.use_value(rhs);
@@ -1054,6 +1045,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
 
     fn assert(&mut self, cond: mlir_ir::Value<'ml, 'a>, msg: &str) {
         // trap-based bound check is handled by assert op.
+        let cond = self.use_value_as_ty(cond, self.type_i1());
         let op = melior::dialect::cf::assert(self.mlir_ctx, cond, msg, self.cur_loc());
     }
 
@@ -1529,8 +1521,9 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         // So the not here is actually bitwise not per rust documentation
         // There is no bitwise not in MLIR and therefore it's going to be an
         // xor to 0xFFFFFFFF which is -1
-
-        let op = melior::dialect::arith::xori(v, self.const_value(-1, v.r#type()), self.cur_loc());
+        let ty = v.r#type();
+        let mask = self.const_value((1 << int_width(ty).expect("expected integer type")) - 1, ty);
+        let op = melior::dialect::arith::xori(v, mask, self.cur_loc());
         self.append_op_res(op)
     }
 
@@ -1992,7 +1985,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             panic!();
         }
         if let Some(const_val) = crate::mlir::mlir_val_to_const_int(val) {
-            return self.const_value(const_val, dest_ty);
+            return self.const_value(const_val & ((1 << int_width(dest_ty).unwrap()) - 1), dest_ty);
         }
         let op = if src_ty.is_index() || dest_ty.is_index() {
             // If either is index, we need to use index_cast

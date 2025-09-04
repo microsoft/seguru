@@ -3,6 +3,7 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 #![feature(register_tool)]
+#![feature(negative_impls)]
 #![register_tool(gpu_codegen)]
 #![no_std]
 

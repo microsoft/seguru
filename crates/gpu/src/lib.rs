@@ -36,10 +36,14 @@ pub use print::{PushPrintfArg, printf};
 pub use shared::{DynamicSharedAlloc, GpuShared};
 pub use thread::{GpuChunksMut, scope, sync_threads};
 
+/// Add an extra assertion before indexing operation.
+/// This is used to ensure that some indexing operation is safe,
+/// allowing us to optimize the assertion using select.
+/// If not followed by an indexing operation, it will be ignored.
 #[inline(never)]
 #[rustc_diagnostic_item = "gpu::build_sfi"]
 #[gpu_codegen::device]
-pub fn build_sfi(_size: usize, _offset: usize) {
+pub(crate) fn assert_before_index(_cond: bool, _idx: usize) {
     unimplemented!()
 }
 

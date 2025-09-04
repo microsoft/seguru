@@ -535,13 +535,13 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             }
             GpuItem::BuildSFI => {
                 trace!("gpu.build_sfi args: {:?}", args);
-                // args[0]: size:    i64
-                // args[1]: offset:  i64
+                // args[0]: cond:    bool
+                // args[1]: idx:     index
 
-                let size = args[0];
-                let offset = args[1];
+                let cond = args[0];
+                let idx = args[1];
 
-                self.emit_bound_check(offset, size, self.san_dummy.unwrap());
+                self.assert_before_index(cond, idx);
 
                 Ok(None)
             }
@@ -1054,17 +1054,29 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         feature = "inplace_bound_check",
         feature = "trap_bound_check"
     )))]
-    fn assert_before_index(&mut self, cond: mlir_ir::Value<'ml, 'a>, idx: mlir_ir::Value<'ml, 'a>) {
+    fn _assert_before_index(
+        &mut self,
+        cond: mlir_ir::Value<'ml, 'a>,
+        idx: mlir_ir::Value<'ml, 'a>,
+    ) {
     }
 
     #[cfg(feature = "trap_bound_check")]
-    fn assert_before_index(&mut self, cond: mlir_ir::Value<'ml, 'a>, idx: mlir_ir::Value<'ml, 'a>) {
+    fn _assert_before_index(
+        &mut self,
+        cond: mlir_ir::Value<'ml, 'a>,
+        idx: mlir_ir::Value<'ml, 'a>,
+    ) {
         // trap-based bound check is handled by assert op.
         self.assert(cond, "assert_before_index");
     }
 
     #[cfg(feature = "inplace_bound_check")]
-    fn assert_before_index(&mut self, cond: mlir_ir::Value<'ml, 'a>, idx: mlir_ir::Value<'ml, 'a>) {
+    fn _assert_before_index(
+        &mut self,
+        cond: mlir_ir::Value<'ml, 'a>,
+        idx: mlir_ir::Value<'ml, 'a>,
+    ) {
         if let Some(mut valid_mem_access) = self.valid_mem_access.take() {
             valid_mem_access.idx.push(idx);
             let old_cond = valid_mem_access.cond;
@@ -1076,11 +1088,20 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
     }
 
     #[cfg(feature = "arith_immediate_bound_check")]
-    fn assert_before_index(&mut self, cond: mlir_ir::Value<'ml, 'a>, idx: mlir_ir::Value<'ml, 'a>) {
+    fn _assert_before_index(
+        &mut self,
+        cond: mlir_ir::Value<'ml, 'a>,
+        idx: mlir_ir::Value<'ml, 'a>,
+    ) {
         let ty = self.san_dummy.unwrap().r#type();
         let nullptr = self.inttoptr(self.const_value(0, self.type_index()), ty);
         let ptr = self.select(cond, self.san_dummy.unwrap(), nullptr);
         self.emit_llvm_volatile_load(ptr);
+    }
+
+    fn assert_before_index(&mut self, cond: mlir_ir::Value<'ml, 'a>, idx: mlir_ir::Value<'ml, 'a>) {
+        let cond = self.use_value_as_ty(cond, self.type_i1());
+        self._assert_before_index(cond, idx);
     }
 }
 

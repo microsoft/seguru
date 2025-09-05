@@ -4,7 +4,8 @@ use alloc::vec::Vec;
 use core::marker::PhantomData;
 use core::ops::{Index, IndexMut};
 
-use crate::{assert_before_index, block_thread_ids};
+use crate::assert_before_index;
+use crate::chunk_scope::{ChunkScope, GlobalMemScope};
 
 /// Thread unique mapping trait
 /// N: number of index dimensions.
@@ -12,7 +13,7 @@ use crate::{assert_before_index, block_thread_ids};
 /// # Safety
 /// requires idx -> thread-unique idx
 /// forall |idx1, idx2, thread_ids1, thread_ids2| thread_ids1 != thread_ids2 ==> map(idx1, thread_ids1) !=  map(idx2, thread_ids2)
-pub unsafe trait ThreadUniqueMap<const N: usize>: Clone {
+pub unsafe trait ThreadUniqueMap<CS: ChunkScope, const N: usize>: Clone {
     #[inline]
     #[gpu_codegen::device]
     fn precondition(&self) -> bool {
@@ -23,18 +24,20 @@ pub unsafe trait ThreadUniqueMap<const N: usize>: Clone {
     /// index. Without providing extra precondition, index will always check the
     /// OOB error with global idx.
     #[gpu_codegen::device]
-    fn map(&self, idx: [usize; N], thread_ids: [usize; 6]) -> (bool, usize);
+    fn map(&self, idx: [usize; N], thread_ids: [usize; CS::TID_LEN]) -> (bool, usize);
 }
 
 /// N: Index dimension, 1, 2, 3
 /// Map: Mapping strategy
-pub struct GlobalThreadChunk<'a, T, const N: usize, Map: ThreadUniqueMap<N>> {
+pub struct GlobalThreadChunk<'a, T, const N: usize, Map: ThreadUniqueMap<GlobalMemScope, N>> {
     data: &'a mut [T], // Must be private.
     pub map_params: Map,
     dummy: PhantomData<[u8; N]>,
 }
 
-impl<'a, T, const N: usize, Map: ThreadUniqueMap<N>> GlobalThreadChunk<'a, T, N, Map> {
+impl<'a, T, const N: usize, Map: ThreadUniqueMap<GlobalMemScope, N>>
+    GlobalThreadChunk<'a, T, N, Map>
+{
     #[inline]
     #[rustc_diagnostic_item = "gpu::chunk_mut"]
     #[gpu_codegen::device]
@@ -62,13 +65,13 @@ impl<'a, T, const N: usize, Map: ThreadUniqueMap<N>> GlobalThreadChunk<'a, T, N,
     #[inline]
     #[gpu_codegen::device]
     fn local_to_global_index(&self, i: [usize; N]) -> (bool, usize) {
-        let ids = block_thread_ids();
+        let ids = GlobalMemScope::thread_ids();
         self.map_params.map(i, ids)
     }
 }
 
 #[cfg(not(feature = "codegen_tests"))]
-unsafe impl<'a, T: Send, const N: usize, Map: ThreadUniqueMap<N> + 'static + Send>
+unsafe impl<'a, T: Send, const N: usize, Map: ThreadUniqueMap<GlobalMemScope, N> + 'static + Send>
     cuda_bindings::AsHostKernelParams for GlobalThreadChunk<'a, T, N, Map>
 where
     // Ensure Map is small enough to be passed by value.
@@ -84,7 +87,9 @@ where
     }
 }
 
-impl<'a, T, Map: ThreadUniqueMap<1>> Index<usize> for GlobalThreadChunk<'a, T, 1, Map> {
+impl<'a, T, Map: ThreadUniqueMap<GlobalMemScope, 1>> Index<usize>
+    for GlobalThreadChunk<'a, T, 1, Map>
+{
     type Output = T;
 
     #[inline(always)]
@@ -96,7 +101,9 @@ impl<'a, T, Map: ThreadUniqueMap<1>> Index<usize> for GlobalThreadChunk<'a, T, 1
     }
 }
 
-impl<'a, T, Map: ThreadUniqueMap<1>> IndexMut<usize> for GlobalThreadChunk<'a, T, 1, Map> {
+impl<'a, T, Map: ThreadUniqueMap<GlobalMemScope, 1>> IndexMut<usize>
+    for GlobalThreadChunk<'a, T, 1, Map>
+{
     #[inline(always)]
     #[gpu_codegen::device]
     fn index_mut(&mut self, idx: usize) -> &mut T {
@@ -106,7 +113,9 @@ impl<'a, T, Map: ThreadUniqueMap<1>> IndexMut<usize> for GlobalThreadChunk<'a, T
     }
 }
 
-impl<'a, T, Map: ThreadUniqueMap<2>> Index<(usize, usize)> for GlobalThreadChunk<'a, T, 2, Map> {
+impl<'a, T, Map: ThreadUniqueMap<GlobalMemScope, 2>> Index<(usize, usize)>
+    for GlobalThreadChunk<'a, T, 2, Map>
+{
     type Output = T;
 
     #[inline(always)]
@@ -118,7 +127,9 @@ impl<'a, T, Map: ThreadUniqueMap<2>> Index<(usize, usize)> for GlobalThreadChunk
     }
 }
 
-impl<'a, T, Map: ThreadUniqueMap<2>> IndexMut<(usize, usize)> for GlobalThreadChunk<'a, T, 2, Map> {
+impl<'a, T, Map: ThreadUniqueMap<GlobalMemScope, 2>> IndexMut<(usize, usize)>
+    for GlobalThreadChunk<'a, T, 2, Map>
+{
     #[inline(always)]
     #[gpu_codegen::device]
     fn index_mut(&mut self, idx: (usize, usize)) -> &mut T {
@@ -128,7 +139,7 @@ impl<'a, T, Map: ThreadUniqueMap<2>> IndexMut<(usize, usize)> for GlobalThreadCh
     }
 }
 
-impl<'a, T, Map: ThreadUniqueMap<3>> Index<(usize, usize, usize)>
+impl<'a, T, Map: ThreadUniqueMap<GlobalMemScope, 3>> Index<(usize, usize, usize)>
     for GlobalThreadChunk<'a, T, 3, Map>
 {
     type Output = T;
@@ -142,7 +153,7 @@ impl<'a, T, Map: ThreadUniqueMap<3>> Index<(usize, usize, usize)>
     }
 }
 
-impl<'a, T, Map: ThreadUniqueMap<3>> IndexMut<(usize, usize, usize)>
+impl<'a, T, Map: ThreadUniqueMap<GlobalMemScope, 3>> IndexMut<(usize, usize, usize)>
     for GlobalThreadChunk<'a, T, 3, Map>
 {
     #[inline(always)]

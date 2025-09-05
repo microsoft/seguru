@@ -15,6 +15,7 @@ use core::arch::asm;
 pub mod cg;
 mod chunk;
 mod chunk_impl;
+mod chunk_scope;
 mod device_intrinsic;
 mod dim;
 pub mod iter;
@@ -30,8 +31,8 @@ pub use device_intrinsic::GPUDeviceFloatIntrinsics;
 #[cfg(not(feature = "codegen_tests"))]
 pub use dim::assume_dim_with_config;
 pub use dim::{
-    DimType, DimX, DimY, DimZ, GpuChunkIdx, GpuSharedChunkIdx, block_dim, block_id,
-    block_thread_ids, dim, global_id, grid_dim, thread_id,
+    DimType, DimX, DimY, DimZ, GpuChunkIdx, GpuSharedChunkIdx, block_dim, block_id, dim, global_id,
+    grid_dim, thread_id,
 };
 pub use print::{PushPrintfArg, printf};
 pub use shared::{DynamicSharedAlloc, GpuShared};

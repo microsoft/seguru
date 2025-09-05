@@ -2211,7 +2211,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         if self.is_unreachable() {
             return cond;
         }
-        let cond = self.use_value(cond);
+        let cond = self.use_value_as_ty(cond, self.type_i1());
         let then_val = self.use_value(then_val);
         let else_val = self.use_value(else_val);
         self.append_op_res(melior::dialect::arith::select(cond, then_val, else_val, self.cur_loc()))

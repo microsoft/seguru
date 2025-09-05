@@ -25,7 +25,8 @@ pub fn kernel_arith_wrapper(a: &[u8], a_window: usize, b: &mut [u8], b_window: u
 // PTX_CHECK: %ntid.x
 // PTX_CHECK: %ntid.y
 // PTX_CHECK: %ntid.z
+// PTX_CHECK: %ctaid.x
+// PTX_CHECK: %ctaid.y
+// PTX_CHECK: %ctaid.z
 // PTX_CHECK: %nctaid.x
 // PTX_CHECK: %nctaid.y
-// PTX_CHECK: %nctaid.z
-

@@ -759,6 +759,16 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         }
     }
 
+    fn use_value_as_integer(
+        &mut self,
+        val: melior::ir::Value<'ml, 'a>,
+        signed: bool,
+    ) -> melior::ir::Value<'ml, 'a> {
+        let val = self.use_value(val);
+        let ty = val.r#type();
+        if ty.is_index() { self.intcast(val, self.type_i64(), signed) } else { val }
+    }
+
     // If the value is memref, use view to convert it to a memref offset = 0.
     fn use_value_as_ty(
         &mut self,
@@ -1473,11 +1483,15 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn urem(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
+        let lhs = self.use_value_as_integer(lhs, false);
+        let rhs = self.use_value_as_integer(rhs, false);
         let op = melior::dialect::arith::remui(lhs, rhs, self.cur_loc());
         self.append_op_res(op)
     }
 
     fn srem(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
+        let lhs = self.use_value_as_integer(lhs, true);
+        let rhs = self.use_value_as_integer(rhs, true);
         let op = melior::dialect::arith::remsi(lhs, rhs, self.cur_loc());
         self.append_op_res(op)
     }
@@ -1922,12 +1936,12 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn uitofp(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
-        let val = self.use_value(val);
+        let val = self.use_value_as_integer(val, false);
         self.append_op_res(melior::dialect::arith::uitofp(val, dest_ty, self.cur_loc()))
     }
 
     fn sitofp(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
-        let val = self.use_value(val);
+        let val = self.use_value_as_integer(val, true);
         self.append_op_res(melior::dialect::arith::sitofp(val, dest_ty, self.cur_loc()))
     }
 

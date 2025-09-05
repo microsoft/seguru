@@ -12,7 +12,7 @@ use crate::{assert_before_index, block_thread_ids};
 /// # Safety
 /// requires idx -> thread-unique idx
 /// forall |idx1, idx2, thread_ids1, thread_ids2| thread_ids1 != thread_ids2 ==> map(idx1, thread_ids1) !=  map(idx2, thread_ids2)
-pub(crate) unsafe trait ThreadUniqueMap<const N: usize>: Clone {
+pub unsafe trait ThreadUniqueMap<const N: usize>: Clone {
     #[inline]
     #[gpu_codegen::device]
     fn precondition(&self) -> bool {
@@ -28,14 +28,12 @@ pub(crate) unsafe trait ThreadUniqueMap<const N: usize>: Clone {
 
 /// N: Index dimension, 1, 2, 3
 /// Map: Mapping strategy
-#[allow(private_bounds)]
 pub struct GlobalThreadChunk<'a, T, const N: usize, Map: ThreadUniqueMap<N>> {
     data: &'a mut [T], // Must be private.
     pub map_params: Map,
     dummy: PhantomData<[u8; N]>,
 }
 
-#[expect(private_bounds)]
 impl<'a, T, const N: usize, Map: ThreadUniqueMap<N>> GlobalThreadChunk<'a, T, N, Map> {
     #[inline]
     #[rustc_diagnostic_item = "gpu::chunk_mut"]

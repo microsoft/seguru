@@ -1,3 +1,6 @@
+use alloc::boxed::Box;
+use alloc::vec;
+use alloc::vec::Vec;
 use core::marker::PhantomData;
 use core::ops::{Index, IndexMut};
 
@@ -45,11 +48,37 @@ impl<'a, T, const N: usize, Map: ThreadUniqueMap<N>> GlobalThreadChunk<'a, T, N,
         Self { data, map_params, dummy: PhantomData }
     }
 
+    /// In some cases, passing GlobalThreadChunk from host to device is more
+    /// convenient. Due to unknown optimization-related factors, passing
+    /// GlobalThreadChunk to kernel function can be more efficient than passing
+    /// CudaMemBox and then create GlobalThreadChunk in the kernel function.
+    #[cfg(not(feature = "codegen_tests"))]
+    pub fn new_from_host(slice: &'a cuda_bindings::CudaMemBox<[T]>, map_params: Map) -> Self {
+        unsafe { Self { data: &mut *(slice.as_ptr() as *mut [T]), map_params, dummy: PhantomData } }
+    }
+
     #[inline]
     #[gpu_codegen::device]
     fn local_to_global_index(&self, i: [usize; N]) -> (bool, usize) {
         let ids = block_thread_ids();
         self.map_params.map(i, ids)
+    }
+}
+
+#[cfg(not(feature = "codegen_tests"))]
+unsafe impl<'a, T: Send, const N: usize, Map: ThreadUniqueMap<N> + 'static + Send>
+    cuda_bindings::AsHostKernelParams for GlobalThreadChunk<'a, T, N, Map>
+where
+    // Ensure Map is small enough to be passed by value.
+    [(); 16 - core::mem::size_of::<Map>()]:,
+{
+    fn as_kernel_param_data(&self) -> Vec<alloc::boxed::Box<dyn core::any::Any>> {
+        assert!(core::mem::size_of::<Map>() <= 16);
+        vec![
+            Box::new((self.data as *const [T] as *const T) as usize),
+            Box::new(self.data.len()),
+            Box::new(self.map_params.clone()),
+        ]
     }
 }
 

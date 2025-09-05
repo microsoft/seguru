@@ -6,6 +6,8 @@
 #![no_std]
 #![feature(asm_experimental_arch)]
 #![feature(core_intrinsics)]
+#![allow(incomplete_features)]
+#![feature(generic_const_exprs)]
 
 extern crate alloc;
 use core::arch::asm;

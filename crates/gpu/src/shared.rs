@@ -38,16 +38,7 @@ impl<T> Deref for GpuShared<T> {
     }
 }
 
-impl<T> DerefMut for GpuShared<T> {
-    // The returned type is not GPUShared and need explicitly tell the compiler
-    // that the memory space is 3
-    #[gpu_codegen::device]
-    #[gpu_codegen::ret_shared]
-    #[inline(always)]
-    fn deref_mut(&mut self) -> &mut T {
-        &mut self.value
-    }
-}
+impl<T> !DerefMut for GpuShared<T> {}
 
 /// Dynamic GPU shared memory allocation.
 #[allow(dead_code)]

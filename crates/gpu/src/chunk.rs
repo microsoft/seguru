@@ -19,8 +19,12 @@ pub(crate) unsafe trait ThreadUniqueMap<const N: usize>: Clone {
     fn precondition(&self) -> bool {
         true
     }
+
+    /// Returns the extra precondition of indexing operation and the global
+    /// index. Without providing extra precondition, index will always check the
+    /// OOB error with global idx.
     #[gpu_codegen::device]
-    fn map(&self, idx: [usize; N], thread_ids: [usize; 6]) -> usize;
+    fn map(&self, idx: [usize; N], thread_ids: [usize; 6]) -> (bool, usize);
 }
 
 /// N: Index dimension, 1, 2, 3
@@ -47,7 +51,7 @@ impl<'a, T, const N: usize, Map: ThreadUniqueMap<N>> GlobalThreadChunk<'a, T, N,
 
     #[inline]
     #[gpu_codegen::device]
-    fn local_to_global_index(&self, i: [usize; N]) -> usize {
+    fn local_to_global_index(&self, i: [usize; N]) -> (bool, usize) {
         let ids = block_thread_ids();
         self.map_params.map(i, ids)
     }
@@ -58,20 +62,20 @@ impl<'a, T, Map: ThreadUniqueMap<1>> Index<usize> for GlobalThreadChunk<'a, T, 1
 
     #[inline(always)]
     #[gpu_codegen::device]
-    fn index(&self, idx: usize) -> &Self::Output {
-        //crate::subslice(self.data, self.local_to_global_index([idx]), 1)[0]
-        &self.data[self.local_to_global_index([idx])]
+    fn index(&self, idx: usize) -> &T {
+        let (idx_precondition, idx) = self.local_to_global_index([idx]);
+        assert_before_index(self.map_params.precondition() & idx_precondition, idx);
+        &self.data[idx]
     }
 }
 
 impl<'a, T, Map: ThreadUniqueMap<1>> IndexMut<usize> for GlobalThreadChunk<'a, T, 1, Map> {
     #[inline(always)]
     #[gpu_codegen::device]
-    fn index_mut(&mut self, idx: usize) -> &mut Self::Output {
-        &mut self.data[self.local_to_global_index([idx])]
-        /*unsafe {
-            &mut crate::subslice_mut(self.data, self.local_to_global_index([idx]), 1)[0]
-        }*/
+    fn index_mut(&mut self, idx: usize) -> &mut T {
+        let (idx_precondition, idx) = self.local_to_global_index([idx]);
+        assert_before_index(self.map_params.precondition() & idx_precondition, idx);
+        &mut self.data[idx]
     }
 }
 
@@ -80,16 +84,20 @@ impl<'a, T, Map: ThreadUniqueMap<2>> Index<(usize, usize)> for GlobalThreadChunk
 
     #[inline(always)]
     #[gpu_codegen::device]
-    fn index(&self, idx: (usize, usize)) -> &Self::Output {
-        &self.data[self.local_to_global_index([idx.0, idx.1])]
+    fn index(&self, idx: (usize, usize)) -> &T {
+        let (idx_precondition, idx) = self.local_to_global_index([idx.0, idx.1]);
+        assert_before_index(self.map_params.precondition() & idx_precondition, idx);
+        &self.data[idx]
     }
 }
 
 impl<'a, T, Map: ThreadUniqueMap<2>> IndexMut<(usize, usize)> for GlobalThreadChunk<'a, T, 2, Map> {
     #[inline(always)]
     #[gpu_codegen::device]
-    fn index_mut(&mut self, idx: (usize, usize)) -> &mut Self::Output {
-        &mut self.data[self.local_to_global_index([idx.0, idx.1])]
+    fn index_mut(&mut self, idx: (usize, usize)) -> &mut T {
+        let (idx_precondition, idx) = self.local_to_global_index([idx.0, idx.1]);
+        assert_before_index(self.map_params.precondition() & idx_precondition, idx);
+        &mut self.data[idx]
     }
 }
 
@@ -100,8 +108,10 @@ impl<'a, T, Map: ThreadUniqueMap<3>> Index<(usize, usize, usize)>
 
     #[inline(always)]
     #[gpu_codegen::device]
-    fn index(&self, idx: (usize, usize, usize)) -> &Self::Output {
-        &self.data[self.local_to_global_index([idx.0, idx.1, idx.2])]
+    fn index(&self, idx: (usize, usize, usize)) -> &T {
+        let (idx_precondition, idx) = self.local_to_global_index([idx.0, idx.1, idx.2]);
+        assert_before_index(self.map_params.precondition() & idx_precondition, idx);
+        &self.data[idx]
     }
 }
 
@@ -110,8 +120,10 @@ impl<'a, T, Map: ThreadUniqueMap<3>> IndexMut<(usize, usize, usize)>
 {
     #[inline(always)]
     #[gpu_codegen::device]
-    fn index_mut(&mut self, idx: (usize, usize, usize)) -> &mut Self::Output {
-        &mut self.data[self.local_to_global_index([idx.0, idx.1, idx.2])]
+    fn index_mut(&mut self, idx: (usize, usize, usize)) -> &mut T {
+        let (idx_precondition, idx) = self.local_to_global_index([idx.0, idx.1, idx.2]);
+        assert_before_index(self.map_params.precondition() & idx_precondition, idx);
+        &mut self.data[idx]
     }
 }
 

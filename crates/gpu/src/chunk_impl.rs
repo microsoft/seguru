@@ -40,7 +40,7 @@ unsafe impl ThreadUniqueMap<1> for MapLinearWithDim<1> {
 
     #[inline]
     #[gpu_codegen::device]
-    fn map(&self, idx: [usize; 1], thread_ids: [usize; 6]) -> usize {
+    fn map(&self, idx: [usize; 1], thread_ids: [usize; 6]) -> (bool, usize) {
         MapLinearWithDim::<3>::new(self.width).map(idx, thread_ids)
     }
 }
@@ -54,7 +54,7 @@ unsafe impl ThreadUniqueMap<1> for MapLinearWithDim<2> {
 
     #[inline]
     #[gpu_codegen::device]
-    fn map(&self, idx: [usize; 1], thread_ids: [usize; 6]) -> usize {
+    fn map(&self, idx: [usize; 1], thread_ids: [usize; 6]) -> (bool, usize) {
         MapLinearWithDim::<3>::new(self.width).map(idx, thread_ids)
     }
 }
@@ -62,9 +62,9 @@ unsafe impl ThreadUniqueMap<1> for MapLinearWithDim<2> {
 unsafe impl ThreadUniqueMap<1> for MapLinearWithDim<3> {
     #[inline]
     #[gpu_codegen::device]
-    fn map(&self, idx: [usize; 1], thread_ids: [usize; 6]) -> usize {
+    fn map(&self, idx: [usize; 1], thread_ids: [usize; 6]) -> (bool, usize) {
         let global_thread_id = global_id(thread_ids);
-        (idx[0] + global_thread_id) * self.width
+        (true, (idx[0] + global_thread_id) * self.width)
     }
 }
 

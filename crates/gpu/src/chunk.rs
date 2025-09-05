@@ -1,11 +1,7 @@
 use core::marker::PhantomData;
 use core::ops::{Index, IndexMut};
 
-use crate::{
-    DimType, assert_before_index, block_dim, block_id, block_thread_ids, dim, grid_dim, thread_id,
-};
-#[cfg(not(feature = "codegen_tests"))]
-use crate::{GpuChunkable2D, GpuChunkableMut2D};
+use crate::{assert_before_index, block_thread_ids};
 
 /// Thread unique mapping trait
 /// N: number of index dimensions.
@@ -125,45 +121,4 @@ impl<'a, T, Map: ThreadUniqueMap<3>> IndexMut<(usize, usize, usize)>
         assert_before_index(self.map_params.precondition() & idx_precondition, idx);
         &mut self.data[idx]
     }
-}
-
-#[cfg(not(feature = "codegen_tests"))]
-#[rustc_diagnostic_item = "gpu::get_local_mut_2d"]
-#[gpu_codegen::device]
-pub fn get_local_mut_2d<'a, T>(a: &mut GpuChunkableMut2D<'a, T>, x: usize, y: usize) -> &'a mut T {
-    // Must check if col is smaller than a.size_x
-
-    let row =
-        y * dim(DimType::Y) + block_dim(DimType::Y) * block_id(DimType::Y) + thread_id(DimType::Y);
-    let col =
-        x * dim(DimType::X) + block_dim(DimType::X) * block_id(DimType::X) + thread_id(DimType::X);
-    let z_size = dim(DimType::Z);
-    let idx = a.size_x() * row + col;
-    assert_before_index(z_size == 1, idx);
-    assert_before_index(col <= a.size_x(), idx);
-
-    // Here Rust will automatic generate an SFI
-    unsafe { &mut (&mut *(a.as_ptr() as *mut [T]))[a.size_x() * row + col] }
-}
-
-#[cfg(not(feature = "codegen_tests"))]
-#[rustc_diagnostic_item = "gpu::get_local_2d"]
-#[gpu_codegen::device]
-pub fn get_local_2d<'a, T>(a: &'a GpuChunkable2D<'a, T>, x: usize, y: usize) -> &'a T {
-    // Must check if col is smaller than a.size_x
-
-    use crate::assert_before_index;
-    let row = y * grid_dim(DimType::Y) * block_dim(DimType::Y)
-        + block_dim(DimType::Y) * block_id(DimType::Y)
-        + thread_id(DimType::Y);
-    let col = x * grid_dim(DimType::X) * block_dim(DimType::X)
-        + block_dim(DimType::X) * block_id(DimType::X)
-        + thread_id(DimType::X);
-    let z_size = grid_dim(DimType::Z) * block_dim(DimType::Z);
-    let idx = a.size_x() * row + col;
-    assert_before_index(z_size == 1, idx);
-    assert_before_index(col <= a.size_x(), idx);
-
-    // Here Rust will automatic generate an SFI
-    unsafe { &(&*a.as_ptr())[idx] }
 }

@@ -21,13 +21,9 @@ mod shared;
 mod thread;
 
 pub use chunk::GlobalThreadChunk;
+pub use chunk_impl::{Map2D, MapLinear, MapLinearWithDim, chunk_mut};
 #[cfg(not(feature = "codegen_tests"))]
-pub use chunk::{get_local_2d, get_local_mut_2d};
-pub use chunk_impl::{MapLinear, MapLinearWithDim, chunk_mut};
-#[cfg(not(feature = "codegen_tests"))]
-pub use cuda_bindings::{
-    GPUConfig, GpuChunkable, GpuChunkable2D, GpuChunkableMut, GpuChunkableMut2D,
-};
+pub use cuda_bindings::GPUConfig;
 pub use device_intrinsic::GPUDeviceFloatIntrinsics;
 #[cfg(not(feature = "codegen_tests"))]
 pub use dim::assume_dim_with_config;
@@ -82,28 +78,6 @@ pub(crate) unsafe fn subslice_mut<T>(
     _window: usize,
 ) -> &mut [T] {
     unimplemented!()
-}
-
-#[cfg(not(feature = "codegen_tests"))]
-#[inline(never)]
-#[rustc_diagnostic_item = "gpu::get_chunk"]
-#[gpu_codegen::device]
-#[gpu_codegen::sync_data(0)]
-pub fn get_mut_chunk<'a, T>(
-    chunkable: &mut GpuChunkableMut<'a, T>,
-    idx_pattern: GpuChunkIdx,
-) -> &'a mut [T] {
-    let w = chunkable.window();
-    let start_idx = idx_pattern.as_usize() * w;
-    let end_idx = w + start_idx - 1;
-    unsafe {
-        // Here Rust will automatic generate an SFI
-        let slice_ptr: *const [T] = chunkable.as_ptr();
-        let slice = &*slice_ptr;
-        let end = &slice[end_idx] as *const T as *mut T;
-        let start = core::intrinsics::offset(end, 1 - w as isize);
-        &mut *core::intrinsics::aggregate_raw_ptr::<*mut [T], _, _>(start, w)
-    }
 }
 
 #[inline(never)]

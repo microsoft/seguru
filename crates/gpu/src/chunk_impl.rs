@@ -78,3 +78,58 @@ pub fn chunk_mut<'a, T>(
 ) -> crate::GlobalThreadChunk<'a, T, 1, MapLinear> {
     crate::GlobalThreadChunk::new(input, MapLinear::new(window))
 }
+
+/// This mapping strategy is useful when we want to reshape a 1D array into a 2D
+/// array and then distribute one element to a thread one by one until consuming
+/// all. It creates a new non-continuous partition for each thread.
+/*
+Example:
+array: [T; 20]
+x_size = 5 => y_size = 4
+dim: x=2, y=2, z=1
+0     2     4     6   7
+┌───┬───┬───┬───┬───┐
+│0,0│1,0│0,0│1,0│0,0│
+├───┼───┼───┼───┼───┤
+│0,1│1,1│0,1│1,1│0,1│
+├───┼───┼───┼───┼───┤
+│0,0│1,0│0,0│1,0│0,0│
+├───┼───┼───┼───┼───┤
+│0,1│1,1│0,1│1,1│0,1│
+└───┴───┴───┴───┴───┘
+This this case, thread(1,0) and (1,1) should
+only have access to a shape of 2*2 = 4 elements,
+while thread (0,0) and (0,1) have a shape of 3*2 = 6 elements.
+*/
+#[derive(Copy, Clone)]
+pub struct Map2D {
+    pub x_size: usize,
+}
+
+impl Map2D {
+    #[inline]
+    #[gpu_codegen::device]
+    #[gpu_codegen::ret_sync_data(0)]
+    pub fn new(x_size: usize) -> Self {
+        Self { x_size }
+    }
+}
+
+unsafe impl ThreadUniqueMap<2> for Map2D {
+    #[inline]
+    #[gpu_codegen::device]
+    fn precondition(&self) -> bool {
+        dim(DimType::Z) == 1
+    }
+
+    #[inline]
+    #[gpu_codegen::device]
+    fn map(&self, idx: [usize; 2], thread_ids: [usize; 6]) -> (bool, usize) {
+        let shape_x = self.x_size;
+        let inner_x = idx[0];
+        let inner_y = idx[1];
+        let x = inner_x * dim(DimType::X) + block_dim(DimType::X) * thread_ids[3] + thread_ids[0];
+        let y = inner_y * dim(DimType::Y) + block_dim(DimType::Y) * thread_ids[4] + thread_ids[1];
+        (x < self.x_size, shape_x * y + x)
+    }
+}

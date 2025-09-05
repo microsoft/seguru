@@ -105,7 +105,7 @@ impl<const SIZE: usize, const STRIDE: usize> ThreadWarpTile<SIZE, STRIDE> {
             % SIZE
     }
 
-    #[gpu_codegen::device]
+    /*#[gpu_codegen::device]
     #[inline(always)]
     pub fn run_on_lane_0<T>(self, slice: &mut [T], f: impl FnOnce(&mut T) + Clone + Send) {
         if self.lane_id() == 0 {
@@ -132,7 +132,7 @@ impl<const SIZE: usize, const STRIDE: usize> ThreadWarpTile<SIZE, STRIDE> {
             // Call exec_on_thread_0
             f(&mut local_val[0]);
         }
-    }
+    }*/
 
     /// Reduce by software-defined warp.
     #[gpu_codegen::device]

@@ -4,6 +4,7 @@ use alloc::vec::Vec;
 
 use crate::CudaMemBox;
 use crate::ctx::GpuCtxSpace;
+use crate::mem::GpuDataMarker;
 
 /// When dim == 0, it indicates that dim is dynamic and should refer to config
 /// When BLOCK_DIM_X != 0
@@ -171,25 +172,27 @@ impl GPUConfig for GPUDynamicConfig {
     }
 }
 
-pub(crate) trait AsKernelParamsGuard {}
-
-/// This trait is used to ensure that the types can be used as kernel parameters passed from host to device.
+/// This trait is used to ensure that the types can be used as kernel parameters
+/// passed from host to device. User should not implement this trait directly.
+/// # Safety:
+/// It must ensure that the data passed to the GPU is valid. in addition, the
+/// returned pointer vec should be properly constructed to match the layout of
+/// the target type. For example, primitive types could be passed by value;
+/// paired types(e.g., slices) should be passed as two fields: pointer + length;
+#[doc(hidden)]
 #[allow(private_bounds)]
-pub trait AsHostKernelParams: AsKernelParamsGuard {
+pub unsafe trait AsHostKernelParams {
     fn as_kernel_param_data(&self) -> Vec<Box<dyn core::any::Any>>;
 }
 
-impl<T: Sized, N: GpuCtxSpace> AsKernelParamsGuard for CudaMemBox<T, N> {}
-
-impl<T: Sized, N: GpuCtxSpace> AsHostKernelParams for CudaMemBox<T, N> {
+/// We only allow the CudaMemBox to store a type T that is allowed as GpuDataMarker.
+unsafe impl<T: Sized + GpuDataMarker, N: GpuCtxSpace> AsHostKernelParams for CudaMemBox<T, N> {
     fn as_kernel_param_data(&self) -> Vec<Box<dyn core::any::Any>> {
         vec![Box::new(self.as_ptr() as usize)]
     }
 }
 
-impl<T: ?Sized, N: GpuCtxSpace> AsKernelParamsGuard for &CudaMemBox<T, N> {}
-
-impl<T: ?Sized, N: GpuCtxSpace> AsHostKernelParams for &CudaMemBox<T, N>
+unsafe impl<T: ?Sized + GpuDataMarker, N: GpuCtxSpace> AsHostKernelParams for &CudaMemBox<T, N>
 where
     CudaMemBox<T, N>: AsHostKernelParams,
 {
@@ -198,9 +201,7 @@ where
     }
 }
 
-impl<T: ?Sized, N: GpuCtxSpace> AsKernelParamsGuard for &mut CudaMemBox<T, N> {}
-
-impl<T: ?Sized, N: GpuCtxSpace> AsHostKernelParams for &mut CudaMemBox<T, N>
+unsafe impl<T: ?Sized + Send, N: GpuCtxSpace> AsHostKernelParams for &mut CudaMemBox<T, N>
 where
     CudaMemBox<T, N>: AsHostKernelParams,
 {
@@ -209,8 +210,7 @@ where
     }
 }
 
-impl<T, N: GpuCtxSpace> AsKernelParamsGuard for CudaMemBox<[T], N> {}
-impl<T: Sized, N: GpuCtxSpace> AsHostKernelParams for CudaMemBox<[T], N> {
+unsafe impl<T: Sized + Send, N: GpuCtxSpace> AsHostKernelParams for CudaMemBox<[T], N> {
     fn as_kernel_param_data(&self) -> Vec<Box<dyn core::any::Any>> {
         vec![Box::new(self.as_ptr() as *const T as usize), Box::new(self.as_ptr().len())]
     }
@@ -218,8 +218,7 @@ impl<T: Sized, N: GpuCtxSpace> AsHostKernelParams for CudaMemBox<[T], N> {
 
 macro_rules! impl_as_kernel_params {
     ($u:ty) => {
-        impl AsKernelParamsGuard for $u {}
-        impl AsHostKernelParams for $u {
+        unsafe impl AsHostKernelParams for $u {
             fn as_kernel_param_data(&self) -> Vec<Box<dyn core::any::Any>> {
                 vec![Box::new(*self)]
             }

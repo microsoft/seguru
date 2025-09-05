@@ -6,11 +6,15 @@
 #![no_std]
 #![feature(asm_experimental_arch)]
 #![feature(core_intrinsics)]
+#![allow(incomplete_features)]
+#![feature(generic_const_exprs)]
 
+extern crate alloc;
 use core::arch::asm;
 
 pub mod cg;
 mod chunk;
+mod chunk_impl;
 mod device_intrinsic;
 mod dim;
 pub mod iter;
@@ -18,23 +22,20 @@ mod print;
 mod shared;
 mod thread;
 
-pub use chunk::{chunk, chunk_mut};
+pub use chunk::GlobalThreadChunk;
+pub use chunk_impl::{Map2D, MapLinear, MapLinearWithDim, chunk_mut};
 #[cfg(not(feature = "codegen_tests"))]
-pub use chunk::{get_local_2d, get_local_mut_2d};
-#[cfg(not(feature = "codegen_tests"))]
-pub use cuda_bindings::{
-    GPUConfig, GpuChunkable, GpuChunkable2D, GpuChunkableMut, GpuChunkableMut2D,
-};
+pub use cuda_bindings::GPUConfig;
 pub use device_intrinsic::GPUDeviceFloatIntrinsics;
 #[cfg(not(feature = "codegen_tests"))]
 pub use dim::assume_dim_with_config;
 pub use dim::{
-    DimType, GpuChunkIdx, GpuSharedChunkIdx, block_dim, block_id, dim, global_id, grid_dim,
-    thread_id,
+    DimType, GpuChunkIdx, GpuSharedChunkIdx, block_dim, block_id, block_thread_ids, dim, global_id,
+    grid_dim, thread_id,
 };
 pub use print::{PushPrintfArg, printf};
 pub use shared::{DynamicSharedAlloc, GpuShared};
-pub use thread::{GpuChunksMut, scope, sync_threads};
+pub use thread::sync_threads;
 
 /// Add an extra assertion before indexing operation.
 /// This is used to ensure that some indexing operation is safe,
@@ -61,6 +62,7 @@ pub const fn add_mlir_string_attr(_: &'static str) -> usize {
 #[inline(never)]
 #[rustc_diagnostic_item = "gpu::subslice"]
 #[gpu_codegen::device]
+#[allow(dead_code)]
 pub(crate) fn subslice<T>(_original: &[T], _offset: usize, _window: usize) -> &[T] {
     unimplemented!()
 }
@@ -78,28 +80,6 @@ pub(crate) unsafe fn subslice_mut<T>(
     _window: usize,
 ) -> &mut [T] {
     unimplemented!()
-}
-
-#[cfg(not(feature = "codegen_tests"))]
-#[inline(never)]
-#[rustc_diagnostic_item = "gpu::get_chunk"]
-#[gpu_codegen::device]
-#[gpu_codegen::sync_data(0)]
-pub fn get_mut_chunk<'a, T>(
-    chunkable: &mut GpuChunkableMut<'a, T>,
-    idx_pattern: GpuChunkIdx,
-) -> &'a mut [T] {
-    let w = chunkable.window();
-    let start_idx = idx_pattern.as_usize() * w;
-    let end_idx = w + start_idx - 1;
-    unsafe {
-        // Here Rust will automatic generate an SFI
-        let slice_ptr: *const [T] = chunkable.as_ptr();
-        let slice = &*slice_ptr;
-        let end = &slice[end_idx] as *const T as *mut T;
-        let start = core::intrinsics::offset(end, 1 - w as isize);
-        &mut *core::intrinsics::aggregate_raw_ptr::<*mut [T], _, _>(start, w)
-    }
 }
 
 #[inline(never)]

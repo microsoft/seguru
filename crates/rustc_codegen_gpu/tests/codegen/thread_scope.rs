@@ -4,6 +4,7 @@
 #![no_std]
 
 extern crate gpu;
+use core::marker::PhantomData;
 
 #[gpu_codegen::device]
 #[no_mangle]
@@ -14,24 +15,31 @@ fn kernel(a: &[u8], b: &mut u8) -> u8 {
     *b
 }
 
+pub struct ThreadScope<'scope, 'env: 'scope> {
+    scope: PhantomData<&'scope mut &'scope ()>,
+    env: PhantomData<&'env mut &'env ()>,
+    val: u32,
+}
+
+#[gpu_codegen::device]
+#[inline(never)]
+pub fn scope<'env, F, T>(f: F) -> T
+where
+    F: for<'scope> FnOnce(&'scope ThreadScope<'scope, 'env>) -> T + Send,
+{
+    f(&ThreadScope { scope: PhantomData, env: PhantomData, val: 0 })
+}
+
+
+
 #[gpu_macros::kernel_v2]
 #[no_mangle]
 pub fn kernel_arith(a: &[u8], b: &mut [u8], window: usize) {
-    let chunks = gpu::GpuChunksMut::<'_, u8>::new(b, window, gpu::GpuChunkIdx::new());
-    let val = gpu::scope(|s| {
-        let c = chunks.unique_chunk(s);
-        kernel(a, &mut c[0])
+    let mut b = gpu::GlobalThreadChunk::new(b, gpu::MapLinear::new(window));
+    let c = &mut b[0];
+    let val = scope(|s| {
+        kernel(a, c)
     });
-    gpu::println!("setting b[?] = %u", val);
-
-    // TODO(datarace): The following code should be disallowed by MIR checker for global memory.
-    // Changing chunks should only be possible for shared memory since we can use _thread_sync() to ensure
-    // all threads in a block have finished using the prior chunk.
-    /* let chunks: gpu::GpuChunksMut<'_, u8> = gpu::gpu_chunk_mut(b, 2, gpu::GpuChunkIdx::new());
-    gpu::scope(|s| {
-        let c = chunks.next(s);
-        kernel(a, &mut c[0]);
-    });*/
 }
 
 // CHECK: @gpu_bin_cst = internal constant

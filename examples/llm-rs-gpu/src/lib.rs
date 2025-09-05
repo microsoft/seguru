@@ -2,7 +2,7 @@
 #![allow(non_snake_case)]
 #![allow(clippy::too_many_arguments)]
 
-use gpu::float4;
+use gpu::{float4, GlobalThreadChunk, MapLinear};
 
 #[gpu_macros::device]
 #[inline(always)]
@@ -17,7 +17,7 @@ pub fn add_float4(a: &float4, b: &float4) -> float4 {
 
 #[gpu_macros::kernel]
 pub fn encoder_forward_kernel3(
-    out: &gpu::GpuChunkableMut<float4>,
+    out: &mut [float4],
     inp: &[i32],
     wte: &[float4],
     wpe: &[float4],
@@ -25,6 +25,7 @@ pub fn encoder_forward_kernel3(
     T: i32,
     C: i32,
 ) {
+    let mut out = GlobalThreadChunk::new(out, MapLinear::new(1));
     let C4 = C / 4;
     let idx = (gpu::block_dim(gpu::DimType::X) * gpu::block_id(gpu::DimType::X)
         + gpu::thread_id(gpu::DimType::X)) as i32;
@@ -90,15 +91,18 @@ pub fn encoder_backward_kernel(
 
 #[gpu_macros::kernel]
 pub fn permute_kernel(
-    q: &gpu::GpuChunkableMut<f32>,
-    k: &gpu::GpuChunkableMut<f32>,
-    v: &gpu::GpuChunkableMut<f32>,
+    q: &mut [f32],
+    k: &mut [f32],
+    v: &mut [f32],
     inp: &[f32],
     B: i32,
     N: i32,
     NH: i32,
     d: i32,
 ) {
+    let mut q = GlobalThreadChunk::new(q, MapLinear::new(1));
+    let mut k = GlobalThreadChunk::new(k, MapLinear::new(1));
+    let mut v = GlobalThreadChunk::new(v, MapLinear::new(1));
     let idx = (gpu::block_dim(gpu::DimType::X) * gpu::block_id(gpu::DimType::X)
         + gpu::thread_id(gpu::DimType::X)) as i32;
 

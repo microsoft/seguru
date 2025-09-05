@@ -3,12 +3,12 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 #![feature(register_tool)]
+#![feature(negative_impls)]
 #![register_tool(gpu_codegen)]
 #![no_std]
 
 extern crate alloc;
 use alloc::string::{String, ToString};
-mod chunk;
 mod ctx;
 mod mem;
 mod params;
@@ -22,7 +22,6 @@ mod unsafe_bindings {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
-pub use chunk::{GpuChunkable, GpuChunkable2D, GpuChunkableMut, GpuChunkableMut2D};
 pub use ctx::{
     CtxSpaceZero, GpuActiveToken, GpuCtxCreateAndUseToken, GpuCtxGuard, GpuCtxHandle, GpuCtxSpace,
     GpuCtxToken, GpuCtxZeroGuard, GpuFunction, GpuModule, GpuToken,

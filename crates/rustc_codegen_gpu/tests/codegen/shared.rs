@@ -14,7 +14,7 @@ pub fn alloc_shared(a: &[u8], _a_window: usize, b: &mut [u8], b_window: usize, f
     let chunk_dy_shared = dy_shared.chunk_mut(1, gpu::GpuSharedChunkIdx::new());
     let chunk_shared = shared.chunk_mut(1, gpu::GpuSharedChunkIdx::new());
     let c = chunk_shared;
-    c[0] = a[gpu::thread_id(gpu::DimType::X)];
+    c[0] = a[gpu::thread_id::<gpu::DimX>()];
     chunk_dy_shared[0] = 1.1;
     gpu::sync_threads();
 

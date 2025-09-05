@@ -8,11 +8,11 @@ type ThreadChunkMatrix2D<'a> = GlobalThreadChunk<'a, f32, 2, Map2D>;
 #[cfg(feature = "v1")]
 #[gpu_macros::kernel_v2]
 pub fn inner_product_kernel(a: &[f32], b: &[f32], c: ThreadChunkMatrix2D<'_>, n: usize) {
-    let mut row = block_id(DimType::Y) * block_dim(DimType::Y) + thread_id(DimType::Y);
+    let mut row = block_id::<gpu::DimY>() * block_dim::<gpu::DimY>() + thread_id::<gpu::DimY>();
     let mut c = c;
-    for i in 0..((n - 1) / gpu::dim(gpu::DimType::Y) + 1) {
-        let mut col = block_id(DimType::X) * block_dim(DimType::X) + thread_id(DimType::X);
-        for j in 0..((n - 1) / gpu::dim(gpu::DimType::X) + 1) {
+    for i in 0..((n - 1) / gpu::dim::<gpu::DimY>() + 1) {
+        let mut col = block_id::<gpu::DimX>() * block_dim::<gpu::DimX>() + thread_id::<gpu::DimX>();
+        for j in 0..((n - 1) / gpu::dim::<gpu::DimX>() + 1) {
             if row < n && col < n {
                 let mut sum = 0.0;
                 let aa = &a[row * n..row * n + n];
@@ -24,19 +24,19 @@ pub fn inner_product_kernel(a: &[f32], b: &[f32], c: ThreadChunkMatrix2D<'_>, n:
                 }
                 c[(j, i)] = sum;
             }
-            col += gpu::dim(gpu::DimType::X);
+            col += gpu::dim::<gpu::DimX>();
         }
-        row += gpu::dim(gpu::DimType::Y);
+        row += gpu::dim::<gpu::DimY>();
     }
 }
 
 #[gpu_macros::kernel_v2]
 pub fn inner_product_kernel2(a: &[f32], b: &[f32], c: &mut [f32], n: usize) {
     let mut c = GlobalThreadChunk::new(c, Map2D::new(n));
-    let mut row = block_id(DimType::Y) * block_dim(DimType::Y) + thread_id(DimType::Y);
-    for i in 0..((n - 1) / gpu::dim(gpu::DimType::Y) + 1) {
-        let mut col = block_id(DimType::X) * block_dim(DimType::X) + thread_id(DimType::X);
-        for j in 0..((n - 1) / gpu::dim(gpu::DimType::X) + 1) {
+    let mut row = block_id::<gpu::DimY>() * block_dim::<gpu::DimY>() + thread_id::<gpu::DimY>();
+    for i in 0..((n - 1) / gpu::dim::<gpu::DimY>() + 1) {
+        let mut col = block_id::<gpu::DimX>() * block_dim::<gpu::DimX>() + thread_id::<gpu::DimX>();
+        for j in 0..((n - 1) / gpu::dim::<gpu::DimX>() + 1) {
             if row < n && col < n {
                 let mut sum = 0.0;
                 let aa = &a[row * n..row * n + n];
@@ -48,9 +48,9 @@ pub fn inner_product_kernel2(a: &[f32], b: &[f32], c: &mut [f32], n: usize) {
                 }
                 c[(j, i)] = sum;
             }
-            col += gpu::dim(gpu::DimType::X);
+            col += gpu::dim::<gpu::DimX>();
         }
-        row += gpu::dim(gpu::DimType::Y);
+        row += gpu::dim::<gpu::DimY>();
     }
 }
 
@@ -59,13 +59,13 @@ pub fn inner_product_kernel2(a: &[f32], b: &[f32], c: &mut [f32], n: usize) {
 #[cfg(feature = "v3")]
 #[gpu_macros::kernel_v2]
 pub fn inner_product_kernel(a: &[f32], b: &[f32], c: ThreadChunkMatrix2D<'_>, n: usize) {
-    let mut row = gpu::block_id(gpu::DimType::Y) * gpu::block_dim(gpu::DimType::Y)
-        + gpu::thread_id(gpu::DimType::Y);
+    let mut row = gpu::block_id::<gpu::DimY>() * gpu::block_dim::<gpu::DimY>()
+        + gpu::thread_id::<gpu::DimY>();
     let mut c = c;
-    for i in 0..((n - 1) / gpu::dim(gpu::DimType::Y) + 1) {
-        let mut col = gpu::block_id(gpu::DimType::X) * gpu::block_dim(gpu::DimType::X)
-            + gpu::thread_id(gpu::DimType::X);
-        for j in 0..((n - 1) / gpu::dim(gpu::DimType::X) + 1) {
+    for i in 0..((n - 1) / gpu::dim::<gpu::DimY>() + 1) {
+        let mut col = gpu::block_id::<gpu::DimX>() * gpu::block_dim::<gpu::DimX>()
+            + gpu::thread_id::<gpu::DimX>();
+        for j in 0..((n - 1) / gpu::dim::<gpu::DimX>() + 1) {
             if row < n && col < n {
                 let mut sum = 0.0;
                 let aa = gpu::iter::GpuIter::new(&a[row * n..row * n + n]);
@@ -77,8 +77,8 @@ pub fn inner_product_kernel(a: &[f32], b: &[f32], c: ThreadChunkMatrix2D<'_>, n:
                 // Here's the cream: updating c
                 c[(j, i)] = sum;
             }
-            col += gpu::dim(gpu::DimType::X);
+            col += gpu::dim::<gpu::DimX>();
         }
-        row += gpu::dim(gpu::DimType::Y);
+        row += gpu::dim::<gpu::DimY>();
     }
 }

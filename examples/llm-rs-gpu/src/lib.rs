@@ -27,8 +27,8 @@ pub fn encoder_forward_kernel3(
 ) {
     let mut out = GlobalThreadChunk::new(out, MapLinear::new(1));
     let C4 = C / 4;
-    let idx = (gpu::block_dim(gpu::DimType::X) * gpu::block_id(gpu::DimType::X)
-        + gpu::thread_id(gpu::DimType::X)) as i32;
+    let idx = (gpu::block_dim::<gpu::DimX>() * gpu::block_id::<gpu::DimX>()
+        + gpu::thread_id::<gpu::DimX>()) as i32;
     let N = B * T * C4;
     if idx < N {
         let bt = idx / C4;
@@ -55,8 +55,8 @@ pub fn encoder_backward_kernel(
     T: i32,
     C: i32,
 ) {
-    let idx = (gpu::block_dim(gpu::DimType::X) * gpu::block_id(gpu::DimType::X)
-        + gpu::thread_id(gpu::DimType::X)) as i32;
+    let idx = (gpu::block_dim::<gpu::DimX>() * gpu::block_id::<gpu::DimX>()
+        + gpu::thread_id::<gpu::DimX>()) as i32;
     let N = B * T * C;
 
     if idx < N {
@@ -103,8 +103,8 @@ pub fn permute_kernel(
     let mut q = GlobalThreadChunk::new(q, MapLinear::new(1));
     let mut k = GlobalThreadChunk::new(k, MapLinear::new(1));
     let mut v = GlobalThreadChunk::new(v, MapLinear::new(1));
-    let idx = (gpu::block_dim(gpu::DimType::X) * gpu::block_id(gpu::DimType::X)
-        + gpu::thread_id(gpu::DimType::X)) as i32;
+    let idx = (gpu::block_dim::<gpu::DimX>() * gpu::block_id::<gpu::DimX>()
+        + gpu::thread_id::<gpu::DimX>()) as i32;
 
     if idx < B * NH * N * d {
         let b = idx / (NH * N * d);

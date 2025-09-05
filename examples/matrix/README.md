@@ -1,6 +1,6 @@
 ### Matrix Multiply
 
-### Runtime costs
+### Runtime costs (TODO: update the table)
 
 | Setup arg(2048, 16)           | Time(s)       |Relative overhead|
 |-------------------------------|---------------|--------|
@@ -38,3 +38,18 @@ v2 will generate less-optimized ptx code, while v1 will generate highly-optimize
 Though ptx1 uses more registers, the parallelism benefits often outweigh the cost, ptx1 unrolls the loop partially (processing 4 elements per iteration).
 
 In both cases, we did not see the bound-checking for inner loop when calculating `sum` and they are generated in MLIR but erased after some optimization.
+
+### Wierd optimization notes
+
+At commit [commit
+61e9c91](https://github.com/MSRSSP/rs-gpu/tree/61e9c91e33fd306d8ec7fbea0e9ced1d4a4eb0f8)
+and earlier, we noticed that creating a chunk from host and then pass it to GPU
+is (1.58s vs 2.1s in release mode) and sometimes the debug mode is even after
+then release mode.
+
+
+At commit [commit 031f110](https://github.com/MSRSSP/rs-gpu/tree/031f110469e654b62d94b3d566bf85bf295e255b) However, after
+we optimize the dim lib to replace the dim selection from enum value to trait
+for zero-cost selection, the above wierd performance disappeared. release
+(1.56s) is always faster than debug(2.1s). passing chunk from host vs creating
+chunk inside gpu device is similar.

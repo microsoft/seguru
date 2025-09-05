@@ -9,7 +9,7 @@ extern crate gpu;
 #[no_mangle]
 #[gpu_codegen::kernel]
 pub fn kernel_arith(a: &[u8], b: &[u8]) {
-    let id = gpu::thread_id(gpu::DimType::X);
+    let id = gpu::thread_id::<gpu::DimX>();
     gpu::println!("Hello from GPU! Value: %u %d at %d", a[0], b[0] as u32, id);
 }
 

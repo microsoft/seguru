@@ -20,7 +20,7 @@ pub fn kernel_arith<const N: u32>(
     f_width: usize,
     g: &[f32],
 ) {
-    let thread_id = gpu::thread_id(gpu::DimType::Y);
+    let thread_id = gpu::thread_id::<gpu::DimY>();
     let a_local = a[thread_id];
     let mut b = b;
     let b_local = &mut b[(0, 0)];
@@ -71,7 +71,7 @@ pub fn kernel_arith2(
     g: &[f32],
 ) {
     /*let mut shared = gpu::GpuShared::<[f32; 32]>::zero();
-    let thread_id = gpu::thread_id(gpu::DimType::Y);
+    let thread_id = gpu::thread_id::<gpu::DimY>();
     let a_local = gpu::get_local_2d::<u32>(&a, 0, 0);
     let mut b = b;
     let b_local = gpu::get_local_mut_2d::<u32>(&mut b, 0, 0);
@@ -87,7 +87,7 @@ pub fn kernel_arith2(
         );
     }
     *b_local = out;*/
-    let thread_id = gpu::thread_id(gpu::DimType::Y);
+    let thread_id = gpu::thread_id::<gpu::DimY>();
     let mut shared = gpu::GpuShared::<[f32; 32]>::zero();
     let mut f = f;
     let f = gpu::get_mut_chunk(&mut f, GpuChunkIdx::new());

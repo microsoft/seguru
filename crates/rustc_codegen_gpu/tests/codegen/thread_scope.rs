@@ -10,7 +10,7 @@ use core::marker::PhantomData;
 #[no_mangle]
 /// assume BK * BK == number of threads in a block x axis.
 fn kernel(a: &[u8], b: &mut u8) -> u8 {
-    let thread_id_x = gpu::thread_id(gpu::DimType::X);
+    let thread_id_x = gpu::thread_id::<gpu::DimX>();
     *b = a[thread_id_x];
     *b
 }

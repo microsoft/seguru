@@ -1,22 +1,31 @@
-pub enum DimType {
-    X,
-    Y,
-    Z,
+pub struct DimX;
+pub struct DimY;
+pub struct DimZ;
+
+pub trait DimType {
+    const DIM_ID: usize;
+    const MLIR_DIM: &str;
 }
 
-macro_rules! dim_fn {
-    ("x", $f: ident) => {{
-        $crate::add_mlir_string_attr("#gpu<dim x>");
-        $f()
-    }};
-    ("y", $f: ident) => {{
-        $crate::add_mlir_string_attr("#gpu<dim y>");
-        $f()
-    }};
-    ("z", $f: ident) => {{
-        $crate::add_mlir_string_attr("#gpu<dim z>");
-        $f()
-    }};
+enum DimTypeID {
+    X = 0,
+    Y = 1,
+    Z = 2,
+}
+
+impl DimType for DimX {
+    const DIM_ID: usize = DimTypeID::X as usize;
+    const MLIR_DIM: &'static str = "#gpu<dim x>";
+}
+
+impl DimType for DimY {
+    const DIM_ID: usize = DimTypeID::Y as usize;
+    const MLIR_DIM: &'static str = "#gpu<dim y>";
+}
+
+impl DimType for DimZ {
+    const DIM_ID: usize = DimTypeID::Z as usize;
+    const MLIR_DIM: &'static str = "#gpu<dim z>";
 }
 
 macro_rules! def_dim_fn {
@@ -32,12 +41,9 @@ macro_rules! def_dim_fn {
         $(#[$meta])*
         #[gpu_codegen::device]
         #[inline(always)]
-        pub const fn $pub_name(dim: DimType) -> usize {
-            match dim {
-                DimType::X => dim_fn!("x", $priv_name),
-                DimType::Y => dim_fn!("y", $priv_name),
-                DimType::Z => dim_fn!("z", $priv_name),
-            }
+        pub const fn $pub_name<D: DimType>() -> usize {
+            crate::add_mlir_string_attr(D::MLIR_DIM);
+            $priv_name()
         }
     };
 }
@@ -51,24 +57,20 @@ def_dim_fn!(grid_dim, _grid_dim, grid_dim, #[gpu_codegen::ret_sync_data(0)]);
 #[gpu_codegen::device]
 #[gpu_codegen::ret_sync_data(0)]
 #[inline(always)]
-pub const fn dim(dim: DimType) -> usize {
-    match dim {
-        DimType::X => block_dim(DimType::X) * grid_dim(DimType::X),
-        DimType::Y => block_dim(DimType::Y) * grid_dim(DimType::Y),
-        DimType::Z => block_dim(DimType::Z) * grid_dim(DimType::Z),
-    }
+pub const fn dim<D: DimType>() -> usize {
+    block_dim::<D>() * grid_dim::<D>()
 }
 
 #[gpu_codegen::device]
 #[inline(always)]
 pub fn block_thread_ids() -> [usize; 6] {
     [
-        thread_id(DimType::X),
-        thread_id(DimType::Y),
-        thread_id(DimType::Z),
-        block_id(DimType::X),
-        block_id(DimType::Y),
-        block_id(DimType::Z),
+        thread_id::<DimX>(),
+        thread_id::<DimY>(),
+        thread_id::<DimZ>(),
+        block_id::<DimX>(),
+        block_id::<DimY>(),
+        block_id::<DimZ>(),
     ]
 }
 
@@ -88,30 +90,30 @@ impl Default for GpuChunkIdx {
 impl GpuChunkIdx {
     #[gpu_codegen::device]
     pub const fn threads_count() -> usize {
-        block_dim(DimType::X)
-            * grid_dim(DimType::X)
-            * block_dim(DimType::Y)
-            * grid_dim(DimType::Y)
-            * block_dim(DimType::Z)
-            * grid_dim(DimType::Z)
+        block_dim::<DimX>()
+            * grid_dim::<DimX>()
+            * block_dim::<DimY>()
+            * grid_dim::<DimY>()
+            * block_dim::<DimZ>()
+            * grid_dim::<DimZ>()
     }
 
     // TODO: optimize the default 3D to 2D or 1D based on the user-specified grid and block dimensions.
     #[gpu_codegen::device]
     #[inline(always)]
     pub const fn new() -> GpuChunkIdx {
-        let block_x = block_dim(DimType::X);
-        let grid_x = grid_dim(DimType::X);
-        let id_x = block_id(DimType::X) * block_x + thread_id(DimType::X);
+        let block_x = block_dim::<DimX>();
+        let grid_x = grid_dim::<DimX>();
+        let id_x = block_id::<DimX>() * block_x + thread_id::<DimX>();
         let dim_x = block_x * grid_x;
 
-        let block_y = block_dim(DimType::Y);
-        let grid_y = grid_dim(DimType::Y);
-        let id_y = block_id(DimType::Y) * block_y + thread_id(DimType::Y);
+        let block_y = block_dim::<DimY>();
+        let grid_y = grid_dim::<DimY>();
+        let id_y = block_id::<DimY>() * block_y + thread_id::<DimY>();
         let dim_y = block_y * grid_y;
 
-        let block_z = block_dim(DimType::Z);
-        let id_z = block_id(DimType::Z) * block_z + thread_id(DimType::Z);
+        let block_z = block_dim::<DimZ>();
+        let id_z = block_id::<DimZ>() * block_z + thread_id::<DimZ>();
         let id_t = id_x + dim_x * (id_y + id_z * dim_y);
         GpuChunkIdx { id: id_t }
     }
@@ -141,11 +143,11 @@ impl GpuSharedChunkIdx {
     #[gpu_codegen::device]
     #[inline(always)]
     pub const fn new() -> GpuSharedChunkIdx {
-        let id_x = thread_id(DimType::X);
-        let block_x = block_dim(DimType::X);
-        let id_y = thread_id(DimType::Y);
-        let block_y = block_dim(DimType::Y);
-        let id_z = thread_id(DimType::Z);
+        let id_x = thread_id::<DimX>();
+        let block_x = block_dim::<DimX>();
+        let id_y = thread_id::<DimY>();
+        let block_y = block_dim::<DimY>();
+        let id_z = thread_id::<DimZ>();
         let id_t = id_x + block_x * (id_y + id_z * block_y);
         GpuSharedChunkIdx { id: id_t }
     }
@@ -168,11 +170,11 @@ impl GpuSharedChunkIdx {
 pub unsafe fn assume_dim_with_config<Config: crate::GPUConfig>() {
     use core::intrinsics::assume;
     unsafe {
-        assume(Config::GRID_DIM_X == 0 || Config::GRID_DIM_X as usize == grid_dim(DimType::X));
-        assume(Config::GRID_DIM_Y == 0 || Config::GRID_DIM_Y as usize == grid_dim(DimType::Y));
-        assume(Config::GRID_DIM_Z == 0 || Config::GRID_DIM_Z as usize == grid_dim(DimType::Z));
-        assume(Config::BLOCK_DIM_X == 0 || Config::BLOCK_DIM_X as usize == block_dim(DimType::X));
-        assume(Config::BLOCK_DIM_Y == 0 || Config::BLOCK_DIM_Y as usize == block_dim(DimType::Y));
-        assume(Config::BLOCK_DIM_Z == 0 || Config::BLOCK_DIM_Z as usize == block_dim(DimType::Z));
+        assume(Config::GRID_DIM_X == 0 || Config::GRID_DIM_X as usize == grid_dim::<DimX>());
+        assume(Config::GRID_DIM_Y == 0 || Config::GRID_DIM_Y as usize == grid_dim::<DimY>());
+        assume(Config::GRID_DIM_Z == 0 || Config::GRID_DIM_Z as usize == grid_dim::<DimZ>());
+        assume(Config::BLOCK_DIM_X == 0 || Config::BLOCK_DIM_X as usize == block_dim::<DimX>());
+        assume(Config::BLOCK_DIM_Y == 0 || Config::BLOCK_DIM_Y as usize == block_dim::<DimY>());
+        assume(Config::BLOCK_DIM_Z == 0 || Config::BLOCK_DIM_Z as usize == block_dim::<DimZ>());
     }
 }

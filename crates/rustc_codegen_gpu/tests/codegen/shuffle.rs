@@ -9,7 +9,7 @@
 #[no_mangle]
 pub fn shuffle_reduce(a: &[f32], _a_window: usize, b: &mut [f32], _b_window: usize) {
     let mut chunked_b = gpu::chunk_mut(b, 1, gpu::GpuChunkIdx::new());
-    let val = a[gpu::thread_id(gpu::DimType::X)];
+    let val = a[gpu::thread_id::<gpu::DimX>()];
     let warp = gpu::cg::ThreadWarpTile::<32, 1>();
     chunked_b[0] = gpu::cg::reduce_add_f32(warp, val);
 }
@@ -18,7 +18,7 @@ pub fn shuffle_reduce(a: &[f32], _a_window: usize, b: &mut [f32], _b_window: usi
 #[no_mangle]
 pub fn shuffle_reduce_max(a: &[f32], _a_window: usize, b: &mut [f32], _b_window: usize) {
     let mut chunked_b = gpu::chunk_mut(b, 1, gpu::GpuChunkIdx::new());
-    let val = a[gpu::thread_id(gpu::DimType::X)];
+    let val = a[gpu::thread_id::<gpu::DimX>()];
     let warp = gpu::cg::ThreadWarpTile::<32, 1>();
     chunked_b[0] = gpu::cg::reduce_max_f32(warp, val);
 }

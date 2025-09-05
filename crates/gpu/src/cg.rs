@@ -1,4 +1,5 @@
 use crate::add_mlir_string_attr;
+use crate::dim::{DimX, DimY, DimZ, block_dim, thread_id};
 
 #[rustc_diagnostic_item = concat!("gpu::subgroup_id")]
 #[gpu_codegen::device]
@@ -88,20 +89,18 @@ impl<const SIZE: usize, const STRIDE: usize> ThreadWarpTile<SIZE, STRIDE> {
     #[gpu_codegen::device]
     #[inline(always)]
     pub fn subgroup_id(&self) -> usize {
-        (crate::thread_id(crate::DimType::X)
-            + crate::block_dim(crate::DimType::X)
-                * (crate::thread_id(crate::DimType::Y)
-                    + crate::block_dim(crate::DimType::Y) * crate::thread_id(crate::DimType::Z)))
+        (thread_id::<DimX>()
+            + block_dim::<DimX>()
+                * (thread_id::<DimY>() + block_dim::<DimY>() * thread_id::<DimZ>()))
             / SIZE
     }
 
     #[gpu_codegen::device]
     #[inline(always)]
     pub fn lane_id(&self) -> usize {
-        (crate::thread_id(crate::DimType::X)
-            + crate::block_dim(crate::DimType::X)
-                * (crate::thread_id(crate::DimType::Y)
-                    + crate::block_dim(crate::DimType::Y) * crate::thread_id(crate::DimType::Z)))
+        (thread_id::<DimX>()
+            + block_dim::<DimX>()
+                * (thread_id::<DimY>() + block_dim::<DimY>() * thread_id::<DimZ>()))
             % SIZE
     }
 
@@ -110,16 +109,16 @@ impl<const SIZE: usize, const STRIDE: usize> ThreadWarpTile<SIZE, STRIDE> {
     pub fn run_on_lane_0<T>(self, slice: &mut [T], f: impl FnOnce(&mut T) + Clone + Send) {
         if self.lane_id() == 0 {
             // Build ref from the slice on the wrap
-            let threads_per_block = crate::block_dim(crate::DimType::X)
-                * crate::block_dim(crate::DimType::Y)
-                * crate::block_dim(crate::DimType::Z);
+            let threads_per_block = block_id::<X>()
+                * block_id::<Y>()
+                * block_id::<Z>();
             // TODO: Although not exactly necessary, shall we enforce threads_per_block % SIZE == 0?
             let offset = (threads_per_block / SIZE)
-                * (crate::block_id(crate::DimType::X)
-                    + crate::grid_dim(crate::DimType::X)
-                        * (crate::block_id(crate::DimType::Y)
-                            + crate::grid_dim(crate::DimType::Y)
-                                * crate::block_id(crate::DimType::Z)))
+                * (crate::block_id::<X>()
+                    + crate::grid_dim::<X>()
+                        * (crate::block_id::<Y>()
+                            + crate::grid_dim::<Y>()
+                                * crate::block_id::<Z>()))
                 + self.subgroup_id();
 
             // SAFETY: The offset is unique per Warp not per GPU thread. Although

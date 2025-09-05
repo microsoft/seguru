@@ -97,9 +97,9 @@ dim: x=2, y=2, z=1
 ├───┼───┼───┼───┼───┤
 │0,1│1,1│0,1│1,1│0,1│
 └───┴───┴───┴───┴───┘
-This this case, thread(1,0) and (1,1) should
+In this case, thread(1,0) and (1,1) should
 only have access to a shape of 2*2 = 4 elements,
-while thread (0,0) and (0,1) have a shape of 3*2 = 6 elements.
+while thread (0,0) and (0,1) have access to a shape of 3*2 = 6 elements.
 */
 #[derive(Copy, Clone)]
 pub struct Map2D {
@@ -130,6 +130,6 @@ unsafe impl ThreadUniqueMap<2> for Map2D {
         let inner_y = idx[1];
         let x = inner_x * dim(DimType::X) + block_dim(DimType::X) * thread_ids[3] + thread_ids[0];
         let y = inner_y * dim(DimType::Y) + block_dim(DimType::Y) * thread_ids[4] + thread_ids[1];
-        (x < self.x_size, shape_x * y + x)
+        (x < shape_x, shape_x * y + x)
     }
 }

@@ -41,6 +41,8 @@ impl<'a, T, const N: usize, Map: ThreadUniqueMap<N>> GlobalThreadChunk<'a, T, N,
     #[rustc_diagnostic_item = "gpu::chunk_mut"]
     #[gpu_codegen::device]
     #[gpu_codegen::sync_data(0, 1)]
+    /// TODO: We will prevent rechunking of global mem in the mir_analysis.
+    /// For now, we just leave it to the user.
     pub fn new(data: &'a mut [T], map_params: Map) -> Self {
         if !map_params.precondition() {
             core::intrinsics::abort();
@@ -50,8 +52,10 @@ impl<'a, T, const N: usize, Map: ThreadUniqueMap<N>> GlobalThreadChunk<'a, T, N,
 
     /// In some cases, passing GlobalThreadChunk from host to device is more
     /// convenient. Due to unknown optimization-related factors, passing
-    /// GlobalThreadChunk to kernel function can be more efficient than passing
-    /// CudaMemBox and then create GlobalThreadChunk in the kernel function.
+    /// GlobalThreadChunk to kernel function may make the kernel faster (see
+    /// examples/matmul). In addition, directly passing GlobalThreadChunk from
+    /// host to device naturally avoids the problem of rechunking the global
+    /// mem.
     #[cfg(not(feature = "codegen_tests"))]
     pub fn new_from_host(slice: &'a cuda_bindings::CudaMemBox<[T]>, map_params: Map) -> Self {
         unsafe { Self { data: &mut *(slice.as_ptr() as *mut [T]), map_params, dummy: PhantomData } }

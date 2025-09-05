@@ -26,7 +26,7 @@ pub(crate) trait GpuDataMarker: 'static {}
 /// &'static T or &'static mut T is still Send when T is Send, but it may not
 /// valid for GPU usage if we do not enable HMM. Thus, we statically ruled out
 /// most risky types; If somehow the user accidentally passed &'static T to
-/// cudaBox, the GPU should return CUDA_ERROR_ILLEGAL_ADDRESS error when
+/// CudaMemBox, the GPU should return CUDA_ERROR_ILLEGAL_ADDRESS error when
 /// accessing the pointer.
 impl<T: ?Sized + Send + 'static> GpuDataMarker for T {}
 

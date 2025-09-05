@@ -27,8 +27,8 @@ mod internal {
 use syntax_gpu::kernel_arith as kernel_arith_gpu;
 #[gpu_macros::host(kernel_arith_gpu::<30>)]
 pub fn kernel_arith(
-    a: gpu::GpuChunkable2D<u32>,
-    b: gpu::GpuChunkableMut2D<u32>,
+    a: &gpu_host::CudaMemBox<[u32]>,
+    b: gpu::GlobalThreadChunk<'_, u32, 2, gpu::Map2D>,
     c: &gpu_host::CudaMemBox<[u32]>,
     f: &mut gpu_host::CudaMemBox<[f32]>,
     f_width: usize,

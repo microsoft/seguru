@@ -22,12 +22,11 @@ pub fn run_host_arith<'ctx>(
     let d_c = ctx.new_gmem_with_len::<u32>(len, &h_c)?;
     let d_f = ctx.new_gmem_with_len::<f32>(len, &h_f)?;
     let d_g = ctx.new_gmem_with_len::<f32>(len, &h_g)?;
-    let d_a_c = gpu::GpuChunkable2D::<u32>::new(d_a, 1);
-    let d_b_c = gpu::GpuChunkableMut2D::<u32>::new(d_b, 1);
+    let d_b_c = gpu::GlobalThreadChunk::new_from_host(d_b, gpu::Map2D::new(w));
 
     // Now do the kernel
     let config = gpu_host::gpu_config!(1, 1, 1, 1, 4, 1, 0);
-    kernel_arith(config, ctx, m, d_a_c, d_b_c, d_c, d_f, w, d_g).expect("Kernel execution failed");
+    kernel_arith(config, ctx, m, d_a, d_b_c, d_c, d_f, w, d_g).expect("Kernel execution failed");
     d_b.copy_to_host(&mut h_b, len, ctx)?;
     d_f.copy_to_host(&mut h_f, len, ctx)?;
 

@@ -8,22 +8,23 @@ use gpu::GpuSharedChunkIdx;
 #[allow(non_upper_case_globals)]
 pub static shared_size_kernel_arith: usize = 0;
 
+type ThreadChunkMatrix2D<'a> = gpu::GlobalThreadChunk<'a, u32, 2, gpu::Map2D>;
 /// # Safety
 /// This kernel might be unsafe because it uses Chunkable::new that is not defined as trusted chunking func.
 #[gpu_macros::kernel]
 pub fn kernel_arith<const N: u32>(
-    a: gpu::GpuChunkable2D<u32>,
-    b: gpu::GpuChunkableMut2D<u32>,
+    a: &[u32],
+    b: ThreadChunkMatrix2D<'_>,
     c: &[u32],
     f: &mut [f32],
     f_width: usize,
     g: &[f32],
 ) {
     let thread_id = gpu::thread_id(gpu::DimType::Y);
-    let a_local = gpu::get_local_2d::<u32>(&a, 0, 0);
+    let a_local = a[thread_id];
     let mut b = b;
-    let b_local = gpu::get_local_mut_2d::<u32>(&mut b, 0, 0);
-    *b_local = *a_local + c[thread_id];
+    let b_local = &mut b[(0, 0)];
+    *b_local = a_local + c[thread_id];
     gpu::atomic_add::<u32>(b_local, 1);
     let mut out: u32;
     let in32: u32 = *b_local + N;

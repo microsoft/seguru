@@ -13,7 +13,7 @@ pub fn inner_product_kernel2(
 pub fn inner_product_kernel(
     a: &gpu_host::CudaMemBox<[f32]>,
     b: &gpu_host::CudaMemBox<[f32]>,
-    c: gpu::GlobalThreadChunk<'_, f32, 2, gpu::Map2D>,
+    c: gpu::GlobalThreadChunk<'_, f32, gpu::Map2D>,
     n: usize,
 ) {
 }

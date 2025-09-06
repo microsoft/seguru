@@ -22,7 +22,9 @@ impl<const N: usize> MapLinearWithDim<N> {
 /// # Safety
 /// It is safe to use this mapping as long as the thread dimensions are properly
 /// configured.
-unsafe impl<CS: ChunkScope> ThreadUniqueMap<CS, 1> for MapLinearWithDim<1> {
+unsafe impl<CS: ChunkScope> ThreadUniqueMap<CS> for MapLinearWithDim<1> {
+    type IndexType = usize;
+
     #[inline]
     #[gpu_codegen::device]
     fn precondition(&self) -> bool {
@@ -31,12 +33,14 @@ unsafe impl<CS: ChunkScope> ThreadUniqueMap<CS, 1> for MapLinearWithDim<1> {
 
     #[inline]
     #[gpu_codegen::device]
-    fn map(&self, idx: [usize; 1], thread_ids: [usize; CS::TID_LEN]) -> (bool, usize) {
+    fn map(&self, idx: Self::IndexType, thread_ids: [usize; CS::TID_LEN]) -> (bool, usize) {
         MapLinearWithDim::<3>::new(self.width).map(idx, thread_ids)
     }
 }
 
-unsafe impl<CS: ChunkScope> ThreadUniqueMap<CS, 1> for MapLinearWithDim<2> {
+unsafe impl<CS: ChunkScope> ThreadUniqueMap<CS> for MapLinearWithDim<2> {
+    type IndexType = usize;
+
     #[inline]
     #[gpu_codegen::device]
     fn precondition(&self) -> bool {
@@ -45,20 +49,22 @@ unsafe impl<CS: ChunkScope> ThreadUniqueMap<CS, 1> for MapLinearWithDim<2> {
 
     #[inline]
     #[gpu_codegen::device]
-    fn map(&self, idx: [usize; 1], thread_ids: [usize; CS::TID_LEN]) -> (bool, usize) {
+    fn map(&self, idx: Self::IndexType, thread_ids: [usize; CS::TID_LEN]) -> (bool, usize) {
         MapLinearWithDim::<3>::new(self.width).map(idx, thread_ids)
     }
 }
 
-unsafe impl<CS: ChunkScope> ThreadUniqueMap<CS, 1> for MapLinearWithDim<3> {
+unsafe impl<CS: ChunkScope> ThreadUniqueMap<CS> for MapLinearWithDim<3> {
+    type IndexType = usize;
+
     #[inline]
     #[gpu_codegen::device]
-    fn map(&self, idx: [usize; 1], thread_ids: [usize; CS::TID_LEN]) -> (bool, usize) {
+    fn map(&self, idx: usize, thread_ids: [usize; CS::TID_LEN]) -> (bool, usize) {
         let x_id = CS::global_id_x(thread_ids);
         let y_id = CS::global_id_y(thread_ids);
         let z_id = CS::global_id_z(thread_ids);
         let global_thread_id = x_id + (z_id * CS::global_dim_y() + y_id) * CS::global_dim_x();
-        (true, (idx[0] + global_thread_id) * self.width)
+        (true, (idx + global_thread_id) * self.width)
     }
 }
 
@@ -69,7 +75,7 @@ pub fn chunk_mut<'a, T>(
     input: &'a mut [T],
     window: usize,
     _idx: crate::GpuChunkIdx,
-) -> crate::GlobalThreadChunk<'a, T, 1, MapLinear> {
+) -> crate::GlobalThreadChunk<'a, T, MapLinear> {
     crate::GlobalThreadChunk::new(input, MapLinear::new(window))
 }
 
@@ -109,7 +115,9 @@ impl Map2D {
     }
 }
 
-unsafe impl<CS: ChunkScope> ThreadUniqueMap<CS, 2> for Map2D {
+unsafe impl<CS: ChunkScope> ThreadUniqueMap<CS> for Map2D {
+    type IndexType = (usize, usize);
+
     #[inline]
     #[gpu_codegen::device]
     fn precondition(&self) -> bool {
@@ -118,10 +126,10 @@ unsafe impl<CS: ChunkScope> ThreadUniqueMap<CS, 2> for Map2D {
 
     #[inline]
     #[gpu_codegen::device]
-    fn map(&self, idx: [usize; 2], thread_ids: [usize; CS::TID_LEN]) -> (bool, usize) {
+    fn map(&self, idx: Self::IndexType, thread_ids: [usize; CS::TID_LEN]) -> (bool, usize) {
         let shape_x = self.x_size;
-        let inner_x = idx[0];
-        let inner_y = idx[1];
+        let inner_x = idx.0;
+        let inner_y = idx.1;
         let x = inner_x * CS::global_dim_x() + CS::global_id_x(thread_ids);
         let y = inner_y * CS::global_dim_y() + CS::global_id_y(thread_ids);
         (x < shape_x, shape_x * y + x)

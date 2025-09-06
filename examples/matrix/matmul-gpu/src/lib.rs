@@ -3,7 +3,7 @@
 
 use gpu::*;
 
-type ThreadChunkMatrix2D<'a> = GlobalThreadChunk<'a, f32, 2, Map2D>;
+type ThreadChunkMatrix2D<'a> = GlobalThreadChunk<'a, f32, Map2D>;
 
 #[cfg(feature = "v1")]
 #[gpu_macros::kernel_v2]

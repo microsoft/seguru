@@ -7,7 +7,7 @@ use gpu::GPUDeviceFloatIntrinsics;
 #[allow(non_upper_case_globals)]
 pub static shared_size_kernel_arith: usize = 0;
 
-type ThreadChunkMatrix2D<'a> = gpu::GlobalThreadChunk<'a, u32, 2, gpu::Map2D>;
+type ThreadChunkMatrix2D<'a> = gpu::GlobalThreadChunk<'a, u32, gpu::Map2D>;
 /// # Safety
 /// This kernel might be unsafe because it uses Chunkable::new that is not defined as trusted chunking func.
 #[gpu_macros::kernel]

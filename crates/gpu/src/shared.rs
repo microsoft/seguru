@@ -98,12 +98,7 @@ impl<T> core::ops::Index<usize> for GpuShared<[T]> {
 /// N:core::ops::Index dimension, 1, 2, 3
 /// Map: Mapping strategy
 #[allow(private_bounds)]
-pub struct SMemThreadChunk<
-    'a,
-    T: ?Sized + AsSharedSlice,
-    const N: usize,
-    Map: ThreadUniqueMap<SharedMemScope, N>,
-> {
+pub struct SMemThreadChunk<'a, T: ?Sized + AsSharedSlice, Map: ThreadUniqueMap<SharedMemScope>> {
     data: &'a mut GpuShared<T>, // Must be private.
     pub map_params: Map,
 }
@@ -163,10 +158,10 @@ impl<T: ?Sized + AsSharedSlice> GpuShared<T> {
     #[gpu_codegen::device]
     #[gpu_codegen::memspace_shared(0, 1000)]
     #[gpu_codegen::sync_data(0, 1)]
-    pub fn chunk_mut<'a, const I: usize, Map: ThreadUniqueMap<SharedMemScope, I>>(
+    pub fn chunk_mut<'a, Map: ThreadUniqueMap<SharedMemScope>>(
         &'a mut self,
         map_params: Map,
-    ) -> SMemThreadChunk<'a, T, I, Map> {
+    ) -> SMemThreadChunk<'a, T, Map> {
         if !map_params.precondition() {
             core::intrinsics::abort();
         }
@@ -174,57 +169,29 @@ impl<T: ?Sized + AsSharedSlice> GpuShared<T> {
     }
 }
 
-impl<'a, T: ?Sized + AsSharedSlice, Map: ThreadUniqueMap<SharedMemScope, 1>> core::ops::Index<usize>
-    for SMemThreadChunk<'a, T, 1, Map>
+impl<'a, T: ?Sized + AsSharedSlice, Map: ThreadUniqueMap<SharedMemScope>>
+    core::ops::Index<Map::IndexType> for SMemThreadChunk<'a, T, Map>
 {
     type Output = T::Elem;
 
     #[inline(always)]
     #[gpu_codegen::device]
     #[gpu_codegen::memspace_shared(1000)]
-    fn index(&self, idx: usize) -> &Self::Output {
-        let (idx_precondition, idx) = self.map_params.local_to_global_index([idx]);
+    fn index(&self, idx: Map::IndexType) -> &Self::Output {
+        let (idx_precondition, idx) = self.map_params.local_to_global_index(idx);
         assert_before_index(self.map_params.precondition() & idx_precondition, idx);
         &self.data.value.as_slice()[idx]
     }
 }
 
-impl<'a, T: ?Sized + AsSharedSlice, Map: ThreadUniqueMap<SharedMemScope, 1>>
-    core::ops::IndexMut<usize> for SMemThreadChunk<'a, T, 1, Map>
+impl<'a, T: ?Sized + AsSharedSlice, Map: ThreadUniqueMap<SharedMemScope>>
+    core::ops::IndexMut<Map::IndexType> for SMemThreadChunk<'a, T, Map>
 {
     #[inline(always)]
     #[gpu_codegen::device]
     #[gpu_codegen::memspace_shared(1000)]
-    fn index_mut(&mut self, idx: usize) -> &mut Self::Output {
-        let (idx_precondition, idx) = self.map_params.local_to_global_index([idx]);
-        assert_before_index(self.map_params.precondition() & idx_precondition, idx);
-        &mut self.data.value.as_mut_slice()[idx]
-    }
-}
-
-impl<'a, T: ?Sized + AsSharedSlice, Map: ThreadUniqueMap<SharedMemScope, 2>>
-    core::ops::Index<(usize, usize)> for SMemThreadChunk<'a, T, 2, Map>
-{
-    type Output = T::Elem;
-
-    #[inline(always)]
-    #[gpu_codegen::device]
-    #[gpu_codegen::memspace_shared(1000)]
-    fn index(&self, idx: (usize, usize)) -> &Self::Output {
-        let (idx_precondition, idx) = self.map_params.local_to_global_index([idx.0, idx.1]);
-        assert_before_index(self.map_params.precondition() & idx_precondition, idx);
-        &(self.data.value.as_slice()[idx])
-    }
-}
-
-impl<'a, T: ?Sized + AsSharedSlice, Map: ThreadUniqueMap<SharedMemScope, 2>>
-    core::ops::IndexMut<(usize, usize)> for SMemThreadChunk<'a, T, 2, Map>
-{
-    #[inline(always)]
-    #[gpu_codegen::device]
-    #[gpu_codegen::memspace_shared(1000)]
-    fn index_mut(&mut self, idx: (usize, usize)) -> &mut Self::Output {
-        let (idx_precondition, idx) = self.map_params.local_to_global_index([idx.0, idx.1]);
+    fn index_mut(&mut self, idx: Map::IndexType) -> &mut Self::Output {
+        let (idx_precondition, idx) = self.map_params.local_to_global_index(idx);
         assert_before_index(self.map_params.precondition() & idx_precondition, idx);
         &mut self.data.value.as_mut_slice()[idx]
     }

@@ -57,32 +57,6 @@ pub const fn add_mlir_string_attr(_: &'static str) -> usize {
     unimplemented!()
 }
 
-/// This is safe to use.
-/// Not part of TCB, but defined in pair with subslice_mut.
-/// Defined to make gpu_macros::kernel work fluently.
-#[inline(never)]
-#[rustc_diagnostic_item = "gpu::subslice"]
-#[gpu_codegen::device]
-#[allow(dead_code)]
-pub(crate) fn subslice<T>(_original: &[T], _offset: usize, _window: usize) -> &[T] {
-    unimplemented!()
-}
-
-/// # Safety
-/// This function is unsafe because it assumes that the [_offset, _offset+ _window) is unique per GPU thread.
-/// If it is not unique per GPU thread, it can cause racing on the same memory location.
-#[inline(never)]
-#[rustc_diagnostic_item = "gpu::subslice_mut"]
-#[gpu_codegen::device]
-#[gpu_codegen::sync_data(0, 2)]
-pub(crate) unsafe fn subslice_mut<T>(
-    _original: &mut [T],
-    _offset: usize,
-    _window: usize,
-) -> &mut [T] {
-    unimplemented!()
-}
-
 #[repr(C)]
 pub struct float4 {
     pub x: f32,

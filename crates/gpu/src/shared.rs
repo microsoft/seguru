@@ -2,6 +2,10 @@
 ///
 use core::ops::{Deref, DerefMut};
 
+use crate::assert_before_index;
+use crate::chunk::{ThreadUniqueMap, ThreadUniqueMapProvidedMethods};
+use crate::chunk_scope::SharedMemScope;
+
 /// Static GPU shared memory.
 #[rustc_diagnostic_item = "gpu::GpuShared"]
 pub struct GpuShared<T: ?Sized> {
@@ -91,31 +95,137 @@ impl<T> core::ops::Index<usize> for GpuShared<[T]> {
     }
 }
 
-impl<T> core::ops::IndexMut<usize> for GpuShared<[T]> {
-    #[inline(always)]
+/// N:core::ops::Index dimension, 1, 2, 3
+/// Map: Mapping strategy
+#[allow(private_bounds)]
+pub struct SMemThreadChunk<
+    'a,
+    T: ?Sized + AsSharedSlice,
+    const N: usize,
+    Map: ThreadUniqueMap<SharedMemScope, N>,
+> {
+    data: &'a mut GpuShared<T>, // Must be private.
+    pub map_params: Map,
+}
+
+trait PrivateTraitGuard {}
+
+#[expect(private_bounds)]
+pub trait AsSharedSlice: PrivateTraitGuard {
+    type Elem;
     #[gpu_codegen::device]
-    fn index_mut(&mut self, idx: usize) -> &mut GpuShared<T> {
-        unsafe { &mut *((&mut self.value[idx]) as *mut _ as *mut GpuShared<T>) }
+    #[gpu_codegen::memspace_shared(0, 1000)]
+    fn as_mut_slice(&mut self) -> &mut [Self::Elem];
+
+    #[gpu_codegen::device]
+    #[gpu_codegen::memspace_shared(0, 1000)]
+    fn as_slice(&self) -> &[Self::Elem];
+}
+
+impl<T> PrivateTraitGuard for [T] {}
+impl<T> AsSharedSlice for [T] {
+    type Elem = T;
+    #[inline]
+    #[gpu_codegen::device]
+    #[gpu_codegen::memspace_shared(0, 1000)]
+    fn as_mut_slice(&mut self) -> &mut [Self::Elem] {
+        self
+    }
+
+    #[inline]
+    #[gpu_codegen::device]
+    #[gpu_codegen::memspace_shared(0, 1000)]
+    fn as_slice(&self) -> &[Self::Elem] {
+        self
     }
 }
 
-impl<T, const N: usize> GpuShared<[T; N]> {
+impl<T, const N: usize> PrivateTraitGuard for [T; N] {}
+impl<T, const N: usize> AsSharedSlice for [T; N] {
+    type Elem = T;
+    #[inline]
     #[gpu_codegen::device]
-    #[gpu_codegen::memspace_shared(1000)]
-    #[gpu_codegen::sync_data(0, 1)]
-    #[inline(always)]
-    pub fn chunk_mut(&mut self, window: usize, idx: super::GpuSharedChunkIdx) -> &mut [T] {
-        let offset = idx.as_usize() * window;
-        unsafe { crate::subslice_mut(&mut self.value, offset, window) }
+    #[gpu_codegen::memspace_shared(0, 1000)]
+    fn as_mut_slice(&mut self) -> &mut [Self::Elem] {
+        self
+    }
+
+    #[inline]
+    #[gpu_codegen::device]
+    #[gpu_codegen::memspace_shared(0, 1000)]
+    fn as_slice(&self) -> &[Self::Elem] {
+        self
     }
 }
-impl<T> GpuShared<[T]> {
+
+impl<T: ?Sized + AsSharedSlice> GpuShared<T> {
+    #[inline]
+    #[gpu_codegen::device]
+    #[gpu_codegen::memspace_shared(0, 1000)]
+    #[gpu_codegen::sync_data(0, 1)]
+    pub fn chunk_mut<'a, const I: usize, Map: ThreadUniqueMap<SharedMemScope, I>>(
+        &'a mut self,
+        map_params: Map,
+    ) -> SMemThreadChunk<'a, T, I, Map> {
+        if !map_params.precondition() {
+            core::intrinsics::abort();
+        }
+        SMemThreadChunk { data: self, map_params }
+    }
+}
+
+impl<'a, T: ?Sized + AsSharedSlice, Map: ThreadUniqueMap<SharedMemScope, 1>> core::ops::Index<usize>
+    for SMemThreadChunk<'a, T, 1, Map>
+{
+    type Output = T::Elem;
+
+    #[inline(always)]
     #[gpu_codegen::device]
     #[gpu_codegen::memspace_shared(1000)]
-    #[gpu_codegen::sync_data(0, 1)]
+    fn index(&self, idx: usize) -> &Self::Output {
+        let (idx_precondition, idx) = self.map_params.local_to_global_index([idx]);
+        assert_before_index(self.map_params.precondition() & idx_precondition, idx);
+        &self.data.value.as_slice()[idx]
+    }
+}
+
+impl<'a, T: ?Sized + AsSharedSlice, Map: ThreadUniqueMap<SharedMemScope, 1>>
+    core::ops::IndexMut<usize> for SMemThreadChunk<'a, T, 1, Map>
+{
     #[inline(always)]
-    pub fn chunk_mut(&mut self, window: usize, idx: super::GpuSharedChunkIdx) -> &mut [T] {
-        let offset = idx.as_usize() * window;
-        unsafe { crate::subslice_mut(&mut self.value, offset, window) }
+    #[gpu_codegen::device]
+    #[gpu_codegen::memspace_shared(1000)]
+    fn index_mut(&mut self, idx: usize) -> &mut Self::Output {
+        let (idx_precondition, idx) = self.map_params.local_to_global_index([idx]);
+        assert_before_index(self.map_params.precondition() & idx_precondition, idx);
+        &mut self.data.value.as_mut_slice()[idx]
+    }
+}
+
+impl<'a, T: ?Sized + AsSharedSlice, Map: ThreadUniqueMap<SharedMemScope, 2>>
+    core::ops::Index<(usize, usize)> for SMemThreadChunk<'a, T, 2, Map>
+{
+    type Output = T::Elem;
+
+    #[inline(always)]
+    #[gpu_codegen::device]
+    #[gpu_codegen::memspace_shared(1000)]
+    fn index(&self, idx: (usize, usize)) -> &Self::Output {
+        let (idx_precondition, idx) = self.map_params.local_to_global_index([idx.0, idx.1]);
+        assert_before_index(self.map_params.precondition() & idx_precondition, idx);
+        &(self.data.value.as_slice()[idx])
+    }
+}
+
+impl<'a, T: ?Sized + AsSharedSlice, Map: ThreadUniqueMap<SharedMemScope, 2>>
+    core::ops::IndexMut<(usize, usize)> for SMemThreadChunk<'a, T, 2, Map>
+{
+    #[inline(always)]
+    #[gpu_codegen::device]
+    #[gpu_codegen::memspace_shared(1000)]
+    fn index_mut(&mut self, idx: (usize, usize)) -> &mut Self::Output {
+        let (idx_precondition, idx) = self.map_params.local_to_global_index([idx.0, idx.1]);
+        assert_before_index(self.map_params.precondition() & idx_precondition, idx);
+        &mut self.data.value.as_mut_slice()[idx]
     }
 }

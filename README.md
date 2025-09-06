@@ -39,7 +39,7 @@ Define GPU and Host functions.
 ```rust
 #[gpu_macros::kernel]
 pub fn kernel(input: &[f32; 1]) {
-    gpu::println!("Hello world... input = %f", input[0]);
+    gpu::println!("Hello world... input = {}", input[0]);
 }
 
 #[gpu_macros::host(kernel)]

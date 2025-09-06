@@ -3,6 +3,7 @@ mod asm;
 mod coverage;
 mod debug;
 mod intrinsic;
+mod print;
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -363,28 +364,44 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 // printf function should starts with a format passed by add_mlir_string_attr
                 // args can be passed to printf as a list of values.
                 // printf ends with an empty printf
-                assert!(self.extra_state.attrs.len() == 1);
+                assert!(
+                    args.len() == 3,
+                    "gpu.print_args must take (val, str, str_len) arguments but got {:?}",
+                    args
+                );
                 if let std::collections::hash_map::Entry::Vacant(e) =
                     self.extra_state.args.entry(gpu_item.clone())
                 {
-                    e.insert(args.to_vec());
+                    e.insert(args[0..2].to_vec());
                 } else {
-                    self.extra_state.args.get_mut(&gpu_item).unwrap().extend(args);
+                    self.extra_state.args.get_mut(&gpu_item).unwrap().extend(&args[0..2]);
                 }
                 Ok(None)
             }
             GpuItem::PrintFormat => {
-                let Ok(format) = self.extra_state.attrs.pop().unwrap().try_into() else {
-                    let err =
-                        format!("{:?} must take a single StringAttribute as format", gpu_item);
+                let Ok(format) = self.get_const_str(args[0]) else {
+                    let err = format!("{:?} must take a constant str as format", gpu_item);
                     self.emit_error(err.clone(), span);
                 };
-                let mut args: Vec<Value<'ml, 'a>> = args.to_vec();
-                if let Some(extra) = self.extra_state.args.get_mut(&GpuItem::PrintArgs) {
-                    args.append(extra);
+                let mut args: Vec<Value<'ml, 'a>> = vec![];
+                let mut holders = vec![];
+                if let Some(extra) = self.extra_state.args.remove(&GpuItem::PrintArgs) {
+                    let mut extra_iter = extra.iter();
+                    while let Some(arg) = extra_iter.next() {
+                        args.push(*arg);
+                        holders.push(
+                            extra_iter.next().and_then(|v| self.get_const_str(*v).ok()).unwrap(),
+                        );
+                    }
                 };
+                let format = print::println_fmt_to_prinf_fmt(format.as_str(), &holders)
+                    .unwrap_or_else(|e| {
+                        self.emit_error(e.clone(), span);
+                    });
+
+                let fmt_attr = StringAttribute::new(self.mlir_ctx, &format);
                 let op_ref = self.append_op(
-                    melior::dialect::ods::gpu::printf(self.mlir_ctx, &args, format, loc).into(),
+                    melior::dialect::ods::gpu::printf(self.mlir_ctx, &args, fmt_attr, loc).into(),
                 );
                 Ok(Some(op_ref))
             }

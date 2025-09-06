@@ -10,7 +10,7 @@ extern crate gpu;
 #[gpu_codegen::kernel]
 pub fn kernel_arith(a: &[u8], b: &[u8]) {
     let id = gpu::thread_id::<gpu::DimX>();
-    gpu::println!("Hello from GPU! Value: %u %d at %d", a[0], b[0] as u32, id);
+    gpu::println!("Hello from GPU! Value: {} {} at {}", a[0], b[0] as u32, id);
 }
 
 // CHECK: @gpu_bin_cst = internal constant

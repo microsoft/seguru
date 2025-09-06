@@ -9,7 +9,11 @@ pub(crate) struct GpuAttributes {
     pub host: bool,
     pub device: bool, // a device function called by a kernel but not by host directly
     pub gpu_item: Option<GpuItem>,
-    pub ret_shared: bool,
+
+    // [0..MAX_FN_IN_PARAMS] indicates the parameters that are in shared memory space.
+    // [MAX_FN_IN_PARAMS..MAX] indicates the return value is in shared memory space.
+    pub shared_data: Vec<usize>,
+
     pub shared_size: bool, // this is used to decide whether to call `gpu_shared_size`.
 
     // The parameters that should have same value across threads.
@@ -24,6 +28,10 @@ pub(crate) struct GpuAttributes {
     // will also be uniform across GPU threads.
     // No effect if empty.
     pub ret_sync_data: Vec<isize>,
+}
+
+impl GpuAttributes {
+    pub const MAX_FN_IN_PARAMS: usize = 1000;
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, Hash)]
@@ -198,8 +206,9 @@ pub fn gpu_shared_size_symbol() -> Symbol {
     Symbol::intern("shared_size")
 }
 
-pub fn ret_shared() -> Symbol {
-    Symbol::intern("ret_shared")
+pub fn memspace_shared() -> Symbol {
+    // 0..MAX_FN_IN_PARAMS for parameters, MAX_FN_IN_PARAMS..max for return value
+    Symbol::intern("memspace_shared")
 }
 
 pub fn sync_data() -> Symbol {
@@ -300,6 +309,25 @@ impl GpuAttributes {
     fn parse(attrs: &[Attribute]) -> Self {
         let mut gpu_attrs = Self::default();
 
+        let get_meta_usize_list = |attr: &Attribute| {
+            let mut ret_sync_data = vec![];
+            if let Some(meta_list) = attr.meta_item_list() {
+                // Expect a literal like 1, 2, -1
+                for meta in meta_list {
+                    if let Some(lit) = meta.lit() {
+                        if let rustc_ast::LitKind::Int(value, int_ty) = lit.kind {
+                            ret_sync_data.push(value.get() as usize);
+                        } else {
+                            panic!("Expected an integer, found {:?} at {:?}", lit, attr.span());
+                        }
+                    } else {
+                        panic!("Expected a literal, found {:?} at {:?}", meta, attr.span());
+                    }
+                }
+            }
+            ret_sync_data
+        };
+
         for attr in attrs {
             if attr.path_matches(&[gpu_symbol(), kernel_symbol()]) {
                 gpu_attrs.kernel = true;
@@ -313,60 +341,19 @@ impl GpuAttributes {
             if attr.path_matches(&[gpu_symbol(), gpu_shared_size_symbol()]) {
                 gpu_attrs.shared_size = true;
             }
-            if attr.path_matches(&[gpu_symbol(), ret_shared()]) {
-                gpu_attrs.ret_shared = true;
+            if attr.path_matches(&[gpu_symbol(), memspace_shared()]) {
+                let shared_data = get_meta_usize_list(attr);
+                gpu_attrs.shared_data = shared_data;
             }
 
             if attr.path_matches(&[gpu_symbol(), sync_data()]) {
-                let mut sync_data = vec![];
-
-                if let Some(meta_list) = attr.meta_item_list() {
-                    // Expect a literal like 1, 2
-                    for meta in meta_list {
-                        if let Some(lit) = meta.lit() {
-                            if let rustc_ast::LitKind::Int(value, _) = lit.kind {
-                                sync_data.push(value.get() as usize);
-                            } else {
-                                panic!(
-                                    "Expected an integer literal for sync_data, found {:?}",
-                                    lit
-                                );
-                            }
-                        } else {
-                            panic!("Expected a literal for sync_data, found {:?}", meta);
-                        }
-                    }
-
-                    gpu_attrs.sync_data = Some(sync_data);
-                }
+                let sync_data = get_meta_usize_list(attr);
+                gpu_attrs.sync_data = Some(sync_data);
             }
 
             if attr.path_matches(&[gpu_symbol(), ret_sync_data()]) {
-                let mut ret_sync_data = vec![];
-                tracing::debug!(
-                    "Parsing ret_sync_data from attribute: {:?} {:?}",
-                    attr,
-                    attr.meta_item_list()
-                );
-                if let Some(meta_list) = attr.meta_item_list() {
-                    // Expect a literal like 1, 2, -1
-                    for meta in meta_list {
-                        if let Some(lit) = meta.lit() {
-                            if let rustc_ast::LitKind::Int(value, _) = lit.kind {
-                                ret_sync_data.push(value.get() as isize - 1);
-                            } else {
-                                panic!(
-                                    "Expected an integer literal for ret_sync_data, found {:?}",
-                                    lit
-                                );
-                            }
-                        } else {
-                            panic!("Expected a literal for ret_sync_data, found {:?}", meta);
-                        }
-                    }
-
-                    gpu_attrs.ret_sync_data = ret_sync_data;
-                }
+                let ret_sync_data = get_meta_usize_list(attr);
+                gpu_attrs.ret_sync_data = ret_sync_data.iter().map(|x| (*x as isize - 1)).collect();
             }
         }
         gpu_attrs

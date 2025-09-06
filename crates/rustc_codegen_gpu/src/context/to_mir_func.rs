@@ -14,6 +14,7 @@ use rustc_middle::ty::{AssocItemContainer, Instance};
 use tracing::debug;
 
 use super::GPUCodegenContext;
+use crate::attr::GpuAttributes;
 use crate::builder::GpuBuilder;
 use crate::context::CodegenGPUError;
 use crate::mlir::{MLIRMutOpHelpers, MLIROpHelpers, MLIRVisibility};
@@ -169,13 +170,34 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         &self,
         abi: &rustc_target::callconv::FnAbi<'tcx, rustc_middle::ty::Ty<'tcx>>,
         is_kernel_entry: bool,
-        ret_shared: bool,
+        shared_data: &[usize],
     ) -> Result<
         (FunctionType<'ml>, Option<(FunctionType<'ml>, IndirectArgsTypes<'tcx>)>),
         CodegenGPUError,
     > {
         let (mut args, indirect_types) = self.fn_abi_to_inputs(abi, is_kernel_entry)?;
-
+        // If we specify the return memory space to shared,
+        // we need to set the memory space for all memref return types.
+        for idx in shared_data {
+            let idx = *idx;
+            if idx < GpuAttributes::MAX_FN_IN_PARAMS {
+                let arg_idx = idx;
+                if arg_idx >= args.len() {
+                    return Err(format!("Argument {} out of range >= {}", arg_idx, args.len()));
+                }
+                let t = &mut args[arg_idx];
+                if t.is_mem_ref() {
+                    *t = self
+                        .memref_set_memory_space(
+                            (*t).try_into().unwrap(),
+                            Some(crate::mlir::memref::MemorySpace::Shared.to_attr(self.mlir_ctx)),
+                        )
+                        .into();
+                } else {
+                    return Err(format!("Arg {t} is not memref, cannot set memspace to shared"));
+                }
+            }
+        }
         // In rust, if struct size > 16bytes, it is passed as a pointer via indirect mode.
         // We need to convert it to a pointer type to translate code correctly.
         // However, we should not do this for kernel entry function.
@@ -200,6 +222,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             new_entry_args = Some(tmp_args);
         }
         let mut ret = vec![];
+        let mut indirect_ret = false;
         if !abi.ret.layout.is_zst() {
             match &abi.ret.mode {
                 rustc_target::callconv::PassMode::Indirect { .. } => {
@@ -212,6 +235,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                     let ptr_layout = self.layout_of(ptr_ty);
                     // Indirect return type becomes an arguments to function.
                     args.insert(0, self.mlir_type(ptr_layout, false));
+                    indirect_ret = true;
                 }
                 rustc_target::callconv::PassMode::Direct(_)
                 | rustc_target::callconv::PassMode::Pair(..) => {
@@ -233,8 +257,17 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
 
         // If we specify the return memory space to shared,
         // we need to set the memory space for all memref return types.
-        if ret_shared {
-            ret.iter_mut().for_each(|t| {
+        for idx in shared_data {
+            let idx = *idx;
+            // We should ignore indirect_ret type.
+            // If the returned value is indirect,
+            // We will have a single return type which must be a default memory space.
+            if idx > GpuAttributes::MAX_FN_IN_PARAMS && !indirect_ret {
+                let ret_idx = idx - GpuAttributes::MAX_FN_IN_PARAMS;
+                if ret_idx >= ret.len() {
+                    return Err(format!("Return index {} out of range < {}", ret_idx, ret.len(),));
+                }
+                let t = &mut ret[ret_idx];
                 if t.is_mem_ref() {
                     *t = self
                         .memref_set_memory_space(
@@ -242,8 +275,10 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                             Some(crate::mlir::memref::MemorySpace::Shared.to_attr(self.mlir_ctx)),
                         )
                         .into();
+                } else {
+                    return Err(format!("Return {t} is not memref, cannot set memspace to shared"));
                 }
-            });
+            }
         }
         let ftype: FunctionType<'ml> = FunctionType::new(self.mlir_ctx, &args, &ret);
         let new_ftype = new_entry_args.map(|new_args| {
@@ -377,7 +412,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
 
         let fn_abi = self.fn_abi_of_instance(instance, rustc_middle::ty::List::empty());
         let (ftype, real_entry_ftype) = self
-            .fn_abi_to_fn_type(fn_abi, gpu_attrs.kernel, gpu_attrs.ret_shared)
+            .fn_abi_to_fn_type(fn_abi, gpu_attrs.kernel, &gpu_attrs.shared_data)
             .unwrap_or_else(|e| self.emit_error(e, span));
         let fn_sym = if real_entry_ftype.is_some() && gpu_attrs.kernel {
             gpu_attrs.kernel = false;

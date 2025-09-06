@@ -31,7 +31,7 @@ impl<T> Deref for GpuShared<T> {
     type Target = T;
 
     #[gpu_codegen::device]
-    #[gpu_codegen::ret_shared]
+    #[gpu_codegen::memspace_shared(0, 1000)]
     #[inline(always)]
     fn deref(&self) -> &T {
         &self.value
@@ -58,14 +58,14 @@ pub struct DynamicSharedAlloc {
 impl DynamicSharedAlloc {
     #[rustc_diagnostic_item = "gpu::base_dynamic_shared"]
     #[inline(never)]
-    #[gpu_codegen::ret_shared]
+    #[gpu_codegen::memspace_shared(1000)]
     unsafe fn base_ptr() -> *const u8 {
         unimplemented!()
     }
 
     #[gpu_codegen::device]
     #[inline(always)]
-    #[gpu_codegen::ret_shared]
+    #[gpu_codegen::memspace_shared(1000)]
     pub fn alloc<T: Sized>(&mut self, len: usize) -> &mut GpuShared<[T]> {
         let size = core::mem::size_of::<T>() * len;
         let (remain_size, len) =
@@ -110,7 +110,7 @@ impl<T> core::ops::IndexMut<usize> for GpuShared<[T]> {
 
 impl<T, const N: usize> GpuShared<[T; N]> {
     #[gpu_codegen::device]
-    #[gpu_codegen::ret_shared]
+    #[gpu_codegen::memspace_shared(1000)]
     #[gpu_codegen::sync_data(0, 1)]
     #[inline(always)]
     pub fn chunk_mut(&mut self, window: usize, idx: super::GpuSharedChunkIdx) -> &mut [T] {
@@ -120,7 +120,7 @@ impl<T, const N: usize> GpuShared<[T; N]> {
 }
 impl<T> GpuShared<[T]> {
     #[gpu_codegen::device]
-    #[gpu_codegen::ret_shared]
+    #[gpu_codegen::memspace_shared(1000)]
     #[gpu_codegen::sync_data(0, 1)]
     #[inline(always)]
     pub fn chunk_mut(&mut self, window: usize, idx: super::GpuSharedChunkIdx) -> &mut [T] {

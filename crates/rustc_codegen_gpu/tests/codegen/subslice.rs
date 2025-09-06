@@ -10,8 +10,6 @@ pub fn kernel_arith(a: &[u8], b: &mut u8) {
 
 #[gpu_codegen::kernel]
 pub fn kernel_arith_wrapper(a: &[u8], a_window: usize, b: &mut [u8], b_window: usize) {
-    let c = gpu::GpuChunkIdx::new().as_usize();
-
     let mut b_local = gpu::chunk_mut(b, gpu::MapLinear::new(b_window));
 
     kernel_arith(a, &mut b_local[0]);

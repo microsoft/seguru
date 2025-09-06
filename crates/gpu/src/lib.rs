@@ -31,8 +31,7 @@ pub use device_intrinsic::GPUDeviceFloatIntrinsics;
 #[cfg(not(feature = "codegen_tests"))]
 pub use dim::assume_dim_with_config;
 pub use dim::{
-    DimType, DimX, DimY, DimZ, GpuChunkIdx, GpuSharedChunkIdx, block_dim, block_id, dim, global_id,
-    grid_dim, thread_id,
+    DimType, DimX, DimY, DimZ, block_dim, block_id, dim, global_id, grid_dim, thread_id,
 };
 pub use print::{PushPrintfArg, printf};
 pub use shared::{DynamicSharedAlloc, GpuShared};

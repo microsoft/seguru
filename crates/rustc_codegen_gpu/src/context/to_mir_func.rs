@@ -262,7 +262,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             // We should ignore indirect_ret type.
             // If the returned value is indirect,
             // We will have a single return type which must be a default memory space.
-            if idx > GpuAttributes::MAX_FN_IN_PARAMS && !indirect_ret {
+            if idx >= GpuAttributes::MAX_FN_IN_PARAMS && !indirect_ret {
                 let ret_idx = idx - GpuAttributes::MAX_FN_IN_PARAMS;
                 if ret_idx >= ret.len() {
                     return Err(format!("Return index {} out of range < {}", ret_idx, ret.len(),));

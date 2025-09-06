@@ -51,11 +51,11 @@ macro_rules! def_dim_fn {
 def_dim_fn!(global_thread_id, _global_thread_id, global_id,);
 def_dim_fn!(thread_id, _thread_id, thread_id,);
 def_dim_fn!(block_id, _block_id, block_id,);
-def_dim_fn!(block_dim, _block_dim, block_dim, #[gpu_codegen::ret_sync_data(0)]);
-def_dim_fn!(grid_dim, _grid_dim, grid_dim, #[gpu_codegen::ret_sync_data(0)]);
+def_dim_fn!(block_dim, _block_dim, block_dim, #[gpu_codegen::ret_sync_data(1000)]);
+def_dim_fn!(grid_dim, _grid_dim, grid_dim, #[gpu_codegen::ret_sync_data(1000)]);
 
 #[gpu_codegen::device]
-#[gpu_codegen::ret_sync_data(0)]
+#[gpu_codegen::ret_sync_data(1000)]
 #[inline(always)]
 pub const fn dim<D: DimType>() -> usize {
     block_dim::<D>() * grid_dim::<D>()

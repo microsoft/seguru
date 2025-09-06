@@ -23,11 +23,12 @@ pub(crate) struct GpuAttributes {
     pub sync_data: Option<Vec<usize>>,
 
     // Indices of parameters that must have the same value across all threads.
-    // Use -1 to indicate the return value. non-neg indices indicate the mutable
-    // parameters. Ensures that if these inputs are uniform, the return value
+    // [0..MAX_FN_IN_PARAMS] indices indicate the mutable parameters.
+    // Use [MAX_FN_IN_PARAMS..max] to indicate the return value.
+    // Ensures that if these inputs are uniform, the return value
     // will also be uniform across GPU threads.
     // No effect if empty.
-    pub ret_sync_data: Vec<isize>,
+    pub ret_sync_data: Vec<usize>,
 }
 
 impl GpuAttributes {
@@ -353,7 +354,7 @@ impl GpuAttributes {
 
             if attr.path_matches(&[gpu_symbol(), ret_sync_data()]) {
                 let ret_sync_data = get_meta_usize_list(attr);
-                gpu_attrs.ret_sync_data = ret_sync_data.iter().map(|x| (*x as isize - 1)).collect();
+                gpu_attrs.ret_sync_data = ret_sync_data;
             }
         }
         gpu_attrs

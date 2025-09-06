@@ -283,19 +283,20 @@ impl<'tcx> Visitor<'tcx> for TaintSourceDetector<'tcx> {
                 // Currently DeviceIntrinsic only defines some float compute operations.
                 // We only care the returned value since the mut arg will
                 // only be tainted when reaching that the terminator.
-                let trusted_non_diversed = matches!(
-                    attr.gpu_item,
-                    Some(
-                        GpuItem::BlockDim
-                            | GpuItem::GridDim
-                            | GpuItem::AllReduce
-                            | GpuItem::SubgroupReduce
-                            | GpuItem::SubgroupSize
-                            | GpuItem::DynamicShared
-                            | GpuItem::NewSharedMem
-                            | GpuItem::DeviceIntrinsic(_)
-                    )
-                ) || attr.ret_sync_data.contains(&-1);
+                let trusted_non_diversed =
+                    matches!(
+                        attr.gpu_item,
+                        Some(
+                            GpuItem::BlockDim
+                                | GpuItem::GridDim
+                                | GpuItem::AllReduce
+                                | GpuItem::SubgroupReduce
+                                | GpuItem::SubgroupSize
+                                | GpuItem::DynamicShared
+                                | GpuItem::NewSharedMem
+                                | GpuItem::DeviceIntrinsic(_)
+                        )
+                    ) || attr.ret_sync_data.contains(&GpuAttributes::MAX_FN_IN_PARAMS);
 
                 // Since any device function may call thread_id, block_id,
                 // we conservatively consider all device function calls as taint sources
@@ -384,7 +385,7 @@ impl<'tcx> TaintTracking<'tcx> {
                 // the sync data and thus the argument should not be tainted.
                 // TODO: we will check and verify that the function is indeed
                 // returning the sync data.
-                if attr.ret_sync_data.contains(&(*i as isize)) {
+                if attr.ret_sync_data.contains(i) {
                     continue;
                 }
             }

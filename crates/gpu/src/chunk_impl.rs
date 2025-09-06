@@ -22,7 +22,7 @@ fn global_id(thread_ids: [usize; 6]) -> usize {
 impl<const N: usize> MapLinearWithDim<N> {
     #[inline]
     #[gpu_codegen::device]
-    #[gpu_codegen::ret_sync_data(0)]
+    #[gpu_codegen::ret_sync_data(1000)]
     pub fn new(width: usize) -> Self {
         Self { width }
     }
@@ -109,7 +109,7 @@ pub struct Map2D {
 impl Map2D {
     #[inline]
     #[gpu_codegen::device]
-    #[gpu_codegen::ret_sync_data(0)]
+    #[gpu_codegen::ret_sync_data(1000)]
     pub fn new(x_size: usize) -> Self {
         Self { x_size }
     }

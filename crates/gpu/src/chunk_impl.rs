@@ -68,17 +68,6 @@ unsafe impl<CS: ChunkScope> ThreadUniqueMap<CS> for MapLinearWithDim<3> {
     }
 }
 
-#[gpu_codegen::device]
-#[gpu_codegen::sync_data(0, 1, 2)]
-#[inline(always)]
-pub fn chunk_mut<'a, T>(
-    input: &'a mut [T],
-    window: usize,
-    _idx: crate::GpuChunkIdx,
-) -> crate::GlobalThreadChunk<'a, T, MapLinear> {
-    crate::GlobalThreadChunk::new(input, MapLinear::new(window))
-}
-
 /// This mapping strategy is useful when we want to reshape a 1D array into a 2D
 /// array and then distribute one element to a thread one by one until consuming
 /// all. It creates a new non-continuous partition for each thread.

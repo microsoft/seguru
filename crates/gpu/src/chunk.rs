@@ -119,3 +119,13 @@ impl<'a, T, Map: ThreadUniqueMap<GlobalMemScope>> IndexMut<Map::IndexType>
         &mut self.data[idx]
     }
 }
+
+#[gpu_codegen::device]
+#[gpu_codegen::sync_data(0, 1, 2)]
+#[inline(always)]
+pub fn chunk_mut<'a, T, Map: ThreadUniqueMap<GlobalMemScope>>(
+    input: &'a mut [T],
+    map: Map,
+) -> crate::GlobalThreadChunk<'a, T, Map> {
+    crate::GlobalThreadChunk::new(input, map)
+}

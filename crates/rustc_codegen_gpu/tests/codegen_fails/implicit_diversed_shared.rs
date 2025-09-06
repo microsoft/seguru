@@ -18,12 +18,12 @@ pub fn alloc_shared(a: &[u8], _a_window: usize, b: &mut [u8], b_window: usize, f
     chunk_dy_shared[0] = 1.1;
     gpu::sync_threads();
 
-    let mut chunked_b = gpu::chunk_mut(b, 1, gpu::GpuChunkIdx::new());
+    let mut chunked_b = gpu::chunk_mut(b, gpu::MapLinear::new(1));
     for i in 0..10 {
         chunked_b[0] += shared[i];
     }
 
-    let mut chunked_f = gpu::chunk_mut(f, 1, gpu::GpuChunkIdx::new());
+    let mut chunked_f = gpu::chunk_mut(f, gpu::MapLinear::new(1));
     for i in 0..10 {
         chunked_f[0] += chunk_dy_shared[i];
     }

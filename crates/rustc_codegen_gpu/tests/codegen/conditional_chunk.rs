@@ -10,9 +10,9 @@
 pub fn test_valid_conditional_chunk(a: &mut [f32]) {
     // This is allowed since block_dim() returns a consistent value across all threads.
     let mut local = if gpu::block_dim::<gpu::DimX>() == 1 {
-        gpu::chunk_mut(a, 1, gpu::GpuChunkIdx::new())
+        gpu::chunk_mut(a, gpu::MapLinear::new(1))
     } else {
-        gpu::chunk_mut(a, 2, gpu::GpuChunkIdx::new())
+        gpu::chunk_mut(a, gpu::MapLinear::new(2))
     };
     local[0] = 1.0;
 }
@@ -21,7 +21,7 @@ pub fn test_valid_conditional_chunk(a: &mut [f32]) {
 #[no_mangle]
 pub fn test_valid_chunk_size(a: &mut [f32]) {
     // This is allowed since block_dim() returns a consistent value across all threads.
-    let mut local = gpu::chunk_mut(a, gpu::block_dim::<gpu::DimX>(), gpu::GpuChunkIdx::new());
+    let mut local = gpu::chunk_mut(a, gpu::MapLinear::new(gpu::block_dim::<gpu::DimX>()));
     local[0] = 1.0;
 }
 

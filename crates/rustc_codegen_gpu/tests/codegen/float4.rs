@@ -24,7 +24,7 @@ pub fn add_float4(a: &float4, b: &float4) -> float4 {
 #[gpu_macros::kernel_v2]
 #[no_mangle]
 pub fn test_float4(out: &mut [float4], in1: &float4, in2: &float4) {
-    let mut out = gpu::chunk_mut(out, 1, gpu::GpuChunkIdx::new());
+    let mut out = gpu::chunk_mut(out, gpu::MapLinear::new(1));
     out[0] = add_float4(in1, in2);
 }
 

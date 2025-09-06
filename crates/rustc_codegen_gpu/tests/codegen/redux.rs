@@ -8,7 +8,7 @@
 #[gpu_macros::kernel_v2]
 #[no_mangle]
 pub fn reduce_max(a: &[u32], _a_window: usize, b: &mut [u32], _b_window: usize) {
-    let mut chunked_b = gpu::chunk_mut(b, 1, gpu::GpuChunkIdx::new());
+    let mut chunked_b = gpu::chunk_mut(b, gpu::MapLinear::new(1));
     let val = a[gpu::thread_id::<gpu::DimX>()];
     gpu::add_mlir_string_attr("#nvvm<redux_kind max>");
     chunked_b[0] = gpu::cg::_redux_sync::<_>(val, u32::MAX);

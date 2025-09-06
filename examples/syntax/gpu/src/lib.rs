@@ -25,7 +25,7 @@ pub fn kernel_arith<const N: u32>(
     let mut b = b;
     let b_local = &mut b[(0, 0)];
     *b_local = a_local + c[thread_id];
-    gpu::atomic_add::<u32>(b_local, 1);
+    gpu::sync::atomic_addi(b_local, 1);
     let mut out: u32;
     let in32: u32 = *b_local + N;
     unsafe {

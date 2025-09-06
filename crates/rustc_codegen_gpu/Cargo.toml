@@ -25,6 +25,7 @@ path = "tests/bin/filecheck.rs"
 compiletest_rs = "0.9.0"
 gpu_macros = {path = "../gpu-macros", features = ["codegen_tests"]}
 cuda_bindings = {path = "../cuda_bindings"}
+num-traits = {version = "0.2", default-features = false}
 typed-arena = "2.0"
 
 [package.metadata.rust-analyzer]

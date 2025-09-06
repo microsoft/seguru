@@ -9,8 +9,9 @@
 #[no_mangle]
 pub fn test_atomic(b: &mut [u8]) {
     let b0 = &mut b[0];
-    gpu::atomic_add(b0, 1);
-    gpu::atomic_add(&mut b[1], 1);
+    gpu::sync::atomic_addi(b0, 1);
+    gpu::sync::atomic_addi(&mut b[1], 1);
+    gpu::sync::atomic_rmw::<gpu::sync::OrI, _>(&mut b[1], 1);
 }
 
 // CHECK: @gpu_bin_cst = internal constant

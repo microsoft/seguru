@@ -38,8 +38,13 @@ fn run_codegen_tests(src: PathBuf, mode: &str) {
 
     // 👇 Point to your shared backend library
     let backend_path = target_dir.join("librustc_codegen_gpu.so");
+    let dep_path = target_dir.join("deps");
+    let dependency = format!("dependency={}", dep_path.to_str().unwrap());
     let gpu_macros_path = find_lib(&target_dir.join("deps"), "libgpu_macros-", ".so");
     let gpu_macros = format!("gpu_macros={}", &gpu_macros_path.to_str().unwrap());
+
+    let num_traits_path = find_lib(&target_dir.join("deps"), "libnum_traits-", ".rmeta");
+    let num_traits = format!("num_traits={}", &num_traits_path.to_str().unwrap());
 
     let gpu_src = target_dir.join("../../gpu/src/lib.rs");
     let gpu_target = target_dir.join("tests/gpu");
@@ -50,8 +55,12 @@ fn run_codegen_tests(src: PathBuf, mode: &str) {
         "-C",
         "codegen-units=1",
         "--crate-type=lib",
+        "-L",
+        dependency.as_str(),
         "--extern",
         gpu_macros.as_str(),
+        "--extern",
+        num_traits.as_str(),
         "--cfg",
         "gpu_codegen",
         &codegen,

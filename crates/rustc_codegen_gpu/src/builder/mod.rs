@@ -49,6 +49,16 @@ impl<'ml, 'a> GpuBuilderState<'ml, 'a> {
     }
 }
 
+impl<'ml, 'a> Drop for GpuBuilderState<'ml, 'a> {
+    fn drop(&mut self) {
+        /*assert!(
+            self.attrs.is_empty(),
+            "attrs should be empty when dropping GpuBuilderState: {:?}",
+            self.attrs
+        );*/
+    }
+}
+
 #[derive(Debug)]
 struct InplaceBoundCheckData<'ml, 'a> {
     pub cond: mlir_ir::Value<'ml, 'a>,
@@ -79,6 +89,11 @@ pub(crate) struct GpuBuilder<'tcx, 'ml, 'a> {
 impl<'tcx, 'ml, 'a> Drop for GpuBuilder<'tcx, 'ml, 'a> {
     fn drop(&mut self) {
         assert!(
+            self.extra_state.attrs.is_empty(),
+            "attrs should be empty when dropping GpuBuilder: {:?}",
+            self.extra_state.attrs
+        );
+        assert!(
             self.valid_mem_access.is_none(),
             "valid_mem_access should be None {:?}",
             self.valid_mem_access
@@ -100,6 +115,25 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         ty: mlir_ir::Type<'ml>,
     ) -> mlir_ir::Value<'ml, 'a> {
         self.mlir_const_val_from_type(val, ty, self.cur_block())
+    }
+
+    fn get_const_str(&self, arg: mlir_ir::Value<'ml, 'a>) -> Result<String, ()> {
+        let name = arg.to_get_global_name();
+        if name.is_err() {
+            return Err(());
+        }
+        let global_name = name.unwrap().value().to_string();
+        let bytes = self.get_const_bytes_by_name(global_name.as_str());
+        if let Ok(bytes) = std::str::from_utf8(bytes) { Ok(bytes.to_string()) } else { Err(()) }
+    }
+
+    fn get_const_attribute(
+        &self,
+        arg: mlir_ir::Value<'ml, 'a>,
+    ) -> Result<mlir_ir::Attribute<'ml>, ()> {
+        self.get_const_str(arg).map_or(Err(()), |bytes| {
+            melior::ir::Attribute::parse(self.mlir_ctx, bytes.as_str()).ok_or(())
+        })
     }
 
     fn static_size_of(&self, ty: mlir_ir::Type<'_>) -> usize {
@@ -359,14 +393,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 let arg = args[0];
                 let err_msg =
                     || format!("{:?} must take valid string as MLIR attritutes", gpu_item);
-                let name = arg.to_get_global_name();
-                if name.is_err() {
-                    self.emit_error(err_msg(), span);
-                }
-                let global_name = name.unwrap().value().to_string();
-                let bytes = self.get_const_bytes_by_name(global_name.as_str());
-                if let Ok(bytes) = std::str::from_utf8(bytes) {
-                    let attr = melior::ir::Attribute::parse(self.mlir_ctx, bytes).unwrap();
+                if let Ok(attr) = self.get_const_attribute(arg) {
                     self.extra_state.attrs.push(attr);
                 } else {
                     self.emit_error(err_msg(), span);
@@ -484,23 +511,25 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 // Do not init the content of the shared memory.
                 Ok(None)
             }
-            GpuItem::AtomicAdd => {
-                trace!("gpu.atomic_add args: {:?}", args);
+            GpuItem::AtomicRMW => {
+                trace!("gpu.atomic_rmw args: {:?}", args);
                 // args[0]: ptr:      memref<1xi8>
                 // args[1]: val:      value, can be any thing... (f32, i32, ...)
+                // args[2]: kind:     string attribute
 
                 let ptr = args[0];
                 let val = args[1];
-                let offset = self.emit_constant(0, self.type_index());
+                let kind = self.get_const_attribute(args[2]).unwrap_or_else(|_| {
+                    self.emit_error(
+                        "gpu.atomic_rmw must have a string attribute to specify the kind"
+                            .to_string(),
+                        span,
+                    )
+                });
 
+                let offset = self.const_value(0, self.type_index());
                 let indices_vec = vec![offset];
                 let indices = &indices_vec;
-                let kind = if val.r#type().is_integer() || val.r#type().is_index() {
-                    mlir_ir::attribute::IntegerAttribute::new(self.type_i64(), 1).into()
-                } else {
-                    mlir_ir::attribute::IntegerAttribute::new(self.type_i64(), 0).into()
-                };
-
                 // Translate ptr into the correct form
                 let ptr_memref_ty = MemRefType::try_from(ptr.r#type()).unwrap();
                 let ptr_t = if self.mlir_element_type(ptr.r#type()) != val.r#type() {
@@ -511,17 +540,20 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                     ptr
                 };
 
-                let atomic_rmw_op = melior::dialect::ods::memref::atomic_rmw(
-                    self.mlir_ctx,
-                    val.r#type(),
-                    val,
-                    ptr_t,
-                    indices,
-                    kind,
-                    self.cur_loc(),
-                );
+                let mut atomic_rmw_op: melior::ir::Operation<'ml> =
+                    melior::dialect::ods::memref::atomic_rmw(
+                        self.mlir_ctx,
+                        val.r#type(),
+                        val,
+                        ptr_t,
+                        indices,
+                        kind,
+                        self.cur_loc(),
+                    )
+                    .into();
+                atomic_rmw_op.set_attribute("kind", kind);
 
-                self.append_op(atomic_rmw_op.into());
+                self.append_op(atomic_rmw_op);
 
                 Ok(None)
             }
@@ -2361,7 +2393,10 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         src: Self::Value,
         order: rustc_codegen_ssa_gpu::common::AtomicOrdering,
     ) -> Self::Value {
-        todo!()
+        self.emit_error(
+            "GPU has different intrinsics. Please use gpu::sync::atomic_xxx".into(),
+            self.cur_span,
+        );
     }
 
     fn atomic_fence(
@@ -2369,7 +2404,10 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         order: rustc_codegen_ssa_gpu::common::AtomicOrdering,
         scope: rustc_codegen_ssa_gpu::common::SynchronizationScope,
     ) {
-        todo!()
+        self.emit_error(
+            "GPU has different intrinsics. Use gpu::sync::sync_threads to sync in a block.".into(),
+            self.cur_span,
+        );
     }
 
     fn set_invariant_load(&mut self, load: Self::Value) {

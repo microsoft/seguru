@@ -194,7 +194,7 @@ impl<'tcx> Visitor<'tcx> for ReadWriteVistor<'_, 'tcx> {
                     Some(
                         GpuItem::SubsliceMut
                         | GpuItem::NewChunk
-                        | GpuItem::AtomicAdd
+                        | GpuItem::AtomicRMW
                         | GpuItem::GetLocalMut2D,
                     ) => {
                         is_trusted_chunk_function = true;

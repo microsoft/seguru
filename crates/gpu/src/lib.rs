@@ -20,7 +20,7 @@ mod dim;
 pub mod iter;
 mod print;
 mod shared;
-mod thread;
+pub mod sync;
 
 pub use chunk::GlobalThreadChunk;
 pub use chunk_impl::{Map2D, MapLinear, MapLinearWithDim, chunk_mut};
@@ -35,7 +35,7 @@ pub use dim::{
 };
 pub use print::{PushPrintfArg, printf};
 pub use shared::{DynamicSharedAlloc, GpuShared};
-pub use thread::sync_threads;
+pub use sync::sync_threads;
 
 /// Add an extra assertion before indexing operation.
 /// This is used to ensure that some indexing operation is safe,
@@ -82,13 +82,6 @@ pub(crate) unsafe fn subslice_mut<T>(
     unimplemented!()
 }
 
-#[inline(never)]
-#[gpu_codegen::builtin(gpu.atomic_add)]
-#[rustc_diagnostic_item = "gpu::atomic_add"]
-pub fn atomic_add<T>(_slice: &mut T, _val: T) -> T {
-    unimplemented!()
-}
-
 #[repr(C)]
 pub struct float4 {
     pub x: f32,
@@ -111,5 +104,3 @@ pub fn __ldcs_f32(val: &f32) -> f32 {
     }
     ret
 }
-
-/*  TODO: Define shared memory */

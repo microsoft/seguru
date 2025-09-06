@@ -8,6 +8,8 @@ pub struct MapLinearWithDim<const N: usize = 3> {
     width: usize,
 }
 
+/// Linear mapping continuous memory chunk per thread.
+/// - IndexType is usize.
 pub type MapLinear = MapLinearWithDim<3>;
 
 impl<const N: usize> MapLinearWithDim<N> {
@@ -71,25 +73,27 @@ unsafe impl<CS: ChunkScope> ThreadUniqueMap<CS> for MapLinearWithDim<3> {
 /// This mapping strategy is useful when we want to reshape a 1D array into a 2D
 /// array and then distribute one element to a thread one by one until consuming
 /// all. It creates a new non-continuous partition for each thread.
-/*
-Example:
-array: [T; 20]
-x_size = 5 => y_size = 4
-dim: x=2, y=2, z=1
-0     2     4     6   7
-┌───┬───┬───┬───┬───┐
-│0,0│1,0│0,0│1,0│0,0│
-├───┼───┼───┼───┼───┤
-│0,1│1,1│0,1│1,1│0,1│
-├───┼───┼───┼───┼───┤
-│0,0│1,0│0,0│1,0│0,0│
-├───┼───┼───┼───┼───┤
-│0,1│1,1│0,1│1,1│0,1│
-└───┴───┴───┴───┴───┘
-In this case, thread(1,0) and (1,1) should
-only have access to a shape of 2*2 = 4 elements,
-while thread (0,0) and (0,1) have access to a shape of 3*2 = 6 elements.
-*/
+/// - IndexType is (usize, usize)
+///
+/// Example:
+/// - array: [T; 20]
+/// - x_size = 5 => y_size = 4
+/// - dim: x=2, y=2, z=1
+/// ```text
+/// 0   1   2   3   4   5
+/// ┌───┬───┬───┬───┬───┐
+/// │0,0│1,0│0,0│1,0│0,0│
+/// ├───┼───┼───┼───┼───┤
+/// │0,1│1,1│0,1│1,1│0,1│
+/// ├───┼───┼───┼───┼───┤
+/// │0,0│1,0│0,0│1,0│0,0│
+/// ├───┼───┼───┼───┼───┤
+/// │0,1│1,1│0,1│1,1│0,1│
+/// └───┴───┴───┴───┴───┘
+/// ```
+/// In this case,
+/// - thread(1,0) and (1,1) should only have access to a shape of 2*2 = 4 elements.
+/// - thread (0,0) and (0,1) have access to a shape of 3*2 = 6 elements.
 #[derive(Copy, Clone)]
 pub struct Map2D {
     pub x_size: usize,

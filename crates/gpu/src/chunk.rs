@@ -7,11 +7,20 @@ use crate::assert_before_index;
 use crate::chunk_scope::{ChunkScope, GlobalMemScope};
 
 /// Thread unique mapping trait
-/// N: number of index dimensions.
-/// N can be different from GPU thread dimensions.
+///
+/// This trait guarantees that each thread produces a unique index mapping,
+/// so no two distinct threads map to the same global index.
+///
+/// # Type Parameters
+/// - `CS`: The memory space: GlobalMemScope or SharedMemScope
+///
 /// # Safety
-/// requires idx -> thread-unique idx
-/// forall |idx1, idx2, thread_ids1, thread_ids2| thread_ids1 != thread_ids2 ==> map(idx1, thread_ids1) !=  map(idx2, thread_ids2)
+/// Implementors must ensure:
+/// ```text
+/// forall |idx1, idx2, thread_ids1, thread_ids2|
+///     thread_ids1 != thread_ids2 ==>
+///         map(idx1, thread_ids1) !=  map(idx2, thread_ids2)
+/// ```
 pub unsafe trait ThreadUniqueMap<CS: ChunkScope>: Clone {
     type IndexType;
     #[inline]
@@ -44,8 +53,12 @@ pub(crate) trait ThreadUniqueMapProvidedMethods<CS: ChunkScope>:
 
 impl<T: ThreadUniqueMap<CS>, CS: ChunkScope> ThreadUniqueMapProvidedMethods<CS> for T {}
 
-/// N: Index dimension, 1, 2, 3
-/// Map: Mapping strategy
+/// Represent a chunk of global memory that is uniquely mapped to each thread.
+/// It supports both continuous and non-continuous mapping strategies.
+/// - T: element type
+/// - Map: mapping strategy type
+/// - 'a: lifetime of the underlying slice
+/// - map_params: parameters for the mapping strategy
 pub struct GlobalThreadChunk<'a, T, Map: ThreadUniqueMap<GlobalMemScope>> {
     data: &'a mut [T], // Must be private.
     pub map_params: Map,
@@ -120,6 +133,11 @@ impl<'a, T, Map: ThreadUniqueMap<GlobalMemScope>> IndexMut<Map::IndexType>
     }
 }
 
+/// Chunk a global memory slice into unique chunks.
+/// supports mapping strategies for global memory.
+/// For example,
+/// - chunk_mut(&mut data, MapLinear::new(width))
+/// - chunk_mut(&mut data, Map2D::new(x_width))
 #[gpu_codegen::device]
 #[gpu_codegen::sync_data(0, 1, 2)]
 #[inline(always)]

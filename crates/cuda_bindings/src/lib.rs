@@ -4,6 +4,8 @@
 #![allow(non_snake_case)]
 #![feature(register_tool)]
 #![feature(negative_impls)]
+#![allow(internal_features)]
+#![feature(rustc_attrs)]
 #![register_tool(gpu_codegen)]
 #![no_std]
 
@@ -11,7 +13,7 @@ extern crate alloc;
 use alloc::string::{String, ToString};
 mod ctx;
 mod mem;
-mod params;
+pub mod params;
 
 // This matches bindgen::Builder output
 #[allow(dead_code)]
@@ -27,10 +29,8 @@ pub use ctx::{
     GpuCtxToken, GpuCtxZeroGuard, GpuFunction, GpuModule, GpuToken,
 };
 pub use mem::CudaMemBox;
-pub use params::{
-    AsHostKernelParams, GPUConfig, GPUConfigMethods, GPUDynamicConfig, GPUStaticConfig,
-};
-pub use unsafe_bindings::CUctx_flags;
+pub use params::{AsHostKernelParams, GPUConfig, GPUDynamicConfig, GPUStaticConfig, SafeGpuConfig};
+pub use unsafe_bindings::{CUctx_flags, CUdevprop};
 
 #[allow(unused_imports)]
 use crate::unsafe_bindings::*; // Private;

@@ -7,6 +7,14 @@ fn main() {
     // Generate bindings
     // Tell cargo to invalidate the built crate whenever the wrapper changes
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=MAX_THREAD_PER_BLOCK");
+    println!("cargo:rerun-if-env-changed=MAX_BLOCK_DIM_X");
+    println!("cargo:rerun-if-env-changed=MAX_BLOCK_DIM_Y");
+    println!("cargo:rerun-if-env-changed=MAX_BLOCK_DIM_Z");
+    println!("cargo:rerun-if-env-changed=MAX_GRID_DIM_X");
+    println!("cargo:rerun-if-env-changed=MAX_GRID_DIM_Y");
+    println!("cargo:rerun-if-env-changed=MAX_GRID_DIM_Z");
+    println!("cargo:rerun-if-env-changed=MAX_SHARED_MEM_PER_BLOCK");
     println!("cargo:rerun-if-changed=libcuda_bindings/lib.h");
     let bindings = bindgen::Builder::default()
         // The input header we would like to generate bindings for.

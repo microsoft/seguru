@@ -37,7 +37,7 @@ impl VisitMut for GpuFunctionRewriter {
         {
             if self.is_kernel_entry {
                 // Add dynamic config params
-                f.sig.generics.params.insert(0, syn::parse_quote! { Config: ::gpu::GPUConfig});
+                f.sig.generics.params.insert(0, syn::parse_quote! { Config: ::gpu::SafeGpuConfig});
                 f.block.stmts.push(parse_quote! {
                     unsafe {::gpu::assume_dim_with_config::<Config>();}
                 });

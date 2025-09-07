@@ -3,6 +3,7 @@
 
 extern crate rustc_ast;
 extern crate rustc_codegen_llvm;
+extern crate rustc_const_eval;
 extern crate rustc_driver;
 extern crate rustc_interface;
 extern crate rustc_lint_defs;

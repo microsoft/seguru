@@ -58,7 +58,7 @@ pub trait GPUConfigMethods: GPUConfig {
             && Self::GRID_DIM_X != 0
             && Self::GRID_DIM_Y != 0
             && Self::GRID_DIM_Z != 0
-            && Self::SHARED_SIZE.is_none()
+            && Self::SHARED_SIZE.is_some()
     }
 
     fn grid_dim_x(&self) -> u32 {
@@ -257,10 +257,10 @@ macro_rules! config_dim_field {
 
 #[macro_export(local_inner_macros)]
 macro_rules! config_shared_size_field {
-    ($name: ident, dynamic_name: ident,,$var:literal, $idx: literal) => {
+    ($name: ident, $dynamic_name: ident,,$var:literal, $idx: literal) => {
         const $name: Option<u32> = Some($var);
     };
-    ($name: ident, dynamic_name: ident, #[const], $var:expr, $idx: literal) => {
+    ($name: ident, $dynamic_name: ident, const, $var:expr, $idx: literal) => {
         const $name: Option<u32> = Some($var);
     };
     ($name: ident, $dynamic_name: ident,,$var:expr, $idx: literal) => {

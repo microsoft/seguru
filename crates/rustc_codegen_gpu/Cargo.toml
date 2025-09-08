@@ -11,8 +11,8 @@ melior-macro = { version = "0.17.0"}
 mlir-sys = "0.5.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3" }
-mlir-compile = {path = "../mlir-compile"}
-gpu_name = {path = "../gpu-name"}
+mlir-compile = {workspace = true}
+gpu_name = {workspace = true}
 
 [lib]
 crate-type = ["dylib"]
@@ -23,9 +23,9 @@ path = "tests/bin/filecheck.rs"
 
 [dev-dependencies]
 compiletest_rs = "0.9.0"
-gpu_macros = {path = "../gpu-macros", features = ["codegen_tests"]}
-cuda_bindings = {path = "../cuda_bindings"}
-num-traits = {version = "0.2", default-features = false}
+gpu_macros = {workspace = true, features = ["codegen_tests"]}
+cuda_bindings = {workspace = true, features = ["gpu"]}
+num-traits = { workspace = true }
 typed-arena = "2.0"
 
 [package.metadata.rust-analyzer]

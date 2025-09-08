@@ -9,3 +9,13 @@ members = [
     "cuda_bindings",
     "gpu-name",
 ]
+
+[workspace.dependencies]
+cuda_bindings = { path = "cuda_bindings", default-features = false}
+gpu = { path = "gpu" }
+gpu_macros = { path = "gpu-macros" }
+gpu_name = { path = "gpu-name" }
+gpu_host = { path = "gpu-host" }
+rustc_codegen_gpu = { path = "rustc_codegen_gpu" }
+mlir-compile = {path = "mlir-compile"}
+num-traits = {version = "0.2", default-features = false, features = ["libm"]}

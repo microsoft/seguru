@@ -4,5 +4,5 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-cuda_bindings = {path = "../cuda_bindings", default-features = false}
-gpu_name = {path = "../gpu-name"}
+cuda_bindings = {workspace = true, default-features = false}
+gpu_name = {workspace = true}

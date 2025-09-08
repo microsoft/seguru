@@ -41,7 +41,9 @@ fn main() {
 
     let mut exit_code =
         rustc_driver::catch_with_exit_code(|| rustc_driver::run_compiler(&args, &mut callbacks));
-
+    if exit_code != 0 {
+        early_dcx.early_fatal(format!("Failed at stage {:?}", callbacks.stage));
+    }
     if let Some(next_stage) = callbacks.next_stage {
         args.insert(1, next_stage.into());
         exit_code = Command::new(&args[0]) // re-run self

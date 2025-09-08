@@ -69,8 +69,8 @@ pub fn encoder_backward_kernel(
 
         let dout_btc: f32 = dout[(b * T * C + t * C + c) as usize];
 
-        gpu::atomic_add::<f32>(&mut dwte[(ix * C + c) as usize], dout_btc);
-        gpu::atomic_add::<f32>(&mut dwpe[(t * C + c) as usize], dout_btc);
+        gpu::sync::atomic_addf::<f32>(&mut dwte[(ix * C + c) as usize], dout_btc);
+        gpu::sync::atomic_addf::<f32>(&mut dwpe[(t * C + c) as usize], dout_btc);
     }
 }
 

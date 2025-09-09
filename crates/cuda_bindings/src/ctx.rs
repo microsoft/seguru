@@ -1,6 +1,15 @@
+/// The use of Gpu context is guarded by GpuToken, GpuCtxIdToken, GpuCtxActiveToken.
+/// This module exposes 4 unsafe functions:
+/// - `GpuToken::new()`
+/// - `GpuCtxCreateAndUseToken::new()`
+/// - `GpuCtxGuard::launch_kernel()`
+/// - `GpuCtxGuard::launch_coop_kernel()`
+///
+/// Those functions should not be used directly.
+/// Instead, use the safe wrappers in `gpu_host` crate.
+/// and use `gpu_macros::host` to generate host code.
 use alloc::boxed::Box;
 use alloc::vec;
-/// The use of Gpu context is guarded by GpuToken, GpuCtxIdToken, GpuCtxActiveToken.
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
@@ -364,7 +373,7 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
     /// # Safety
     /// This is safe if the argument types match the kernel's expected types.
     /// To make it safe, use the gpu_macros::host to generate dummy api checking code.
-    pub unsafe fn launch_coop_fn<C: SafeGpuConfig>(
+    unsafe fn launch_coop_fn<C: SafeGpuConfig>(
         &self,
         f: &GpuFunction<'ctx, N>,
         config: C,
@@ -416,7 +425,7 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
     /// # Safety
     /// This is safe if the argument types match the kernel's expected types.
     /// To make it safe, use the gpu_macros::host to generate dummy api checking code.
-    pub unsafe fn launch_fn<C: SafeGpuConfig>(
+    unsafe fn launch_fn<C: SafeGpuConfig>(
         &self,
         f: &GpuFunction<'ctx, N>,
         config: C,

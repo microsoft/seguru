@@ -7,10 +7,11 @@ pub trait DimType {
     const MLIR_DIM: &str;
 }
 
-enum DimTypeID {
+pub(crate) enum DimTypeID {
     X = 0,
     Y = 1,
     Z = 2,
+    Max = 3,
 }
 
 impl DimType for DimX {

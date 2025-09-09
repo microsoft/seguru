@@ -1,4 +1,4 @@
-use crate::dim::{DimType, DimX, DimY, DimZ, block_dim, block_id, dim, thread_id};
+use crate::dim::{DimType, DimTypeID, DimX, DimY, DimZ, block_dim, block_id, dim, thread_id};
 
 trait PrivateTraitGuard {}
 
@@ -59,6 +59,8 @@ impl ChunkScope for GlobalMemScope {
     #[inline]
     #[gpu_codegen::device]
     fn thread_ids() -> [usize; Self::TID_LEN] {
+        // global memory is accessible across blocks,
+        // so we need block_id as well as thread_id.
         [
             thread_id::<DimX>(),
             thread_id::<DimY>(),
@@ -72,7 +74,7 @@ impl ChunkScope for GlobalMemScope {
     #[inline]
     #[gpu_codegen::device]
     fn global_id<D: DimType>(thread_ids: [usize; Self::TID_LEN]) -> usize {
-        thread_ids[D::DIM_ID + SharedMemScope::TID_LEN] * block_dim::<D>() + thread_ids[D::DIM_ID]
+        thread_ids[D::DIM_ID + DimTypeID::Max as usize] * block_dim::<D>() + thread_ids[D::DIM_ID]
     }
 
     #[inline]
@@ -91,8 +93,8 @@ impl ChunkScope for SharedMemScope {
     #[inline]
     #[gpu_codegen::device]
     fn thread_ids() -> [usize; Self::TID_LEN] {
-        let ids = GlobalMemScope::thread_ids();
-        [ids[DimX::DIM_ID], ids[DimY::DIM_ID], ids[DimZ::DIM_ID]]
+        // shared memory is shared within a block and so no block_id.
+        [thread_id::<DimX>(), thread_id::<DimY>(), thread_id::<DimZ>()]
     }
 
     #[inline]

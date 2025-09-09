@@ -7,10 +7,11 @@ pub trait DimType {
     const MLIR_DIM: &str;
 }
 
-enum DimTypeID {
+pub(crate) enum DimTypeID {
     X = 0,
     Y = 1,
     Z = 2,
+    Max = 3,
 }
 
 impl DimType for DimX {
@@ -59,19 +60,6 @@ def_dim_fn!(grid_dim, _grid_dim, grid_dim, #[gpu_codegen::ret_sync_data(1000)]);
 #[inline(always)]
 pub const fn dim<D: DimType>() -> usize {
     block_dim::<D>() * grid_dim::<D>()
-}
-
-#[gpu_codegen::device]
-#[inline(always)]
-pub fn block_thread_ids() -> [usize; 6] {
-    [
-        thread_id::<DimX>(),
-        thread_id::<DimY>(),
-        thread_id::<DimZ>(),
-        block_id::<DimX>(),
-        block_id::<DimY>(),
-        block_id::<DimZ>(),
-    ]
 }
 
 #[derive(Clone, Copy)]

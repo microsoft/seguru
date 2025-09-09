@@ -11,10 +11,9 @@ pub fn alloc_shared(a: &[u8], _a_window: usize, b: &mut [u8], b_window: usize, f
     let mut salloc = salloc;
     let mut dy_shared = salloc.alloc::<f32>(32);
     let mut shared = gpu::GpuShared::<[u8; 10]>::zero();
-    let chunk_dy_shared = dy_shared.chunk_mut(1, gpu::GpuSharedChunkIdx::new());
-    let chunk_shared = shared.chunk_mut(1, gpu::GpuSharedChunkIdx::new());
-    let c = chunk_shared;
-    c[0] = a[gpu::thread_id::<gpu::DimX>()];
+    let mut chunk_dy_shared = dy_shared.chunk_mut(gpu::MapLinear::new(1));
+    let mut chunk_shared = shared.chunk_mut(gpu::MapLinear::new(1));
+    chunk_shared[0] = a[gpu::thread_id::<gpu::DimX>()];
     chunk_dy_shared[0] = 1.1;
     gpu::sync_threads();
 

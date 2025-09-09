@@ -144,14 +144,15 @@ impl<'ctx, N: GpuCtxSpace> GpuCtxHandle<N> {
     /// It checks the error code from CUDA API calls.
     /// GpuCtxToken guarantees that only one context is created per context id N.
     pub fn new<'gpu>(
-        c: GpuCtxToken<'gpu, N>,
+        ctx_token: GpuCtxToken<'gpu, N>,
         dev_id: u32,
         flags: CUctx_flags,
     ) -> (Self, GpuCtxToken<'gpu, Succ<N>>) {
         let mut err;
 
         let mut dev: CUdevice;
-        // Safety: This is safe since we check the return value and GpuToken is valid.
+        // Safety: It is safe to run since we provided correct CUdevice type
+        // and GpuToken is valid indicating that CUDA is initialized.
         unsafe {
             dev = core::mem::zeroed();
             err = cuDeviceGet(&mut dev as *mut _ as _, dev_id as _);
@@ -163,8 +164,8 @@ impl<'ctx, N: GpuCtxSpace> GpuCtxHandle<N> {
             CudaError::Err(err)
         );
 
-        // Safety: This is safe since we check the return value and GpuToken is valid.
         let mut ctx: CUcontext;
+        // Safety: It is safe since we provide valid CUcontext pointer and dev is valid.
         unsafe {
             ctx = core::mem::zeroed();
             err = cuCtxCreate_v2(&mut ctx as *mut _ as _, flags as _, dev);
@@ -178,7 +179,7 @@ impl<'ctx, N: GpuCtxSpace> GpuCtxHandle<N> {
         );
 
         let mut dev_prop = crate::params::CU_DEV_PROP;
-        // Safety: This is safe since we check the return value and GpuToken is valid.
+        // Safety: It is safe since dev_prop is valid and dev is valid.
         unsafe {
             cuDeviceGetProperties(&mut dev_prop, dev_id as _);
         }
@@ -189,7 +190,7 @@ impl<'ctx, N: GpuCtxSpace> GpuCtxHandle<N> {
                 inner: GpuCtxHandleInner { ctx, dev_prop, _flags: flags, _dev: dev },
                 _marker: PhantomData,
             },
-            GpuCtxToken { gpu: c.gpu, token: GpuCtxIdToken { _marker: PhantomData } },
+            GpuCtxToken { gpu: ctx_token.gpu, token: GpuCtxIdToken { _marker: PhantomData } },
         )
     }
 

@@ -66,7 +66,7 @@ const MAX_SHARED_MEM_PER_BLOCK: i32 = 163 * 1024;
 /// ### Checking Validity
 /// - Compile-time checks are enforced via the `SafeGpuConfig` trait.
 /// - Runtime checks perform a HW-level check using the `runtime_check` method in `SafeGpuConfig`.
-/// - Share memory size is only loosely checked at compile-time.
+/// - Shared memory size is loosely checked at compile-time.
 /// - TODO: Add bound in kernel function signature to enforce static + dynamic size < sharedMemPerBlock at compile-time.
 pub const CU_DEV_PROP: CUdevprop = CUdevprop {
     maxThreadsPerBlock: MAX_THREAD_PER_BLOCK,
@@ -205,8 +205,8 @@ macro_rules! assert_valid_block_size {
 /// ## Compile-Time Checks
 ///
 /// Ensures that all static values comply with the hardware limits defined in [`CU_DEV_PROP`].
-/// If kernel execution uses a types implementing this GPUConfig manually, or created via
-/// `gpu_config!`, will automatically perform these checks.
+/// If kernel execution uses a type implementing this GPUConfig manually, or created via
+/// `gpu_config!`, Rust compiler will automatically perform these checks.
 ///
 /// ### Example
 ///

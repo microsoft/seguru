@@ -26,7 +26,7 @@ pub mod sync;
 pub use chunk::GlobalThreadChunk;
 pub use chunk_impl::{Map2D, MapLinear, MapLinearWithDim, chunk_mut};
 #[cfg(not(feature = "codegen_tests"))]
-pub use cuda_bindings::GPUConfig;
+pub use cuda_bindings::SafeGpuConfig;
 pub use device_intrinsic::GPUDeviceFloatIntrinsics;
 #[cfg(not(feature = "codegen_tests"))]
 pub use dim::assume_dim_with_config;

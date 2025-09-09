@@ -1,14 +1,24 @@
+/// The use of Gpu context is guarded by GpuToken, GpuCtxIdToken, GpuCtxActiveToken.
+/// This module exposes 4 unsafe functions:
+/// - `GpuToken::new()`
+/// - `GpuCtxCreateAndUseToken::new()`
+/// - `GpuCtxGuard::launch_kernel()`
+/// - `GpuCtxGuard::launch_coop_kernel()`
+///
+/// Those functions should not be used directly.
+/// Instead, use the safe wrappers in `gpu_host` crate.
+/// and use `gpu_macros::host` to generate host code.
 use alloc::boxed::Box;
 use alloc::vec;
-/// The use of Gpu context is guarded by GpuToken, GpuCtxIdToken, GpuCtxActiveToken.
 use alloc::vec::Vec;
 use core::marker::PhantomData;
+use core::mem::MaybeUninit;
 
 use typed_arena::Arena;
 
 use super::unsafe_bindings::*;
 use super::{CUDA_SUCCESS, CudaError};
-use crate::{AsHostKernelParams, GPUConfig, GPUConfigMethods};
+use crate::{AsHostKernelParams, SafeGpuConfig};
 
 #[cfg(feature = "gpu")]
 macro_rules! eprintln {
@@ -106,6 +116,7 @@ impl<N: GpuCtxSpace> core::ops::Deref for GpuCtxHandle<N> {
 
 pub struct GpuCtxHandleInner {
     ctx: CUcontext,
+    dev_prop: CUdevprop, // TODO: Put it to dev-specific struct.
     _flags: CUctx_flags, // TODO: This is not used yet, but we may delete it later.
     _dev: CUdevice,      // TODO: This is not used yet, but we may delete it later.
 }
@@ -143,39 +154,56 @@ impl<'ctx, N: GpuCtxSpace> GpuCtxHandle<N> {
     /// It checks the error code from CUDA API calls.
     /// GpuCtxToken guarantees that only one context is created per context id N.
     pub fn new<'gpu>(
-        c: GpuCtxToken<'gpu, N>,
+        ctx_token: GpuCtxToken<'gpu, N>,
         dev_id: u32,
         flags: CUctx_flags,
     ) -> (Self, GpuCtxToken<'gpu, Succ<N>>) {
-        // # Safety:
-        // This function is safe if no more than one context is created for current cpu thread.
-        // It requires GpuToken to be initialized first.
-        // and it checks the error code from CUDA API calls.
-        unsafe {
-            let mut ctx: CUcontext = core::mem::zeroed();
-            let mut dev: CUdevice = core::mem::zeroed();
-            let err = cuDeviceGet(&mut dev as *mut _ as _, dev_id as _);
-            if err != CUDA_SUCCESS {
-                panic!("Failed to get device ({}): {}", dev_id, CudaError::Err(err));
-            }
-            let err = cuCtxCreate_v2(&mut ctx as *mut _ as _, flags as _, dev);
-            if err != CUDA_SUCCESS {
-                panic!(
-                    "Failed to create context ({}, {:?}): {}",
-                    dev_id,
-                    flags,
-                    CudaError::Err(err)
-                );
-            }
-            (
-                GpuCtxHandle::<N> {
-                    arena: Arena::new(),
-                    inner: GpuCtxHandleInner { ctx, _flags: flags, _dev: dev },
-                    _marker: PhantomData,
-                },
-                GpuCtxToken { gpu: c.gpu, token: GpuCtxIdToken { _marker: PhantomData } },
-            )
-        }
+        let mut err;
+
+        // Safety: It is safe to run since we provided correct CUdevice type
+        // and GpuToken is valid indicating that CUDA is initialized.
+        // We check the error code to ensure that the dev_ptr is initialized.
+        let mut dev_uninit = MaybeUninit::<CUdevice>::uninit();
+        let dev = unsafe {
+            err = cuDeviceGet(dev_uninit.as_mut_ptr(), dev_id as _);
+            assert!(
+                err == CUDA_SUCCESS,
+                "Failed to get device({}): error {}",
+                dev_id,
+                CudaError::Err(err)
+            );
+            dev_uninit.assume_init()
+        };
+
+        let mut ctx_uninit = MaybeUninit::<CUcontext>::uninit();
+        // Safety: It is safe since we provide valid CUcontext pointer and dev is valid.
+        let ctx = unsafe {
+            err = cuCtxCreate_v2(ctx_uninit.as_mut_ptr(), flags as _, dev);
+            assert!(
+                err == CUDA_SUCCESS,
+                "Failed to create context ({}, {:?}): error {}",
+                dev_id,
+                flags,
+                CudaError::Err(err)
+            );
+            ctx_uninit.assume_init()
+        };
+
+        let mut dev_prop_uninit = MaybeUninit::<CUdevprop>::uninit();
+        // Safety: It is safe since dev_prop is valid and dev is valid.
+        let dev_prop = unsafe {
+            cuDeviceGetProperties(dev_prop_uninit.as_mut_ptr(), dev_id as _);
+            assert!(err == CUDA_SUCCESS, "Failed to get device({}) properties", dev_id);
+            dev_prop_uninit.assume_init()
+        };
+        (
+            GpuCtxHandle::<N> {
+                arena: Arena::new(),
+                inner: GpuCtxHandleInner { ctx, dev_prop, _flags: flags, _dev: dev },
+                _marker: PhantomData,
+            },
+            GpuCtxToken { gpu: ctx_token.gpu, token: GpuCtxIdToken { _marker: PhantomData } },
+        )
     }
 
     #[allow(private_bounds)]
@@ -211,10 +239,14 @@ impl Drop for GpuCtxHandleInner {
 impl<'ctx, 'a, N: GpuCtxSpace> Drop for GpuCtxGuard<'ctx, 'a, N> {
     fn drop(&mut self) {
         let ret;
+        let mut ctx_uninit = MaybeUninit::<CUcontext>::uninit();
+        // Safety: This is safe since we provide valid CUcontext pointer.
         unsafe {
-            let mut ctx: CUcontext = core::mem::zeroed();
-            ret = cuCtxPopCurrent_v2(&mut ctx);
+            ret = cuCtxPopCurrent_v2(ctx_uninit.as_mut_ptr());
         }
+        // We do not want to panic in drop since it may cause double panic.
+        // For example, when the context is poisoned by kernel launch failure,
+        // the drop of GpuCtxHandleInner will panic, and if we panic here again
         if ret != CUDA_SUCCESS {
             // do not use panic since it will cause a double panic.
             eprintln!("Failed to pop GPU_CTX: {}", CudaError::Err(ret));
@@ -247,6 +279,7 @@ impl<N: GpuCtxSpace> Drop for GpuModule<N> {
 /// A Cuda function can only be used in the context creating the module.
 pub struct GpuFunction<'ctx, N: GpuCtxSpace> {
     func: CUfunction,
+    max_dyn_shared_size: i32,
     _marker: PhantomData<&'ctx N>,
 }
 
@@ -273,23 +306,40 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
         func_name: &str,
     ) -> Result<GpuFunction<'ctx, N>, CudaError> {
         let func_name_cstr = alloc::ffi::CString::new(func_name).expect("Failed to create CString");
-        let mut f: CUfunction;
         let ret;
-        unsafe {
-            f = core::mem::zeroed();
-            ret = cuModuleGetFunction(&mut f as *mut _ as _, m.module, func_name_cstr.as_ptr());
-        }
-        if ret != CUDA_SUCCESS {
-            return Err(CudaError::Err(ret));
-        }
-        Ok(GpuFunction { func: f, _marker: PhantomData })
+        let mut func_uninit = MaybeUninit::<CUfunction>::uninit();
+
+        // Safety: it is safe since m.module is valid and error is checked before using result.
+        let func = unsafe {
+            ret = cuModuleGetFunction(func_uninit.as_mut_ptr(), m.module, func_name_cstr.as_ptr());
+            if ret != CUDA_SUCCESS {
+                return Err(CudaError::Err(ret));
+            }
+            func_uninit.assume_init()
+        };
+
+        let mut max_dyn_shared_size_uninit = MaybeUninit::uninit();
+
+        // Safety: it is safe since func is valid and error is checked before using result.
+        let max_dyn_shared_size = unsafe {
+            let ret = cuFuncGetAttribute(
+                max_dyn_shared_size_uninit.as_mut_ptr(),
+                CUfunction_attribute::CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+                func,
+            );
+            if ret != CUDA_SUCCESS {
+                return Err(CudaError::Err(ret));
+            }
+            max_dyn_shared_size_uninit.assume_init()
+        };
+        Ok(GpuFunction { func, max_dyn_shared_size, _marker: PhantomData })
     }
 
     /// # Safety
     /// This is safe if the argument types match the kernel's expected types.
     /// To make it safe, use the gpu_macros::host to generate dummy api checking code.
     #[allow(clippy::too_many_arguments)]
-    pub unsafe fn launch_coop_kernel<C: GPUConfig>(
+    pub unsafe fn launch_coop_kernel<C: SafeGpuConfig>(
         &self,
         m: &GpuModule<N>,
         func_name: &str,
@@ -307,7 +357,7 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
     /// This is safe if the argument types match the kernel's expected types.
     /// To make it safe, use the gpu_macros::host to generate dummy api checking code.
     #[allow(clippy::too_many_arguments)]
-    pub unsafe fn launch_kernel<C: GPUConfig>(
+    pub unsafe fn launch_kernel<C: SafeGpuConfig>(
         &self,
         m: &GpuModule<N>,
         func_name: &str,
@@ -323,7 +373,7 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
     /// # Safety
     /// This is safe if the argument types match the kernel's expected types.
     /// To make it safe, use the gpu_macros::host to generate dummy api checking code.
-    pub unsafe fn launch_coop_fn<C: GPUConfig>(
+    unsafe fn launch_coop_fn<C: SafeGpuConfig>(
         &self,
         f: &GpuFunction<'ctx, N>,
         config: C,
@@ -331,6 +381,7 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
         stream: Option<&CudaStream>,
         is_async: bool,
     ) -> Result<(), CudaError> {
+        config.runtime_check(self.dev_prop, f.max_dyn_shared_size);
         let mut kernel_data = vec![];
 
         host_args.iter().for_each(|arg| {
@@ -374,7 +425,7 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
     /// # Safety
     /// This is safe if the argument types match the kernel's expected types.
     /// To make it safe, use the gpu_macros::host to generate dummy api checking code.
-    pub unsafe fn launch_fn<C: GPUConfig>(
+    unsafe fn launch_fn<C: SafeGpuConfig>(
         &self,
         f: &GpuFunction<'ctx, N>,
         config: C,
@@ -382,6 +433,7 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
         stream: Option<&CudaStream>,
         is_async: bool,
     ) -> Result<(), CudaError> {
+        config.runtime_check(self.dev_prop, f.max_dyn_shared_size);
         let mut kernel_data = vec![];
 
         host_args.iter().for_each(|arg| {
@@ -419,14 +471,15 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
     }
 
     pub fn new_module(&self, bin: *const u8) -> Result<&mut GpuModule<N>, CudaError> {
-        unsafe {
-            let mut m: CUmodule = core::mem::zeroed();
-            let ret = cuModuleLoadData(&mut m as *mut _ as _, bin as _);
+        let mut module_uninit = MaybeUninit::<CUmodule>::uninit();
+        let module = unsafe {
+            let ret = cuModuleLoadData(module_uninit.as_mut_ptr(), bin as _);
             if ret != CUDA_SUCCESS {
                 return Err(CudaError::Err(ret));
             }
-            let m = GpuModule { module: m, _marker: PhantomData };
-            Ok(self.ctx.alloc_typed(m))
-        }
+            module_uninit.assume_init()
+        };
+        let m = GpuModule { module, _marker: PhantomData };
+        Ok(self.ctx.alloc_typed(m))
     }
 }

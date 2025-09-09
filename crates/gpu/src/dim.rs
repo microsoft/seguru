@@ -155,14 +155,14 @@ impl GpuSharedChunkIdx {
 #[inline(always)]
 #[gpu_codegen::device]
 #[cfg(not(feature = "codegen_tests"))]
-pub unsafe fn assume_dim_with_config<Config: crate::GPUConfig>() {
+pub unsafe fn assume_dim_with_config<Config: crate::SafeGpuConfig>() {
     use core::intrinsics::assume;
     unsafe {
-        assume(Config::GRID_DIM_X == 0 || Config::GRID_DIM_X as usize == grid_dim::<DimX>());
-        assume(Config::GRID_DIM_Y == 0 || Config::GRID_DIM_Y as usize == grid_dim::<DimY>());
-        assume(Config::GRID_DIM_Z == 0 || Config::GRID_DIM_Z as usize == grid_dim::<DimZ>());
-        assume(Config::BLOCK_DIM_X == 0 || Config::BLOCK_DIM_X as usize == block_dim::<DimX>());
-        assume(Config::BLOCK_DIM_Y == 0 || Config::BLOCK_DIM_Y as usize == block_dim::<DimY>());
-        assume(Config::BLOCK_DIM_Z == 0 || Config::BLOCK_DIM_Z as usize == block_dim::<DimZ>());
+        assume(Config::GDIM_X == 0 || Config::GDIM_X as usize == grid_dim::<DimX>());
+        assume(Config::GDIM_Y == 0 || Config::GDIM_Y as usize == grid_dim::<DimY>());
+        assume(Config::GDIM_Z == 0 || Config::GDIM_Z as usize == grid_dim::<DimZ>());
+        assume(Config::BDIM_X == 0 || Config::BDIM_X as usize == block_dim::<DimX>());
+        assume(Config::BDIM_Y == 0 || Config::BDIM_Y as usize == block_dim::<DimY>());
+        assume(Config::BDIM_Z == 0 || Config::BDIM_Z as usize == block_dim::<DimZ>());
     }
 }

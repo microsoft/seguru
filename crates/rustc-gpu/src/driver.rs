@@ -247,6 +247,38 @@ impl Callbacks for GpuOrCpuRustCallback {
             REGISTERED_TOOLS.lock().unwrap().replace(providers.registered_tools);
 
             providers.queries.registered_tools = gpu_register_tool;
+            providers.queries.eval_to_const_value_raw = |tcx, id| {
+                use rustc_middle::mir::ConstValue;
+                use rustc_middle::mir::interpret::Scalar;
+                use rustc_middle::ty::ScalarInt;
+                const GPU_PARAM_SYM: &str = "gpu_params::";
+                let mut ret =
+                    rustc_const_eval::const_eval::eval_to_const_value_raw_provider(tcx, id);
+                let def_id = id.value.instance.def_id();
+                if let Some(sym) = tcx.all_diagnostic_items(()).id_to_name.get(&def_id) {
+                    let sym_name = sym.to_string();
+                    if sym_name.starts_with(GPU_PARAM_SYM) {
+                        let env_var_name =
+                            tcx.arena.alloc_str(sym_name.strip_prefix(GPU_PARAM_SYM).unwrap());
+                        let Ok(ConstValue::Scalar(Scalar::Int(scalar_int))) = &mut ret else {
+                            panic!("only support scalar(int) const for now");
+                        };
+                        if let Ok(valstr) = tcx.env_var(env_var_name) {
+                            // Warn user that we are overriding the some gpu_params.
+                            tcx.sess.dcx().span_note(tcx.def_span(def_id), format!("Overriding const {sym_name} with env var {env_var_name} to {valstr}"));
+                            valstr
+                                .parse::<u128>()
+                                .map(|v| {
+                                    *scalar_int = ScalarInt::try_from_uint(v, scalar_int.size())
+                                        .expect("Provided value too large");
+                                })
+                                .expect("failed to parse env var to integer");
+                        }
+                    }
+                }
+
+                ret
+            };
         });
 
         config.opts.cg.extra_filename = format!("{}{GPU_SUFFIX}", config.opts.cg.extra_filename);

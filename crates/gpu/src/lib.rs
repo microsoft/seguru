@@ -18,6 +18,8 @@ mod chunk_impl;
 mod chunk_scope;
 mod device_intrinsic;
 mod dim;
+pub(crate) mod global;
+mod host_dev;
 pub mod iter;
 mod print;
 mod shared;
@@ -33,6 +35,8 @@ pub use dim::assume_dim_with_config;
 pub use dim::{
     DimType, DimX, DimY, DimZ, block_dim, block_id, dim, global_id, grid_dim, thread_id,
 };
+pub use global::GpuGlobal;
+pub use host_dev::HostToDev;
 pub use print::{PushPrintfArg, printf};
 pub use shared::{DynamicSharedAlloc, GpuShared};
 pub use sync::sync_threads;

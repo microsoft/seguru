@@ -11,7 +11,7 @@ pub fn f(x: &mut u8) {
     *x = 10;
 }
 
-#[gpu_macros::kernel_v2]
+#[gpu_codegen::kernel]
 #[no_mangle]
 pub fn test_mut_arg(a: &[u8], _a_window: usize, b: &mut [u8], b_window: usize) {
     let mut tmp = 0; // valid

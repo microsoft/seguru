@@ -1,5 +1,7 @@
 //! Synchronization and atomic operations for GPU programming.
 
+use crate::GpuGlobal;
+
 /// Synchronization within a thread block.
 #[inline(never)]
 #[gpu_codegen::device]
@@ -51,8 +53,8 @@ impl<'a, T: ?Sized> Atomic<'a, T> {
     #[inline(never)]
     #[gpu_codegen::device]
     #[rustc_diagnostic_item = "gpu::sync::Atomic::new"]
-    pub fn new(data: &'a mut T) -> Atomic<'a, T> {
-        Self { data }
+    pub fn new(data: GpuGlobal<'a, T>) -> Atomic<'a, T> {
+        Self { data: data.data }
     }
 
     #[inline(always)]

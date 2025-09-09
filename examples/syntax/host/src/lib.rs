@@ -16,6 +16,7 @@ pub fn run_host_arith<'ctx>(
     let h_c = (10..(10 + len as u32)).collect::<Vec<u32>>();
     let mut h_f = vec![0.0f32; len];
     let h_g = (1..(1 + len)).map(|x| x as f32 * 1.1).collect::<Vec<f32>>();
+    let mut h_h = 0.0f32;
 
     let d_a = ctx.new_gmem_with_len::<u32>(len, &h_a)?;
     let d_b = ctx.new_gmem_with_len::<u32>(len, &h_b)?;
@@ -23,19 +24,23 @@ pub fn run_host_arith<'ctx>(
     let d_f = ctx.new_gmem_with_len::<f32>(len, &h_f)?;
     let d_g = ctx.new_gmem_with_len::<f32>(len, &h_g)?;
     let d_b_c = gpu::GlobalThreadChunk::new_from_host(d_b, gpu::Map2D::new(w));
+    let d_h = ctx.new_gmem(h_h)?;
 
     // Now do the kernel
-    let config = gpu_host::gpu_config!(1, 1, 1, 1, 4, 1, 0);
-    kernel_arith(config, ctx, m, d_a, d_b_c, d_c, d_f, w, d_g).expect("Kernel execution failed");
+    const BDIM_Y: u32 = 4;
+    let config = gpu_host::gpu_config!(1, 1, 1, 1, @const BDIM_Y, 1, 0);
+    kernel_arith(config, ctx, m, d_a, d_b_c, d_c, d_f, w, d_g, d_h)
+        .expect("Kernel execution failed");
     d_b.copy_to_host(&mut h_b, len, ctx)?;
     d_f.copy_to_host(&mut h_f, len, ctx)?;
+    d_h.copy_to_host(&mut h_h, ctx)?;
 
-    for (i, bi) in h_b.iter().enumerate().take(4) {
+    for (i, bi) in h_b.iter().enumerate().take(BDIM_Y as _) {
         println!("b[{}] = {}", i, bi);
         assert!(*bi == 42 + i as u32 * 2);
     }
 
-    for (i, fi) in h_f.iter().enumerate().take(4) {
+    for (i, fi) in h_f.iter().enumerate().take(BDIM_Y as _) {
         println!("f[{}] = {}", i, fi);
         match i {
             0 => assert!(*fi == 13.391208),
@@ -45,5 +50,10 @@ pub fn run_host_arith<'ctx>(
             _ => unreachable!(),
         }
     }
+    let mut sum = 0.0f32;
+    for i in 0..BDIM_Y {
+        sum += h_g[i as usize];
+    }
+    assert!(h_h == sum, "{} != {}: {:?}", h_h, sum, h_g);
     Ok(())
 }

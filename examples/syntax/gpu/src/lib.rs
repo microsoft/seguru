@@ -18,6 +18,7 @@ pub fn kernel_arith<const N: u32>(
     f: &mut [f32],
     f_width: usize,
     g: &[f32],
+    h: &mut f32, // sum of g
 ) {
     let thread_id = gpu::thread_id::<gpu::DimY>();
     let a_local = a[thread_id];
@@ -56,10 +57,9 @@ pub fn kernel_arith<const N: u32>(
         f[0] += 1.5;
     }
 
-    // This is not necessary since it is already local
-    // Just to test atomic_and is correct.
-    let atomic_b_local = gpu::sync::Atomic::new(b_local);
-    atomic_b_local.atomic_andi(u32::MAX);
+    // Use atomic to update h
+    let atomic_h = gpu::sync::Atomic::new(h);
+    atomic_h.atomic_addf(g[thread_id]);
     /*let warp = gpu::cg::ThreadWarpTile::<32, 1>();
     warp.run_on_lane_0::<f32>(f, |v| {
         *v += 1.5;

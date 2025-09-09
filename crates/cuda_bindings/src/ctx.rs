@@ -3,6 +3,7 @@ use alloc::vec;
 /// The use of Gpu context is guarded by GpuToken, GpuCtxIdToken, GpuCtxActiveToken.
 use alloc::vec::Vec;
 use core::marker::PhantomData;
+use core::mem::MaybeUninit;
 
 use typed_arena::Arena;
 
@@ -150,40 +151,42 @@ impl<'ctx, N: GpuCtxSpace> GpuCtxHandle<N> {
     ) -> (Self, GpuCtxToken<'gpu, Succ<N>>) {
         let mut err;
 
-        let mut dev: CUdevice;
         // Safety: It is safe to run since we provided correct CUdevice type
         // and GpuToken is valid indicating that CUDA is initialized.
-        unsafe {
-            dev = core::mem::zeroed();
-            err = cuDeviceGet(&mut dev as *mut _ as _, dev_id as _);
-        }
-        assert!(
-            err == CUDA_SUCCESS,
-            "Failed to get device({}): error {}",
-            dev_id,
-            CudaError::Err(err)
-        );
+        // We check the error code to ensure that the dev_ptr is initialized.
+        let mut dev_uninit = MaybeUninit::<CUdevice>::uninit();
+        let dev = unsafe {
+            err = cuDeviceGet(dev_uninit.as_mut_ptr(), dev_id as _);
+            assert!(
+                err == CUDA_SUCCESS,
+                "Failed to get device({}): error {}",
+                dev_id,
+                CudaError::Err(err)
+            );
+            dev_uninit.assume_init()
+        };
 
-        let mut ctx: CUcontext;
+        let mut ctx_uninit = MaybeUninit::<CUcontext>::uninit();
         // Safety: It is safe since we provide valid CUcontext pointer and dev is valid.
-        unsafe {
-            ctx = core::mem::zeroed();
-            err = cuCtxCreate_v2(&mut ctx as *mut _ as _, flags as _, dev);
-        }
-        assert!(
-            err == CUDA_SUCCESS,
-            "Failed to create context ({}, {:?}): error {}",
-            dev_id,
-            flags,
-            CudaError::Err(err)
-        );
+        let ctx = unsafe {
+            err = cuCtxCreate_v2(ctx_uninit.as_mut_ptr(), flags as _, dev);
+            assert!(
+                err == CUDA_SUCCESS,
+                "Failed to create context ({}, {:?}): error {}",
+                dev_id,
+                flags,
+                CudaError::Err(err)
+            );
+            ctx_uninit.assume_init()
+        };
 
-        let mut dev_prop = crate::params::CU_DEV_PROP;
+        let mut dev_prop_uninit = MaybeUninit::<CUdevprop>::uninit();
         // Safety: It is safe since dev_prop is valid and dev is valid.
-        unsafe {
-            cuDeviceGetProperties(&mut dev_prop, dev_id as _);
-        }
-        assert!(err == CUDA_SUCCESS, "Failed to get device({}) properties", dev_id);
+        let dev_prop = unsafe {
+            cuDeviceGetProperties(dev_prop_uninit.as_mut_ptr(), dev_id as _);
+            assert!(err == CUDA_SUCCESS, "Failed to get device({}) properties", dev_id);
+            dev_prop_uninit.assume_init()
+        };
         (
             GpuCtxHandle::<N> {
                 arena: Arena::new(),
@@ -227,10 +230,14 @@ impl Drop for GpuCtxHandleInner {
 impl<'ctx, 'a, N: GpuCtxSpace> Drop for GpuCtxGuard<'ctx, 'a, N> {
     fn drop(&mut self) {
         let ret;
+        let mut ctx_uninit = MaybeUninit::<CUcontext>::uninit();
+        // Safety: This is safe since we provide valid CUcontext pointer.
         unsafe {
-            let mut ctx: CUcontext = core::mem::zeroed();
-            ret = cuCtxPopCurrent_v2(&mut ctx);
+            ret = cuCtxPopCurrent_v2(ctx_uninit.as_mut_ptr());
         }
+        // We do not want to panic in drop since it may cause double panic.
+        // For example, when the context is poisoned by kernel launch failure,
+        // the drop of GpuCtxHandleInner will panic, and if we panic here again
         if ret != CUDA_SUCCESS {
             // do not use panic since it will cause a double panic.
             eprintln!("Failed to pop GPU_CTX: {}", CudaError::Err(ret));
@@ -290,24 +297,33 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
         func_name: &str,
     ) -> Result<GpuFunction<'ctx, N>, CudaError> {
         let func_name_cstr = alloc::ffi::CString::new(func_name).expect("Failed to create CString");
-        let mut f: CUfunction;
         let ret;
-        unsafe {
-            f = core::mem::zeroed();
-            ret = cuModuleGetFunction(&mut f as *mut _ as _, m.module, func_name_cstr.as_ptr());
-        }
-        if ret != CUDA_SUCCESS {
-            return Err(CudaError::Err(ret));
-        }
-        let mut max_dyn_shared_size: i32 = crate::params::CU_DEV_PROP.sharedMemPerBlock;
-        unsafe {
-            cuFuncGetAttribute(
-                &mut max_dyn_shared_size,
+        let mut func_uninit = MaybeUninit::<CUfunction>::uninit();
+
+        // Safety: it is safe since m.module is valid and error is checked before using result.
+        let func = unsafe {
+            ret = cuModuleGetFunction(func_uninit.as_mut_ptr(), m.module, func_name_cstr.as_ptr());
+            if ret != CUDA_SUCCESS {
+                return Err(CudaError::Err(ret));
+            }
+            func_uninit.assume_init()
+        };
+
+        let mut max_dyn_shared_size_uninit = MaybeUninit::uninit();
+
+        // Safety: it is safe since func is valid and error is checked before using result.
+        let max_dyn_shared_size = unsafe {
+            let ret = cuFuncGetAttribute(
+                max_dyn_shared_size_uninit.as_mut_ptr(),
                 CUfunction_attribute::CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
-                f,
+                func,
             );
-        }
-        Ok(GpuFunction { func: f, max_dyn_shared_size, _marker: PhantomData })
+            if ret != CUDA_SUCCESS {
+                return Err(CudaError::Err(ret));
+            }
+            max_dyn_shared_size_uninit.assume_init()
+        };
+        Ok(GpuFunction { func, max_dyn_shared_size, _marker: PhantomData })
     }
 
     /// # Safety
@@ -446,14 +462,15 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
     }
 
     pub fn new_module(&self, bin: *const u8) -> Result<&mut GpuModule<N>, CudaError> {
-        unsafe {
-            let mut m: CUmodule = core::mem::zeroed();
-            let ret = cuModuleLoadData(&mut m as *mut _ as _, bin as _);
+        let mut module_uninit = MaybeUninit::<CUmodule>::uninit();
+        let module = unsafe {
+            let ret = cuModuleLoadData(module_uninit.as_mut_ptr(), bin as _);
             if ret != CUDA_SUCCESS {
                 return Err(CudaError::Err(ret));
             }
-            let m = GpuModule { module: m, _marker: PhantomData };
-            Ok(self.ctx.alloc_typed(m))
-        }
+            module_uninit.assume_init()
+        };
+        let m = GpuModule { module, _marker: PhantomData };
+        Ok(self.ctx.alloc_typed(m))
     }
 }

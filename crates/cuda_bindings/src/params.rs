@@ -112,7 +112,7 @@ pub const CU_DEV_PROP: CUdevprop = CUdevprop {
 /// ```
 ///
 /// Refer to `gpu_config!` macro documentation for details.
-pub trait GPUConfig {
+pub trait GPUConfig: 'static {
     const BLOCK_DIM_X: u32 = 1;
     const BLOCK_DIM_Y: u32 = 1;
     const BLOCK_DIM_Z: u32 = 1;
@@ -242,7 +242,7 @@ macro_rules! assert_valid_block_size {
 /// The `runtime_check` method verifies:
 /// - `cu_dev_prop`: Actual device properties queried from the GPU.
 /// - `max_dynamic_size`: Maximum dynamic shared memory size supported by the kernel.
-pub trait SafeGpuConfig: GPUConfig {
+pub trait SafeGpuConfig: GPUConfig + 'static {
     // Ensure that the block dim is valid.
     // This is a compile-time check.
     const CONFIG_CHECK: () = {

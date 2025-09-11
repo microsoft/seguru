@@ -13,13 +13,21 @@ use tracing::debug;
 use crate::attr::GpuItem;
 use crate::error::{GpuCodegenError, GpuCodegenResult};
 
-struct MutArgAliasAnalysis;
+// If the function is a kernel entry, we find out all mutable args.
+// Since kernel entry should use GlobalMem for mutable args, we check if
+// mutable args are used for mutation.
+struct ThreadSyncAnalysis {
+    is_kernel_entry: bool,
+}
+
+type Domain = DenseBitSet<Local>;
 
 /// Find all mutable argument locals and propagate their aliases through the forward analysis.
-impl<'tcx> Analysis<'tcx> for MutArgAliasAnalysis {
-    type Domain = DenseBitSet<Local>; // Or Place, if needed
+impl<'tcx> Analysis<'tcx> for ThreadSyncAnalysis {
+    // Track the mutable argument locals and their aliases.
+    type Domain = DenseBitSet<Local>;
     type Direction = rustc_mir_dataflow::Forward;
-    const NAME: &'static str = "MutArgAliasAnalysis";
+    const NAME: &'static str = "ThreadSyncAnalysis";
 
     fn bottom_value(&self, body: &Body<'tcx>) -> Self::Domain {
         DenseBitSet::new_empty(body.local_decls.len())
@@ -27,6 +35,9 @@ impl<'tcx> Analysis<'tcx> for MutArgAliasAnalysis {
 
     fn initialize_start_block(&self, body: &Body<'tcx>, state: &mut Self::Domain) {
         // Add initial mutable argument locals
+        if !self.is_kernel_entry {
+            return;
+        }
         for local in body.args_iter() {
             let local_decl = &body.local_decls[local];
             if local_decl.mutability.is_mut() {
@@ -44,6 +55,9 @@ impl<'tcx> Analysis<'tcx> for MutArgAliasAnalysis {
         stmt: &Statement<'tcx>,
         _location: Location,
     ) {
+        if !self.is_kernel_entry {
+            return;
+        }
         // Propagate aliases through moves/copies
         if let StatementKind::Assign(box (lhs, Rvalue::Ref(_, _, src))) = &stmt.kind {
             if state.contains(src.local) {
@@ -62,30 +76,83 @@ impl<'tcx> Analysis<'tcx> for MutArgAliasAnalysis {
     }
 }
 
-#[derive(Debug)]
-enum SharedState {
-    NeedBlockSync(Location, Vec<Location>), // location where it needs sync_threads
-    BlockSynced,
+/// https://docs.nvidia.com/cuda/parallel-thread-execution/#id674
+/// .cta = block scope
+/// The set of all threads executing in the same CTA as the current thread.
+/// .cluster
+/// The set of all threads executing in the same cluster as the current thread.
+/// .gpu
+/// The set of all threads in the current program executing on the same compute device as the current thread. This also includes other kernel grids invoked by the host program on the same compute device.
+/// .sys
+/// The set of all threads in the current program, including all kernel grids invoked by the host program on all compute devices, and all threads constituting the host program itself.
+#[derive(Debug, Clone, Copy)]
+enum SyncScope {
+    Block,
+    Cluster,
 }
 
-pub(crate) struct MutArgAliasVisitors<'tcx> {
+enum ScopedFun {
+    NewChunk(SyncScope),
+    Sync(SyncScope),
+    NewAtomic(SyncScope),
+}
+
+impl TryFrom<GpuItem> for ScopedFun {
+    type Error = ();
+
+    fn try_from(item: GpuItem) -> Result<Self, Self::Error> {
+        match item {
+            GpuItem::SyncThreads => Ok(ScopedFun::Sync(SyncScope::Block)),
+            GpuItem::DiagnoseOnly(name) => {
+                if name == "gpu::chunk_mut" {
+                    Ok(ScopedFun::NewChunk(SyncScope::Cluster))
+                } else if name == "gpu::shared_chunk_mut" {
+                    Ok(ScopedFun::NewChunk(SyncScope::Block))
+                } else if name == "gpu::sync::Atomic::new" {
+                    Ok(ScopedFun::NewAtomic(SyncScope::Cluster))
+                } else {
+                    Err(())
+                }
+            }
+            _ => Err(()),
+        }
+    }
+}
+
+#[allow(dead_code)]
+struct LocalWithSyncScope {
+    sync_scope: SyncScope,
+    local: Local,
+}
+
+#[derive(Debug)]
+enum SharedState {
+    // .0: scope that needs sync
+    // .1: The location of the write to the chunk, the reason why we need sync
+    // .2: The locations of the reads/writes to shared mem after the write to the chunk
+    NeedSync(SyncScope, Location, Vec<Location>),
+    Synced,
+}
+
+// ThreadSyncDataFlowVistors detects two issues:
+// 1) Mutable argument is used in non-chunking/atomic functions.
+// 2) Missing sync_threads between a write to a shared chunk and other read/write to shared memory.
+pub(crate) struct ThreadSyncDataFlowVistors<'tcx> {
     tcx: rustc_middle::ty::TyCtxt<'tcx>,
     local_decls: &'tcx rustc_index::IndexVec<Local, rustc_middle::mir::LocalDecl<'tcx>>,
-    reads: Vec<(Place<'tcx>, Location)>,
-    writes: Vec<(Place<'tcx>, Location)>,
+    writes: Vec<(Place<'tcx>, Location)>, // This is mostly not needed after represent &mut as GlobalMem, but keep it for now as a defense in depth.
     mem_state: FxHashMap<Local, SharedState>, // mem to its state
-    chunk_map: FxHashMap<Local, SharedOrGlobal>, // Map from chunk local to global/shared local
+    chunk_map: FxHashMap<Local, LocalWithSyncScope>, // Map from chunk local to global/shared local
     local_origin: FxHashMap<Local, Vec<Local>>, // Map from memory local to its original local
 }
 
-impl<'tcx> MutArgAliasVisitors<'tcx> {
+impl<'tcx> ThreadSyncDataFlowVistors<'tcx> {
     pub fn new(
         tcx: rustc_middle::ty::TyCtxt<'tcx>,
         local_decls: &'tcx rustc_index::IndexVec<Local, rustc_middle::mir::LocalDecl<'tcx>>,
     ) -> Self {
         Self {
             tcx,
-            reads: Vec::new(),
             writes: Vec::new(),
             local_decls,
             chunk_map: FxHashMap::default(),
@@ -94,30 +161,33 @@ impl<'tcx> MutArgAliasVisitors<'tcx> {
         }
     }
 }
-type Domain = DenseBitSet<Local>;
-
-#[allow(dead_code)]
-enum SharedOrGlobal {
-    Shared(Local), // is_shared, shared_var
-    Global(Local),
-}
 
 /// Visitor to collect reads/writes of mutable arguments.
 /// It skips the chunk function to allow the trusted GPU memory partition.
-struct ReadWriteVistor<'a, 'tcx> {
+struct ThreadSyncMirVisitor<'a, 'tcx> {
     tcx: rustc_middle::ty::TyCtxt<'tcx>,
     state: &'a Domain,
     local_decls: &'tcx rustc_index::IndexVec<Local, rustc_middle::mir::LocalDecl<'tcx>>,
-    reads: &'a mut Vec<(Place<'tcx>, Location)>,
-    writes: &'a mut Vec<(Place<'tcx>, Location)>,
-    chunk_map: &'a mut FxHashMap<Local, SharedOrGlobal>,
-    mem_state: &'a mut FxHashMap<Local, SharedState>,
-    called_sync_threads: bool,
+    called_sync_threads: Option<SyncScope>,
     inside_fcall: bool,
-    local_origin: &'a mut FxHashMap<Local, Vec<Local>>, // Map from memory local to its original local
+    flow_visitor: &'a mut ThreadSyncDataFlowVistors<'tcx>,
 }
 
-impl<'a, 'tcx> ReadWriteVistor<'a, 'tcx> {
+impl<'a, 'tcx> std::ops::Deref for ThreadSyncMirVisitor<'a, 'tcx> {
+    type Target = ThreadSyncDataFlowVistors<'tcx>;
+
+    fn deref(&self) -> &Self::Target {
+        self.flow_visitor
+    }
+}
+
+impl<'a, 'tcx> std::ops::DerefMut for ThreadSyncMirVisitor<'a, 'tcx> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.flow_visitor
+    }
+}
+
+impl<'a, 'tcx> ThreadSyncMirVisitor<'a, 'tcx> {
     fn is_mut_arg(&self, local: Local) -> bool {
         self.local_decls[local].mutability.is_mut() && !self.is_mut_ref_arg(local)
     }
@@ -136,23 +206,24 @@ impl<'a, 'tcx> ReadWriteVistor<'a, 'tcx> {
 /// ## The analysis logic for sync_threads detection (shared mem):
 /// - Track the origin of a local.
 /// - Track the creation of shared chunk and mapping it to its shared mem origin.
-/// - When the shared chunk is mutated, marked the shared mem origin as NeedBlockSync, the current loc as mut_loc.
-/// - If a place is used and its origin is in NeedBlockSync state, it means
+/// - When the shared chunk is mutated, marked the shared mem origin as NeedSync, the current loc as mut_loc.
+/// - If a place is used and its origin is in NeedSync state, it means
 ///   we need a sync_thread between the mut_loc and the current loc.
-impl<'tcx> Visitor<'tcx> for ReadWriteVistor<'_, 'tcx> {
+impl<'tcx> Visitor<'tcx> for ThreadSyncMirVisitor<'_, 'tcx> {
     fn visit_place(&mut self, place: &Place<'tcx>, ctx: PlaceContext, loc: Location) {
         use rustc_middle::mir::visit::{MutatingUseContext, NonMutatingUseContext};
-        let origins = if let Some(origins) = self.local_origin.get(&place.local) {
+        let flow_visitor = &mut self.flow_visitor;
+        let origins = if let Some(origins) = flow_visitor.local_origin.get(&place.local) {
             origins
         } else {
             &vec![place.local]
         };
 
         for origin in origins {
-            if let Some(SharedState::NeedBlockSync(need_sync_loc, propose_loc)) =
-                self.mem_state.get_mut(origin)
+            if let Some(SharedState::NeedSync(_, mut_loc, unsync_locs)) =
+                flow_visitor.mem_state.get_mut(origin)
             {
-                propose_loc.push(loc);
+                unsync_locs.push(loc);
             }
         }
 
@@ -161,55 +232,58 @@ impl<'tcx> Visitor<'tcx> for ReadWriteVistor<'_, 'tcx> {
                 PlaceContext::MutatingUse(
                     MutatingUseContext::Borrow | MutatingUseContext::RawBorrow,
                 ) => {
-                    // Borrowing a mutable argument is not allowed in GPU code.
-                    // TODO: considering more allowed cases.
-                    debug!("Allowing borrowing mutable argument: {:?} used as {:?}", place, ctx);
+                    // Allow let a = &mut b since a is not used to mutate b yet.
                 }
                 PlaceContext::MutatingUse(_) => {
-                    // If projection is empty, it is assign value (e.g.,
-                    // let x = &b[i];) to the local instead of dereferencing it
-                    // (e.g., *x = 0).
+                    // If projection is empty, it is assign value (e.g., let x =
+                    // &b[i];) to the local instead of dereferencing it (e.g.,
+                    // *x = 0).
                     if !place.projection.is_empty() || self.is_mut_arg(place.local) {
-                        debug!("Disallow use mutable argument: {:?} used as {:?}", place, ctx);
+                        debug!("Disallow mutate mutable argument: {:?} used as {:?}", place, ctx);
                         self.writes.push((*place, loc));
-                    } else {
-                        debug!("Allowing mutable argument: {:?} used as {:?}", place, ctx);
                     }
                 }
                 PlaceContext::NonMutatingUse(
-                    NonMutatingUseContext::Move | NonMutatingUseContext::Copy,
+                    NonMutatingUseContext::RawBorrow
+                    | NonMutatingUseContext::Inspect
+                    | NonMutatingUseContext::FakeBorrow
+                    | NonMutatingUseContext::SharedBorrow,
                 ) => {
+                    // Allow let a = b; or let a = &b; let len = b.len();
+                }
+                PlaceContext::NonMutatingUse(_) => {
                     if !place.projection.is_empty()
                         || self.inside_fcall
                         || self.is_mut_arg(place.local)
                     {
-                        debug!("Disallow use mutable argument: {:?} used as {:?}", place, ctx);
-                        self.reads.push((*place, loc));
-                    } else {
-                        debug!("Checking non-mutating use of mutable: {:?} at {:?}", place, loc);
-                        debug!("Allowing non-mutating use of mutable: {:?} as {:?}", place, ctx);
+                        debug!(
+                            "Disallow use mutable argument via index/function: {:?} used as {:?}",
+                            place, ctx
+                        );
+                        self.writes.push((*place, loc));
                     }
                 }
-                _ => {}
+                PlaceContext::NonUse(_) => {}
             }
         }
         // If the place is a chunked variable, update its shared memory state.
-        // If the operation is a write, mark it as NeedBlockSync.
+        // If the operation is a write, mark it as NeedSync.
         if self.chunk_map.contains_key(&place.local) {
-            if let SharedOrGlobal::Shared(shared_var) = self.chunk_map[&place.local] {
-                if let PlaceContext::MutatingUse(_) = ctx {
-                    let origins = if let Some(origins) = self.local_origin.get(&shared_var) {
+            if let PlaceContext::MutatingUse(_) = ctx {
+                let flow_visitor = &mut self.flow_visitor;
+                let chunk_from = &flow_visitor.chunk_map[&place.local];
+                let origins =
+                    if let Some(origins) = flow_visitor.local_origin.get(&chunk_from.local) {
                         origins
                     } else {
-                        &vec![shared_var]
+                        &vec![chunk_from.local]
                     };
-                    for origin in origins {
-                        debug!(
-                            "Marking shared var {:?} as NeedBlockSync: {:?}, {:?}",
-                            origin, place.local, loc
-                        );
-                        self.mem_state.insert(*origin, SharedState::NeedBlockSync(loc, vec![]));
-                    }
+                for origin in origins {
+                    debug!("Marking var {:?} as NeedSync: {:?}, {:?}", origin, place.local, loc);
+                    let sync_scope = chunk_from.sync_scope;
+                    flow_visitor
+                        .mem_state
+                        .insert(*origin, SharedState::NeedSync(sync_scope, loc, vec![]));
                 }
             }
         }
@@ -238,33 +312,26 @@ impl<'tcx> Visitor<'tcx> for ReadWriteVistor<'_, 'tcx> {
     fn visit_terminator(&mut self, terminator: &Terminator<'tcx>, location: Location) {
         // Visit the terminator to find reads/writes
         self.inside_fcall = true;
-        let mut is_shared_mem = false;
         if let TerminatorKind::Call { func, destination, ref args, fn_span, .. } = &terminator.kind
         {
             if let Some((def_id, generic_args)) = func.const_fn_def() {
                 let attr = crate::attr::GpuAttributes::build(&self.tcx, def_id);
-                // Skip the chunk function to allow the trusted GPU memory partition.
                 let mut is_trusted_chunk_function = false;
-                if attr.gpu_item == Some(GpuItem::SyncThreads) {
-                    self.called_sync_threads = true;
+                let mut sync_scope = None;
+                if let Some(gpu_item) = &attr.gpu_item {
+                    self.called_sync_threads =
+                        ScopedFun::try_from(gpu_item.clone()).ok().and_then(|f| match f {
+                            ScopedFun::Sync(scope) => Some(scope),
+                            ScopedFun::NewChunk(scope) | ScopedFun::NewAtomic(scope) => {
+                                is_trusted_chunk_function = true;
+                                sync_scope = Some(scope);
+                                None
+                            }
+                        });
                 }
-                match &attr.gpu_item {
-                    Some(GpuItem::DiagnoseOnly(name))
-                        if name == "gpu::chunk_mut" || name == "gpu::shared_chunk_mut" =>
-                    {
-                        is_shared_mem = name == "gpu::shared_chunk_mut";
-                        is_trusted_chunk_function = true;
-                    }
-                    Some(
-                        GpuItem::SubsliceMut
-                        | GpuItem::NewChunk
-                        | GpuItem::AtomicRMW
-                        | GpuItem::GetLocalMut2D,
-                    ) => {
-                        is_trusted_chunk_function = true;
-                    }
-                    _ => {}
-                }
+
+                // Skip the chunk function to allow the trusted GPU memory partition.
+                // TODO: checks on !is_trusted_chunk_function is not needed in the future if we represent &'a mut T as GlobalMem<'a, T>, defense in depth for now.
                 if is_trusted_chunk_function {
                     self.visit_span(*fn_span);
                     self.visit_operand(func, location);
@@ -279,12 +346,11 @@ impl<'tcx> Visitor<'tcx> for ReadWriteVistor<'_, 'tcx> {
                     );
                     let global_or_shared_var = args[0].node.place().unwrap().local;
                     let chunked_var = destination.local;
-                    self.chunk_map.insert(
+                    self.flow_visitor.chunk_map.insert(
                         chunked_var,
-                        if is_shared_mem {
-                            SharedOrGlobal::Shared(global_or_shared_var)
-                        } else {
-                            SharedOrGlobal::Global(global_or_shared_var)
+                        LocalWithSyncScope {
+                            sync_scope: sync_scope.unwrap(),
+                            local: global_or_shared_var,
                         },
                     );
                     self.inside_fcall = false;
@@ -297,71 +363,67 @@ impl<'tcx> Visitor<'tcx> for ReadWriteVistor<'_, 'tcx> {
     }
 }
 
-impl<'mir, 'tcx> ResultsVisitor<'mir, 'tcx, MutArgAliasAnalysis> for MutArgAliasVisitors<'tcx> {
+impl<'mir, 'tcx> ResultsVisitor<'mir, 'tcx, ThreadSyncAnalysis>
+    for ThreadSyncDataFlowVistors<'tcx>
+{
     fn visit_after_primary_statement_effect(
         &mut self,
-        _results: &mut Results<'tcx, MutArgAliasAnalysis>,
+        _results: &mut Results<'tcx, ThreadSyncAnalysis>,
         state: &Domain,
         stmt: &'mir Statement<'tcx>,
         location: Location,
     ) {
-        ReadWriteVistor {
+        ThreadSyncMirVisitor {
             tcx: self.tcx,
             local_decls: self.local_decls,
             state,
-            reads: &mut self.reads,
-            writes: &mut self.writes,
-            chunk_map: &mut self.chunk_map,
-            mem_state: &mut self.mem_state,
-            called_sync_threads: false,
+            flow_visitor: self,
+            called_sync_threads: None,
             inside_fcall: false,
-            local_origin: &mut self.local_origin,
         }
         .visit_statement(stmt, location);
     }
 
     fn visit_after_primary_terminator_effect(
         &mut self,
-        _results: &mut Results<'tcx, MutArgAliasAnalysis>,
+        _results: &mut Results<'tcx, ThreadSyncAnalysis>,
         state: &Domain,
         terminator: &'mir Terminator<'tcx>,
         location: Location,
     ) {
-        let mut visitor = ReadWriteVistor {
+        let mut visitor = ThreadSyncMirVisitor {
             tcx: self.tcx,
             local_decls: self.local_decls,
             state,
-            reads: &mut self.reads,
-            writes: &mut self.writes,
-            chunk_map: &mut self.chunk_map,
-            mem_state: &mut self.mem_state,
-            called_sync_threads: false,
+            flow_visitor: self,
+            called_sync_threads: None,
             inside_fcall: false,
-            local_origin: &mut self.local_origin,
         };
         visitor.visit_terminator(terminator, location);
 
-        // If sync_threads is called, all chunk states become BlockSynced.
-        if visitor.called_sync_threads {
+        // If sync_threads is called, all chunk states become Synced.
+        if let Some(sync_scope) = visitor.called_sync_threads {
             for (local, state) in self.mem_state.iter_mut() {
                 debug!("Marking shared var {:?} as synced: {:?}", local, location);
-                *state = SharedState::BlockSynced;
+                if let SharedState::NeedSync(sync_scope, _, _) = state {
+                    *state = SharedState::Synced;
+                }
             }
         }
     }
 }
 
 /// Analyze the body to check the mutable argument locals and their uses.
-/// TODO: check shared memory access.
-pub(crate) fn analyze_access_to_mut<'tcx>(
+pub(crate) fn analyze_shared_access<'tcx>(
     tcx: rustc_middle::ty::TyCtxt<'tcx>,
     body: &'tcx Body<'tcx>,
+    is_kernel_entry: bool,
 ) -> GpuCodegenResult<()> {
-    let analysis = MutArgAliasAnalysis;
+    let analysis = ThreadSyncAnalysis { is_kernel_entry };
     let mut results = analysis.iterate_to_fixpoint(tcx, body, None);
-    let mut result_visitor = MutArgAliasVisitors::new(tcx, &body.local_decls);
+    let mut result_visitor = ThreadSyncDataFlowVistors::new(tcx, &body.local_decls);
     results.visit_with(body, body.basic_blocks.iter_nodes(), &mut result_visitor);
-    for (place, location) in result_visitor.reads.iter().chain(result_visitor.writes.iter()) {
+    for (place, location) in result_visitor.writes.iter() {
         let span = body.source_info(*location).span;
         tcx.sess
             .dcx()
@@ -374,7 +436,7 @@ pub(crate) fn analyze_access_to_mut<'tcx>(
     let mut missing_sync: bool = false;
 
     for (place, state) in result_visitor.mem_state.iter() {
-        if let SharedState::NeedBlockSync(mut_loc, unsynced_loc) = state {
+        if let SharedState::NeedSync(sync_scope, mut_loc, unsynced_loc) = state {
             let mut_span = body.source_info(*mut_loc).span;
             let mut unsynced_spans = FxHashSet::default();
             unsynced_loc.iter().for_each(|loc| {
@@ -396,7 +458,7 @@ pub(crate) fn analyze_access_to_mut<'tcx>(
         }
     }
 
-    if !result_visitor.reads.is_empty() || !result_visitor.writes.is_empty() {
+    if !result_visitor.writes.is_empty() {
         return Err(GpuCodegenError::MisuseMutableArgument);
     }
     if missing_sync {

@@ -632,8 +632,8 @@ pub(crate) fn analyze_gpu_code(
         debug!("Skipping GPU crate checks {:?} {}", def_id, crate_name);
         skip_check = true; // Skip checks for the gpu crate
     }
-    if is_kernel_entry && !skip_check {
-        crate::mir_chunk_analysis::analyze_access_to_mut(tcx, mir)?;
+    if !skip_check {
+        crate::mir_thread_sync_check::analyze_shared_access(tcx, mir, is_kernel_entry)?;
     }
     if !skip_check {
         debug!("analyze_diversed_data {:?}", def_id);

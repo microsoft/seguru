@@ -188,15 +188,12 @@ impl<'tcx> Visitor<'tcx> for ReadWriteVistor<'_, 'tcx> {
                 // Skip the chunk function to allow the trusted GPU memory partition.
                 let mut is_trusted_chunk_function = false;
                 match &attr.gpu_item {
-                    Some(GpuItem::DiagnoseOnly(name)) if name == "gpu::chunk_mut" => {
+                    Some(GpuItem::DiagnoseOnly(name))
+                        if name == "gpu::chunk_mut" || name == "gpu::sync::Atomic::new" =>
+                    {
                         is_trusted_chunk_function = true;
                     }
-                    Some(
-                        GpuItem::SubsliceMut
-                        | GpuItem::NewChunk
-                        | GpuItem::AtomicRMW
-                        | GpuItem::GetLocalMut2D,
-                    ) => {
+                    Some(GpuItem::SubsliceMut | GpuItem::NewChunk | GpuItem::GetLocalMut2D) => {
                         is_trusted_chunk_function = true;
                     }
                     _ => {}

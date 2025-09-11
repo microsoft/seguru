@@ -24,7 +24,8 @@ pub fn kernel_arith<const N: u32>(
     let mut b = b;
     let b_local = &mut b[(0, 0)];
     *b_local = a_local + c[thread_id];
-    gpu::sync::atomic_addi(b_local, 1);
+    *b_local += 1;
+
     let mut out: u32;
     let in32: u32 = *b_local + N;
     unsafe {
@@ -54,6 +55,11 @@ pub fn kernel_arith<const N: u32>(
     if warp.lane_id() == 0 {
         f[0] += 1.5;
     }
+
+    // This is not necessary since it is already local
+    // Just to test atomic_and is correct.
+    let atomic_b_local = gpu::sync::Atomic::new(b_local);
+    atomic_b_local.atomic_andi(u32::MAX);
     /*let warp = gpu::cg::ThreadWarpTile::<32, 1>();
     warp.run_on_lane_0::<f32>(f, |v| {
         *v += 1.5;

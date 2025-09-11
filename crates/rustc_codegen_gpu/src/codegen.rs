@@ -46,6 +46,9 @@ fn callees_of_instance<'tcx>(
     if !matches!(instance.def, InstanceKind::Item(_)) {
         return vec![];
     }
+    if !tcx.is_mir_available(instance.def_id()) {
+        return vec![];
+    }
     let generic_body = tcx.instance_mir(instance.def).clone();
     // Instantiate/monomorphize the generic MIR body for this instance.
     // Applies the instance's type substitutions and normalizes/erases region (lifetime)

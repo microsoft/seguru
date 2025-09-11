@@ -7,11 +7,11 @@
 
 #[gpu_macros::kernel_v2]
 #[no_mangle]
-pub fn test_atomic(b: &mut [u8]) {
-    let b0 = &mut b[0];
-    gpu::sync::atomic_addi(b0, 1);
-    gpu::sync::atomic_addi(&mut b[1], 1);
-    gpu::sync::atomic_rmw::<gpu::sync::OrI, _>(&mut b[1], 1);
+pub fn test_atomic(b: &mut u8) {
+    let mut atomic_b = gpu::sync::Atomic::new(b);
+    atomic_b.atomic_addi(1);
+    atomic_b.atomic_addi(1);
+    atomic_b.atomic_ori(1);
 }
 
 // CHECK: @gpu_bin_cst = internal constant

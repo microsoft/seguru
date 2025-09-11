@@ -14,18 +14,56 @@ trait AtomicRMWKind {
     const NAME: &str;
 }
 
+/// To prevent the user from mixing use of
+/// Atomic operation and chunk-based access,
+/// we wrap the reference to the data to be modified in an Atomic struct.
+/// ensuring that the user cannot access the data without using atomic operations.
+/// If user wants to repurpose the data for non-atomic access,
+/// they need to drop the Atomic struct first and need a sync across all blocks.
+/// For now, sync across all blocks is not supported, we should reject such code in analysis.
+/// TODO: Avoid repurposing data for atomic or chunk-based access.
+#[rustc_diagnostic_item = "gpu::sync::Atomic"]
+pub struct Atomic<'a, T: ?Sized> {
+    data: &'a T,
+}
+
+impl<'a, T> Atomic<'a, [T]> {
+    /// Get a reference to the data inside the Atomic struct.
+    /// This is unsafe because the user must ensure that no other thread
+    /// is accessing the data at the same time.
+    #[inline(always)]
+    #[gpu_codegen::device]
+    pub fn index(&'a self, i: usize) -> Atomic<'a, T> {
+        Atomic { data: &self.data[i] }
+    }
+}
+
 #[inline(never)]
 #[gpu_codegen::device]
 #[rustc_diagnostic_item = "gpu::atomic_rmw"]
-fn _atomic_rmw<T: num_traits::Num>(_mem: &mut T, _val: T, _kind: &'static str) -> T {
+unsafe fn _atomic_rmw<T: num_traits::Num>(_mem: &T, _val: T, _kind: &'static str) -> T {
     unimplemented!()
 }
 
 /// Atomic read-modify-write operation with kind defined in
 /// [MLIR memref::atomic_rmw](https://mlir.llvm.org/docs/Dialects/MemRef/#memrefatomic_rmw-memrefatomicrmwop)
-#[expect(private_bounds)]
-pub fn atomic_rmw<K: AtomicRMWKind, T: num_traits::Num>(mem: &mut T, val: T) -> T {
-    _atomic_rmw(mem, val, K::NAME)
+impl<'a, T: ?Sized> Atomic<'a, T> {
+    #[inline(never)]
+    #[gpu_codegen::device]
+    #[rustc_diagnostic_item = "gpu::sync::Atomic::new"]
+    pub fn new(data: &'a mut T) -> Atomic<'a, T> {
+        Self { data }
+    }
+
+    #[inline(always)]
+    #[gpu_codegen::device]
+    #[expect(private_bounds)]
+    pub fn atomic_rmw<K: AtomicRMWKind>(&self, val: T) -> T
+    where
+        T: num_traits::Num,
+    {
+        unsafe { _atomic_rmw(self.data, val, K::NAME) }
+    }
 }
 
 macro_rules! def_atomic_rmw_kind {
@@ -36,11 +74,16 @@ macro_rules! def_atomic_rmw_kind {
             const NAME: &str = concat!(stringify!($val), ": i64");
         }
 
-        #[doc = concat!("Equivalent to: atomic_rmw::<[`", stringify!($t), "`]>")]
-        #[inline(always)]
-        #[gpu_codegen::device]
-        pub fn $atomic_fn<T: $trait>(mem: &mut T, val: T) -> T {
-            atomic_rmw::<$t, T>(mem, val)
+        impl<'a, T: num_traits::Num> Atomic<'a, T> {
+            #[doc = concat!("Equivalent to: atomic_rmw::<[`", stringify!($t), "`]>")]
+            #[inline(always)]
+            #[gpu_codegen::device]
+            pub fn $atomic_fn(&self, val: T) -> T
+            where
+                T: $trait,
+            {
+                self.atomic_rmw::<$t>(val)
+            }
         }
     };
 }

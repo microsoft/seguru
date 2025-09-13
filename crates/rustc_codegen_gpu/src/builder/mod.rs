@@ -26,7 +26,7 @@ use rustc_codegen_ssa_gpu::traits::{
 };
 use rustc_hir::LangItem;
 use rustc_span::Span;
-use tracing::{debug, trace, warn};
+use tracing::{debug, trace};
 
 use crate::attr::GpuItem;
 use crate::context::GPUCodegenContext;
@@ -423,7 +423,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 self.extra_state.inside_gpu_scope = true;
                 let fn_ptr = self.get_fn_addr(closure);
                 let fn_type: FunctionType<'ml> = fn_ptr.r#type().try_into().unwrap();
-                warn!("gpu.scope args: {:?} {} {}", args, fn_type, fn_type.input_count());
+                debug!("gpu.scope args: {:?} {} {}", args, fn_type, fn_type.input_count());
                 let extra_arg_len = fn_type.input_count() - 1;
                 assert!(extra_arg_len <= args.len());
                 let start = args.len() - extra_arg_len;
@@ -440,7 +440,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 unreachable!();
             }
             GpuItem::UniqueChunk => {
-                warn!("gpu.iter_next args: {:?}", args);
+                debug!("gpu.iter_next args: {:?}", args);
                 let arg = args[0];
                 let ptr = self.load(
                     self.type_memref(self.type_i8(), &[1], None, None),
@@ -717,7 +717,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 indices.push(0.into());
                 sizes.push((target_memref_ty.dim_size(i).unwrap() as i64).into());
                 strides.push(1.into());
-                warn!(
+                debug!(
                     "inbounds_gep_op: only supports 1D memref, but got rank {}, strides: {:?}",
                     target_memref_ty.rank(),
                     strides,
@@ -874,12 +874,12 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         let (base_memref, base_byte_offset) = match layout {
             Ok(layout) if layout.get_offset() != 0 => {
                 // view cannot work on offset !=0;
-                warn!("mlir_memref_view with offset != 0 casting {} to {}", val, dst_ty);
+                debug!("mlir_memref_view with offset != 0 casting {} to {}", val, dst_ty);
                 let results = self.extract_strided_metadata(val);
                 let element_ty = self.mlir_element_type(ty);
 
                 if element_ty != self.type_i8() {
-                    warn!("mlir_memref_view: element_ty is not type_i8");
+                    debug!("mlir_memref_view: element_ty is not type_i8");
                     let backtrace = std::backtrace::Backtrace::force_capture();
                     println!("{}", backtrace);
                 }
@@ -1618,7 +1618,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         lhs: Self::Value,
         rhs: Self::Value,
     ) -> (Self::Value, Self::Value) {
-        warn!("Incomplete checked_binop: {:?} {:?} {:?}", oop, lhs, rhs);
+        debug!("Incomplete checked_binop: {:?} {:?} {:?}", oop, lhs, rhs);
         // TODO: Build op with set_overflow_flags
         let ret = match oop {
             OverflowOp::Add => self.add(lhs, rhs),
@@ -2460,7 +2460,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         let args = &args;
         let fn_sym_ptr = llfn.to_func_sym().unwrap();
         let sym = fn_sym_ptr.value();
-        warn!("fn_sym_ptr = {}", fn_sym_ptr);
+        debug!("fn_sym_ptr = {}", fn_sym_ptr);
         let ftype = Some(self.fn_db.read().unwrap()[sym].get_func_type().unwrap());
         let span = self.cur_span;
         let op = self.call_op(llfn, instance, args, ftype, span).unwrap();

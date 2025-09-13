@@ -72,7 +72,7 @@ pub enum GpuItem {
 }
 
 fn lang_item_from_str(name: &str) -> Option<LangItem> {
-    tracing::warn!("lang_item_from_str: {}", name);
+    tracing::debug!("lang_item_from_str: {}", name);
     LangItem::from_name(Symbol::intern(name))
 }
 

@@ -259,7 +259,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 } else {
                     let mut memory_space = memory_space;
                     if let Some(def) = inner_type.ty_adt_def() {
-                        tracing::warn!("Using adt {:?} as scalar type", def);
+                        tracing::debug!("Using adt {:?} as scalar type", def);
                         if Some(def.did())
                             == self
                                 .tcx

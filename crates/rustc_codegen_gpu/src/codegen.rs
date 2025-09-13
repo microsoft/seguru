@@ -60,7 +60,7 @@ fn callees_of_instance<'tcx>(
     );
     /*let mut out = Vec::new();
     rustc_middle::mir::write_mir_pretty(tcx, Some(instance.def_id()), &mut out).unwrap();
-    tracing::warn!("analyzing body {}", String::from_utf8_lossy(&out));
+    tracing::debug!("analyzing body {}", String::from_utf8_lossy(&out));
     */
     let mut visit_calless = FindCallee { cx, callees: Vec::new(), ty_env: body.typing_env(tcx) };
     visit_calless.visit_body(&body);
@@ -152,7 +152,7 @@ pub(crate) fn module_codegen<'tcx>(
         let mono_items = cgu.items_in_deterministic_order(tcx);
         let mono_items = find_gpu_related_mono_items(&mut cx, &mono_items);
         for &(mono_item, data) in &mono_items {
-            tracing::info!("is_gpu_related define {}", tcx.def_path_str(mono_item.def_id()));
+            tracing::debug!("is_gpu_related define {}", tcx.def_path_str(mono_item.def_id()));
             mono_item.predefine::<GpuBuilder<'_, '_, '_>>(&cx, data.linkage, data.visibility);
             cx.define_indirect_if_needed();
         }

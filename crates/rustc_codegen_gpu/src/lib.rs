@@ -24,11 +24,14 @@ mod codegen;
 mod context;
 mod error;
 mod mir_analysis;
+mod mir_mut_arg_check;
 mod mir_thread_sync_check;
 mod mlir;
+mod scope;
 mod write;
 
 #[no_mangle]
 pub fn __rustc_codegen_backend() -> Box<dyn rustc_codegen_ssa_gpu::traits::CodegenBackend> {
+    //let _ = tracing_subscriber::fmt::try_init();
     Box::new(backend::GPUCodegenBackend::new())
 }

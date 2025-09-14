@@ -23,7 +23,7 @@ impl<'a, T: ?Sized> GpuGlobal<'a, T> {
 ///
 /// Can I read global data before write to unique chunk?
 /// Yes, but it is not common and requires us to syncronize the read for all running threads from future write access.
-/// otherside, the read may get old or new data indeterministically.
+/// otherwide, the read may get old or new data indeterministically.
 /// This is not a common pattern in GPU programming.
 /// So we disallow it for simplicity.
 ///

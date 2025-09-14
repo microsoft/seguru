@@ -25,7 +25,7 @@ impl VisitMut for GpuFunctionRewriter {
         // Replace &'a mut T args with GpuGlobal<'a, T>
         // kernel entry function is guaranteed to use global memory for &mut T args
         if !self.is_kernel_entry {
-            // Only modify kernel functions
+            // Only modify the arguments of kernel functions
             return;
         }
         if let syn::FnArg::Typed(pat_type) = arg {

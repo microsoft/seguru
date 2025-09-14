@@ -1,33 +1,38 @@
+/// Disallow arbitrary implementations of HostToDev.
 /// Allow the safe conversion from host types Self to device types T.
-trait SafeHostToDev<T> {}
+trait HostToDevPrivateSeal<T> {}
 
 /// Expose the convert function to users.
 /// This trait is sealed to prevent arbitrary implementations.
-/// Only types that implement SafeHostToDev can implement this trait.
-/// This ensures that only safe conversions are allowed.
+/// Only types that implement HostToDevPrivateSeal can implement this trait.
+/// This ensures that only safe conversions are allowed,
+/// ensuring safe host-to-device interface.
 #[allow(private_bounds)]
-pub trait HostToDev<T>: Sized + SafeHostToDev<T> {
+pub trait HostToDev<T>: Sized + HostToDevPrivateSeal<T> {
     fn convert(self) -> T {
         unimplemented!()
     }
 }
 
-impl<T> SafeHostToDev<T> for T {}
+impl<T> HostToDevPrivateSeal<T> for T {}
 
 impl<T> HostToDev<T> for T {}
 
 #[cfg(not(feature = "codegen_tests"))]
-impl<'a, T: ?Sized> SafeHostToDev<&'a T> for &'a cuda_bindings::CudaMemBox<T> {}
+impl<'a, T: ?Sized> HostToDevPrivateSeal<&'a T> for &'a cuda_bindings::CudaMemBox<T> {}
 
+/// Allow host-side &CudaMemBox<T>  to device-side &T
 #[cfg(not(feature = "codegen_tests"))]
 impl<'a, T: ?Sized> HostToDev<&'a T> for &'a cuda_bindings::CudaMemBox<T> {}
 
+/// Allow host-side &mut CudaMemBox<T>  to device-side GpuGlobal<T>
 #[cfg(not(feature = "codegen_tests"))]
-impl<'a, T: ?Sized> SafeHostToDev<crate::global::GpuGlobal<'a, T>>
+impl<'a, T: ?Sized> HostToDevPrivateSeal<crate::global::GpuGlobal<'a, T>>
     for &'a mut cuda_bindings::CudaMemBox<T>
 {
 }
 
+/// Allow host-side T to device-side T
 #[cfg(not(feature = "codegen_tests"))]
 impl<'a, T: ?Sized> HostToDev<crate::global::GpuGlobal<'a, T>>
     for &'a mut cuda_bindings::CudaMemBox<T>

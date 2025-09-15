@@ -33,6 +33,7 @@ pub fn kernel_arith(
     f: &mut gpu_host::CudaMemBox<[f32]>,
     f_width: usize,
     g: &gpu_host::CudaMemBox<[f32]>,
+    h: &mut gpu_host::CudaMemBox<f32>,
 ) {
 }
 

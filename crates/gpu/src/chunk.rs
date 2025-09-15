@@ -3,8 +3,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::ops::{Index, IndexMut};
 
-use crate::assert_before_index;
 use crate::chunk_scope::{ChunkScope, GlobalMemScope};
+use crate::{GpuGlobal, assert_before_index};
 
 /// Thread unique mapping trait
 ///
@@ -71,11 +71,11 @@ impl<'a, T, Map: ThreadUniqueMap<GlobalMemScope>> GlobalThreadChunk<'a, T, Map> 
     #[gpu_codegen::sync_data(0, 1)]
     /// TODO: We will prevent rechunking of global mem in the mir_analysis.
     /// For now, we just leave it to the user.
-    pub fn new(data: &'a mut [T], map_params: Map) -> Self {
+    pub fn new(global: GpuGlobal<'a, [T]>, map_params: Map) -> Self {
         if !map_params.precondition() {
             core::intrinsics::abort();
         }
-        Self { data, map_params }
+        Self { data: global.data, map_params }
     }
 
     /// In some cases, passing GlobalThreadChunk from host to device is more
@@ -142,7 +142,7 @@ impl<'a, T, Map: ThreadUniqueMap<GlobalMemScope>> IndexMut<Map::IndexType>
 #[gpu_codegen::sync_data(0, 1, 2)]
 #[inline(always)]
 pub fn chunk_mut<'a, T, Map: ThreadUniqueMap<GlobalMemScope>>(
-    input: &'a mut [T],
+    input: GpuGlobal<'a, [T]>,
     map: Map,
 ) -> crate::GlobalThreadChunk<'a, T, Map> {
     crate::GlobalThreadChunk::new(input, map)

@@ -21,6 +21,27 @@ fn path_matches(path: &Path, target: &str) -> bool {
 }
 
 impl VisitMut for GpuFunctionRewriter {
+    fn visit_fn_arg_mut(&mut self, arg: &mut syn::FnArg) {
+        // Replace &'a mut T args with GpuGlobal<'a, T>
+        // kernel entry function is guaranteed to use global memory for &mut T args
+        if !self.is_kernel_entry {
+            // Only modify the arguments of kernel functions
+            return;
+        }
+        if let syn::FnArg::Typed(pat_type) = arg {
+            if let syn::Type::Reference(type_ref) = &*pat_type.ty {
+                if type_ref.mutability.is_some() {
+                    let inner_type = &*type_ref.elem;
+                    let lifetime =
+                        type_ref.lifetime.as_ref().map_or(parse_quote!('_), |lt| lt.clone());
+                    let new_type: syn::Type = parse_quote! {
+                        ::gpu::GpuGlobal<#lifetime, #inner_type>
+                    };
+                    pat_type.ty = Box::new(new_type);
+                }
+            }
+        }
+    }
     fn visit_expr_closure_mut(&mut self, closure: &mut syn::ExprClosure) {
         syn::visit_mut::visit_expr_closure_mut(self, closure);
         if !self.target.need_register_tool() {

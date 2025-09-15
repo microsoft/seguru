@@ -179,7 +179,7 @@ fn host_rewrite(
         // Add call to kernel function so that gpu2gpu will be able to monomorphize the kernel.
         host_func.block.stmts.push(Stmt::Expr(
             Expr::Verbatim(quote!(
-                #kernel_fn_path(#(#args,)*);
+                #kernel_fn_path(#(::gpu::HostToDev::convert(#args),)*);
             )),
             None,
         ));

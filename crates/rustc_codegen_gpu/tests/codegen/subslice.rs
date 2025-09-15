@@ -2,13 +2,13 @@
 #![register_tool(gpu_codegen)]
 #![no_std]
 
-#[gpu_codegen::device]
+#[gpu_macros::device]
 #[inline(always)]
 pub fn kernel_arith(a: &[u8], b: &mut u8) {
     *b = a[0];
 }
 
-#[gpu_codegen::kernel]
+#[gpu_macros::kernel_v2]
 pub fn kernel_arith_wrapper(a: &[u8], a_window: usize, b: &mut [u8], b_window: usize) {
     let mut b_local = gpu::chunk_mut(b, gpu::MapLinear::new(b_window));
 

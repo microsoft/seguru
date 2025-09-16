@@ -86,6 +86,8 @@ pub(crate) fn basic_rewrite_gpu_func(
     is_kernel_entry: bool,
     target: crate::CodegenTarget,
 ) {
+    let mut dev_rewriter = crate::gpu_syntax::GpuFunctionRewriter::new(is_kernel_entry, target);
+    dev_rewriter.visit_item_fn_mut(fun);
     if target.erase_func_body() {
         fun.attrs.push(parse_quote!(#[allow(unused_variables)]));
         fun.block.stmts.clear();
@@ -93,8 +95,6 @@ pub(crate) fn basic_rewrite_gpu_func(
             unimplemented!();
         });
     }
-    let mut dev_rewriter = crate::gpu_syntax::GpuFunctionRewriter::new(is_kernel_entry, target);
-    dev_rewriter.visit_item_fn_mut(fun);
 }
 
 pub(crate) fn rewrite_gpu_code(

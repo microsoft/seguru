@@ -9,6 +9,7 @@ members = [
     "cuda_bindings",
     "gpu-name",
 ]
+resolver = "1"
 
 [workspace.dependencies]
 cuda_bindings = { path = "cuda_bindings", default-features = false}

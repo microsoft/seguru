@@ -7,6 +7,7 @@ members = [
     "syntax/gpu",
     "syntax/host",
 ]
+resolver = "1"
 
 [workspace.dependencies]
 gpu_host = {path = "../crates/gpu-host"}

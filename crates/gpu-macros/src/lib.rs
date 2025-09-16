@@ -5,7 +5,6 @@ extern crate proc_macro;
 use proc_macro::TokenStream;
 mod gpu_syntax;
 mod host_rewriter;
-mod kernel_rewriter;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
 pub(crate) enum CodegenTarget {
@@ -36,7 +35,7 @@ fn target() -> CodegenTarget {
 
 #[proc_macro_attribute]
 pub fn kernel(attr: TokenStream, item: TokenStream) -> TokenStream {
-    kernel_rewriter::rewrite(attr, item, target())
+    gpu_syntax::rewrite_gpu_code(attr, item, true, target())
 }
 
 #[proc_macro_attribute]

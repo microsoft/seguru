@@ -59,6 +59,7 @@ pub fn encoder_backward_kernel(
         + gpu::thread_id::<gpu::DimX>()) as i32;
     let N = B * T * C;
     let dwte = gpu::sync::Atomic::new(dwte);
+    let dwpe = gpu::sync::Atomic::new(dwpe);
 
     if idx < N {
         let bt = idx / C;
@@ -70,7 +71,7 @@ pub fn encoder_backward_kernel(
 
         let dout_btc: f32 = dout[(b * T * C + t * C + c) as usize];
         dwte.index((ix * C + c) as usize).atomic_addf(dout_btc);
-        dwte.index((t * C + c) as usize).atomic_addf(dout_btc);
+        dwpe.index((t * C + c) as usize).atomic_addf(dout_btc);
     }
 }
 

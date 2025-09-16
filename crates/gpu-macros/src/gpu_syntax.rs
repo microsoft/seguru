@@ -88,13 +88,6 @@ pub(crate) fn basic_rewrite_gpu_func(
 ) {
     let mut dev_rewriter = crate::gpu_syntax::GpuFunctionRewriter::new(is_kernel_entry, target);
     dev_rewriter.visit_item_fn_mut(fun);
-    if target.erase_func_body() {
-        fun.attrs.push(parse_quote!(#[allow(unused_variables)]));
-        fun.block.stmts.clear();
-        fun.block.stmts.push(parse_quote! {
-            unimplemented!();
-        });
-    }
 }
 
 pub(crate) fn rewrite_gpu_code(

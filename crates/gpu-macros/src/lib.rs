@@ -19,10 +19,6 @@ impl CodegenTarget {
         matches!(self, CodegenTarget::Gpu)
     }
 
-    fn erase_func_body(&self) -> bool {
-        matches!(self, CodegenTarget::Cpu)
-    }
-
     fn need_register_tool(&self) -> bool {
         matches!(self, CodegenTarget::Gpu)
     }

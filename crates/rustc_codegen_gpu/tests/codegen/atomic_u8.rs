@@ -5,7 +5,7 @@
 #![feature(stmt_expr_attributes)]
 #![no_std]
 
-#[gpu_macros::kernel_v2]
+#[gpu_macros::kernel]
 #[no_mangle]
 pub fn test_atomic(b: &mut u8) {
     let mut atomic_b = gpu::sync::Atomic::new(b);

@@ -5,7 +5,7 @@
 #![no_std]
 
 
-#[gpu_macros::kernel_v2]
+#[gpu_macros::kernel]
 #[no_mangle]
 pub fn test_valid_conditional_chunk(a: &mut [f32]) {
     // This is allowed since block_dim() returns a consistent value across all threads.
@@ -17,7 +17,7 @@ pub fn test_valid_conditional_chunk(a: &mut [f32]) {
     local[0] = 1.0;
 }
 
-#[gpu_macros::kernel_v2]
+#[gpu_macros::kernel]
 #[no_mangle]
 pub fn test_valid_chunk_size(a: &mut [f32]) {
     // This is allowed since block_dim() returns a consistent value across all threads.

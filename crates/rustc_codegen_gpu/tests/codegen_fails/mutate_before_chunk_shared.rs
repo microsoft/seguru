@@ -5,7 +5,7 @@
 #![no_std]
 
 
-#[gpu_macros::kernel_v2]
+#[gpu_macros::kernel]
 #[no_mangle]
 pub fn mutate_shared() {
     let mut shared = gpu::GpuShared::<[u8; 10]>::zero();

@@ -47,8 +47,3 @@ pub fn host(attr: TokenStream, item: TokenStream) -> TokenStream {
 pub fn device(attr: TokenStream, item: TokenStream) -> TokenStream {
     gpu_syntax::rewrite_gpu_code(attr, item, false, target())
 }
-
-#[proc_macro_attribute]
-pub fn kernel_v2(attr: TokenStream, item: TokenStream) -> TokenStream {
-    gpu_syntax::rewrite_gpu_code(attr, item, true, target())
-}

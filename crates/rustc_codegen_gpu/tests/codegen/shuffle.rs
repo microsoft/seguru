@@ -5,7 +5,7 @@
 #![feature(stmt_expr_attributes)]
 #![no_std]
 
-#[gpu_macros::kernel_v2]
+#[gpu_macros::kernel]
 #[no_mangle]
 pub fn shuffle_reduce(a: &[f32], _a_window: usize, b: &mut [f32], _b_window: usize) {
     let mut chunked_b = gpu::chunk_mut(b, gpu::MapLinear::new(1));
@@ -14,7 +14,7 @@ pub fn shuffle_reduce(a: &[f32], _a_window: usize, b: &mut [f32], _b_window: usi
     chunked_b[0] = gpu::cg::reduce_add_f32(warp, val);
 }
 
-#[gpu_macros::kernel_v2]
+#[gpu_macros::kernel]
 #[no_mangle]
 pub fn shuffle_reduce_max(a: &[f32], _a_window: usize, b: &mut [f32], _b_window: usize) {
     let mut chunked_b = gpu::chunk_mut(b, gpu::MapLinear::new(1));

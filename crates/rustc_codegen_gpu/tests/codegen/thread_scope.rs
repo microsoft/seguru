@@ -32,7 +32,7 @@ where
 
 
 
-#[gpu_macros::kernel_v2]
+#[gpu_macros::kernel]
 #[no_mangle]
 pub fn kernel_arith(a: &[u8], b: &mut [u8], window: usize) {
     let mut b = gpu::GlobalThreadChunk::new(b, gpu::MapLinear::new(window));

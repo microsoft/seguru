@@ -19,7 +19,7 @@ fn dev_call_inline(a: usize, b: usize) -> usize {
 }
 
 
-#[gpu_macros::kernel_v2]
+#[gpu_macros::kernel]
 pub fn test_diversed_chunk(a: &mut [f32], b: &mut [f32], v: usize) {
     let mut local = gpu::GlobalThreadChunk::new(b, gpu::MapLinear::new(dev_call_inline(1, 2))); // No error here due to inlining
     local[0] = 1.0;

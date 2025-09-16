@@ -13,7 +13,7 @@ pub fn f(x: &mut u8) {
 
 type A<'a> = &'a mut u8;
 
-#[gpu_macros::kernel_v2]
+#[gpu_macros::kernel]
 #[no_mangle]
 pub fn test_mut_arg2(a: A<'_>) {
     let b = *a; //~ ERROR Mutable argument must be used in Valid chunking or atomic functions

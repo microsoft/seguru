@@ -5,7 +5,7 @@
 #![feature(stmt_expr_attributes)]
 #![no_std]
 
-#[gpu_macros::kernel_v2]
+#[gpu_macros::kernel]
 #[no_mangle]
 pub fn reduce_max(a: &[u32], _a_window: usize, b: &mut [u32], _b_window: usize) {
     let mut chunked_b = gpu::chunk_mut(b, gpu::MapLinear::new(1));

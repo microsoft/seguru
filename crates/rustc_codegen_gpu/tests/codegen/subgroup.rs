@@ -5,7 +5,7 @@
 #![feature(stmt_expr_attributes)]
 #![no_std]
 
-#[gpu_macros::kernel_v2]
+#[gpu_macros::kernel]
 #[no_mangle]
 pub fn subgroup_reduce(a: &[u32], _a_window: usize, b: &mut [u32], b_window: usize) {
     let mut chunked_b = gpu::GlobalThreadChunk::new(b, gpu::MapLinear::new(b_window));

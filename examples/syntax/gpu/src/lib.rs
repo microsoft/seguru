@@ -67,7 +67,7 @@ pub fn kernel_arith<const N: u32>(
 }
 
 /*
-#[gpu_macros::kernel_v2]
+#[gpu_macros::kernel]
 pub fn kernel_arith2(
     a: gpu::GpuChunkable2D<u32>,
     b: gpu::GpuChunkableMut2D<u32>,

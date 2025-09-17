@@ -15,7 +15,7 @@ pub fn add_float4(a: &float4, b: &float4) -> float4 {
     }
 }
 
-#[gpu_macros::kernel]
+#[gpu_macros::cuda_kernel]
 pub fn encoder_forward_kernel3(
     out: &mut [float4],
     inp: &[i32],
@@ -44,8 +44,8 @@ pub fn encoder_forward_kernel3(
     }
 }
 
-// really bad naive kernel with atomicAdd
-#[gpu_macros::kernel]
+/// really bad naive kernel with atomicAdd
+#[gpu_macros::cuda_kernel]
 pub fn encoder_backward_kernel(
     dwte: &mut [f32],
     dwpe: &mut [f32],
@@ -76,7 +76,7 @@ pub fn encoder_backward_kernel(
 }
 
 // TODO: out is column-chunked by wrap. Not supported currently
-// #[gpu_macros::kernel]
+// #[gpu_macros::cuda_kernel]
 // pub fn layernorm_forward_kernel3(
 //     out: &mut [f32],
 //     mean: &mut [f32],
@@ -90,7 +90,7 @@ pub fn encoder_backward_kernel(
 //     unimplemented!();
 // }
 
-#[gpu_macros::kernel]
+#[gpu_macros::cuda_kernel]
 pub fn permute_kernel(
     q: &mut [f32],
     k: &mut [f32],

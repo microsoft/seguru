@@ -4,5 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-gpu = {path = "../../crates/gpu"}
-gpu_macros = { path = "../../crates/gpu-macros" }
+gpu = {workspace = true}
+gpu_macros = {workspace = true}
+gpu_host = {workspace = true}

@@ -173,6 +173,7 @@ name = "llm-rs-gpu"
 version = "0.1.0"
 dependencies = [
  "gpu",
+ "gpu_host",
  "gpu_macros",
 ]
 

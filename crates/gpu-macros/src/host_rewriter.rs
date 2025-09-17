@@ -77,22 +77,24 @@ fn host_rewrite(
     let ctx_type_arg = syn::Ident::new("CN", span);
     let config_type_arg = syn::Ident::new("Config", span);
 
+    let args = wrapper_args
+        .iter()
+        .map(|arg| {
+            if let syn::FnArg::Typed(pat_type) = arg {
+                if let syn::Pat::Ident(pat_ident) = *pat_type.pat.clone() {
+                    pat_ident.ident.clone()
+                } else {
+                    panic!("You don't have a name for your arg");
+                }
+            } else {
+                panic!("Unexpected untyped argument");
+            }
+        })
+        .collect::<Vec<_>>();
     stmts.push(Stmt::Expr(
-        Expr::Verbatim(quote_spanned! {span =>let mut #host_args = Vec::<&dyn gpu_host::AsHostKernelParams>::new();}),
+        Expr::Verbatim(quote_spanned! {span =>let #host_args = [#(&#args as &dyn gpu_host::AsHostKernelParams),*];}),
         None,
     ));
-    wrapper_args.iter().for_each(|arg| {
-        if let syn::FnArg::Typed(pat_type) = arg {
-            if let syn::Pat::Ident(pat_ident) = *pat_type.pat.clone() {
-                stmts.push(Stmt::Expr(
-                    Expr::Verbatim(quote_spanned! {span => #host_args.push(&#pat_ident);}),
-                    None,
-                ));
-            } else {
-                panic!("You don't have a name for your arg");
-            }
-        }
-    });
 
     // Add generic param for context namespace.
     host_func.sig.generics.params.push(generic_config_bound(config_type_arg.clone(), false, span));

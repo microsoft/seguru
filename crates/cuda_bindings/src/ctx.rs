@@ -344,7 +344,7 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
         m: &GpuModule<N>,
         func_name: &str,
         config: C,
-        host_args: &Vec<&dyn AsHostKernelParams>,
+        host_args: &[&dyn AsHostKernelParams],
         stream: Option<&CudaStream>,
         is_async: bool,
     ) -> Result<(), CudaError> {
@@ -362,7 +362,7 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
         m: &GpuModule<N>,
         func_name: &str,
         config: C,
-        host_args: &Vec<&dyn AsHostKernelParams>,
+        host_args: &[&dyn AsHostKernelParams],
         stream: Option<&CudaStream>,
         is_async: bool,
     ) -> Result<(), CudaError> {
@@ -377,7 +377,7 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
         &self,
         f: &GpuFunction<'ctx, N>,
         config: C,
-        host_args: &Vec<&dyn AsHostKernelParams>,
+        host_args: &[&dyn AsHostKernelParams],
         stream: Option<&CudaStream>,
         is_async: bool,
     ) -> Result<(), CudaError> {
@@ -429,7 +429,7 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
         &self,
         f: &GpuFunction<'ctx, N>,
         config: C,
-        host_args: &Vec<&dyn AsHostKernelParams>,
+        host_args: &[&dyn AsHostKernelParams],
         stream: Option<&CudaStream>,
         is_async: bool,
     ) -> Result<(), CudaError> {

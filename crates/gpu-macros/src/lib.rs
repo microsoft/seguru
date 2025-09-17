@@ -38,6 +38,14 @@ pub fn kernel(attr: TokenStream, item: TokenStream) -> TokenStream {
     gpu_syntax::rewrite_gpu_code(attr, item, true, target())
 }
 
+/// This attribute generates a host wrapper around a kernel function, allowing it to be launched from the host.
+/// The kernel function itself is original function with Config.
+/// The generated host function is in mod #kname {pub fn launch(...)}
+#[proc_macro_attribute]
+pub fn cuda_kernel(attr: TokenStream, item: TokenStream) -> TokenStream {
+    host_rewriter::create_host_from_kernel(attr, item, target())
+}
+
 #[proc_macro_attribute]
 pub fn host(attr: TokenStream, item: TokenStream) -> TokenStream {
     host_rewriter::rewrite(attr, item, target())

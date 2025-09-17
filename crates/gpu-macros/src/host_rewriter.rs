@@ -218,3 +218,41 @@ pub(crate) fn rewrite(attr: TokenStream, input: TokenStream, target: CodegenTarg
     host_rewrite(&mut fun, kernel_fn_path.clone(), fun_span, target);
     fun.to_token_stream().into()
 }
+
+pub(crate) fn create_host_from_kernel(
+    _attr: TokenStream,
+    input: TokenStream,
+    target: CodegenTarget,
+) -> TokenStream {
+    let mut kfun = syn::parse_macro_input!(input as syn::ItemFn);
+    let kname = kfun.sig.ident.clone();
+    let mut fun = kfun.clone();
+    crate::gpu_syntax::basic_rewrite_gpu_func(&mut kfun, true, target);
+    fun.block.stmts.clear();
+    fun.vis = syn::parse_quote!(pub);
+    fun.sig.ident = syn::Ident::new("launch", kname.span());
+    let kernel_fn_path = syn::parse_quote! {super::#kname};
+    fun.sig.inputs.iter_mut().for_each(|arg| {
+        if let syn::FnArg::Receiver(_) = arg {
+            panic!("Kernel function cannot have receiver argument");
+        }
+        if let syn::FnArg::Typed(pat_type) = arg {
+            if let syn::Type::Reference(type_ref) = pat_type.ty.as_mut() {
+                let inner_type = &*type_ref.elem;
+                type_ref.elem = syn::parse_quote! {
+                    ::gpu_host::CudaMemBox<#inner_type>
+                };
+            }
+        }
+    });
+    let span = fun.span();
+    host_rewrite(&mut fun, kernel_fn_path, span, target);
+    quote_spanned! {span =>
+            #kfun
+            pub mod #kname {
+                #[allow(unused_imports)] use super::*;
+                #fun
+            }
+    }
+    .into()
+}

@@ -3,9 +3,12 @@
 use crate::GpuGlobal;
 
 /// Synchronization within a thread block.
+/// Disallow diversed control flow to
+/// ensure all threads in a block can reach the sync point to avoid deadlock.
 #[inline(never)]
 #[gpu_codegen::device]
 #[rustc_diagnostic_item = "gpu::sync_threads"]
+#[gpu_codegen::sync_data]
 pub fn sync_threads() {
     unimplemented!();
 }

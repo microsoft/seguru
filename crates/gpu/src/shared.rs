@@ -12,15 +12,6 @@ pub struct GpuShared<T: ?Sized> {
     value: T,
 }
 
-impl<T: Copy> Copy for GpuShared<T> {}
-
-impl<T: Copy> Clone for GpuShared<T> {
-    #[inline]
-    fn clone(&self) -> GpuShared<T> {
-        *self
-    }
-}
-
 impl<T> GpuShared<T> {
     #[rustc_diagnostic_item = "gpu::new_shared_mem"]
     #[gpu_codegen::device]
@@ -158,6 +149,7 @@ impl<T: ?Sized + AsSharedSlice> GpuShared<T> {
     #[gpu_codegen::device]
     #[gpu_codegen::memspace_shared(0, 1000)]
     #[gpu_codegen::sync_data(0, 1)]
+    #[rustc_diagnostic_item = "gpu::shared_chunk_mut"]
     pub fn chunk_mut<'a, Map: ThreadUniqueMap<SharedMemScope>>(
         &'a mut self,
         map_params: Map,

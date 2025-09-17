@@ -2,7 +2,7 @@
 #![allow(clippy::too_many_arguments)]
 #![feature(stmt_expr_attributes)]
 
-use gpu::GPUDeviceFloatIntrinsics;
+use gpu::{CacheStreamLoadStore, GPUDeviceFloatIntrinsics};
 
 #[allow(non_upper_case_globals)]
 pub static shared_size_kernel_arith: usize = 0;
@@ -40,7 +40,7 @@ pub fn kernel_arith<const N: u32>(
 
     let f_chunk_param: gpu::MapLinearWithDim = gpu::MapLinearWithDim::new(f_width);
     let mut f = gpu::GlobalThreadChunk::new(f, f_chunk_param);
-    let g_local = gpu::__ldcs_f32(&g[thread_id]);
+    let g_local = g[thread_id].ldcs();
     f[0] = g_local.sin();
 
     let mut shared = gpu::GpuShared::<[f32; 32]>::zero();

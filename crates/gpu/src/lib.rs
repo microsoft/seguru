@@ -10,7 +10,6 @@
 #![feature(generic_const_exprs)]
 
 extern crate alloc;
-use core::arch::asm;
 
 pub mod cg;
 mod chunk;
@@ -21,6 +20,7 @@ mod dim;
 pub(crate) mod global;
 mod host_dev;
 pub mod iter;
+mod ldst;
 mod print;
 mod shared;
 pub mod sync;
@@ -37,6 +37,7 @@ pub use dim::{
 };
 pub use global::GpuGlobal;
 pub use host_dev::HostToDev;
+pub use ldst::CacheStreamLoadStore;
 pub use print::{PushPrintfArg, printf};
 pub use shared::{DynamicSharedAlloc, GpuShared};
 pub use sync::sync_threads;
@@ -66,19 +67,4 @@ pub struct float4 {
     pub y: f32,
     pub z: f32,
     pub w: f32,
-}
-
-#[gpu_codegen::device]
-#[inline(always)]
-pub fn __ldcs_f32(val: &f32) -> f32 {
-    let mut ret: f32;
-    let ptr = val as *const f32;
-    unsafe {
-        asm!(
-            "ld.global.cs.f32 {0:e}, [{1:r}];",
-            out(reg) ret,
-            in(reg) ptr,
-        );
-    }
-    ret
 }

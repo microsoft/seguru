@@ -2,7 +2,7 @@
 #![allow(non_snake_case)]
 #![allow(clippy::too_many_arguments)]
 
-use gpu::{float4, GlobalThreadChunk, MapLinear};
+use gpu::{cg, chunk_mut, float4, CacheStreamLoadStore, MapLinear};
 
 #[gpu_macros::device]
 #[inline(always)]
@@ -25,7 +25,7 @@ pub fn encoder_forward_kernel3(
     T: i32,
     C: i32,
 ) {
-    let mut out = GlobalThreadChunk::new(out, MapLinear::new(1));
+    let mut out = chunk_mut(out, MapLinear::new(1));
     let C4 = C / 4;
     let idx = (gpu::block_dim::<gpu::DimX>() * gpu::block_id::<gpu::DimX>()
         + gpu::thread_id::<gpu::DimX>()) as i32;
@@ -101,9 +101,9 @@ pub fn permute_kernel(
     NH: i32,
     d: i32,
 ) {
-    let mut q = GlobalThreadChunk::new(q, MapLinear::new(1));
-    let mut k = GlobalThreadChunk::new(k, MapLinear::new(1));
-    let mut v = GlobalThreadChunk::new(v, MapLinear::new(1));
+    let mut q = chunk_mut(q, MapLinear::new(1));
+    let mut k = chunk_mut(k, MapLinear::new(1));
+    let mut v = chunk_mut(v, MapLinear::new(1));
     let idx = (gpu::block_dim::<gpu::DimX>() * gpu::block_id::<gpu::DimX>()
         + gpu::thread_id::<gpu::DimX>()) as i32;
 
@@ -117,8 +117,8 @@ pub fn permute_kernel(
         let inp_idx = (b * N * 3 * NH * d) + (n * 3 * NH * d) + (0 * NH * d) + (nh_ * d) + d_;
 
         // q, k, v are local
-        q[0] = gpu::__ldcs_f32(&inp[(inp_idx) as usize]);
-        k[0] = gpu::__ldcs_f32(&inp[(inp_idx + NH * d) as usize]);
-        v[0] = gpu::__ldcs_f32(&inp[(inp_idx + 2 * (NH * d)) as usize]);
+        q[0] = inp[(inp_idx) as usize].ldcs();
+        k[0] = inp[(inp_idx + NH * d) as usize].ldcs();
+        v[0] = inp[(inp_idx + 2 * (NH * d)) as usize].ldcs();
     }
 }

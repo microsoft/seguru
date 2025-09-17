@@ -3,6 +3,12 @@ use crate::attr::GpuItem;
 /// Synchronization scope levels in GPU execution.
 /// https://docs.nvidia.com/cuda/parallel-thread-execution/#id674
 /// See thread_group::sync() in cuda/include/cooperative_groups.h
+/// For now, by default,
+/// GpuGlobal<T> is bound to grid scope,
+/// GpuShared<T> is bound to block scope.
+/// TODO: Support warp and cluster scope.
+/// 1. Support cluster-shared memory: GpuClusterShared<T> similar to GpuShared<T>, with scope cluster.
+/// 2. support GpuWarpChunk<WARP_SIZE, T> which is derived from GpuShared<T> or GpuGlobal<T> or GpuClusterShared<T> with chunk_to_warp.
 #[derive(Eq, PartialEq, PartialOrd, Copy, Clone, Debug, Hash)]
 #[allow(dead_code)]
 pub(crate) enum SyncScope {

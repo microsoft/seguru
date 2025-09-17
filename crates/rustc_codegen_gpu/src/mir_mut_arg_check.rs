@@ -40,9 +40,6 @@ impl<'tcx> Analysis<'tcx> for MutArgAnalysis {
     fn initialize_start_block(&self, body: &Body<'tcx>, state: &mut Self::Domain) {
         for local in body.args_iter() {
             let local_decl = &body.local_decls[local];
-            if local_decl.mutability.is_mut() {
-                state.insert(local);
-            }
             if let Ref(_, _, rustc_middle::ty::Mutability::Mut) = local_decl.ty.kind() {
                 state.insert(local);
             }
@@ -56,14 +53,9 @@ impl<'tcx> Analysis<'tcx> for MutArgAnalysis {
         _location: Location,
     ) {
         // Propagate aliases through moves/copies
-        if let StatementKind::Assign(box (lhs, Rvalue::Ref(_, _, src))) = &stmt.kind {
-            if state.contains(src.local) {
-                state.insert(lhs.local);
-            }
-        }
         if let StatementKind::Assign(box (
             lhs,
-            Rvalue::Use(Operand::Copy(src) | Operand::Move(src)),
+            Rvalue::Ref(_, _, src) | Rvalue::Use(Operand::Copy(src) | Operand::Move(src)),
         )) = &stmt.kind
         {
             if state.contains(src.local) {
@@ -140,7 +132,7 @@ impl<'a, 'tcx> MutArgMirVisitor<'a, 'tcx> {
                 // Allow let a = &mut b since a is not used to mutate b yet.
             }
             PlaceContext::MutatingUse(_) => {
-                // If projection is empty, it is assign value (e.g., let x =
+                // If projection is empty, it assigns value (e.g., let x =
                 // &b[i];) to the local instead of dereferencing it (e.g.,
                 // *x = 0).
                 if !place.projection.is_empty() || self.is_mut_arg(place.local) {
@@ -189,30 +181,26 @@ impl<'tcx> Visitor<'tcx> for MutArgMirVisitor<'_, 'tcx> {
         {
             if let Some((def_id, generic_args)) = func.const_fn_def() {
                 let attr = crate::attr::GpuAttributes::build(&self.tcx, def_id);
-                let mut is_trusted_chunk_function = false;
-
+                // Skip the chunk function to allow the trusted GPU memory partition.
                 if let Some(gpu_item) = &attr.gpu_item {
-                    is_trusted_chunk_function = matches!(
+                    if matches!(
                         ScopedFun::try_from(gpu_item.clone()),
                         Ok(ScopedFun::NewChunk(_) | ScopedFun::NewAtomic(_))
-                    );
-                }
-
-                // Skip the chunk function to allow the trusted GPU memory partition.
-                if is_trusted_chunk_function {
-                    self.visit_span(*fn_span);
-                    self.visit_operand(func, location);
-                    // Skip the first argument (self.chunk_mut(...))
-                    for arg in args.iter().skip(1) {
-                        self.visit_operand(&arg.node, location);
+                    ) {
+                        self.visit_span(*fn_span);
+                        self.visit_operand(func, location);
+                        // Skip the first argument (self.chunk_mut(...))
+                        for arg in args.iter().skip(1) {
+                            self.visit_operand(&arg.node, location);
+                        }
+                        self.visit_place(
+                            destination,
+                            PlaceContext::MutatingUse(MutatingUseContext::Call),
+                            location,
+                        );
+                        self.inside_fcall = false;
+                        return;
                     }
-                    self.visit_place(
-                        destination,
-                        PlaceContext::MutatingUse(MutatingUseContext::Call),
-                        location,
-                    );
-                    self.inside_fcall = false;
-                    return;
                 }
             }
         }

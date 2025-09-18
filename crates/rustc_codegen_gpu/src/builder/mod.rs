@@ -1606,7 +1606,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         // There is no bitwise not in MLIR and therefore it's going to be an
         // xor to 0xFFFFFFFF which is -1
         let ty = v.r#type();
-        let mask = self.const_value((1 << int_width(ty).expect("expected integer type")) - 1, ty);
+        let mask =
+            self.const_value((1i128 << int_width(ty).expect("expected integer type")) - 1, ty);
         let op = melior::dialect::arith::xori(v, mask, self.cur_loc());
         self.append_op_res(op)
     }
@@ -2052,7 +2053,11 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn bitcast(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
-        todo!()
+        if val.r#type() == dest_ty {
+            val
+        } else {
+            todo!("bitcast: {:?} {} -> {}", self.cur_span, val.r#type(), dest_ty);
+        }
     }
 
     fn intcast(&mut self, val: Self::Value, dest_ty: Self::Type, is_signed: bool) -> Self::Value {

@@ -1559,6 +1559,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn shl(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
+        let (rhs, lhs) = self.int_val_pair_cast(rhs, lhs);
         let op = melior::dialect::arith::shli(lhs, rhs, self.cur_loc());
         self.append_op_res(op)
     }

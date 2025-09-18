@@ -2,6 +2,7 @@
 #[allow(dead_code)]
 pub enum GpuCodegenError {
     MisuseMutableArgument,
+    MissingSyncThreads,
     InvalidDiversedData,
     UnsupportedAsm(String),
     InvalidMLIR(String),

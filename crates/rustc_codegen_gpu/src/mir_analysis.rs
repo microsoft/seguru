@@ -2,12 +2,12 @@ use rustc_data_structures::fx::FxHashSet;
 use rustc_data_structures::graph::DirectedGraph;
 use rustc_index::bit_set::DenseBitSet;
 use rustc_middle::mir::pretty::write_mir_pretty;
-use rustc_middle::mir::visit::{MutatingUseContext, PlaceContext, Visitor};
+use rustc_middle::mir::visit::Visitor;
 use rustc_middle::mir::{
     BasicBlock, Body, Local, Location, Operand, Place, Rvalue, Statement, StatementKind,
     Terminator, TerminatorKind,
 };
-use rustc_middle::ty::{Instance, Ref, TyCtxt, TyKind};
+use rustc_middle::ty::{Instance, TyCtxt, TyKind};
 use rustc_mir_dataflow::{Analysis, Results, ResultsVisitor};
 use tracing::debug;
 
@@ -48,214 +48,6 @@ fn check_terminator_call<'tcx>(
         }
     }
     (inlines, real)
-}
-
-struct MutArgAliasAnalysis;
-
-/// Find all mutable argument locals and propagate their aliases through the forward analysis.
-impl<'tcx> Analysis<'tcx> for MutArgAliasAnalysis {
-    type Domain = DenseBitSet<Local>; // Or Place, if needed
-    type Direction = rustc_mir_dataflow::Forward;
-    const NAME: &'static str = "MutArgAliasAnalysis";
-
-    fn bottom_value(&self, body: &Body<'tcx>) -> Self::Domain {
-        DenseBitSet::new_empty(body.local_decls.len())
-    }
-
-    fn initialize_start_block(&self, body: &Body<'tcx>, state: &mut Self::Domain) {
-        // Add initial mutable argument locals
-        for local in body.args_iter() {
-            let local_decl = &body.local_decls[local];
-            if local_decl.mutability.is_mut() {
-                state.insert(local);
-            }
-            if let Ref(_, _, rustc_middle::ty::Mutability::Mut) = local_decl.ty.kind() {
-                state.insert(local);
-            }
-        }
-    }
-
-    fn apply_primary_statement_effect(
-        &mut self,
-        state: &mut Self::Domain,
-        stmt: &Statement<'tcx>,
-        _location: Location,
-    ) {
-        // Propagate aliases through moves/copies
-        if let StatementKind::Assign(box (lhs, Rvalue::Ref(_, _, src))) = &stmt.kind {
-            if state.contains(src.local) {
-                state.insert(lhs.local);
-            }
-        }
-        if let StatementKind::Assign(box (
-            lhs,
-            Rvalue::Use(Operand::Copy(src) | Operand::Move(src)),
-        )) = &stmt.kind
-        {
-            if state.contains(src.local) {
-                state.insert(lhs.local);
-            }
-        }
-    }
-}
-
-pub struct MutArgAliasVisitors<'tcx> {
-    tcx: rustc_middle::ty::TyCtxt<'tcx>,
-    local_decls: &'tcx rustc_index::IndexVec<Local, rustc_middle::mir::LocalDecl<'tcx>>,
-    reads: Vec<(Place<'tcx>, Location)>,
-    writes: Vec<(Place<'tcx>, Location)>,
-}
-
-impl<'tcx> MutArgAliasVisitors<'tcx> {
-    pub fn new(
-        tcx: rustc_middle::ty::TyCtxt<'tcx>,
-        local_decls: &'tcx rustc_index::IndexVec<Local, rustc_middle::mir::LocalDecl<'tcx>>,
-    ) -> Self {
-        Self { tcx, reads: Vec::new(), writes: Vec::new(), local_decls }
-    }
-}
-type Domain = DenseBitSet<Local>;
-
-/// Visitor to collect reads/writes of mutable arguments.
-/// It skips the chunk function to allow the trusted GPU memory partition.
-struct ReadWriteVistor<'a, 'tcx> {
-    tcx: rustc_middle::ty::TyCtxt<'tcx>,
-    state: &'a Domain,
-    local_decls: &'tcx rustc_index::IndexVec<Local, rustc_middle::mir::LocalDecl<'tcx>>,
-    reads: &'a mut Vec<(Place<'tcx>, Location)>,
-    writes: &'a mut Vec<(Place<'tcx>, Location)>,
-    inside_fcall: bool,
-}
-
-impl<'a, 'tcx> ReadWriteVistor<'a, 'tcx> {
-    fn is_mut_arg(&self, local: Local) -> bool {
-        self.local_decls[local].mutability.is_mut() && !self.is_mut_ref_arg(local)
-    }
-
-    fn is_mut_ref_arg(&self, local: Local) -> bool {
-        matches!(self.local_decls[local].ty.kind(), Ref(_, _, rustc_middle::ty::Mutability::Mut))
-    }
-}
-
-impl<'tcx> Visitor<'tcx> for ReadWriteVistor<'_, 'tcx> {
-    fn visit_place(&mut self, place: &Place<'tcx>, ctx: PlaceContext, loc: Location) {
-        use rustc_middle::mir::visit::{MutatingUseContext, NonMutatingUseContext};
-        if self.state.contains(place.local) {
-            match ctx {
-                PlaceContext::MutatingUse(
-                    MutatingUseContext::Borrow | MutatingUseContext::RawBorrow,
-                ) => {
-                    // Borrowing a mutable argument is not allowed in GPU code.
-                    // TODO: considering more allowed cases.
-                    debug!("Allowing borrowing mutable argument: {:?} used as {:?}", place, ctx);
-                }
-                PlaceContext::MutatingUse(_) => {
-                    // If projection is empty, it is assign value (e.g.,
-                    // let x = &b[i];) to the local instead of dereferencing it
-                    // (e.g., *x = 0).
-                    if !place.projection.is_empty() || self.is_mut_arg(place.local) {
-                        debug!("Disallow use mutable argument: {:?} used as {:?}", place, ctx);
-                        self.writes.push((*place, loc));
-                    } else {
-                        debug!("Allowing mutable argument: {:?} used as {:?}", place, ctx);
-                    }
-                }
-                PlaceContext::NonMutatingUse(
-                    NonMutatingUseContext::Move | NonMutatingUseContext::Copy,
-                ) => {
-                    if !place.projection.is_empty()
-                        || self.inside_fcall
-                        || self.is_mut_arg(place.local)
-                    {
-                        debug!("Disallow use mutable argument: {:?} used as {:?}", place, ctx);
-                        self.reads.push((*place, loc));
-                    } else {
-                        debug!("Allowing non-mutating use of mutable: {:?} as {:?}", place, ctx);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    fn visit_terminator(&mut self, terminator: &Terminator<'tcx>, location: Location) {
-        // Visit the terminator to find reads/writes
-        self.inside_fcall = true;
-        if let TerminatorKind::Call { func, destination, ref args, fn_span, .. } = &terminator.kind
-        {
-            if let Some((def_id, generic_args)) = func.const_fn_def() {
-                let attr = crate::attr::GpuAttributes::build(&self.tcx, def_id);
-                // Skip the chunk function to allow the trusted GPU memory partition.
-                let mut is_trusted_chunk_function = false;
-                match &attr.gpu_item {
-                    Some(GpuItem::DiagnoseOnly(name))
-                        if name == "gpu::chunk_mut" || name == "gpu::sync::Atomic::new" =>
-                    {
-                        is_trusted_chunk_function = true;
-                    }
-                    Some(GpuItem::SubsliceMut | GpuItem::NewChunk | GpuItem::GetLocalMut2D) => {
-                        is_trusted_chunk_function = true;
-                    }
-                    _ => {}
-                }
-                if is_trusted_chunk_function {
-                    self.visit_span(*fn_span);
-                    self.visit_operand(func, location);
-                    // Only skip the first argument.
-                    for arg in args.iter().skip(1) {
-                        self.visit_operand(&arg.node, location);
-                    }
-                    self.visit_place(
-                        destination,
-                        PlaceContext::MutatingUse(MutatingUseContext::Call),
-                        location,
-                    );
-                    self.inside_fcall = false;
-                    return;
-                }
-            }
-        }
-        self.super_terminator(terminator, location);
-        self.inside_fcall = false;
-    }
-}
-
-impl<'mir, 'tcx> ResultsVisitor<'mir, 'tcx, MutArgAliasAnalysis> for MutArgAliasVisitors<'tcx> {
-    fn visit_after_primary_statement_effect(
-        &mut self,
-        _results: &mut Results<'tcx, MutArgAliasAnalysis>,
-        state: &Domain,
-        stmt: &'mir Statement<'tcx>,
-        location: Location,
-    ) {
-        ReadWriteVistor {
-            tcx: self.tcx,
-            local_decls: self.local_decls,
-            state,
-            reads: &mut self.reads,
-            writes: &mut self.writes,
-            inside_fcall: false,
-        }
-        .visit_statement(stmt, location);
-    }
-
-    fn visit_after_primary_terminator_effect(
-        &mut self,
-        _results: &mut Results<'tcx, MutArgAliasAnalysis>,
-        state: &Domain,
-        terminator: &'mir Terminator<'tcx>,
-        location: Location,
-    ) {
-        ReadWriteVistor {
-            tcx: self.tcx,
-            local_decls: self.local_decls,
-            state,
-            reads: &mut self.reads,
-            writes: &mut self.writes,
-            inside_fcall: false,
-        }
-        .visit_terminator(terminator, location);
-    }
 }
 
 /// Visitor to detect if a specific local is assigned from a GPU-specific intrinsic.
@@ -438,7 +230,7 @@ impl<'tcx> Analysis<'tcx> for TaintTracking<'tcx> {
 
     fn apply_primary_statement_effect(
         &mut self,
-        state: &mut Domain,
+        state: &mut Self::Domain,
         statement: &Statement<'tcx>,
         _location: Location,
     ) {
@@ -503,7 +295,7 @@ impl<'tcx> Analysis<'tcx> for TaintTracking<'tcx> {
 
     fn apply_primary_terminator_effect<'mir>(
         &mut self,
-        state: &mut Domain,
+        state: &mut Self::Domain,
         terminator: &'mir Terminator<'tcx>,
         _location: Location,
     ) -> rustc_middle::mir::TerminatorEdges<'mir, 'tcx> {
@@ -698,7 +490,7 @@ impl<'mir, 'tcx> ResultsVisitor<'mir, 'tcx, TaintTracking<'tcx>> for TaintResult
                     if let Some(local) = operand_local(&arg.node) {
                         if state.contains(local) {
                             debug!(
-                                "Invalid use of diversed data in GPU code at {:?} for local {:?}",
+                                "Invalid use of code in divergent data/control flow execution at {:?} for local {:?}",
                                 span, local
                             );
                             self.invalid_diversed.push(arg.span);
@@ -751,33 +543,6 @@ fn analyze_diversed_data<'tcx>(
         Ok(())
     } else {
         Err(GpuCodegenError::InvalidDiversedData)
-    }
-}
-
-/// Analyze the body to check the mutable argument locals and their uses.
-/// TODO: check shared memory access.
-fn analyze_access_to_mut<'tcx>(
-    tcx: rustc_middle::ty::TyCtxt<'tcx>,
-    body: &'tcx Body<'tcx>,
-) -> GpuCodegenResult<()> {
-    let analysis = MutArgAliasAnalysis;
-    let mut results = analysis.iterate_to_fixpoint(tcx, body, None);
-    let mut result_visitor = MutArgAliasVisitors::new(tcx, &body.local_decls);
-    results.visit_with(body, body.basic_blocks.iter_nodes(), &mut result_visitor);
-    for (place, location) in result_visitor.reads.iter().chain(result_visitor.writes.iter()) {
-        let span = body.source_info(*location).span;
-        tcx.sess
-            .dcx()
-            .struct_span_err(
-                span,
-                "Mutable argument must be used in Valid chunking or atomic functions".to_string(),
-            )
-            .emit();
-    }
-    if result_visitor.reads.is_empty() && result_visitor.writes.is_empty() {
-        Ok(())
-    } else {
-        Err(GpuCodegenError::MisuseMutableArgument)
     }
 }
 
@@ -867,12 +632,13 @@ pub(crate) fn analyze_gpu_code(
         debug!("Skipping GPU crate checks {:?} {}", def_id, crate_name);
         skip_check = true; // Skip checks for the gpu crate
     }
-    if is_kernel_entry && !skip_check {
-        analyze_access_to_mut(tcx, mir)?;
+    if !skip_check && is_kernel_entry {
+        crate::mir_mut_arg_check::analyze_mut_args(tcx, mir)?;
     }
     if !skip_check {
         debug!("analyze_diversed_data {:?}", def_id);
         analyze_diversed_data(tcx, def_id, mir, is_kernel_entry)?;
+        crate::mir_thread_sync_check::analyze_shared_access(tcx, mir, is_kernel_entry)?;
     }
     analyze_loop(tcx, def_id)
 }

@@ -24,7 +24,10 @@ mod codegen;
 mod context;
 mod error;
 mod mir_analysis;
+mod mir_mut_arg_check;
+mod mir_thread_sync_check;
 mod mlir;
+mod scope;
 mod write;
 
 #[no_mangle]

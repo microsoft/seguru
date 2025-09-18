@@ -147,6 +147,7 @@ impl<'tcx, 'ml, 'a> IntrinsicCallBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 
     }
 
     fn assume(&mut self, val: Self::Value) {
+        let val = self.use_value(val);
         self.append_op(
             melior::dialect::ods::llvm::intr_assume(
                 self.mlir_ctx,

@@ -5,22 +5,26 @@
 #![feature(stmt_expr_attributes)]
 #![no_std]
 
+extern crate gpu;
+
 #[gpu_macros::kernel]
 #[no_mangle]
-pub fn shuffle_reduce(a: &[f32], _a_window: usize, b: &mut [f32], _b_window: usize) {
+pub fn shuffle_redux(a: &[f32], _a_window: usize, b: &mut [f32], _b_window: usize) {
+    use gpu::cg::WarpReduceOp;
     let mut chunked_b = gpu::chunk_mut(b, gpu::MapLinear::new(1));
     let val = a[gpu::thread_id::<gpu::DimX>()];
-    let warp = gpu::cg::ThreadWarpTile::<32, 1>();
-    chunked_b[0] = gpu::cg::reduce_add_f32(warp, val);
+    let warp = gpu::cg::ThreadWarpTile::<32>;
+    chunked_b[0] = warp.redux(gpu::cg::ReduxAdd, val);
 }
 
 #[gpu_macros::kernel]
 #[no_mangle]
-pub fn shuffle_reduce_max(a: &[f32], _a_window: usize, b: &mut [f32], _b_window: usize) {
+pub fn shuffle_redux_max(a: &[f32], _a_window: usize, b: &mut [f32], _b_window: usize) {
+    use gpu::cg::WarpReduceOp;
     let mut chunked_b = gpu::chunk_mut(b, gpu::MapLinear::new(1));
     let val = a[gpu::thread_id::<gpu::DimX>()];
-    let warp = gpu::cg::ThreadWarpTile::<32, 1>();
-    chunked_b[0] = gpu::cg::reduce_max_f32(warp, val);
+    let warp = gpu::cg::ThreadWarpTile::<32>;
+    chunked_b[0] = warp.redux(gpu::cg::ReduxMax, val);
 }
 
 // CHECK: @gpu_bin_cst = internal constant

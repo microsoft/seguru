@@ -2,7 +2,7 @@
 #![allow(non_snake_case)]
 #![allow(clippy::too_many_arguments)]
 
-use gpu::{cg, chunk_mut, float4, CacheStreamLoadStore, MapLinear};
+use gpu::{chunk_mut, float4, CacheStreamLoadStore, MapLinear};
 
 #[gpu_macros::device]
 #[inline(always)]

@@ -165,7 +165,6 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         }
         let loc = self.to_mlir_loc(span);
         if let Ok(builtin_sym) = builtin_sym {
-            trace!("call_op fn_sym_ptr: {:?}", builtin_sym.value());
             if let Ok(gpu_item) = GpuItem::try_from(builtin_sym.value()) {
                 return self.call_gpu_builtin_operation(
                     gpu_item,
@@ -284,8 +283,12 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 Ok(Some(self.append_op(NonDimFn::SubgroupSize.build(self.mlir_ctx, loc))))
             }
             GpuItem::SubgroupReduce => {
-                assert!(self.extra_state.attrs.len() == 1);
-                let op_attr = self.extra_state.attrs.pop().unwrap();
+                let Ok(op_str) = self.get_const_str(args[1]) else {
+                    let err = format!("{:?} must take a constant str as op", gpu_item);
+                    self.emit_error(err.clone(), span);
+                };
+                let op_attr = Attribute::parse(self.mlir_ctx, &op_str)
+                    .unwrap_or_else(|| panic!("failed to parse op attribute {}", op_str));
                 let generic_consts = get_generic_const();
                 let c_size = generic_consts[0].try_to_target_usize(self.tcx).unwrap() as _;
                 let c_stride = generic_consts[1].try_to_target_usize(self.tcx).unwrap() as _;
@@ -300,7 +303,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 }
                 if c_size != 32 && c_stride != 0 {
                     self.emit_error(
-                        "Due to limited subgroup conversion, we only support cluster_size = warp_size = 32, and stride_size = 1".to_string(),
+                        format!("Due to limited support in MLIR gpu::subgroup_reduce now supports cluster_size = warp_size = 32, and stride_size = 1, but c_size = {}, c_stride = {}. consider using nvcc_redux_sync or reduce_with_shuffle", c_size, c_stride),
                         span,
                     );
                 }
@@ -319,19 +322,27 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 Ok(Some(self.append_op(op)))
             }
             GpuItem::Shuffle => {
-                assert!(self.extra_state.attrs.len() == 1);
-                let mode = self.extra_state.attrs.pop().unwrap();
+                let Ok(op_str) = self.get_const_str(args[3]) else {
+                    let err = format!("{:?} must take a constant str as op", gpu_item);
+                    self.emit_error(err.clone(), span);
+                };
+                let op_attr = Attribute::parse(self.mlir_ctx, &op_str)
+                    .unwrap_or_else(|| panic!("failed to parse op attribute {}", op_str));
                 let val: Value<'_, '_> = args[0];
                 let offset = args[1];
                 let width = args[2];
                 assert!(offset.r#type() == self.type_i32());
                 assert!(width.r#type() == self.type_i32());
-                let op = crate::mlir::gpu::shuffle(self.mlir_ctx, val, offset, width, mode, loc);
+                let op = crate::mlir::gpu::shuffle(self.mlir_ctx, val, offset, width, op_attr, loc);
                 Ok(Some(self.append_op(op)))
             }
             GpuItem::NvvmReduxSync => {
-                assert!(self.extra_state.attrs.len() == 1);
-                let op_attr = self.extra_state.attrs.pop().unwrap();
+                let Ok(op_str) = self.get_const_str(args[2]) else {
+                    let err = format!("{:?} must take a constant str as op", gpu_item);
+                    self.emit_error(err.clone(), span);
+                };
+                let op_attr = Attribute::parse(self.mlir_ctx, &op_str)
+                    .unwrap_or_else(|| panic!("failed to parse op attribute {}", op_str));
                 let mask = args[1];
                 assert!(mask.r#type() == self.type_i32());
                 let abs = false;

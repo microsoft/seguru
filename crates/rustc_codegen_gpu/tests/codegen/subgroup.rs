@@ -9,10 +9,9 @@
 #[no_mangle]
 pub fn subgroup_reduce(a: &[u32], _a_window: usize, b: &mut [u32], b_window: usize) {
     let mut chunked_b = gpu::GlobalThreadChunk::new(b, gpu::MapLinear::new(b_window));
-    let warp = gpu::cg::ThreadWarpTile::<32, 1>();
+    let warp = gpu::cg::ThreadWarpTile::<32>;
     let val = a[gpu::thread_id::<gpu::DimX>()];
-    gpu::add_mlir_string_attr("#gpu<all_reduce_op add>");
-    chunked_b[0] = warp._subgroup_reduce::<_>(val);
+    chunked_b[0] = warp.subgroup_reduce(gpu::cg::ReduxAdd, val);
 }
 
 // CHECK: @gpu_bin_cst = internal constant

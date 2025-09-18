@@ -52,8 +52,8 @@ pub fn kernel_arith<const N: u32>(
         f[0] += shared[i];
         i += 1;
     }
-    let warp = gpu::cg::ThreadWarpTile::<32, 1>();
-    if warp.lane_id() == 0 {
+    let warp = gpu::cg::ThreadWarpTile::<32>;
+    if warp.thread_rank() == 0 {
         f[0] += 1.5;
     }
 

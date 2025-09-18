@@ -56,10 +56,47 @@ def_dim_fn!(block_dim, _block_dim, block_dim, #[gpu_codegen::ret_sync_data(1000)
 def_dim_fn!(grid_dim, _grid_dim, grid_dim, #[gpu_codegen::ret_sync_data(1000)]);
 
 #[gpu_codegen::device]
+#[inline(always)]
+#[allow(dead_code)]
+pub fn warp_id() -> usize {
+    let mut ret: u32;
+    unsafe {
+        core::arch::asm!("mov.u32 {0:e}, %warpid;", out(reg) ret);
+    }
+    ret as usize
+}
+
+#[gpu_codegen::device]
+#[inline(always)]
+#[allow(dead_code)]
+pub fn lane_id() -> usize {
+    let mut laneid: u32;
+    unsafe {
+        core::arch::asm!("mov.u32 {0:e}, %laneid;", out(reg) laneid);
+    }
+    laneid as usize
+}
+
+#[gpu_codegen::device]
 #[gpu_codegen::ret_sync_data(1000)]
 #[inline(always)]
 pub const fn dim<D: DimType>() -> usize {
     block_dim::<D>() * grid_dim::<D>()
+}
+
+#[gpu_codegen::device]
+#[gpu_codegen::ret_sync_data(1000)]
+#[inline(always)]
+pub fn block_size() -> usize {
+    block_dim::<DimX>() * block_dim::<DimY>() * block_dim::<DimZ>()
+}
+
+#[gpu_codegen::device]
+#[gpu_codegen::ret_sync_data(1000)]
+#[inline(always)]
+#[allow(dead_code)]
+pub fn num_blocks() -> usize {
+    grid_dim::<DimX>() * grid_dim::<DimY>() * grid_dim::<DimZ>()
 }
 
 /// Users should not use it directly. It should only used from gpu_macros.

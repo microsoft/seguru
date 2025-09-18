@@ -635,11 +635,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             GpuItem::Core(lang_item) => {
                 // Not a builtin.
                 match lang_item {
-                    LangItem::PanicBoundsCheck => {
-                        self.abort();
-                        Ok(None)
-                    }
-                    LangItem::PanicNounwind => {
+                    LangItem::PanicBoundsCheck | LangItem::PanicNounwind | LangItem::Panic => {
                         self.abort();
                         Ok(None)
                     }

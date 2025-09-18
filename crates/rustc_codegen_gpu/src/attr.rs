@@ -230,7 +230,10 @@ impl GpuAttributes {
         let mut gpu_attr = GpuAttributes::parse(attrs);
         if tcx.crate_name(def_id.krate).as_str() == "core" {
             if let Some(lang_item) = tcx.lang_items().from_def_id(def_id) {
-                if matches!(lang_item, LangItem::PanicBoundsCheck | LangItem::PanicNounwind) {
+                if matches!(
+                    lang_item,
+                    LangItem::PanicBoundsCheck | LangItem::PanicNounwind | LangItem::Panic
+                ) {
                     gpu_attr.device = true;
                     gpu_attr.gpu_item = Some(GpuItem::Core(lang_item));
                 }
@@ -245,7 +248,7 @@ impl GpuAttributes {
                 .contains(&path)
                 {
                     gpu_attr.device = true;
-                    gpu_attr.gpu_item = Some(GpuItem::CoreFn(tcx.def_path_str(def_id)));
+                    gpu_attr.gpu_item = Some(GpuItem::CoreFn(path.into()));
                 }
             }
         }
@@ -287,7 +290,10 @@ impl GpuAttributes {
             Some(GpuItem::GetLocalMut2D) => false,
             Some(GpuItem::GetLocal2D) => false,
             Some(GpuItem::Core(item))
-                if !matches!(item, LangItem::PanicBoundsCheck | LangItem::PanicNounwind) =>
+                if !matches!(
+                    item,
+                    LangItem::PanicBoundsCheck | LangItem::PanicNounwind | LangItem::Panic
+                ) =>
             {
                 false
             }

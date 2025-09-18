@@ -27,6 +27,9 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     }
 
     pub(crate) fn mlir_integer_width(&self, ty: MLIRType<'_>) -> usize {
+        if ty.is_index() {
+            return self.mlir_integer_width(self.type_i64());
+        }
         let int_ty = mlir_type::IntegerType::try_from(ty).unwrap();
         int_ty.width() as usize
     }
@@ -493,7 +496,7 @@ impl<'tcx, 'ml, 'a> BaseTypeCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> 
     fn type_kind(&self, ty: Self::Type) -> rustc_codegen_ssa_gpu::common::TypeKind {
         if ty.is_float() {
             rustc_codegen_ssa_gpu::common::TypeKind::Float
-        } else if ty.is_integer() {
+        } else if ty.is_integer() || ty.is_index() {
             rustc_codegen_ssa_gpu::common::TypeKind::Integer
         } else if ty.is_ranked_tensor() {
             rustc_codegen_ssa_gpu::common::TypeKind::Array

@@ -1,5 +1,6 @@
 mod host;
 
+use gpu_host::cuda_ctx;
 use host::kernel_arith;
 
 pub fn run_host_arith<'ctx>(
@@ -56,4 +57,40 @@ pub fn run_host_arith<'ctx>(
     }
     assert!(h_h == sum, "{} != {}: {:?}", h_h, sum, h_g);
     Ok(())
+}
+
+pub fn test_oob1() {
+    cuda_ctx(0, |ctx, m| {
+        let out = ctx.new_gmem_with_len(16, &[0.0; 16]).unwrap();
+        let config = gpu_host::gpu_config!(1, 1, 1, 8, 1, 1, 0);
+        host::oob1(config, ctx, m, 1.1, out, 1)
+    })
+    .expect("Kernel execution failed");
+}
+
+pub fn test_oob2() {
+    cuda_ctx(0, |ctx, m| {
+        let out = ctx.new_gmem_with_len(16, &[0.0; 16]).unwrap();
+        let config = gpu_host::gpu_config!(1, 1, 1, 8, 1, 1, 0);
+        host::oob2(config, ctx, m, 1.1, out, 4)
+    })
+    .expect("Kernel execution failed");
+}
+
+pub fn test_oob3() {
+    cuda_ctx(0, |ctx, m| {
+        let out = ctx.new_gmem_with_len(16, &[0.0; 16]).unwrap();
+        let config = gpu_host::gpu_config!(1, 1, 1, 8, 1, 1, 0);
+        host::oob3(config, ctx, m, 1.1, out, 16)
+    })
+    .expect("Kernel execution failed");
+}
+
+pub fn test_oob_no_fails() {
+    cuda_ctx(0, |ctx, m| {
+        let out = ctx.new_gmem_with_len(16, &[0.0; 16]).unwrap();
+        let config = gpu_host::gpu_config!(1, 1, 1, 8, 1, 1, 0);
+        host::oob_no_fails(config, ctx, m, 1.1, out, 16)
+    })
+    .expect("Kernel execution failed");
 }

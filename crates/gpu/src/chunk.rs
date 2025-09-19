@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use core::ops::{Index, IndexMut};
 
 use crate::chunk_scope::{ChunkScope, GlobalMemScope};
-use crate::{GpuGlobal, assert_before_index};
+use crate::{GpuGlobal, assert_ptr};
 
 /// Thread unique mapping trait
 ///
@@ -116,8 +116,7 @@ impl<'a, T, Map: ThreadUniqueMap<GlobalMemScope>> Index<Map::IndexType>
     #[gpu_codegen::device]
     fn index(&self, idx: Map::IndexType) -> &T {
         let (idx_precondition, idx) = self.map_params.local_to_global_index(idx);
-        assert_before_index(self.map_params.precondition() & idx_precondition, idx);
-        &self.data[idx]
+        assert_ptr(self.map_params.precondition() & idx_precondition, &self.data[idx])
     }
 }
 
@@ -128,8 +127,7 @@ impl<'a, T, Map: ThreadUniqueMap<GlobalMemScope>> IndexMut<Map::IndexType>
     #[gpu_codegen::device]
     fn index_mut(&mut self, idx: Map::IndexType) -> &mut T {
         let (idx_precondition, idx) = self.map_params.local_to_global_index(idx);
-        assert_before_index(self.map_params.precondition() & idx_precondition, idx);
-        &mut self.data[idx]
+        assert_ptr(self.map_params.precondition() & idx_precondition, &mut self.data[idx])
     }
 }
 

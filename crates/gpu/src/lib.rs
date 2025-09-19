@@ -49,7 +49,7 @@ pub use sync::sync_threads;
 #[inline(never)]
 #[rustc_diagnostic_item = "gpu::build_sfi"]
 #[gpu_codegen::device]
-pub(crate) fn assert_before_index(_cond: bool, _idx: usize) {
+pub(crate) fn assert_ptr<T>(_cond: bool, _ptr: T) -> T {
     unimplemented!()
 }
 

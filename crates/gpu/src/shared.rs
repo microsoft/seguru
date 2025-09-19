@@ -2,7 +2,7 @@
 ///
 use core::ops::{Deref, DerefMut};
 
-use crate::assert_before_index;
+use crate::assert_ptr;
 use crate::chunk::{ThreadUniqueMap, ThreadUniqueMapProvidedMethods};
 use crate::chunk_scope::SharedMemScope;
 
@@ -171,8 +171,8 @@ impl<'a, T: ?Sized + AsSharedSlice, Map: ThreadUniqueMap<SharedMemScope>>
     #[gpu_codegen::memspace_shared(1000)]
     fn index(&self, idx: Map::IndexType) -> &Self::Output {
         let (idx_precondition, idx) = self.map_params.local_to_global_index(idx);
-        assert_before_index(self.map_params.precondition() & idx_precondition, idx);
-        &self.data.value.as_slice()[idx]
+        let valid = self.map_params.precondition() & idx_precondition;
+        assert_ptr(valid, &self.data.value.as_slice()[idx])
     }
 }
 
@@ -184,7 +184,7 @@ impl<'a, T: ?Sized + AsSharedSlice, Map: ThreadUniqueMap<SharedMemScope>>
     #[gpu_codegen::memspace_shared(1000)]
     fn index_mut(&mut self, idx: Map::IndexType) -> &mut Self::Output {
         let (idx_precondition, idx) = self.map_params.local_to_global_index(idx);
-        assert_before_index(self.map_params.precondition() & idx_precondition, idx);
-        &mut self.data.value.as_mut_slice()[idx]
+        let valid = self.map_params.precondition() & idx_precondition;
+        assert_ptr(valid, &mut self.data.value.as_mut_slice()[idx])
     }
 }

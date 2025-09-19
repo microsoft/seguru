@@ -60,15 +60,20 @@ impl<'ml, 'a> Drop for GpuBuilderState<'ml, 'a> {
     }
 }
 
+#[cfg(feature = "inplace_bound_check")]
 #[derive(Debug)]
 struct InplaceBoundCheckData<'ml, 'a> {
     pub cond: mlir_ir::Value<'ml, 'a>,
     pub idx: Vec<mlir_ir::Value<'ml, 'a>>,
+    // If not find inbound_gep that has matched idx,
+    // we add select_ptr for all ld/store when loc matches
+    pub checked_by_loc: bool,
 }
 
+#[cfg(feature = "inplace_bound_check")]
 impl<'ml, 'a> InplaceBoundCheckData<'ml, 'a> {
     pub fn new(cond: mlir_ir::Value<'ml, 'a>, idx: mlir_ir::Value<'ml, 'a>) -> Self {
-        Self { cond, idx: vec![idx] }
+        Self { cond, idx: vec![idx], checked_by_loc: false }
     }
 }
 
@@ -94,8 +99,10 @@ impl<'tcx, 'ml, 'a> Drop for GpuBuilder<'tcx, 'ml, 'a> {
             "attrs should be empty when dropping GpuBuilder: {:?}",
             self.extra_state.attrs
         );
+
+        #[cfg(feature = "inplace_bound_check")]
         assert!(
-            self.valid_mem_access.is_none(),
+            self.valid_mem_access.iter().all(|v| v.checked_by_loc),
             "valid_mem_access should be None {:?}",
             self.valid_mem_access
         );
@@ -599,10 +606,10 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 // args[1]: idx:     index
 
                 let cond = args[0];
-                let idx = args[1];
+                let ptr = args[1];
 
-                self.assert_before_index(cond, idx);
-
+                let ret = self.assert_ptr(cond, ptr);
+                self.op_to_extra_values.insert(self.cur_loc().to_string(), vec![ret]);
                 Ok(None)
             }
             GpuItem::DynamicShared => {
@@ -742,6 +749,19 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         )
     }
 
+    fn inbounds_gep_ret(
+        &mut self,
+        ty: <GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::Type,
+        ptr: melior::ir::Value<'ml, 'a>,
+        indices: &[melior::ir::Value<'ml, 'a>],
+        check: bool,
+    ) -> melior::ir::Value<'ml, 'a> {
+        let op = self.inbounds_gep_op(ty, ptr, indices);
+        let ptr = self.append_op_res(op);
+        #[cfg(feature = "inplace_bound_check")]
+        let ptr = if check { self.select_ptr(ptr, Some(indices[0])) } else { ptr };
+        ptr
+    }
     /*fn size_of(&self, ty: mlir_ir::Type<'_>) -> melior::ir::Value<'ml, 'a> {
             if ty.is_integer() {
                 self.const_value(self.cx.mlir_integer_width(ty) / 8, self.type_index())
@@ -1060,53 +1080,144 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         (lhs, rhs)
     }
 
+    fn load_with_check(
+        &mut self,
+        ty: mlir_ir::Type<'ml>,
+        ptr: mlir_ir::Value<'ml, 'a>,
+        align: rustc_abi::Align,
+        check: bool,
+    ) -> mlir_ir::Value<'ml, 'a> {
+        // If the type is memref, we need to load the address (See store).
+        let load_ty = if ty.is_mem_ref() { self.type_index() } else { ty };
+        // ptr is almost always memref<sizexi8>. Must be casted into memref<ty>
+        let src_ptr_ty = ptr.r#type();
+        let src_memref_ty: MemRefType<'ml> = src_ptr_ty.try_into().unwrap();
+        let ptr = if load_ty != src_memref_ty.element() {
+            self.mlir_memref_view(
+                ptr,
+                self.type_memref(load_ty, &[1], None, src_memref_ty.memory_space()),
+                None,
+            )
+        } else {
+            ptr
+        };
+
+        #[cfg(feature = "inplace_bound_check")]
+        let ptr = if check { self.select_ptr(ptr, None) } else { ptr };
+        let mut loaded =
+            self.mlir_load(load_ty, ptr, &[self.const_value(0, self.type_index())], align);
+        // If the type is memref, we need to cast the address to the correct type.
+        if ty.is_mem_ref() {
+            loaded = self.inttoptr(loaded, ty);
+        }
+        loaded
+    }
+
+    fn store_with_check(
+        &mut self,
+        val: mlir_ir::Value<'ml, 'a>,
+        ptr: mlir_ir::Value<'ml, 'a>,
+        align: rustc_abi::Align,
+        check: bool,
+    ) -> mlir_ir::Value<'ml, 'a> {
+        if self.is_unreachable() {
+            return val;
+        }
+        let val_ty = val.r#type();
+        let ptr_ty = ptr.r#type();
+        let mut val = self.use_value(val);
+
+        // If the type is memref, we get the address and store it as 8-byte data
+        // This is because Rust always treat Ref/Pointer as 8bytes while MemRef size > 24 bytes
+        let store_ty = if val_ty.is_mem_ref() {
+            val = self.ptrtoint(val, self.type_index());
+            self.type_index()
+        } else {
+            val_ty
+        };
+        let const_idx = self.const_value(0, self.type_index());
+        let dst_memref_ty = MemRefType::try_from(ptr_ty).unwrap();
+        let target_memref_ty = self.type_memref(store_ty, &[1], None, dst_memref_ty.memory_space());
+        let ptr = if self.mlir_element_type(ptr_ty) != store_ty {
+            self.mlir_memref_view(ptr, target_memref_ty, None)
+        } else {
+            ptr
+        };
+
+        #[cfg(feature = "inplace_bound_check")]
+        let ptr = if check { self.select_ptr(ptr, None) } else { ptr };
+        self.append_op(mlir_memref::store(val, ptr, &[const_idx], self.cur_loc()));
+        val
+    }
+
+    fn null_ptr(&mut self, ty: mlir_ir::Type<'ml>) -> mlir_ir::Value<'ml, 'a> {
+        self.inttoptr(self.const_value(0, self.type_i64()), ty)
+    }
+
     #[cfg(feature = "inplace_bound_check")]
+    /// Why this works?
+    /// When generating basic block, ssa always use reverse postorder traversal,
+    /// so we should see the assert_before_index before any inbound-gep/load/store using the index.
+    /// If the inbound-gep uses the same index we need to check, that is exactly the place we want to
+    /// do the select ptr.
+    /// In some cases, do to stack allocation, we different expr of index in the inbound-gep, but they are
+    /// actually the same value. So we need to check the location as well.
+    /// In that case, we rely on load/store to do the select_ptr.
+    /// For all load/store ops are from same location with the target bound check, we do the select_ptr.
     fn select_ptr(
         &mut self,
         ptr: mlir_ir::Value<'ml, 'a>,
         idx: Option<mlir_ir::Value<'ml, 'a>>,
     ) -> mlir_ir::Value<'ml, 'a> {
-        let need_insert =
-            |idx1: Option<mlir_ir::Value<'ml, 'a>>, idxes: &Vec<mlir_ir::Value<'ml, 'a>>| -> bool {
-                if idx1.is_none() {
-                    return true;
-                }
-                let idx1 = idx1.unwrap();
-                for idx2 in idxes {
-                    if idx1 == *idx2 {
-                        return true;
+        if let Some(mut valid_mem_access) = self.valid_mem_access.take() {
+            let same_loc = valid_mem_access.idx.iter().any(|i| {
+                if let Some((file, line, col)) = crate::mlir::value_loc_decoded(*i) {
+                    if let Some((file2, line2, col2)) = crate::mlir::loc_decoded(self.cur_loc()) {
+                        file == file2 && line == line2 && col >= col2
+                    } else {
+                        false
                     }
-                    let Some(v1) = crate::mlir::mlir_val_to_const_int(idx1) else {
-                        continue;
-                    };
-                    let Some(v2) = crate::mlir::mlir_val_to_const_int(*idx2) else {
-                        continue;
-                    };
-                    if v1 == v2 {
-                        return true;
-                    }
+                } else {
+                    false
                 }
-                false
-            };
-        if let Some(valid_mem_access) = self.valid_mem_access.take() {
-            if need_insert(idx, &valid_mem_access.idx) {
+            });
+            let same_idx = idx.is_some()
+                && valid_mem_access.idx.iter().any(|i| crate::mlir::same_value(*i, idx.unwrap()));
+            let cond = valid_mem_access.cond;
+            if same_loc {
                 debug!(
-                    "select_ptr {:?}  != {:?} at {:?}",
-                    idx, &valid_mem_access.idx, self.cur_span
+                    "check by loc {:?} idx = {:?} {:?}",
+                    self.valid_mem_access,
+                    idx,
+                    crate::mlir::loc_decoded(self.cur_loc())
                 );
-                let null_ptr = self.inttoptr(self.const_value(0, self.type_index()), ptr.r#type());
-                self.select(valid_mem_access.cond, ptr, null_ptr)
-            } else {
-                eprintln!(
-                    "skip select_ptr {:?}  != {:?} at {:?}",
-                    idx, &valid_mem_access.idx, self.cur_span
-                );
+                valid_mem_access.checked_by_loc = true;
+            }
+            if !same_idx {
                 self.valid_mem_access = Some(valid_mem_access);
+            }
+
+            if same_loc || same_idx {
+                self.assert_ptr(cond, ptr)
+            } else {
+                debug!("skipped {:?} idx = {:?} {}", self.valid_mem_access, idx, self.cur_loc());
                 ptr
             }
         } else {
             ptr
         }
+    }
+
+    fn assert_ptr(
+        &mut self,
+        cond: mlir_ir::Value<'ml, 'a>,
+        ptr: mlir_ir::Value<'ml, 'a>,
+    ) -> mlir_ir::Value<'ml, 'a> {
+        let ty = ptr.r#type();
+        let nullptr = self.null_ptr(ty);
+        let cond = self.use_value_as_ty(cond, self.type_i1());
+
+        self.select(cond, ptr, nullptr)
     }
 
     fn assert(&mut self, cond: mlir_ir::Value<'ml, 'a>, msg: &str) {
@@ -1160,7 +1271,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         idx: mlir_ir::Value<'ml, 'a>,
     ) {
         let ty = self.san_dummy.unwrap().r#type();
-        let nullptr = self.inttoptr(self.const_value(0, self.type_index()), ty);
+        let nullptr = self.null_ptr(ty);
         let ptr = self.select(cond, self.san_dummy.unwrap(), nullptr);
         self.emit_llvm_volatile_load(ptr);
     }
@@ -1692,30 +1803,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn load(&mut self, ty: Self::Type, ptr: Self::Value, align: rustc_abi::Align) -> Self::Value {
-        // If the type is memref, we need to load the address (See store).
-        let load_ty = if ty.is_mem_ref() { self.type_index() } else { ty };
-        // ptr is almost always memref<sizexi8>. Must be casted into memref<ty>
-        let src_ptr_ty = ptr.r#type();
-        let src_memref_ty: MemRefType<'ml> = src_ptr_ty.try_into().unwrap();
-        let ptr = if load_ty != src_memref_ty.element() {
-            self.mlir_memref_view(
-                ptr,
-                self.type_memref(load_ty, &[1], None, src_memref_ty.memory_space()),
-                None,
-            )
-        } else {
-            ptr
-        };
-
-        #[cfg(feature = "inplace_bound_check")]
-        let ptr = self.select_ptr(ptr, None);
-        let mut loaded =
-            self.mlir_load(load_ty, ptr, &[self.const_value(0, self.type_index())], align);
-        // If the type is memref, we need to cast the address to the correct type.
-        if ty.is_mem_ref() {
-            loaded = self.inttoptr(loaded, ty);
-        }
-        loaded
+        self.load_with_check(ty, ptr, align, true)
     }
 
     fn volatile_load(&mut self, ty: Self::Type, ptr: Self::Value) -> Self::Value {
@@ -1883,34 +1971,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         ptr: Self::Value,
         align: rustc_abi::Align,
     ) -> Self::Value {
-        if self.is_unreachable() {
-            return val;
-        }
-        let val_ty = val.r#type();
-        let ptr_ty = ptr.r#type();
-        let mut val = self.use_value(val);
-
-        // If the type is memref, we get the address and store it as 8-byte data
-        // This is because Rust always treat Ref/Pointer as 8bytes while MemRef size > 24 bytes
-        let store_ty = if val_ty.is_mem_ref() {
-            val = self.ptrtoint(val, self.type_index());
-            self.type_index()
-        } else {
-            val_ty
-        };
-        let const_idx = self.const_value(0, self.type_index());
-        let dst_memref_ty = MemRefType::try_from(ptr_ty).unwrap();
-        let target_memref_ty = self.type_memref(store_ty, &[1], None, dst_memref_ty.memory_space());
-        let ptr = if self.mlir_element_type(ptr_ty) != store_ty {
-            self.mlir_memref_view(ptr, target_memref_ty, None)
-        } else {
-            ptr
-        };
-
-        #[cfg(feature = "inplace_bound_check")]
-        let ptr = self.select_ptr(ptr, None);
-        self.append_op(mlir_memref::store(val, ptr, &[const_idx], self.cur_loc()));
-        val
+        self.store_with_check(val, ptr, align, true)
     }
 
     fn store_with_flags(
@@ -1946,14 +2007,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         ptr: Self::Value,
         indices: &[Self::Value],
     ) -> Self::Value {
-        if self.is_unreachable() {
-            return ptr;
-        }
-        let op = self.inbounds_gep_op(ty, ptr, indices);
-        let ptr = self.append_op_res(op);
-        #[cfg(feature = "inplace_bound_check")]
-        let ptr = self.select_ptr(ptr, Some(indices[0]));
-        ptr
+        self.inbounds_gep_ret(ty, ptr, indices, true)
     }
 
     fn trunc(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
@@ -2037,13 +2091,13 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         let zero = self.const_value(0, self.type_index());
         let one = self.const_value(1, self.type_index());
         let two = self.const_value(2, self.type_index());
-        let ptr = self.inbounds_gep(self.type_i64(), base_memref, &[zero]);
+        let ptr = self.inbounds_gep_ret(self.type_i64(), base_memref, &[zero], false);
         let val = self.intcast(val, self.type_i64(), false);
-        self.store(val, ptr, align);
-        let ptr = self.inbounds_gep(self.type_i64(), base_memref, &[one]);
-        self.store(val, ptr, align);
-        let ptr = self.inbounds_gep(self.type_i64(), base_memref, &[two]);
-        self.store(self.const_value(0, self.type_i64()), ptr, align);
+        self.store_with_check(val, ptr, align, false);
+        let ptr = self.inbounds_gep_ret(self.type_i64(), base_memref, &[one], false);
+        self.store_with_check(val, ptr, align, false);
+        let ptr = self.inbounds_gep_ret(self.type_i64(), base_memref, &[two], false);
+        self.store_with_check(self.const_value(0, self.type_i64()), ptr, align, false);
         if self.fn_shared_memory_size.read().unwrap()[&self.name] > 0 {
             panic!(
                 "inttoptr: {:?} {} -> {} where memoryspace is unknown",

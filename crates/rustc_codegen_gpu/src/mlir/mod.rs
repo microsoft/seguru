@@ -372,3 +372,33 @@ pub(crate) fn type_memref<'ml>(
     }
     MemRefType::new(eletype, dim, layout, memory_space)
 }
+
+pub(crate) fn same_value(idx1: Value<'_, '_>, idx2: Value<'_, '_>) -> bool {
+    if idx1 == idx2 {
+        return true;
+    }
+    let v1 = crate::mlir::mlir_val_to_const_int(idx1);
+    let v2 = crate::mlir::mlir_val_to_const_int(idx2);
+    if v1.is_some() && v1 == v2 {
+        return true;
+    }
+    false
+}
+
+pub(crate) fn value_loc<'ml>(val: Value<'ml, '_>) -> Option<Location<'ml>> {
+    let op_val: OperationResult<'_, '_> = val.try_into().ok()?;
+    Some(op_val.owner().location())
+}
+
+pub(crate) fn value_loc_decoded<'ml>(val: Value<'ml, '_>) -> Option<(String, usize, usize)> {
+    value_loc(val).and_then(|loc| loc_decoded(loc))
+}
+
+pub(crate) fn loc_decoded<'ml>(loc: Location<'ml>) -> Option<(String, usize, usize)> {
+    let s = format!("{}", loc);
+    let parts = s.split(":").collect::<Vec<_>>();
+    if parts.len() != 3 {
+        return None;
+    }
+    Some((parts[0].to_string(), parts[1].parse().unwrap_or(0), parts[2].parse().unwrap_or(0)))
+}

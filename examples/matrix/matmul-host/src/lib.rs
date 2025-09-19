@@ -65,14 +65,14 @@ pub fn run_host_matmul<'ctx>(
 
     let config = gpu_host::gpu_config!(grid_dim, grid_dim, 1, block_dim, block_dim, 1, 0);
     let start = std::time::Instant::now();
-    inner_product_kernel2(config, ctx, m, d_a, d_b, d_c, n).expect("Kernel execution failed");
+    inner_product_kernel(config, ctx, m, d_a, d_b, d_c, n).expect("Kernel execution failed");
     let elapsed = start.elapsed();
     println!("GPU execution time: {:?}", elapsed);
 
     let config = gpu_host::gpu_config!(grid_dim, grid_dim, 1, block_dim, block_dim, 1, 0);
     let d_c_c = gpu::GlobalThreadChunk::new_from_host(d_c, gpu::Map2D::new(n));
     let start = std::time::Instant::now();
-    inner_product_kernel(config, ctx, m, d_a, d_b, d_c_c, n).expect("Kernel execution failed");
+    inner_product_kernel2(config, ctx, m, d_a, d_b, d_c_c, n).expect("Kernel execution failed");
     let elapsed = start.elapsed();
     println!("GPU execution time: {:?}", elapsed);
 

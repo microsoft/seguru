@@ -5,9 +5,8 @@ use gpu::*;
 
 type ThreadChunkMatrix2D<'a> = GlobalThreadChunk<'a, f32, Map2D>;
 
-#[cfg(feature = "v1")]
 #[gpu_macros::kernel]
-pub fn inner_product_kernel(a: &[f32], b: &[f32], c: ThreadChunkMatrix2D<'_>, n: usize) {
+pub fn inner_product_kernel2(a: &[f32], b: &[f32], c: ThreadChunkMatrix2D<'_>, n: usize) {
     let mut row = block_id::<gpu::DimY>() * block_dim::<gpu::DimY>() + thread_id::<gpu::DimY>();
     let mut c = c;
     for i in 0..((n - 1) / gpu::dim::<gpu::DimY>() + 1) {
@@ -30,9 +29,10 @@ pub fn inner_product_kernel(a: &[f32], b: &[f32], c: ThreadChunkMatrix2D<'_>, n:
     }
 }
 
+#[cfg(feature = "v1")]
 #[gpu_macros::kernel]
-pub fn inner_product_kernel2(a: &[f32], b: &[f32], c: &mut [f32], n: usize) {
-    let mut c = GlobalThreadChunk::new(c, Map2D::new(n));
+pub fn inner_product_kernel(a: &[f32], b: &[f32], c: &mut [f32], n: usize) {
+    let mut c = chunk_mut(c, Map2D::new(n));
     let mut row = block_id::<gpu::DimY>() * block_dim::<gpu::DimY>() + thread_id::<gpu::DimY>();
     for i in 0..((n - 1) / gpu::dim::<gpu::DimY>() + 1) {
         let mut col = block_id::<gpu::DimX>() * block_dim::<gpu::DimX>() + thread_id::<gpu::DimX>();

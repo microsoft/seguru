@@ -39,7 +39,7 @@ pub fn kernel_arith<const N: u32>(
     *b_local = out;
 
     let f_chunk_param: gpu::MapLinearWithDim = gpu::MapLinearWithDim::new(f_width);
-    let mut f = gpu::GlobalThreadChunk::new(f, f_chunk_param);
+    let mut f = gpu::chunk_mut(f, f_chunk_param);
     let g_local = g[thread_id].ldcs();
     f[0] = g_local.sin();
 

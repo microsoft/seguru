@@ -114,7 +114,8 @@ impl<const SIZE: usize> ThreadWarpTile<SIZE, 1> {
     #[gpu_codegen::device]
     #[inline(always)]
     pub(crate) fn _subgroup_id() -> usize {
-        warp_id() << (Self::SHIFT_COUNT as usize + (lane_id() >> Self::SHIFT_COUNT as usize))
+        (warp_id() << Self::SHIFT_COUNT as usize)
+            + ((lane_id() & !(Self::LANE_MASK as usize)) >> Self::SHIFT_COUNT as usize)
     }
 
     #[gpu_codegen::device]
@@ -143,13 +144,13 @@ impl<const SIZE: usize> ThreadWarpTile<SIZE, 1> {
     #[inline(always)]
     fn reduce_with_shuffle(&self, value: f32, op: impl Fn(f32, f32) -> f32) -> f32 {
         let mut offset = Self::CHECKED_SIZE >> 1;
-        let mut val = value;
+        let mut value = value;
         while offset > 0 {
             let (peer_val, _) = crate::shuffle!(xor, value, offset, Self::CHECKED_SIZE);
-            val = op(val, peer_val);
+            value = op(value, peer_val);
             offset /= 2;
         }
-        val
+        value
     }
 
     // Hardware-specific warp reduce.

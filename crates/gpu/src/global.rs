@@ -32,6 +32,7 @@ impl<'a, T: ?Sized> GpuGlobal<'a, T> {
 /// otherside, the read may get old or new data indeterministically.
 /// This is not a common pattern in GPU programming.
 /// So we disallow it for simplicity.
+#[cfg(not(doc))]
 impl<'a, T: ?Sized> !core::ops::Deref for GpuGlobal<'a, T> {}
 
 /// Never implement DerefMut to prevent direct mutable access to the data.

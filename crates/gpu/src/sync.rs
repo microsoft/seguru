@@ -73,14 +73,14 @@ impl<'a, T: ?Sized> Atomic<'a, T> {
 
 macro_rules! def_atomic_rmw_kind {
     ($t:ident, $val:literal, $atomic_fn: ident, $trait:path) => {
-        #[doc = concat!("Atomic operation kind for [`", stringify!($atomic_fn), "`]")]
+        #[doc = concat!("Atomic operation kind for [`Atomic<'a, T>::", stringify!($atomic_fn), "`]")]
         pub struct $t;
         impl AtomicRMWKind for $t {
             const NAME: &str = concat!(stringify!($val), ": i64");
         }
 
         impl<'a, T: num_traits::Num> Atomic<'a, T> {
-            #[doc = concat!("Equivalent to: atomic_rmw::<[`", stringify!($t), "`]>")]
+            #[doc = concat!("Equivalent to: atomic_rmw::<[`Atomic<'a, T>::", stringify!($t), "`]>")]
             #[inline(always)]
             #[gpu_codegen::device]
             pub fn $atomic_fn(&self, val: T) -> T

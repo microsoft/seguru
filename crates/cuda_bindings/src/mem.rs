@@ -171,7 +171,7 @@ impl<T: ?Sized> core::ops::Deref for CudaMemBox<T> {
 
     /// This should never be used in host code, as it would panic.
     /// This is only here to check API correctness in GPU code.
-    /// Since &CudaMemBox<T> is treated as &T in GPU code.
+    /// Since &`CudaMemBox<T>` is treated as &T in GPU code.
     fn deref(&self) -> &Self::Target {
         // SAFETY: we know `ptr` is valid and was allocated via cudaMalloc
         panic!("This should only be called in GPU code, not host code")

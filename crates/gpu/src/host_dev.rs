@@ -21,7 +21,7 @@ impl<T> HostToDev<T> for T {}
 #[cfg(not(feature = "codegen_tests"))]
 impl<'a, T: ?Sized> HostToDevPrivateSeal<&'a T> for &'a cuda_bindings::CudaMemBox<T> {}
 
-/// Allow host-side &CudaMemBox<T>  to device-side &T
+/// Allow host-side &`CudaMemBox<T>`  to device-side &T
 #[cfg(not(feature = "codegen_tests"))]
 impl<'a, T: ?Sized> HostToDev<&'a T> for &'a cuda_bindings::CudaMemBox<T> {}
 

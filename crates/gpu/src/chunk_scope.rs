@@ -1,6 +1,6 @@
 use core::marker::PhantomData;
 
-use crate::cg::ThreadWarpTile;
+pub use crate::cg::ThreadWarpTile;
 use crate::chunk::ScopeUniqueMap;
 use crate::dim::{
     DimType, DimTypeID, DimX, DimY, DimZ, block_dim, block_id, block_size, dim, num_blocks,
@@ -18,7 +18,6 @@ trait SyncScope {}
 /// - block_id_{x,y,z}, warp_id, lane_id, unused
 pub const TID_MAX_LEN: usize = 6;
 
-/// 3 + 2 + 1 = 6;
 #[derive(Copy, Clone)]
 pub struct Thread;
 #[derive(Copy, Clone)]
@@ -95,34 +94,102 @@ where
     from.build_chunk_scope(to)
 }
 
-/// This trait is used to provide chunking scope information.
-/// Indicating chunking from a larger scope to a smaller scope.
+/// This trait provides chunking scope information,
+/// indicating chunking from a larger scope to a smaller scope:
 /// Grid -> Cluster -> Block -> Warp -> Thread
-/// 4 * 3 * 2 = 24 combinations.
-/// Cluster is now out of scope due to limited hardware support.
-/// So we may consider only 6 combinations now.
 ///
-/// ChainedScope can be used to chain two scopes together.
-/// For example, Grid2Block + Block2Thread = Grid2Thread.
-/// ChainedScope is used together with ChainedMap to chain two mapping strategies.
+/// ## Primitive Chunk Scopes
 ///
-/// For simplicity, user may not always chunk from a scope to its next scope.
-/// For example, Grid2Warp directly instead of Grid2Block + Block2Warp.
-/// Thus, we provides all the 6 combinations of two-level chunking scopes.
+/// Cluster is now mostly out of scope due to limited hardware support.
+/// We currently consider the following 6 scope transitions:
 ///
-/// Chained scope/mapping should not be over-used, but is still useful in some scenarios.
+/// - `Grid2Block`: chunking from Grid scope to Block scope.
+/// - `Block2Thread`: chunking from Block scope to Thread scope.
+/// - `Grid2Thread`: chunking from Grid scope to Thread scope.
+/// - `Grid2Warp`: chunking from Grid scope to Warp scope.
+/// - `Block2Warp`: chunking from Block scope to Warp scope.
+/// - `Warp2Thread`: chunking from Warp scope to Thread scope.
 ///
-/// For example, when the access pattern switches between
-/// the two scopes, e.g. from grid to warp for read and then from warp to thread for write.
+/// ## Chained Scope and Chained Map
 ///
-/// Chained scopes is also useful to remove some threads out of the work.
-/// For example,
-/// by Grid2Warp + Warp2Thread, we can have only the lane0 of each warp to do the work.
-/// `chunk_to_scope::<Grid2Warp>`(`MapLinear::new(32)`).`chunk_to_scope::<Warp2Thread>`(`MapLinear::new(MAX_SIZE)`);
-/// This indicates that only lane0 of each warp will see the elements.
+/// In addition to primitive chunk scopes, we provide `ChainedScope`,
+/// which allows chaining two scopes together. `ChainedScope` is always used
+/// together with `ChainedMap` to chain two mapping strategies.
 ///
-/// TODO: ToScope is useful for static analysis of memory access patterns.
-/// We may use it to check require sync scope.
+/// For example, `Grid2Block + Block2Thread` is similar to `Grid2Thread`
+/// but differs slightly in usage.
+///
+/// ### When should I use Primitive Scopes instead of Chained Scopes?
+///
+/// **_Chained scope/mapping should not be over-used._**
+///
+/// For simplicity, you may not always need to chunk from a scope to its next scope.
+/// For example, use `Grid2Warp` directly instead of `Grid2Block + Block2Warp`
+/// if the intermediate chunking strategy does not matter much.
+///
+/// This is especially true when access patterns switch between scopes,
+/// e.g., from grid to warp for read and then from warp to thread for write.
+///
+/// ### When should I use Chained Scopes?
+///
+/// `ChainedScope` is useful for:
+/// - Removing some threads from work, and
+/// - Applying different mapping strategies at different levels.
+///
+/// ## Examples
+///
+/// ### Direct chunk: Grid -> Thread
+///
+/// The following example is similar to chunk_mut(...) with MapLinear.
+///
+/// ```rust
+/// use gpu::MapLinear;
+/// use gpu::chunk_scope::{build_chunk_scope, Grid, Thread, ThreadWarpTile};
+///
+/// fn kernel(input: gpu::GpuGlobal<[f32]>) {
+///     let g2w = build_chunk_scope(Grid, Thread);
+///     let _ = input.chunk_to_scope(g2w, MapLinear::new(2));
+/// }
+/// ```
+///
+/// ### Flexible chunking: Grid -> Warp -> Thread
+///
+/// With `Grid2Warp + Warp2Thread`, only lane0 of each warp may access elements.
+///
+/// ```rust
+/// use gpu::MapLinear;
+/// use gpu::chunk_scope::{build_chunk_scope, Grid, Thread, ThreadWarpTile};
+///
+/// fn kernel(input: gpu::GpuGlobal<[f32]>) {
+///     let warp = ThreadWarpTile::<32>;
+///     let g2w = build_chunk_scope(Grid, warp);
+///     let w2t = build_chunk_scope(warp, Thread);
+///     input
+///         .chunk_to_scope(g2w, MapLinear::new(2))
+///         .chunk_to_scope(w2t, MapLinear::new(2));
+/// }
+/// ```
+///
+/// ### Invalid scope transitions will be rejected
+///
+/// The `chunk_to_scope` API guarantees valid scope transitions.
+/// ```rust,compile_fail,E0271
+/// use gpu::MapLinear;
+/// use gpu::chunk_scope::{build_chunk_scope, Grid, Block, Thread, ThreadWarpTile};
+///
+/// fn kernel(input: gpu::GpuGlobal<[f32]>) {
+///     let warp = ThreadWarpTile::<32>;
+///     let g2w = build_chunk_scope(Grid, warp);
+///     let b2t = build_chunk_scope(Block, Thread);
+///     // This should not compile, as the scope transition is invalid.
+///     // Type mismatch resolving `<Block2ThreadScope as ChunkScope>::FromScope == ThreadWarpTile`
+///     input.chunk_to_scope(g2w, MapLinear::new(2))
+///          .chunk_to_scope(b2t, MapLinear::new(2));
+/// }
+/// ```
+///
+/// TODO: `ToScope` can be leveraged for static analysis of memory access patterns.
+/// It may be used to check required synchronization scopes.
 #[expect(private_bounds)]
 pub trait ChunkScope: PrivateTraitGuard + Clone {
     type FromScope: SyncScope;

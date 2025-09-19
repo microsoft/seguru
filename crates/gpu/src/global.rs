@@ -23,6 +23,8 @@ impl<'a, T: ?Sized> GpuGlobal<'a, T> {
 }
 
 impl<'a, T> GpuGlobal<'a, [T]> {
+    /// Convert GpuGlobal to GlobalGroupChunk in one step.
+    /// See `ChunkScope` for more details about chunk scope.
     #[gpu_codegen::device]
     #[gpu_codegen::sync_data(0, 1, 2)]
     #[inline(always)]

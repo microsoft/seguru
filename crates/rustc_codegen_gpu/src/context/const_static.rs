@@ -187,15 +187,15 @@ impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
     }
 
     fn const_i8(&self, i: i8) -> Self::Value {
-        self.mlir_global_const_int_from_type(i, self.type_index())
+        self.mlir_global_const_int_from_type(i, self.type_i8())
     }
 
     fn const_i16(&self, i: i16) -> Self::Value {
-        self.mlir_global_const_int_from_type(i, self.type_index())
+        self.mlir_global_const_int_from_type(i, self.type_i16())
     }
 
     fn const_i32(&self, i: i32) -> Self::Value {
-        self.mlir_global_const_int_from_type(i, self.type_index())
+        self.mlir_global_const_int_from_type(i, self.type_i32())
     }
 
     fn const_int(&self, t: Self::Type, i: i64) -> Self::Value {
@@ -203,31 +203,31 @@ impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
     }
 
     fn const_u8(&self, i: u8) -> Self::Value {
-        self.mlir_global_const_int_from_type(i, self.type_index())
+        self.mlir_global_const_int_from_type(i as i8, self.type_i8())
     }
 
     fn const_u32(&self, i: u32) -> Self::Value {
-        self.mlir_global_const_int_from_type(i, self.type_index())
+        self.mlir_global_const_int_from_type(i as i32, self.type_i32())
     }
 
     fn const_u64(&self, i: u64) -> Self::Value {
-        self.mlir_global_const_int_from_type(i, self.type_index())
+        self.mlir_global_const_int_from_type(i as i64, self.type_i64())
     }
 
     fn const_u128(&self, i: u128) -> Self::Value {
-        self.mlir_global_const_int_from_type(i, self.type_index())
+        self.mlir_global_const_int_from_type(i as i128, self.type_i128())
     }
 
     fn const_usize(&self, i: u64) -> Self::Value {
-        self.mlir_global_const_int_from_type(i, self.type_index())
+        self.mlir_global_const_int_from_type(i as i64, self.type_i64())
     }
 
     fn const_uint(&self, t: Self::Type, i: u64) -> Self::Value {
-        self.mlir_global_const_int_from_type(i, t)
+        self.mlir_global_const_int_from_type(i as i64, t)
     }
 
     fn const_uint_big(&self, t: Self::Type, u: u128) -> Self::Value {
-        self.mlir_global_const_int_from_type(u, t)
+        self.mlir_global_const_int_from_type(u as i128, t)
     }
 
     fn const_real(&self, t: Self::Type, val: f64) -> Self::Value {

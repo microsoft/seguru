@@ -62,7 +62,7 @@ pub fn run_host_arith<'ctx>(
 pub fn test_oob1() {
     cuda_ctx(0, |ctx, m| {
         let out = ctx.new_gmem_with_len(16, &[0.0; 16]).unwrap();
-        let config = gpu_host::gpu_config!(1, 1, 1, 8, 1, 1, 0);
+        let config = gpu_host::gpu_config!(1, 1, 1, 16, 1, 1, 0);
         host::oob1(config, ctx, m, 1.1, out, 1)
     })
     .expect("Kernel execution failed");

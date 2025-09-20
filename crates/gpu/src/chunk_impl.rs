@@ -13,7 +13,6 @@ pub struct MapLinearWithDim<const N: usize = 3> {
 pub type MapLinear = MapLinearWithDim<3>;
 
 impl<const N: usize> MapLinearWithDim<N> {
-    #[inline]
     #[gpu_codegen::device]
     #[gpu_codegen::ret_sync_data(1000)]
     pub fn new(width: usize) -> Self {
@@ -66,7 +65,9 @@ unsafe impl<CS: ChunkScope> ThreadUniqueMap<CS> for MapLinearWithDim<3> {
         let y_id = CS::global_id_y(thread_ids);
         let z_id = CS::global_id_z(thread_ids);
         let global_thread_id = x_id + (z_id * CS::global_dim_y() + y_id) * CS::global_dim_x();
-        (idx < self.width, idx + global_thread_id * self.width)
+        let stride = self.width;
+        let total_dim = CS::global_dim_x() * CS::global_dim_y() * CS::global_dim_z();
+        (true, idx % stride + (idx / stride) * stride * total_dim + global_thread_id * stride)
     }
 }
 
@@ -75,6 +76,7 @@ unsafe impl<CS: ChunkScope> ThreadUniqueMap<CS> for MapLinearWithDim<3> {
 /// all. It creates a new non-continuous partition for each thread.
 /// - IndexType is (usize, usize)
 ///
+/// Example:
 /// Example:
 /// - array: [T; 20]
 /// - x_size = 5 => y_size = 4

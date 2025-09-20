@@ -66,7 +66,7 @@ unsafe impl<CS: ChunkScope> ThreadUniqueMap<CS> for MapLinearWithDim<3> {
         let y_id = CS::global_id_y(thread_ids);
         let z_id = CS::global_id_z(thread_ids);
         let global_thread_id = x_id + (z_id * CS::global_dim_y() + y_id) * CS::global_dim_x();
-        (true, (idx + global_thread_id) * self.width)
+        (idx < self.width, idx + global_thread_id * self.width)
     }
 }
 

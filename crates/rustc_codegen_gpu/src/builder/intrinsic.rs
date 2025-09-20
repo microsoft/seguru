@@ -117,6 +117,11 @@ impl<'tcx, 'ml, 'a> IntrinsicCallBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 
         let ctx = self.mlir_ctx;
         let args_imm = args.iter().map(|arg| arg.immediate()).collect::<Vec<_>>();
         use rustc_span::sym;
+        if name == sym::select_unpredictable {
+            let ret = self.select(args_imm[0], args_imm[1], args_imm[2]);
+            self.store(ret, llresult, rustc_abi::Align::ONE);
+            return Ok(());
+        }
         intrinsic_match! {name, llresult, args_imm, self, ctx, loc,
             {
                 sym::sinf32 => melior_math::sin, 1,

@@ -1,3 +1,7 @@
+use crate::GlobalGroupChunk;
+use crate::chunk::ScopeUniqueMap;
+use crate::chunk_scope::{ChunkScope, Grid};
+
 /// Used to distinguish different memory spaces in GPU programming.
 /// GpuGlobal represents global memory space.
 /// See shared::GpuShared for shared memory space.
@@ -15,6 +19,22 @@ impl<'a, T: ?Sized> GpuGlobal<'a, T> {
     #[cfg(not(feature = "codegen_tests"))]
     pub fn new(slice: &'a mut cuda_bindings::CudaMemBox<T>) -> Self {
         unsafe { GpuGlobal { data: &mut *(slice.as_ptr() as *mut T) } }
+    }
+}
+
+impl<'a, T> GpuGlobal<'a, [T]> {
+    #[gpu_codegen::device]
+    #[gpu_codegen::sync_data(0, 1, 2)]
+    #[inline(always)]
+    pub fn chunk_to_scope<CS, Map: ScopeUniqueMap<CS>>(
+        self,
+        _cs: CS,
+        m: Map,
+    ) -> GlobalGroupChunk<'a, T, CS, Map>
+    where
+        CS: ChunkScope<FromScope = Grid>,
+    {
+        GlobalGroupChunk::new(self, m)
     }
 }
 

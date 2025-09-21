@@ -761,7 +761,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 }
                 _ => {
                     // TODO: handle other cases, we should return false here and handle them properly
-                    true
+                    false
                 }
             };
             if handled {

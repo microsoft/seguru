@@ -14,3 +14,9 @@ gpu_host = {path = "../crates/gpu-host"}
 gpu_macros = { path = "../crates/gpu-macros" }
 gpu = { path = "../crates/gpu" }
 syntax_gpu = {path = "syntax/gpu"}
+
+[profile.dev]
+overflow-checks = true
+
+[profile.release]
+overflow-checks = false

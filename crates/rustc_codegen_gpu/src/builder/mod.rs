@@ -19,12 +19,12 @@ use melior::ir::{
     TypeLike, Value, ValueLike,
 };
 use rustc_abi::BackendRepr;
+use rustc_codegen_ssa_gpu::common::IntPredicate;
 use rustc_codegen_ssa_gpu::mir::operand::{OperandRef, OperandValue};
 use rustc_codegen_ssa_gpu::traits::{
     BackendTypes, BaseTypeCodegenMethods, BuilderMethods, ConstCodegenMethods,
     IntrinsicCallBuilderMethods, LayoutTypeCodegenMethods, OverflowOp, StaticBuilderMethods,
 };
-use rustc_hir::LangItem;
 use rustc_span::Span;
 use tracing::{debug, trace};
 
@@ -652,14 +652,11 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             }
             GpuItem::Core(lang_item) => {
                 // Not a builtin.
-                match lang_item {
-                    LangItem::PanicBoundsCheck | LangItem::PanicNounwind | LangItem::Panic => {
-                        self.abort();
-                        Ok(None)
-                    }
-                    _ => {
-                        todo!();
-                    }
+                if lang_item.name().to_string().starts_with("panic") {
+                    self.assert(self.const_value(0, self.type_i1()), &lang_item.name().to_string());
+                    Ok(None)
+                } else {
+                    todo!("unhandled core lang item: {:?}", lang_item);
                 }
             }
             GpuItem::CoreFn(fn_name) => {
@@ -962,7 +959,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
     }
 
     fn is_unreachable(&self) -> bool {
-        self.cur_block().terminator().is_some()
+        false
     }
 
     fn append_op(&self, op: mlir_ir::Operation<'ml>) -> mlir_ir::OperationRef<'ml, 'a> {
@@ -1078,6 +1075,79 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         let rhs = self.use_value(rhs);
         let rhs = self.intcast(rhs, ty, false);
         (lhs, rhs)
+    }
+
+    // Overflowing add that always return the wrapped value.
+    // return wrapped value, overflow flag(bool)
+    fn mlir_overflowing_add(
+        &mut self,
+        lhs: mlir_ir::Value<'ml, 'a>,
+        rhs: mlir_ir::Value<'ml, 'a>,
+        signed: bool,
+    ) -> (mlir_ir::Value<'ml, 'a>, mlir_ir::Value<'ml, 'a>) {
+        let (lhs, rhs) = self.int_val_pair_cast(lhs, rhs);
+        let op = melior::dialect::arith::addi(lhs, rhs, self.cur_loc());
+        let ret = self.append_op_res(op);
+        let cmp_op = if signed { IntPredicate::IntSGT } else { IntPredicate::IntUGT };
+        let lhs_greater = self.icmp(cmp_op, lhs, ret);
+        // overflow = (z < x) == (y > 0)
+        let overflow = if signed {
+            let zero: Value<'_, '_> = self.const_value(0, rhs.r#type());
+            let rhs_pos = self.icmp(IntPredicate::IntSGT, rhs, zero);
+            self.icmp(IntPredicate::IntEQ, lhs_greater, rhs_pos)
+        } else {
+            lhs_greater
+        };
+        (ret, overflow)
+    }
+
+    fn mlir_overflowing_sub(
+        &mut self,
+        lhs: mlir_ir::Value<'ml, 'a>,
+        rhs: mlir_ir::Value<'ml, 'a>,
+        signed: bool,
+    ) -> (mlir_ir::Value<'ml, 'a>, mlir_ir::Value<'ml, 'a>) {
+        let (lhs, rhs) = self.int_val_pair_cast(lhs, rhs);
+        let op = melior::dialect::arith::subi(lhs, rhs, self.cur_loc());
+        let ret = self.append_op_res(op);
+        let cmp_op = if signed { IntPredicate::IntSLT } else { IntPredicate::IntULT };
+        let lhs_smaller_rhs = self.icmp(cmp_op, lhs, rhs);
+        // if signed: overflow = (x < y) == (z > x)
+        // if unsigned: overflow = (x < y)
+        let overflow = if signed {
+            let lhs_smaller = self.icmp(cmp_op, lhs, ret);
+            self.icmp(IntPredicate::IntEQ, lhs_smaller_rhs, lhs_smaller)
+        } else {
+            lhs_smaller_rhs
+        };
+        (ret, overflow)
+    }
+
+    fn mlir_overflowing_mul(
+        &mut self,
+        lhs: mlir_ir::Value<'ml, 'a>,
+        rhs: mlir_ir::Value<'ml, 'a>,
+        signed: bool,
+    ) -> (mlir_ir::Value<'ml, 'a>, mlir_ir::Value<'ml, 'a>) {
+        let (lhs, rhs) = self.int_val_pair_cast(lhs, rhs);
+        let op = melior::dialect::arith::muli(lhs, rhs, self.cur_loc());
+        let ret = self.append_op_res(op);
+        let zero = self.const_value(0, rhs.r#type());
+        // if signed, overflow = (((x ^ y ^ z) & (x ^ z)) < 0);
+        // if unsigned, overflow = (y != 0 && x > z);
+        let overflow = if signed {
+            let x_xor_y = self.xor(lhs, rhs);
+            let x_xor_z = self.xor(lhs, ret);
+            let x_xor_y_and_x_xor_z = self.and(x_xor_y, x_xor_z);
+            self.icmp(IntPredicate::IntSLT, x_xor_y_and_x_xor_z, zero)
+        } else {
+            let lhs_greater = self.icmp(IntPredicate::IntUGT, lhs, ret);
+            let rhs_not_zero = self.icmp(IntPredicate::IntNE, rhs, zero);
+            let lhs_not_zero = self.icmp(IntPredicate::IntNE, lhs, zero);
+            let tmp = self.and(rhs_not_zero, lhs_greater);
+            self.and(lhs_not_zero, tmp)
+        };
+        (ret, overflow)
     }
 
     fn load_with_check(
@@ -1224,6 +1294,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         // trap-based bound check is handled by assert op.
         let cond = self.use_value_as_ty(cond, self.type_i1());
         let op = melior::dialect::cf::assert(self.mlir_ctx, cond, msg, self.cur_loc());
+        self.append_op(op);
     }
 
     #[cfg(not(any(
@@ -1547,22 +1618,17 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn unreachable(&mut self) {
-        if self.is_unreachable() {
-            return;
-        }
+        self.assert(self.const_value(0, self.type_i1()), "unreachable");
         let block = self.append_sibling_block("unreachable");
         self.br(block);
         let cur = self.cur_block;
         self.switch_to_block(block);
-        self.assert(self.const_value(0, self.type_i1()), "unreachable");
         self.br(self.cur_block);
         self.switch_to_block(cur);
     }
 
     fn add(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        let (lhs, rhs) = self.int_val_pair_cast(lhs, rhs);
-        let op = melior::dialect::arith::addi(lhs, rhs, self.cur_loc());
-        self.append_op_res(op)
+        self.mlir_overflowing_add(lhs, rhs, false).0
     }
 
     fn fadd(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
@@ -1581,9 +1647,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn sub(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        let (lhs, rhs) = self.int_val_pair_cast(lhs, rhs);
-        let op = melior::dialect::arith::subi(lhs, rhs, self.cur_loc());
-        self.append_op_res(op)
+        self.mlir_overflowing_sub(lhs, rhs, false).0
     }
 
     fn fsub(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
@@ -1600,9 +1664,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn mul(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        let (lhs, rhs) = self.int_val_pair_cast(lhs, rhs);
-        let op = melior::dialect::arith::muli(lhs, rhs, self.cur_loc());
-        self.append_op_res(op)
+        self.mlir_overflowing_mul(lhs, rhs, false).0
     }
 
     fn fmul(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
@@ -1738,14 +1800,18 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         lhs: Self::Value,
         rhs: Self::Value,
     ) -> (Self::Value, Self::Value) {
-        debug!("Incomplete checked_binop: {:?} {:?} {:?}", oop, lhs, rhs);
-        // TODO: Build op with set_overflow_flags
-        let ret = match oop {
-            OverflowOp::Add => self.add(lhs, rhs),
-            OverflowOp::Sub => self.sub(lhs, rhs),
-            OverflowOp::Mul => self.mul(lhs, rhs),
+        // The default add/sub/mul in GPU is wrapped add and so
+        // we do not need to wrap it specially.
+        let signed = match ty.kind() {
+            rustc_middle::ty::Int(ity) => true,
+            rustc_middle::ty::Uint(uty) => false,
+            _ => panic!("non integer discriminant"),
         };
-        (ret, self.const_value(0, self.type_i1()))
+        match oop {
+            OverflowOp::Add => self.mlir_overflowing_add(lhs, rhs, signed),
+            OverflowOp::Sub => self.mlir_overflowing_sub(lhs, rhs, signed),
+            OverflowOp::Mul => self.mlir_overflowing_mul(lhs, rhs, signed),
+        }
     }
 
     fn from_immediate(&mut self, val: Self::Value) -> Self::Value {

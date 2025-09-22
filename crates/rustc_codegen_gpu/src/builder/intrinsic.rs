@@ -142,6 +142,7 @@ impl<'tcx, 'ml, 'a> IntrinsicCallBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 
                 sym::logf64 => melior_math::log, 1,
                 sym::log2f32 => melior_math::log_2, 1,
                 sym::log2f64 => melior_math::log_2, 1,
+                sym::maxnumf32 => melior_arith::maxnumf, 2,
             }
         }
         Ok(())

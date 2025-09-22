@@ -175,7 +175,7 @@ pub fn permute_kernel(
         let b = idx / (NH * N * d);
         let mut rest = idx % (NH * N * d);
         let nh_ = rest / (N * d);
-        rest = rest % (N * d);
+        rest %= N * d;
         let n = rest / d;
         let d_ = rest % d;
         let inp_idx = (b * N * 3 * NH * d) + (n * 3 * NH * d) + (0 * NH * d) + (nh_ * d) + d_;
@@ -184,5 +184,127 @@ pub fn permute_kernel(
         q[0] = inp[(inp_idx) as usize].ldcs();
         k[0] = inp[(inp_idx + NH * d) as usize].ldcs();
         v[0] = inp[(inp_idx + 2 * (NH * d)) as usize].ldcs();
+    }
+}
+
+/*
+__global__ void permute_kernel_backward(float* dinp,
+                                        const float* dq, const float* dk, const float* dv,
+                                        int B, int N, int NH, int d) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < B * NH * N * d) {
+        int b = idx / (NH * N * d);
+        int rest = idx % (NH * N * d);
+        int nh_ = rest / (N * d);
+        rest = rest % (N * d);
+        int n = rest / d;
+        int d_ = rest % d;
+
+        int inp_idx = (b * N * 3 * NH * d) + (n * 3 * NH * d) + (0 * NH * d) + (nh_ * d) + d_;
+        dinp[inp_idx] = dq[idx];
+        dinp[inp_idx + NH * d] = dk[idx];
+        dinp[inp_idx + 2 * (NH * d)] = dv[idx];
+    }
+}
+*/
+
+#[gpu_macros::cuda_kernel]
+pub fn permute_kernel_backward(
+    dinp: &mut [f32],
+    dq: &[f32],
+    dk: &[f32],
+    dv: &[f32],
+    B: i32,
+    N: i32,
+    NH: i32,
+    D: i32,
+) {
+    // shape (B, NH, N, D) to (B, N, 3, NH, D)
+    // Q[b][nh_][n][d_][0] = inp[b][n][0][nh_][d_]
+    // K[b][nh_][n][d_][0] = inp[b][n][1][nh_][d_]
+    // V[b][nh_][n][d_][0] = inp[b][n][2][nh_][d_]
+    // swap id2 <-> id3
+    // insert id0 between id2 and id3
+    let map = gpu::reshape_map!([3] | [D as usize, N as usize, NH as usize, B as usize]  => layout: [t0, t2, i0, t1, t3]);
+    let mut dinp = chunk_mut(dinp, map);
+    let idx = gpu::block_dim::<gpu::DimX>() * gpu::block_id::<gpu::DimX>()
+        + gpu::thread_id::<gpu::DimX>();
+    if idx < (B * NH * N * D) as usize {
+        dinp[0] = dq[idx];
+        dinp[1] = dk[idx];
+        dinp[2] = dv[idx];
+    }
+}
+
+/*
+__global__ void unpermute_kernel(float* inp, float *out, int B, int N, int NH, int d) {
+   // out has shape (B, nh, N, d) but we need to unpermute it to (B, N, nh, d)
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    // out[b][n][nh_][d_] <- inp[b][nh_][n][d_]
+    if (idx < B * NH * N * d) {
+        int b = idx / (NH * N * d);
+        int rest = idx % (NH * N * d);
+        int nh_ = rest / (N * d);
+        rest = rest % (N * d);
+        int n = rest / d;
+        int d_ = rest % d;
+        int other_idx = (b * NH * N * d) + (n * NH * d) + (nh_ * d) + d_;
+        out[other_idx] = __ldcs(&inp[idx]);
+    }
+}
+*/
+
+#[gpu_macros::cuda_kernel]
+pub fn unpermute_kernel(inp: &[f32], out: &mut [f32], B: i32, N: i32, NH: i32, D: i32) {
+    // shape (B, NH, N, D) to (B, N, NH, D)
+    // inp shape: (B, NH, N, D) out shape (B, N, NH, D)
+    // out[b][n][nh_][d_] <- inp[b][nh_][n][d_]
+    // swap tid1 and tid2
+    //let map = gpu::reshape_map!([B as usize, NH as usize, N as usize, D as usize] | [1] => layout: [0, 2, 1, 3, 4]);
+    let map = gpu::reshape_map!([1] | [D as usize, N as usize, NH as usize, B as usize]  => layout: [i0, t0, t2, t1, t3]);
+
+    let mut out = chunk_mut(out, map);
+    let idx = gpu::block_dim::<gpu::DimX>() * gpu::block_id::<gpu::DimX>()
+        + gpu::thread_id::<gpu::DimX>();
+    if idx < (B * NH * N * D) as usize {
+        out[0] = inp[idx].ldcs();
+    }
+}
+
+/*
+__global__ void unpermute_kernel_backward(float* dinp, const float *dout, int B, int N, int NH, int d) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < B * NH * N * d) {
+        int b = idx / (NH * N * d);
+        int rest = idx % (NH * N * d);
+        int nh_ = rest / (N * d);
+        rest = rest % (N * d);
+        int n = rest / d;
+        int d_ = rest % d;
+        int other_idx = (b * NH * N * d) + (n * NH * d) + (nh_ * d) + d_;
+        dinp[idx] = dout[other_idx];
+    }
+}
+*/
+
+#[gpu_macros::cuda_kernel]
+pub fn unpermute_kernel_backward(dinp: &mut [f32], dout: &[f32], B: i32, N: i32, NH: i32, D: i32) {
+    // shape (B, N, NH, D) to (B, NH, N, D)
+    // inp shape: (B, NH, N, D) out shape (B, N, NH, D)
+    // out[b][n][nh_][d_] <- inp[b][nh_][n][d_]
+    // swap tid1 and tid2
+    let map = gpu::MapLinear::new(1);
+    let mut dinp = chunk_mut(dinp, map);
+    let idx = (gpu::block_dim::<gpu::DimX>() * gpu::block_id::<gpu::DimX>()
+        + gpu::thread_id::<gpu::DimX>()) as i32;
+    if idx < (NH * N * B * D) {
+        let b = idx / (NH * N * D);
+        let mut rest = idx % (NH * N * D);
+        let nh_ = rest / (N * D);
+        rest %= N * D;
+        let n = rest / D;
+        let d_ = rest % D;
+        let other_idx = (b * (NH * N * D)) + (n * (NH * D)) + (nh_ * D) + d_;
+        dinp[0] = dout[other_idx as usize].ldcs();
     }
 }

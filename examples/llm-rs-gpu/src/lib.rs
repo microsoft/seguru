@@ -5,8 +5,8 @@
 use gpu::cg::{CGOperations, ReduxAdd, ReduxMax, ThreadWarpTile, WarpReduceOp};
 use gpu::chunk_scope::{build_chunk_scope, Grid, Thread};
 use gpu::{
-    block_id, chunk_mut, float4, grid_dim, reshape_map, CacheStreamLoadStore, DimX,
-    GPUDeviceFloatIntrinsics, MapLinear,
+    block_dim, block_id, chunk_mut, float4, grid_dim, reshape_map, thread_id, CacheStreamLoadStore,
+    DimX, GPUDeviceFloatIntrinsics, MapLinear,
 };
 
 #[gpu_macros::device]
@@ -460,5 +460,64 @@ pub fn residual_forward_kernel(out: &mut [f32], inp1: &[f32], inp2: &[f32], N: i
         + gpu::thread_id::<gpu::DimX>()) as i32;
     if idx < N {
         out[0] = inp1[idx as usize].ldcs() + inp2[idx as usize].ldcs();
+    }
+}
+
+/*
+#define GELU_SCALING_FACTOR sqrtf(2.0f / M_PI)
+__global__ void gelu_forward_kernel(float* out, const float* inp, int N) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < N) {
+        float xi = inp[i];
+        float cube = 0.044715f * xi * xi * xi;
+        out[i] = 0.5f * xi * (1.0f + tanhf(GELU_SCALING_FACTOR * (xi + cube)));
+    }
+}
+*/
+
+#[gpu_macros::cuda_kernel]
+pub fn gelu_forward_kernel(out: &mut [f32], inp: &[f32], N: i32) {
+    let GELU_SCALING_FACTOR: f32 = (2.0f32 / core::f32::consts::PI).sqrt();
+
+    let mut out = chunk_mut(out, MapLinear::new(1));
+    let idx = (block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>()) as i32;
+    if idx < N {
+        let xi = inp[idx as usize].ldcs();
+        let cube = 0.044715 * xi * xi * xi;
+        out[0] = 0.5 * xi * (1.0 + (GELU_SCALING_FACTOR * (xi + cube)).tanh());
+    }
+}
+
+/*
+__global__ void gelu_backward_kernel(float* dinp, const float* inp, const float* dout, const int N) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < N) {
+        float x = inp[i];
+        float cube = 0.044715f * x * x * x;
+        float tanh_arg = GELU_SCALING_FACTOR * (x + cube);
+        float tanh_out = tanhf(tanh_arg);
+        float coshf_out = coshf(tanh_arg);
+        float sech_out = 1.0f / (coshf_out * coshf_out);
+        float local_grad = 0.5f * (1.0f + tanh_out) + x * 0.5f * sech_out * GELU_SCALING_FACTOR * (1.0f + 3.0f * 0.044715f * x * x);
+        dinp[i] = local_grad * dout[i];
+    }
+}
+*/
+
+#[gpu_macros::cuda_kernel]
+pub fn gelu_backward_kernel(dinp: &mut [f32], inp: &[f32], dout: &[f32], N: i32) {
+    let gelu_scaling_factor: f32 = (2.0f32 / core::f32::consts::PI).sqrt();
+    let mut dinp = chunk_mut(dinp, MapLinear::new(1));
+    let idx = block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>();
+    if idx < N as usize {
+        let x = inp[idx].ldcs();
+        let cube = 0.044715 * x * x * x;
+        let tanh_arg = gelu_scaling_factor * (x + cube);
+        let tanh_out = tanh_arg.tanh();
+        let coshf_out = tanh_arg.cosh();
+        let sech_out = 1.0 / (coshf_out * coshf_out);
+        let local_grad = 0.5 * (1.0 + tanh_out)
+            + x * 0.5 * sech_out * gelu_scaling_factor * (1.0 + 3.0 * 0.044715 * x * x);
+        dinp[0].stcs(local_grad * dout[idx].ldcs());
     }
 }

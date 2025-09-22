@@ -12,7 +12,7 @@
 extern crate alloc;
 
 pub mod cg;
-mod chunk;
+pub mod chunk;
 mod chunk_impl;
 pub mod chunk_scope;
 mod device_intrinsic;
@@ -26,7 +26,7 @@ mod shared;
 pub mod sync;
 
 pub use chunk::{GlobalGroupChunk, GlobalThreadChunk, chunk_mut};
-pub use chunk_impl::{Map2D, MapLinear, MapLinearWithDim};
+pub use chunk_impl::{Map2D, MapLinear, MapLinearWithDim, MapReshape};
 #[cfg(not(feature = "codegen_tests"))]
 pub use cuda_bindings::SafeGpuConfig;
 pub use device_intrinsic::GPUDeviceFloatIntrinsics;

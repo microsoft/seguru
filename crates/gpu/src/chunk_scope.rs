@@ -27,7 +27,6 @@ impl SyncScope for Grid {}
 #[expect(private_bounds)]
 pub trait BuildChunkScope<S2: SyncScope>: SyncScope {
     type CS: ChunkScope<FromScope = Self, ToScope = S2>;
-
     #[gpu_codegen::device]
     #[gpu_codegen::ret_sync_data(1000)]
     fn build_chunk_scope(&self, to: S2) -> Self::CS;
@@ -672,5 +671,27 @@ mod test {
         assert_map!(S2, map_warp_threads, 0, thread_ids, (true, WIDTH));
         assert_map!(S1, map_warps, 64, thread_ids, (true, N + WIDTH)); // 128/32 * 64 + 64
         assert_map!(_, chained_map.clone(), 0, thread_ids, (true, N + WIDTH));
+    }
+
+    #[test]
+    pub(crate) fn test_reshape_map_example3() {
+        type S = MockWarp2ThreadScope<4, 0>; // a group of 4 threads.
+        let map_reshape = crate::reshape_map!([2, 2] | [3] => layout: [2, 0, 1]);
+        assert_map!(S, map_reshape, 0, [0, 0, 0, 0, 0, 0], (true, 0));
+        assert_map!(S, map_reshape, 0, [0, 2, 0, 0, 0, 0], (true, 1));
+        assert_map!(S, map_reshape, 1, [0, 0, 0, 0, 0, 0], (true, 2));
+        assert_map!(S, map_reshape, 0, [0, 1, 0, 0, 0, 0], (true, 6));
+        assert_map!(S, map_reshape, 0, [0, 3, 0, 0, 0, 0], (true, 7));
+    }
+    #[test]
+    pub(crate) fn test_reshape_map_example4() {
+        type S = MockWarp2ThreadScope<4, 0>; // a group of 4 threads.
+        let map_reshape = crate::reshape_map!([2, 2] | [3] => layout: [1, 0, 2]);
+        assert_map!(S, map_reshape, 0, [0, 0, 0, 0, 0, 0], (true, 0));
+        assert_map!(S, map_reshape, 1, [0, 0, 0, 0, 0, 0], (true, 1));
+        assert_map!(S, map_reshape, 2, [0, 0, 0, 0, 0, 0], (true, 2));
+        assert_map!(S, map_reshape, 0, [0, 2, 0, 0, 0, 0], (true, 3));
+        assert_map!(S, map_reshape, 0, [0, 1, 0, 0, 0, 0], (true, 6));
+        assert_map!(S, map_reshape, 0, [0, 3, 0, 0, 0, 0], (true, 9));
     }
 }

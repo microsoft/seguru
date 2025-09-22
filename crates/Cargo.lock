@@ -348,6 +348,7 @@ name = "gpu"
 version = "0.1.0"
 dependencies = [
  "cuda_bindings",
+ "gpu_macros",
  "num-traits",
 ]
 

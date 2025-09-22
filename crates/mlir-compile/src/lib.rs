@@ -189,6 +189,7 @@ impl CompileConfig {
         let args = [
             "-march=nvptx64",
             &format!("-mcpu={}", self.cubin_chip),
+            &format!("-mattr={}", self.cubin_features),
             &self.opt_flag(),
             inpath.to_str().unwrap(),
             "-o",

@@ -112,11 +112,33 @@ impl TryFrom<&str> for GpuItem {
             s if s.starts_with("gpu::device_intrinsics::") => {
                 GpuItem::DeviceIntrinsic(s.replace("gpu::device_intrinsics::", ""))
             }
+            // Override cmath functions to use our device intrinsics
+            "std::sys::cmath::tanhf" => {
+                GpuItem::DeviceIntrinsic("gpu::device_intrinsics::tanh".into())
+            }
+            "std::sys::cmath::tanf" => {
+                GpuItem::DeviceIntrinsic("gpu::device_intrinsics::tanf".into())
+            }
+            "std::sys::cmath::coshf" => {
+                GpuItem::DeviceIntrinsic("gpu::device_intrinsics::cosh".into())
+            }
+            "std::sys::cmath::sinhf" => {
+                GpuItem::DeviceIntrinsic("gpu::device_intrinsics::sinh".into())
+            }
+            s if [
+                "core::slice::index::slice_index_order_fail",
+                "core::slice::index::slice_start_index_len_fail",
+                "core::slice::index::slice_end_index_len_fail",
+            ]
+            .contains(&s) =>
+            {
+                GpuItem::CoreFn(s.to_string())
+            }
             s if s.starts_with("core") => {
                 if let Some(i) = lang_item_from_str(s) {
                     GpuItem::Core(i)
                 } else {
-                    GpuItem::CoreFn(s.to_string())
+                    return Err(());
                 }
             }
             _ => {
@@ -228,7 +250,8 @@ impl GpuAttributes {
     pub fn build(tcx: &rustc_middle::ty::TyCtxt<'_>, def_id: DefId) -> GpuAttributes {
         let attrs = tcx.get_attrs_unchecked(def_id);
         let mut gpu_attr = GpuAttributes::parse(attrs);
-        if tcx.crate_name(def_id.krate).as_str() == "core" {
+        let crate_name = tcx.crate_name(def_id.krate);
+        if crate_name == rustc_span::sym::core || crate_name == rustc_span::sym::std {
             if let Some(lang_item) = tcx.lang_items().from_def_id(def_id) {
                 if lang_item.name().to_string().starts_with("panic") {
                     gpu_attr.device = true;
@@ -237,15 +260,9 @@ impl GpuAttributes {
             } else {
                 let path = tcx.def_path_str(def_id);
                 let path = path.as_str();
-                if [
-                    "core::slice::index::slice_index_order_fail",
-                    "core::slice::index::slice_start_index_len_fail",
-                    "core::slice::index::slice_end_index_len_fail",
-                ]
-                .contains(&path)
-                {
+                if let Ok(gpu_item) = GpuItem::try_from(path) {
                     gpu_attr.device = true;
-                    gpu_attr.gpu_item = Some(GpuItem::CoreFn(path.into()));
+                    gpu_attr.gpu_item = Some(gpu_item);
                 }
             }
         }

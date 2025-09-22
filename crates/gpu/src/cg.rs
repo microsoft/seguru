@@ -212,13 +212,15 @@ where
     }
 }
 
+/*
 impl<const SIZE: usize> WarpReduceOp<f32, ReduxMax> for ThreadWarpTile<SIZE> {
     // LLVM 20.1.8 does not support redux.sync.max.f32
+    // This requires sm_100f and so reserved only for future arch even after Hopper.
     fn redux(&self, _op: ReduxMax, value: f32) -> f32 {
         let mut ret: f32;
         unsafe {
             core::arch::asm!(
-                "redux.sync.max.f32 {0:e}, {1:e}, {2:e}",
+                "redux.sync.max.f32 {0:e}, {1:e}, {2:e};",
                 out(reg) ret,
                 in(reg) value,
                 in(reg) self.thread_mask()
@@ -227,6 +229,7 @@ impl<const SIZE: usize> WarpReduceOp<f32, ReduxMax> for ThreadWarpTile<SIZE> {
         ret
     }
 }
+*/
 
 /// PTX does not support `redux.sync.add.f32` and so implement it via shuffle.
 impl !SubGroupReduceKind<f32> for ReduxAdd {}
@@ -235,6 +238,15 @@ impl !NvvmReduxSyncKind<f32> for ReduxAdd {}
 impl<const SIZE: usize> WarpReduceOp<f32, ReduxAdd> for ThreadWarpTile<SIZE> {
     fn redux(&self, _op: ReduxAdd, value: f32) -> f32 {
         self.reduce_with_shuffle(value, |a, b| a + b)
+    }
+}
+
+impl !SubGroupReduceKind<f32> for ReduxMax {}
+impl !NvvmReduxSyncKind<f32> for ReduxMax {}
+
+impl<const SIZE: usize> WarpReduceOp<f32, ReduxMax> for ThreadWarpTile<SIZE> {
+    fn redux(&self, _op: ReduxMax, value: f32) -> f32 {
+        self.reduce_with_shuffle(value, |a, b| a.max(b))
     }
 }
 

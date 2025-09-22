@@ -2,9 +2,12 @@
 #![allow(non_snake_case)]
 #![allow(clippy::too_many_arguments)]
 
-use gpu::cg::{CGOperations, ReduxAdd, ThreadWarpTile, WarpReduceOp};
+use gpu::cg::{CGOperations, ReduxAdd, ReduxMax, ThreadWarpTile, WarpReduceOp};
 use gpu::chunk_scope::{build_chunk_scope, Grid, Thread};
-use gpu::{block_id, chunk_mut, float4, CacheStreamLoadStore, GPUDeviceFloatIntrinsics, MapLinear};
+use gpu::{
+    block_id, chunk_mut, float4, grid_dim, reshape_map, CacheStreamLoadStore, DimX,
+    GPUDeviceFloatIntrinsics, MapLinear,
+};
 
 #[gpu_macros::device]
 #[inline(always)]
@@ -305,5 +308,157 @@ pub fn unpermute_kernel_backward(dinp: &mut [f32], dout: &[f32], B: i32, N: i32,
         let d_ = rest % D;
         let other_idx = (b * (NH * N * D)) + (n * (NH * D)) + (nh_ * D) + d_;
         dinp[0] = dout[other_idx as usize].ldcs();
+    }
+}
+
+/*
+__global__ void softmax_forward_kernel5(float* out, float inv_temperature, const float* inp, int N, int T) {
+    // inp, out shape: (N, T, T), where N = B * NH
+    // fuses the multiplication by scale inside attention
+    // directly autoregressive, so we only compute the lower triangular part
+    // uses the online softmax algorithm
+    assert(T % 4  == 0);
+    cg::thread_block block = cg::this_thread_block();
+    cg::thread_block_tile<32> warp = cg::tiled_partition<32>(block);
+    // micro-optimization: we iterate backwards so that
+    // after the softmax backward operation completes, the cache retains the
+    // part of the matrix close to the upper left corner, which benefits the
+    // matmul operation that immediately follows.
+    // int idx = blockIdx.x * warp.meta_group_size() + warp.meta_group_rank(); // forward order
+    int idx = (gridDim.x - blockIdx.x - 1) * warp.meta_group_size() + warp.meta_group_rank(); // backward order
+    if(idx >= N * T) {
+        return;
+    }
+    int own_pos = idx % T;
+    int pos_by_4 = own_pos / 4;
+
+    // one row of inp, i.e. inp[idx, :] of shape (T,)
+    const float* x = inp + idx * T;
+
+    // not INF, so we don't get NaNs accidentally when subtracting two values.
+    float maxval = -FLT_MAX;
+    float sumval = 0.0f;
+
+    const float4* x_vec = reinterpret_cast<const float4*>(x);
+    for (int i = warp.thread_rank(); i < pos_by_4; i += warp.size()) {
+        float4 v = x_vec[i];
+        float old_maxval = maxval;
+        for(int k = 0; k < 4; ++k) {
+            maxval = fmaxf(maxval, vec_at(v, k));
+        }
+        sumval *= expf(inv_temperature * (old_maxval - maxval));
+        for(int k = 0; k < 4; ++k) {
+            sumval += expf(inv_temperature * (vec_at(v, k) - maxval));
+        }
+    }
+
+    if(4*pos_by_4 + warp.thread_rank() <= own_pos) {
+        float old_maxval = maxval;
+        maxval = fmaxf(maxval, x[4*pos_by_4 + warp.thread_rank()]);
+        sumval *= expf(inv_temperature * (old_maxval - maxval));
+        sumval += expf(inv_temperature * (x[4*pos_by_4 + warp.thread_rank()] - maxval));
+    }
+
+    float global_maxval = cg::reduce(warp, maxval, cg::greater<float>{});
+    sumval *= expf(inv_temperature * (maxval - global_maxval));
+
+    float sum = cg::reduce(warp, sumval, cg::plus<float>{});
+    float norm = 1.f / sum;
+
+    // divide the whole row by the sum
+    for (int i = warp.thread_rank(); i <= own_pos; i += warp.size()) {
+        // recalculation is faster than doing the round-trip through memory.
+        float ev = expf(inv_temperature * (__ldcs(x + i) - global_maxval));
+        __stcs(out + idx * T + i, ev * norm);
+    }
+}
+*/
+
+#[gpu_macros::cuda_kernel]
+pub fn softmax_forward_kernel5(out: &mut [f32], inv_temperature: f32, inp: &[f32], N: i32, T: i32) {
+    assert!(T % 4 == 0);
+    let warp = ThreadWarpTile::<32>;
+    let grid2warp = build_chunk_scope(Grid, warp);
+    let warp2thread = build_chunk_scope(warp, Thread);
+    // idx * T + i0 * warp_size + thread_rank.
+    // ((gdim - 1 - bid) * meta_group_size + subgroup_id) * T + i0 * warp_size + thread_rank
+    let mut out = out
+        .chunk_to_scope(
+            grid2warp,
+            reshape_map!(
+                [T as usize] | [warp.meta_group_size(), grid_dim::<DimX>()] => layout: [i0, t0, -t1]
+            ),
+        )
+        .chunk_to_scope(warp2thread, gpu::MapLinear::new(1));
+    // micro-optimization: we iterate backwards so that
+    // after the softmax backward operation completes, the cache retains the
+    // part of the matrix close to the upper left corner, which benefits the
+    // matmul operation that immediately follows.
+    // int idx = blockIdx.x * warp.meta_group_size() + warp.meta_group_rank(); // forward order
+    let global_warp_id_reversed =
+        (grid_dim::<DimX>() - block_id::<DimX>() - 1) * warp.meta_group_size() + warp.subgroup_id(); // backward order
+    let global_warp_id_reversed = global_warp_id_reversed as i32;
+    if global_warp_id_reversed >= N * T {
+        return;
+    }
+    let own_pos = (global_warp_id_reversed % T) as usize;
+    let pos_by_4 = own_pos / 4;
+    let x = &inp[(global_warp_id_reversed * T) as usize..];
+    let mut maxval = f32::MIN;
+    let mut sumval = 0.0f32;
+    for i in (warp.thread_rank()..pos_by_4).step_by(warp.size()) {
+        let v4 = &x[4 * i..4 * i + 4];
+        let old_maxval = maxval;
+        for &v in v4 {
+            maxval = maxval.max(v);
+        }
+        sumval *= (inv_temperature * (old_maxval - maxval)).exp();
+        for &v in v4 {
+            sumval += (inv_temperature * (v - maxval)).exp();
+        }
+    }
+
+    if 4 * pos_by_4 + warp.thread_rank() <= own_pos {
+        let old_maxval = maxval;
+        maxval = maxval.max(x[4 * pos_by_4 + warp.thread_rank()]);
+        sumval *= (inv_temperature * (old_maxval - maxval)).exp();
+        sumval += (inv_temperature * (x[4 * pos_by_4 + warp.thread_rank()] - maxval)).exp();
+    }
+
+    let global_maxval = warp.redux(ReduxMax, maxval);
+    sumval *= (inv_temperature * (maxval - global_maxval)).exp();
+    let sum = warp.redux(ReduxAdd, sumval);
+    let norm = 1.0f32 / sum;
+    // divide the whole row by the sum
+    // If global_warp_id_reversed = 0, only the first thread writes to out[idx]
+    // If global_warp_id_reversed = 1, only the first two threads write to out[idx]
+    // ...
+    // If global_warp_id_reversed = T-1, if T > 32, all threads write to out[idx]
+    for (idx, i) in (warp.thread_rank()..=own_pos)
+        .step_by(warp.size())
+        .enumerate()
+    {
+        // recalculation is faster than doing the round-trip through memory.
+        let ev = (inv_temperature * (x[i].ldcs() - global_maxval)).exp();
+        //__stcs(out + idx * T + i, ev * norm);
+        out[idx].stcs(ev * norm);
+    }
+}
+/*
+__global__ void residual_forward_kernel(float* out, float* inp1, float* inp2, int N) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < N) {
+        out[idx] = __ldcs(&inp1[idx]) + __ldcs(&inp2[idx]);
+    }
+}
+*/
+
+#[gpu_macros::cuda_kernel]
+pub fn residual_forward_kernel(out: &mut [f32], inp1: &[f32], inp2: &[f32], N: i32) {
+    let mut out = chunk_mut(out, gpu::MapLinear::new(1));
+    let idx = (gpu::block_dim::<gpu::DimX>() * gpu::block_id::<gpu::DimX>()
+        + gpu::thread_id::<gpu::DimX>()) as i32;
+    if idx < N {
+        out[0] = inp1[idx as usize].ldcs() + inp2[idx as usize].ldcs();
     }
 }

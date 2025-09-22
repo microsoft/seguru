@@ -585,7 +585,6 @@ fn analyze_loop(
             // If so, the successor is a loop header
             // The bb is the loop end.
             if dominators.dominates(succ, bb) {
-                println!("Backedge from {:?} to {:?} (loop header)", bb, succ);
                 let loop_body = compute_loop_body(mir, succ, bb);
                 loop_pairs.push((bb, succ));
             }

@@ -521,3 +521,72 @@ pub fn gelu_backward_kernel(dinp: &mut [f32], inp: &[f32], dout: &[f32], N: i32)
         dinp[0].stcs(local_grad * dout[idx].ldcs());
     }
 }
+
+/*
+__device__ inline float lerp(float start, float end, float weight) {
+    return fma(weight, end, fma(-weight, start, start));
+}
+*/
+#[gpu_macros::device]
+pub fn lerp(start: f32, end: f32, weight: f32) -> f32 {
+    weight.fma(end, (-weight).fma(start, start))
+}
+
+/*
+__global__ void adamw_kernel2(float* params_memory, float* grads_memory, float* m_memory, float* v_memory, long num_parameters,
+                              float learning_rate, float beta1, float beta2, float beta1_correction, float beta2_correction, float eps, float weight_decay) {
+   int i = blockIdx.x * blockDim.x + threadIdx.x;
+   if (i >= num_parameters) return;  // guard
+   float grad = grads_memory[i];
+   float m = m_memory[i];
+   float v = v_memory[i];
+   // update the first moment (momentum)
+   m = lerp(grad, m, beta1);
+   m_memory[i] = m;
+   // update the second moment (RMSprop)
+   v = lerp(grad * grad, v, beta2);
+   v_memory[i] = v;
+   m /= beta1_correction;  // m_hat
+   v /= beta2_correction;  // v_hat
+   params_memory[i] -= learning_rate * (m / (sqrtf(v) + eps) + weight_decay * params_memory[i]);
+}
+*/
+/// TODO: add tests
+#[gpu_macros::cuda_kernel]
+pub fn adamw_kernel2(
+    params_memory: &mut [f32],
+    grads_memory: &[f32],
+    m_memory: &mut [f32],
+    v_memory: &mut [f32],
+    num_parameters: i32,
+    learning_rate: f32,
+    beta1: f32,
+    beta2: f32,
+    beta1_correction: f32,
+    beta2_correction: f32,
+    eps: f32,
+    weight_decay: f32,
+) {
+    let mut params_memory = chunk_mut(params_memory, gpu::MapLinear::new(1));
+    let mut m_memory = chunk_mut(m_memory, gpu::MapLinear::new(1));
+    let mut v_memory = chunk_mut(v_memory, gpu::MapLinear::new(1));
+    let idx = (gpu::block_dim::<gpu::DimX>() * gpu::block_id::<gpu::DimX>()
+        + gpu::thread_id::<gpu::DimX>()) as i32;
+    if idx >= num_parameters {
+        return;
+    }
+    let grad = grads_memory[idx as usize];
+    let m = m_memory[0];
+    let v = v_memory[0];
+    // update the first moment (momentum)
+    let m = lerp(grad, m, beta1);
+    m_memory[0] = lerp(grad, m, beta1);
+    // update the second moment (RMSprop)
+    let v = lerp(grad * grad, v, beta2);
+    v_memory[0] = v;
+    let m_hat = m / beta1_correction; // m_hat
+    let v_hat = v / beta2_correction; // v_hat
+    let old_param = params_memory[0];
+    params_memory[0] =
+        old_param - learning_rate * (m_hat / (v_hat.sqrt() + eps) + weight_decay * old_param);
+}

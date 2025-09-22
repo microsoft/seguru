@@ -22,7 +22,7 @@ pub fn gelu_forward_cpu(inp: &[f32]) -> Vec<f32> {
 #[test]
 fn test_gelu() {
     const N: usize = 1024;
-    let mut h_dinp = random_f32_vec(N);
+    let h_dinp = random_f32_vec(N);
     let mut h_doutp = [0.0f32; N];
     const BLOCK_SIZE: u32 = 256;
     cuda_ctx(0, |ctx, m| {

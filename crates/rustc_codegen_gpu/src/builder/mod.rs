@@ -570,7 +570,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 let ptr_t = if self.mlir_element_type(ptr.r#type()) != val.r#type() {
                     let target_memref_ty =
                         self.type_memref(val.r#type(), &[1], None, ptr_memref_ty.memory_space());
-                    self.mlir_memref_view(ptr, target_memref_ty, None)
+                    self.mlir_memref_view(ptr, target_memref_ty, None, None)
                 } else {
                     ptr
                 };
@@ -854,7 +854,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             val
         } else if ty.is_mem_ref() && dst_ty.is_mem_ref() {
             // Should be i8 to i8 here
-            self.mlir_memref_view(val, dst_ty, None)
+            self.mlir_memref_view(val, dst_ty, None, None)
         } else if ty.is_index() || ty.is_integer() || dst_ty.is_index() || dst_ty.is_integer() {
             self.intcast(val, dst_ty, false)
         } else {
@@ -878,6 +878,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         val: melior::ir::Value<'ml, 'a>,
         dst_ty: melior::ir::Type<'ml>,
         byte_offset: Option<Value<'ml, 'a>>,
+        dy_size: Option<Value<'ml, 'a>>,
     ) -> Value<'ml, 'a> {
         let ty = val.r#type();
         assert!(ty.is_mem_ref());
@@ -933,11 +934,17 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         } else {
             base_byte_offset
         };
+        let dy_sizes = if let Some(dy_size) = dy_size {
+            let dy_size = self.intcast(dy_size, self.type_index(), false);
+            vec![dy_size]
+        } else {
+            vec![] // No dynamic sizes
+        };
         let op = melior::dialect::memref::view(
             self.cx.mlir_ctx,
             base_memref,
             byte_offset,
-            &[], // No dynamic sizes
+            &dy_sizes,
             dst_memref_ty,
             self.cur_loc(),
         );
@@ -970,13 +977,9 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         self.cur_block().append_operation(op)
     }
 
-    fn inttollvmptr(
-        &mut self,
-        val: mlir_ir::Value<'ml, 'a>,
-        dest_ty: <GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::Type,
-    ) -> mlir_ir::Value<'ml, 'a> {
+    fn inttollvmptr(&mut self, val: mlir_ir::Value<'ml, 'a>) -> mlir_ir::Value<'ml, 'a> {
         assert!(!self.is_unreachable());
-
+        let dest_ty = self.type_llvm_ptr();
         let int64_val = if val.r#type() == self.type_i64() {
             val
         } else {
@@ -1045,7 +1048,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         let llvm_raw_ptr_int = self.intcast(raw_ptr, self.type_i64(), false);
 
         // Ptr to LLVM
-        let llvm_ptr = self.inttollvmptr(llvm_raw_ptr_int, self.type_llvm_ptr());
+        let llvm_ptr = self.inttollvmptr(llvm_raw_ptr_int);
 
         // LLVM store with volatile
         let llvm_store_op = melior::dialect::llvm::load(
@@ -1093,7 +1096,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         // overflow = (z < x) == (y > 0)
         let overflow = if signed {
             let zero: Value<'_, '_> = self.const_value(0, rhs.r#type());
-            let rhs_pos = self.icmp(IntPredicate::IntSGT, rhs, zero);
+            let rhs_pos = self.icmp(IntPredicate::IntSGE, rhs, zero);
             self.icmp(IntPredicate::IntEQ, lhs_greater, rhs_pos)
         } else {
             lhs_greater
@@ -1167,6 +1170,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 ptr,
                 self.type_memref(load_ty, &[1], None, src_memref_ty.memory_space()),
                 None,
+                None,
             )
         } else {
             ptr
@@ -1209,7 +1213,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         let dst_memref_ty = MemRefType::try_from(ptr_ty).unwrap();
         let target_memref_ty = self.type_memref(store_ty, &[1], None, dst_memref_ty.memory_space());
         let ptr = if self.mlir_element_type(ptr_ty) != store_ty {
-            self.mlir_memref_view(ptr, target_memref_ty, None)
+            self.mlir_memref_view(ptr, target_memref_ty, None, None)
         } else {
             ptr
         };
@@ -1922,6 +1926,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
                         ptr,
                         self.type_memref(base_ty, &[1], None, ptr_memref_ty.memory_space()),
                         offset,
+                        None,
                     )
                 } else {
                     ptr
@@ -1945,7 +1950,16 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         count: u64,
         dest: rustc_codegen_ssa_gpu::mir::place::PlaceRef<'tcx, Self::Value>,
     ) {
-        todo!()
+        let val = match elem.val {
+            OperandValue::Immediate(v) => v,
+            _ => panic!("expected immediate"),
+        };
+
+        for i in 0..count {
+            let idx = self.const_value(i, self.type_index());
+            let dest_elem = dest.project_index(self, idx).val.llval;
+            self.store(val, dest_elem, dest.val.align);
+        }
     }
 
     fn range_metadata(&mut self, load: Self::Value, range: rustc_abi::WrappingRange) {
@@ -2176,6 +2190,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             base_memref,
             unsafe { self._type_memref(dest_ty, &[1], None, None).into() },
             None,
+            None,
         );
         self.mlir_load(dest_ty, casted_base_memref, &[zero], align)
     }
@@ -2379,21 +2394,19 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         size: Self::Value,
         flags: rustc_codegen_ssa_gpu::MemFlags,
     ) {
-        if self.is_unreachable() {
-            return;
-        }
         let dst_ty = MemRefType::try_from(dst.r#type()).unwrap();
         let src_ty = MemRefType::try_from(src.r#type()).unwrap();
-        let dst_ty = {
-            let mut sizes = vec![];
-            for i in 0..dst_ty.rank() {
-                sizes.push(dst_ty.dim_size(i).unwrap() as i64);
-            }
-            self.type_memref(dst_ty.element(), &sizes, None, src_ty.memory_space())
-        };
-        let src = self.mlir_memref_view(src, dst_ty, None);
-        let op = melior::dialect::ods::memref::copy(self.mlir_ctx, src, dst, self.cur_loc()).into();
-        self.append_op(op);
+        let dst_ty = self.type_memref(
+            dst_ty.element(),
+            &[crate::mlir::memref::dynamic_size()],
+            None,
+            src_ty.memory_space(),
+        );
+        let src = self.mlir_memref_view(src, dst_ty, None, Some(size));
+        let dst = self.mlir_memref_view(dst, dst_ty, None, Some(size));
+        self.append_op(
+            melior::dialect::ods::memref::copy(self.mlir_ctx, src, dst, self.cur_loc()).into(),
+        );
     }
 
     fn memmove(
@@ -2416,7 +2429,23 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         align: rustc_abi::Align,
         flags: rustc_codegen_ssa_gpu::MemFlags,
     ) {
-        todo!()
+        let is_volatile = flags.contains(rustc_codegen_ssa_gpu::MemFlags::VOLATILE);
+        let is_volatile = IntegerAttribute::new(self.type_i1(), if is_volatile { 1 } else { 0 });
+        let dst_addr = self.ptrtoint(ptr, self.type_i64());
+        let dst = self.inttollvmptr(dst_addr);
+        let fill_byte = self.use_value(fill_byte);
+        let size = self.use_value(size);
+        self.append_op(
+            melior::dialect::ods::llvm::intr_memset(
+                self.mlir_ctx,
+                dst,
+                fill_byte,
+                size,
+                is_volatile,
+                self.cur_loc(),
+            )
+            .into(),
+        );
     }
 
     fn select(

@@ -212,7 +212,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a> AsmBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a
         for i in &mut inputs {
             if i.r#type().is_mem_ref() {
                 let addr = self.ptrtoint(*i, self.type_i64());
-                *i = self.inttollvmptr(addr, self.type_llvm_ptr());
+                *i = self.inttollvmptr(addr);
             }
         }
         let builder = builder.operands(&inputs);

@@ -350,7 +350,11 @@ pub(crate) fn static_size_of(ty: Type<'_>) -> usize {
         let ranked_ty = RankedTensorType::try_from(ty).unwrap();
         let ty = ranked_ty.element();
         let base_size = static_size_of(ty);
-        todo!();
+        let mut len = 1;
+        for i in 0..ranked_ty.rank() {
+            len *= ranked_ty.dim_size(i).unwrap();
+        }
+        base_size * len
     } else {
         panic!("Unsupported type: {:?}", ty);
     }

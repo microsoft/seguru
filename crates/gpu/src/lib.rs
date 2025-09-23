@@ -14,7 +14,7 @@ extern crate alloc;
 pub mod cg;
 mod chunk;
 mod chunk_impl;
-mod chunk_scope;
+pub mod chunk_scope;
 mod device_intrinsic;
 mod dim;
 pub(crate) mod global;
@@ -25,7 +25,7 @@ mod print;
 mod shared;
 pub mod sync;
 
-pub use chunk::{GlobalThreadChunk, chunk_mut};
+pub use chunk::{GlobalGroupChunk, GlobalThreadChunk, chunk_mut};
 pub use chunk_impl::{Map2D, MapLinear, MapLinearWithDim};
 #[cfg(not(feature = "codegen_tests"))]
 pub use cuda_bindings::SafeGpuConfig;

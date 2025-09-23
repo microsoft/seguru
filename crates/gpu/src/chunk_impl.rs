@@ -1,15 +1,29 @@
-use crate::chunk::ThreadUniqueMap;
-use crate::chunk_scope::ChunkScope;
+use crate::chunk::ScopeUniqueMap;
+use crate::chunk_scope::{ChunkScope, TID_MAX_LEN};
 
-/// Unique mapping for continuous memory
+/// Linear mapping for 1D array.
 /// N is the number of thread dimensions.
+/// width is the chunking window.
+/// The array is divided into chunks along threads until all elements are covered.
+///
+/// ## Examples
+///
+/// Given:
+/// bdim = (x=4, y=1, z=1)
+/// gdim = (x=1, y=1, z=1)
+/// arr: [T; 8]
+/// width = 2
+///
+/// With `width = 2`, the mapping assign two continuous elements to thread 0-3:
+/// [0, 0, 1, 1, 2, 2, 3, 3]
+///
+/// width = 1, the mapping assign two non-continuous elements to thread 0-3:
+/// [0, 1, 2, 3, 0, 1, 2, 3]
 #[derive(Copy, Clone)]
 pub struct MapLinearWithDim<const N: usize = 3> {
     width: usize,
 }
 
-/// Linear mapping continuous memory chunk per thread.
-/// - IndexType is usize.
 pub type MapLinear = MapLinearWithDim<3>;
 
 impl<const N: usize> MapLinearWithDim<N> {
@@ -23,7 +37,7 @@ impl<const N: usize> MapLinearWithDim<N> {
 /// # Safety
 /// It is safe to use this mapping as long as the thread dimensions are properly
 /// configured.
-unsafe impl<CS: ChunkScope> ThreadUniqueMap<CS> for MapLinearWithDim<1> {
+unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for MapLinearWithDim<1> {
     type IndexType = usize;
 
     #[inline]
@@ -34,12 +48,12 @@ unsafe impl<CS: ChunkScope> ThreadUniqueMap<CS> for MapLinearWithDim<1> {
 
     #[inline]
     #[gpu_codegen::device]
-    fn map(&self, idx: Self::IndexType, thread_ids: [usize; CS::TID_LEN]) -> (bool, usize) {
-        MapLinearWithDim::<3>::new(self.width).map(idx, thread_ids)
+    fn map(&self, idx: Self::IndexType, thread_ids: [usize; TID_MAX_LEN]) -> (bool, usize) {
+        ScopeUniqueMap::<CS>::map(&MapLinearWithDim::<3>::new(self.width), idx, thread_ids)
     }
 }
 
-unsafe impl<CS: ChunkScope> ThreadUniqueMap<CS> for MapLinearWithDim<2> {
+unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for MapLinearWithDim<2> {
     type IndexType = usize;
 
     #[inline]
@@ -50,17 +64,17 @@ unsafe impl<CS: ChunkScope> ThreadUniqueMap<CS> for MapLinearWithDim<2> {
 
     #[inline]
     #[gpu_codegen::device]
-    fn map(&self, idx: Self::IndexType, thread_ids: [usize; CS::TID_LEN]) -> (bool, usize) {
-        MapLinearWithDim::<3>::new(self.width).map(idx, thread_ids)
+    fn map(&self, idx: Self::IndexType, thread_ids: [usize; TID_MAX_LEN]) -> (bool, usize) {
+        ScopeUniqueMap::<CS>::map(&MapLinearWithDim::<3>::new(self.width), idx, thread_ids)
     }
 }
 
-unsafe impl<CS: ChunkScope> ThreadUniqueMap<CS> for MapLinearWithDim<3> {
+unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for MapLinearWithDim<3> {
     type IndexType = usize;
 
     #[inline]
     #[gpu_codegen::device]
-    fn map(&self, idx: usize, thread_ids: [usize; CS::TID_LEN]) -> (bool, usize) {
+    fn map(&self, idx: usize, thread_ids: [usize; TID_MAX_LEN]) -> (bool, usize) {
         let x_id = CS::global_id_x(thread_ids);
         let y_id = CS::global_id_y(thread_ids);
         let z_id = CS::global_id_z(thread_ids);
@@ -110,7 +124,7 @@ impl Map2D {
     }
 }
 
-unsafe impl<CS: ChunkScope> ThreadUniqueMap<CS> for Map2D {
+unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for Map2D {
     type IndexType = (usize, usize);
 
     #[inline]
@@ -121,7 +135,7 @@ unsafe impl<CS: ChunkScope> ThreadUniqueMap<CS> for Map2D {
 
     #[inline]
     #[gpu_codegen::device]
-    fn map(&self, idx: Self::IndexType, thread_ids: [usize; CS::TID_LEN]) -> (bool, usize) {
+    fn map(&self, idx: Self::IndexType, thread_ids: [usize; TID_MAX_LEN]) -> (bool, usize) {
         let shape_x = self.x_size;
         let inner_x = idx.0;
         let inner_y = idx.1;

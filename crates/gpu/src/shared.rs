@@ -3,8 +3,8 @@
 use core::ops::{Deref, DerefMut};
 
 use crate::assert_ptr;
-use crate::chunk::{ThreadUniqueMap, ThreadUniqueMapProvidedMethods};
-use crate::chunk_scope::SharedMemScope;
+use crate::chunk::{ScopeUniqueMap, ScopeUniqueMapProvidedMethods};
+use crate::chunk_scope::Block2ThreadScope;
 
 /// Static GPU shared memory.
 #[rustc_diagnostic_item = "gpu::GpuShared"]
@@ -89,7 +89,7 @@ impl<T> core::ops::Index<usize> for GpuShared<[T]> {
 /// N:core::ops::Index dimension, 1, 2, 3
 /// Map: Mapping strategy
 #[allow(private_bounds)]
-pub struct SMemThreadChunk<'a, T: ?Sized + AsSharedSlice, Map: ThreadUniqueMap<SharedMemScope>> {
+pub struct SMemThreadChunk<'a, T: ?Sized + AsSharedSlice, Map: ScopeUniqueMap<Block2ThreadScope>> {
     data: &'a mut GpuShared<T>, // Must be private.
     pub map_params: Map,
 }
@@ -150,7 +150,7 @@ impl<T: ?Sized + AsSharedSlice> GpuShared<T> {
     #[gpu_codegen::memspace_shared(0, 1000)]
     #[gpu_codegen::sync_data(0, 1)]
     #[rustc_diagnostic_item = "gpu::shared_chunk_mut"]
-    pub fn chunk_mut<'a, Map: ThreadUniqueMap<SharedMemScope>>(
+    pub fn chunk_mut<'a, Map: ScopeUniqueMap<Block2ThreadScope>>(
         &'a mut self,
         map_params: Map,
     ) -> SMemThreadChunk<'a, T, Map> {
@@ -161,7 +161,7 @@ impl<T: ?Sized + AsSharedSlice> GpuShared<T> {
     }
 }
 
-impl<'a, T: ?Sized + AsSharedSlice, Map: ThreadUniqueMap<SharedMemScope>>
+impl<'a, T: ?Sized + AsSharedSlice, Map: ScopeUniqueMap<Block2ThreadScope>>
     core::ops::Index<Map::IndexType> for SMemThreadChunk<'a, T, Map>
 {
     type Output = T::Elem;
@@ -176,7 +176,7 @@ impl<'a, T: ?Sized + AsSharedSlice, Map: ThreadUniqueMap<SharedMemScope>>
     }
 }
 
-impl<'a, T: ?Sized + AsSharedSlice, Map: ThreadUniqueMap<SharedMemScope>>
+impl<'a, T: ?Sized + AsSharedSlice, Map: ScopeUniqueMap<Block2ThreadScope>>
     core::ops::IndexMut<Map::IndexType> for SMemThreadChunk<'a, T, Map>
 {
     #[inline(always)]

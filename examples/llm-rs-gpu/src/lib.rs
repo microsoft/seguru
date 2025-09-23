@@ -2,7 +2,9 @@
 #![allow(non_snake_case)]
 #![allow(clippy::too_many_arguments)]
 
-use gpu::{chunk_mut, float4, CacheStreamLoadStore, MapLinear};
+use gpu::cg::{ReduxAdd, ThreadWarpTile, WarpReduceOp};
+use gpu::chunk_scope::{build_chunk_scope, Grid, Thread};
+use gpu::{block_id, chunk_mut, float4, CacheStreamLoadStore, GPUDeviceFloatIntrinsics, MapLinear};
 
 #[gpu_macros::device]
 #[inline(always)]
@@ -75,21 +77,83 @@ pub fn encoder_backward_kernel(
     }
 }
 
-// TODO: out is column-chunked by wrap. Not supported currently
-// #[gpu_macros::cuda_kernel]
-// pub fn layernorm_forward_kernel3(
-//     out: &mut [f32],
-//     mean: &mut [f32],
-//     rstd: &mut [f32],
-//     inp: &[i32],
-//     weight: &[f32],
-//     bias: &[f32],
-//     N: i32,
-//     C: i32,
-// ) {
-//     unimplemented!();
-// }
+#[gpu_macros::cuda_kernel]
+pub fn layernorm_forward_kernel3(
+    out: &mut [f32],
+    mean: &mut [f32],
+    rstd: &mut [f32],
+    inp: &[f32],
+    weight: &[f32],
+    bias: &[f32],
+    N: i32,
+    C: i32,
+) {
+    let C = C as u32;
+    let N = N as u32;
+    let warp = ThreadWarpTile::<32>;
+    let grid2warp = build_chunk_scope(Grid, warp);
+    let warp2thread = build_chunk_scope(warp, Thread);
 
+    // chunk to warp and then to a single thread.
+    let mut chunked_rstd = rstd
+        .chunk_to_scope(grid2warp, MapLinear::new(1))
+        .chunk_to_scope(warp2thread, MapLinear::new(1));
+
+    // chunk to warp and then to a single thread.
+    let mut chunked_mean = mean
+        .chunk_to_scope(grid2warp, MapLinear::new(1))
+        .chunk_to_scope(warp2thread, MapLinear::new(1));
+
+    // chunk to warp and then to a all thread in the warp
+    // where each thread gets a strided chunk.
+    let mut chunked_out = out
+        .chunk_to_scope(grid2warp, MapLinear::new(C as _))
+        .chunk_to_scope(warp2thread, MapLinear::new(1));
+
+    let idx = block_id::<gpu::DimX>() * warp.meta_group_size() + warp.subgroup_id();
+    let lane_id = warp.thread_rank();
+    if idx >= N as usize {
+        return;
+    }
+    // the row of input that this group of threads is responsible for
+    let idx_C = idx * C as usize;
+    let x = &inp[idx_C..idx_C + C as usize];
+
+    // mean
+    let mut local_sum = 0.0f32;
+    for i in (lane_id..C).step_by(warp.size()) {
+        local_sum += x[i as usize];
+    }
+    let sum: f32 = warp.redux(ReduxAdd, local_sum);
+    let m = sum / C as f32;
+    if lane_id == 0 {
+        chunked_mean[0].stcs(m);
+    }
+
+    // rstd
+    let mut local_sum = 0.0f32;
+    for i in (lane_id..C).step_by(warp.size()) {
+        let diff = x[i as usize] - m;
+        local_sum += diff * diff;
+    }
+    let sum = warp.redux(ReduxAdd, local_sum);
+    let s = (sum / C as f32 + 1e-5f32).rsqrt();
+    if lane_id == 0 {
+        chunked_rstd[0].stcs(s);
+    }
+    // final normalization and scaling by weight/bias
+    for (i, c) in (lane_id..C).step_by(warp.size()).enumerate() {
+        // load and store using the .cs "streaming" hint to the compiler,
+        // indicating that this data will not be reused soon, and can be streamed through the caches
+        // this allows the threads to get more cache-hits for the (shared) weight and bias parameters
+        let c = c as usize;
+        let n = s * (x[c].ldcs() - m);
+        let o = n * weight[c] + bias[c];
+        chunked_out[i].stcs(o);
+    }
+}
+
+#[allow(clippy::erasing_op)]
 #[gpu_macros::cuda_kernel]
 pub fn permute_kernel(
     q: &mut [f32],

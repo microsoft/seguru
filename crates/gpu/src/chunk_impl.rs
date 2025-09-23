@@ -81,8 +81,7 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for MapLinearWithDim<3> {
         let global_thread_id = x_id + (z_id * CS::global_dim_y() + y_id) * CS::global_dim_x();
         let stride = self.width;
         let total_dim = CS::global_dim_x() * CS::global_dim_y() * CS::global_dim_z();
-        let ret = idx % stride + (idx / stride) * stride * total_dim + global_thread_id * stride;
-        (true, ret)
+        (true, idx % stride + (idx / stride) * stride * total_dim + global_thread_id * stride)
     }
 }
 
@@ -154,10 +153,11 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for Map2D {
 pub struct MapReshape<const N: usize, const M: usize> {
     max_tid: usize,
     old_tid_w: [usize; N],
-    new_tid_w: [usize; N],
+    new_tid_w: [isize; N],
     max_idx: usize,
     old_idx_w: [usize; M],
-    new_idx_w: [usize; M],
+    new_idx_w: [isize; M],
+    offset: isize,
 }
 
 /// User will not be able to use MapReshape as a regular mapping strategy directly.
@@ -169,13 +169,14 @@ impl<const N: usize, const M: usize> MapReshape<N, M> {
     #[gpu_codegen::ret_sync_data(1000)]
     pub fn new_with_weight_no_check(
         old_tid_w: [usize; N],
-        new_tid_w: [usize; N],
+        new_tid_w: [isize; N],
         old_idx_w: [usize; M],
-        new_idx_w: [usize; M],
+        new_idx_w: [isize; M],
         max_tid: usize,
         max_idx: usize,
+        offset: isize,
     ) -> Self {
-        Self { old_tid_w, new_tid_w, old_idx_w, new_idx_w, max_tid, max_idx }
+        Self { old_tid_w, new_tid_w, old_idx_w, new_idx_w, max_tid, max_idx, offset }
     }
     /// sizes: The shape of the input tensor, in terms of thread dimensions and index dimensions.
     /// sizes = [D_0, D_1, ..., D_{N-1}, D_N, ..., D_{N+M}]
@@ -183,19 +184,22 @@ impl<const N: usize, const M: usize> MapReshape<N, M> {
     /// index_places: The permutation of dimensions, also indicating the sorted order of weights
     #[gpu_codegen::device]
     #[gpu_codegen::ret_sync_data(1000)]
-    pub fn new_with_weight<const LEN: usize>(sizes: [usize; LEN], weights: [usize; LEN]) -> Self {
+    pub fn new_with_weight<const LEN: usize>(
+        sizes: [usize; LEN],
+        weights: [isize; LEN],
+        offset: isize,
+    ) -> Self {
         // helper closure: product of slice elements after position `i`
         let suffix_prod = |arr: &[usize], i: usize| {
             let mut w = 1;
             arr[i..].iter().for_each(|v| w *= *v);
             w
         };
-
         for i in 0..LEN {
-            let w = weights[i];
+            let w = weights[i].unsigned_abs();
             let mut sum = 0;
             for j in 0..LEN {
-                let w2 = weights[j];
+                let w2 = weights[j].unsigned_abs();
                 let s2 = sizes[j];
                 if i == j {
                     continue;
@@ -226,6 +230,7 @@ impl<const N: usize, const M: usize> MapReshape<N, M> {
             new_idx_w,
             max_tid: suffix_prod(&sizes[0..N], 0),
             max_idx: suffix_prod(&sizes[N..N + M], 0),
+            offset,
         }
     }
 
@@ -256,11 +261,11 @@ impl<const N: usize, const M: usize> MapReshape<N, M> {
         let mut new_idx_w = [0; M];
         for i in 0..N {
             old_tid_w[i] = suffix_prod(&sizes[0..N], i + 1);
-            new_tid_w[i] = suffix_prod(&new_sizes, index_places[i] + 1);
+            new_tid_w[i] = suffix_prod(&new_sizes, index_places[i] + 1) as isize;
         }
         for i in N..(N + M) {
             old_idx_w[i - N] = suffix_prod(&sizes, i + 1);
-            new_idx_w[i - N] = suffix_prod(&new_sizes, index_places[i] + 1);
+            new_idx_w[i - N] = suffix_prod(&new_sizes, index_places[i] + 1) as isize;
         }
         Self {
             old_tid_w,
@@ -269,6 +274,7 @@ impl<const N: usize, const M: usize> MapReshape<N, M> {
             new_idx_w,
             max_tid: suffix_prod(&sizes[0..N], 0),
             max_idx: suffix_prod(&sizes[N..], 0),
+            offset: 0,
         }
     }
 
@@ -283,19 +289,19 @@ impl<const N: usize, const M: usize> MapReshape<N, M> {
             + CS::global_dim_x()
                 * (CS::global_id_y(thread_ids) + CS::global_dim_y() * CS::global_id_z(thread_ids));
         let mut remain = tid;
-        let mut index = 0;
+        let mut index = self.offset;
         for i in 0..N {
-            index += (remain / self.old_tid_w[i]) * self.new_tid_w[i];
+            index += (remain / self.old_tid_w[i]) as isize * self.new_tid_w[i];
             remain %= self.old_tid_w[i];
         }
         let valid = tid < self.max_tid && extra_id < self.max_idx;
         let mut remain = extra_id;
         for i in 0..M {
             let id = remain / self.old_idx_w[i];
-            index += id * self.new_idx_w[i];
+            index += id as isize * self.new_idx_w[i];
             remain %= self.old_idx_w[i];
         }
-        (valid, index)
+        (valid, index as usize)
     }
 }
 

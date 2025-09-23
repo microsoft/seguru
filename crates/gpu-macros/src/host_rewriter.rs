@@ -221,7 +221,6 @@ pub(crate) fn create_host_from_kernel(
     let mut fun = kfun.clone();
     crate::gpu_syntax::basic_rewrite_gpu_func(&mut kfun, true, kernel_attr.clone(), target);
     fun.block.stmts.clear();
-    fun.attrs.clear();
     fun.vis = syn::parse_quote!(pub);
     fun.sig.ident = syn::Ident::new("launch", kname.span());
     let kernel_fn_path = syn::parse_quote! {super::#kname};

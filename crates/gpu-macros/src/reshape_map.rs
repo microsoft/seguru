@@ -13,9 +13,9 @@ struct MapArgs {
     _semi: syn::Token![|],
     extra_sizes: ExprArray,
     _holder: syn::Token![=>],
-    _kind: Ident,
     weights: Option<ExprArray>,
     layout: Option<ExprArray>,
+    offset: Option<Expr>,
 }
 
 impl Parse for MapArgs {
@@ -26,21 +26,39 @@ impl Parse for MapArgs {
         let _semi: syn::Token![|] = input.parse()?;
         let extra_sizes = input.parse()?;
         let _holder: syn::Token![=>] = input.parse()?;
-        let _kind = input.parse()?;
-        let weights = if _kind == "weights" {
+        let mut weights = None;
+        let mut layout = None;
+        let mut offset = None;
+        loop {
+            let kind: Ident = input.parse()?;
             let _: syn::Token![:] = input.parse()?;
-            let weights = input.parse()?;
-            Some(weights)
-        } else {
-            None
-        };
-        let layout = if _kind == "layout" {
-            let _: syn::Token![:] = input.parse()?;
-            let layout: ExprArray = input.parse()?;
-            Some(layout)
-        } else {
-            None
-        };
+            match kind.to_string().as_str() {
+                "weights" => {
+                    let expr = input.parse()?;
+                    weights = Some(expr);
+                }
+                "layout" => {
+                    let expr = input.parse()?;
+                    layout = Some(expr);
+                }
+                "offset" => {
+                    let expr = input.parse()?;
+                    offset = Some(expr);
+                }
+                _ => {
+                    return Err(syn::Error::new(
+                        kind.span(),
+                        "Expected either 'weights', 'layout', or 'offset'",
+                    ));
+                }
+            }
+            if input.peek(syn::Token![,]) {
+                let _: syn::Token![,] = input.parse()?;
+                continue;
+            } else {
+                break;
+            }
+        }
         assert!(weights.is_some() || layout.is_some(), "Expected either weights or layout");
         Ok(MapArgs {
             span: input.span(),
@@ -50,19 +68,20 @@ impl Parse for MapArgs {
             _semi,
             extra_sizes,
             _holder,
-            _kind,
             weights,
             layout,
+            offset,
         })
     }
 }
 
-fn check_permutation(values: &[usize]) -> Result<(), syn::Error> {
+fn check_permutation(values: &[isize]) -> Result<(), syn::Error> {
     let n = values.len();
 
     // Check permutation validity
     let mut seen = vec![false; n];
     for &v in values {
+        let v = v as usize;
         if v >= n {
             return Err(syn::Error::new(
                 proc_macro2::Span::call_site(),
@@ -80,14 +99,18 @@ fn check_permutation(values: &[usize]) -> Result<(), syn::Error> {
     Ok(())
 }
 
-fn get_const_array(expr: impl Iterator<Item = Expr>) -> Result<Vec<usize>, syn::Error> {
+fn get_const_array<T>(expr: impl Iterator<Item = Expr>) -> Result<Vec<T>, syn::Error>
+where
+    T: std::str::FromStr,
+    T::Err: std::fmt::Display,
+{
     let mut const_array = vec![];
     for size in expr {
         if let Expr::Lit(expr_lit) | Expr::Group(ExprGroup { expr: box Expr::Lit(expr_lit), .. }) =
             size
         {
             if let syn::Lit::Int(lit_int) = &expr_lit.lit {
-                let val = lit_int.base10_parse::<usize>().unwrap();
+                let val = lit_int.base10_parse::<T>().unwrap();
                 const_array.push(val);
             } else {
                 return Err(syn::Error::new(
@@ -110,15 +133,16 @@ fn check_weight(
     sizes: &ExprArray,
     extra_sizes: &ExprArray,
     weights: &ExprArray,
-) -> Result<Option<(Vec<usize>, Vec<usize>, usize, Vec<usize>, Vec<usize>, usize)>, syn::Error> {
-    let const_weight = match get_const_array(weights.elems.iter().cloned()) {
+) -> Result<Option<(Vec<usize>, Vec<isize>, usize, Vec<usize>, Vec<isize>, usize)>, syn::Error> {
+    let const_weight = match get_const_array::<isize>(weights.elems.iter().cloned()) {
         Ok(w) => w,
         Err(_) => return Ok(None), // Not constant, skip check
     };
     let nsize = sizes.elems.len();
     let msize = extra_sizes.elems.len();
     let const_sizes =
-        match get_const_array(sizes.elems.iter().chain(extra_sizes.elems.iter()).cloned()) {
+        match get_const_array::<usize>(sizes.elems.iter().chain(extra_sizes.elems.iter()).cloned())
+        {
             Ok(s) => s,
             Err(_) => return Ok(None), // Not constant, skip check
         };
@@ -126,7 +150,7 @@ fn check_weight(
     for i in 0..sizes.elems.len() {
         old_tid_weights.push(const_sizes[i + 1..].iter().product::<usize>());
     }
-    let max_tid = const_sizes[..nsize].iter().product::<usize>();
+    let max_tid = const_sizes[..nsize].iter().product::<usize>() as usize;
     let mut old_idx_weights = vec![];
     for i in nsize..const_sizes.len() {
         old_idx_weights.push(const_sizes[i + 1..].iter().product::<usize>());
@@ -146,11 +170,11 @@ fn check_weight(
     for (i, &w) in const_weight.iter().enumerate() {
         let mut sum = 0;
         for j in 0..const_weight.len() {
-            if i != j && const_weight[j] <= w {
-                sum += const_weight[j] * (const_sizes[j] - 1);
+            if i != j && const_weight[j].abs() <= w.abs() {
+                sum += const_weight[j].unsigned_abs() * (const_sizes[j] - 1);
             }
         }
-        if sum >= w && const_sizes[0] > 1 {
+        if sum >= w.unsigned_abs() && const_sizes[0] > 1 {
             return Err(syn::Error::new(
                 proc_macro2::Span::call_site(),
                 format!(
@@ -232,7 +256,7 @@ pub fn reshape_map(input: TokenStream) -> TokenStream {
         }
         // Check weights validity if it is constant.
         let check = check_weight(&sizes, &extra_sizes, &weights);
-
+        let offset = args.offset.unwrap_or_else(|| syn::parse_quote! {0});
         let inner = match check {
             Ok(Some((
                 old_tid_weights,
@@ -252,17 +276,18 @@ pub fn reshape_map(input: TokenStream) -> TokenStream {
                             [#(#const_weight_idx),*],
                             #max_tid,
                             #max_idx,
+                            #offset,
                         );
 
                         PrivateReshapedMap(inner)
                     }
                 }
             }
-            Ok(None) => {
+            Ok(_) => {
                 quote_spanned! {
                     span => {
                         // This is dynamically checked to be safe at runtime.
-                        let inner = #gpu_crate::MapReshape::<#nsize, #msize>::new_with_weight(#all_sizes, #weights);
+                        let inner = #gpu_crate::MapReshape::<#nsize, #msize>::new_with_weight(#all_sizes, #weights, #offset);
                         PrivateReshapedMap(inner)
                     }
                 }

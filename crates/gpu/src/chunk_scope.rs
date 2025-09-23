@@ -14,8 +14,8 @@ trait SyncScope {}
 
 /// The length of thread_ids array.
 /// A thread can be indexed by one of following ways:
-/// - block_id_{x,y,z}, thread_id_{x,y,z}
-/// - block_id_{x,y,z}, warp_id, lane_id, unused
+/// - thread_id_{x,y,z}, block_id_{x,y,z}
+/// - _, lane_id, warp_id, block_id_{x,y,z}
 pub const TID_MAX_LEN: usize = 6;
 
 #[derive(Copy, Clone)]
@@ -338,7 +338,9 @@ impl<const SIZE: usize> ChunkScope for Grid2WarpScope<SIZE> {
     #[inline]
     #[gpu_codegen::device]
     fn thread_ids() -> [usize; TID_MAX_LEN] {
-        // warp memory is shared within a warp and so only lane_id.
+        // warp memory is shared within a warp and so only each warp has a
+        // unique warp id and block id and we use warp id (`subgroup_id`,
+        // `block_id_{x,y,z}` to index the group.
         [
             0,
             0,
@@ -379,7 +381,7 @@ impl<const SIZE: usize> ChunkScope for Block2WarpScope<SIZE> {
     #[inline]
     #[gpu_codegen::device]
     fn thread_ids() -> [usize; TID_MAX_LEN] {
-        // warp memory is shared within a warp and so only lane_id.
+        // warp memory is shared within a warp and so only warp_id.
         [0, 0, Self::ToScope::_subgroup_id(), 0, 0, 0]
     }
 

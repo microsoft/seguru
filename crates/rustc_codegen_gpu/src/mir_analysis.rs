@@ -636,7 +636,10 @@ pub(crate) fn analyze_gpu_code(
     }
     if !skip_check {
         debug!("analyze_diversed_data {:?}", def_id);
-        analyze_diversed_data(tcx, def_id, mir, is_kernel_entry)?;
+        let gpu_attr = crate::attr::GpuAttributes::build(&tcx, def_id);
+        if !gpu_attr.disable_diverse_checker {
+            analyze_diversed_data(tcx, def_id, mir, is_kernel_entry)?;
+        }
         crate::mir_thread_sync_check::analyze_shared_access(tcx, mir, is_kernel_entry)?;
     }
     analyze_loop(tcx, def_id)

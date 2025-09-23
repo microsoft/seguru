@@ -29,6 +29,10 @@ pub(crate) struct GpuAttributes {
     // will also be uniform across GPU threads.
     // No effect if empty.
     pub ret_sync_data: Vec<usize>,
+    // disable diverse checker for this function
+    // Due to the limitation of our current diverse checker,
+    // some functions need to disable the diverse checker.
+    pub disable_diverse_checker: bool,
 }
 
 impl GpuAttributes {
@@ -370,6 +374,10 @@ impl GpuAttributes {
             if attr.path_matches(&[gpu_symbol(), ret_sync_data()]) {
                 let ret_sync_data = get_meta_usize_list(attr);
                 gpu_attrs.ret_sync_data = ret_sync_data;
+            }
+
+            if attr.path_matches(&[gpu_symbol(), Symbol::intern("skip_divergence_check")]) {
+                gpu_attrs.disable_diverse_checker = true;
             }
         }
         gpu_attrs

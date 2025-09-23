@@ -3,6 +3,7 @@
 extern crate proc_macro;
 
 use proc_macro::TokenStream;
+use quote::ToTokens;
 mod gpu_syntax;
 mod host_rewriter;
 
@@ -54,4 +55,14 @@ pub fn host(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn device(attr: TokenStream, item: TokenStream) -> TokenStream {
     gpu_syntax::rewrite_gpu_code(attr, item, false, target())
+}
+
+#[proc_macro_attribute]
+pub fn attr(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let mut kfun = syn::parse_macro_input!(item as syn::ItemFn);
+    let attr = syn::parse_macro_input!(attr as syn::Ident);
+    if target().need_register_tool() {
+        kfun.attrs.push(syn::parse_quote!(#[gpu_codegen::#attr]));
+    }
+    kfun.into_token_stream().into()
 }

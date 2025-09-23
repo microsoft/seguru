@@ -23,7 +23,7 @@ use rustc_codegen_ssa_gpu::common::IntPredicate;
 use rustc_codegen_ssa_gpu::mir::operand::{OperandRef, OperandValue};
 use rustc_codegen_ssa_gpu::traits::{
     BackendTypes, BaseTypeCodegenMethods, BuilderMethods, ConstCodegenMethods,
-    IntrinsicCallBuilderMethods, LayoutTypeCodegenMethods, OverflowOp, StaticBuilderMethods,
+    LayoutTypeCodegenMethods, OverflowOp, StaticBuilderMethods,
 };
 use rustc_span::Span;
 use tracing::{debug, trace};
@@ -103,8 +103,9 @@ impl<'tcx, 'ml, 'a> Drop for GpuBuilder<'tcx, 'ml, 'a> {
         #[cfg(feature = "inplace_bound_check")]
         assert!(
             self.valid_mem_access.iter().all(|v| v.checked_by_loc),
-            "valid_mem_access should be None {:?}",
-            self.valid_mem_access
+            "valid_mem_access should be None {:?} at {}",
+            self.valid_mem_access,
+            crate::mlir::value_loc(self.valid_mem_access.as_ref().unwrap().idx[0]).unwrap()
         );
     }
 }
@@ -667,7 +668,10 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 ]
                 .contains(&fn_name.as_str())
                 {
-                    self.abort();
+                    self.assert(
+                        self.const_value(0, self.type_i1()),
+                        &format!("{} abort at {}", fn_name, self.cur_loc()),
+                    );
                     return Ok(None);
                 }
                 todo!();
@@ -1297,7 +1301,8 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
     fn assert(&mut self, cond: mlir_ir::Value<'ml, 'a>, msg: &str) {
         // trap-based bound check is handled by assert op.
         let cond = self.use_value_as_ty(cond, self.type_i1());
-        let op = melior::dialect::cf::assert(self.mlir_ctx, cond, msg, self.cur_loc());
+        let msg = format!("{} {}", msg, self.cur_loc());
+        let op = melior::dialect::cf::assert(self.mlir_ctx, cond, &msg, self.cur_loc());
         self.append_op(op);
     }
 
@@ -1685,6 +1690,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn udiv(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
+        let (lhs, rhs) = self.int_val_pair_cast(lhs, rhs);
         let op = melior::dialect::arith::divui(lhs, rhs, self.cur_loc());
         self.append_op_res(op)
     }
@@ -1950,15 +1956,10 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         count: u64,
         dest: rustc_codegen_ssa_gpu::mir::place::PlaceRef<'tcx, Self::Value>,
     ) {
-        let val = match elem.val {
-            OperandValue::Immediate(v) => v,
-            _ => panic!("expected immediate"),
-        };
-
         for i in 0..count {
             let idx = self.const_value(i, self.type_index());
-            let dest_elem = dest.project_index(self, idx).val.llval;
-            self.store(val, dest_elem, dest.val.align);
+            let dest_elem = dest.project_index(self, idx);
+            elem.val.store(self, dest_elem);
         }
     }
 

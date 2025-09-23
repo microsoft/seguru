@@ -5,8 +5,8 @@
 use gpu::cg::{CGOperations, ReduxAdd, ReduxMax, ThreadWarpTile, WarpReduceOp};
 use gpu::chunk_scope::{build_chunk_scope, Grid, Thread};
 use gpu::{
-    block_dim, block_id, chunk_mut, float4, grid_dim, reshape_map, thread_id, CacheStreamLoadStore,
-    DimX, GPUDeviceFloatIntrinsics, MapLinear,
+    block_dim, block_id, chunk_mut, dim, float4, grid_dim, reshape_map, sync_threads, thread_id,
+    CacheStreamLoadStore, DimX, DimY, GPUDeviceFloatIntrinsics, GpuShared, MapLinear,
 };
 
 #[gpu_macros::device]
@@ -528,8 +528,109 @@ __device__ inline float lerp(float start, float end, float weight) {
 }
 */
 #[gpu_macros::device]
+#[inline(always)]
 pub fn lerp(start: f32, end: f32, weight: f32) -> f32 {
     weight.fma(end, (-weight).fma(start, start))
+}
+
+/*
+// this kernel performs a column-wise reduction over dout, in PyTorch equivalent to:
+// dbias = dout.sum((0,1))
+// the idea is to employ one block to reduce along several columns,
+// where each block has a width of 32 columns to ensure coalesced access.
+// at the end we accumulate the reductions performed by the warps in each block via shared memory
+__global__ void matmul_backward_bias_kernel4(float* dbias, const float* dout, int B, int T, int OC) {
+    // this kernel is launched with 1D grid_dim of OC/32
+    // for example let's say block_size is 128
+    extern __shared__ float smem[]; // of size block_size (128)
+    const int warp_id = threadIdx.x / warpSize; // warp index in the block, 0,1,2,3
+    const int lane_id = threadIdx.x % warpSize; // thread index in the warp, 0,1,2,...,31
+    const int tl = blockIdx.x * warpSize; // pointer to the start column for this block
+    const int vstep = blockDim.x / warpSize; // number of warps in a block, e.g. 4
+
+    // pointer to the start of the column for one lane of threads
+    // so e.g. 4 threads (of the same lane_id) will reduce this one column
+    const float* dout_col = dout + tl + lane_id;
+
+    // column reductions by looping through the rows
+    // each of the 4 threads offsets by its warp_id and then skips by vstep
+    // together these 4 threads cover all B*T rows of this (lane_id) column
+    // importantly, consecutive threads (in threadId) are processing adjacent columns,
+    // leading to a coalesced memory access pattern
+    float dout_sum = 0.0f;
+    for (int row = warp_id; row < B * T; row += vstep) {
+        dout_sum += dout_col[row * OC];
+    }
+    smem[lane_id + warp_id * warpSize] = dout_sum;
+    __syncthreads();
+
+    // warp_id 0 reduces the shared memory column-wise, linearly
+    dout_sum = 0.0f;
+    if (warp_id == 0) {
+        for (int j = 0; j < vstep; j++) {
+            dout_sum += smem[lane_id + j * warpSize];
+        }
+        dbias[tl + lane_id] += dout_sum;
+    }
+}
+*/
+
+// TODO: Add tests
+// This constructs matmul_backward with cublasSgemm
+#[gpu_macros::attr(skip_divergence_check)]
+#[gpu_macros::cuda_kernel(dynamic_shared)]
+pub fn matmul_backward_bias_kernel4(dbias: &mut [f32], dout: &[f32], B: i32, T: i32, OC: i32) {
+    // this kernel is launched with 1D grid_dim of OC/32
+    // for example let's say block_size is 128
+    let block_size = block_dim::<DimX>();
+    let warp = ThreadWarpTile::<32>;
+    // block_id * warp_size + lane_id
+    let mut dbias_chunk = chunk_mut(
+        dbias,
+        reshape_map!(
+            [1] | [warp.size(), (warp.meta_group_size(), 1), grid_dim::<DimX>()] => layout: [i0, t0, t1, t2]
+        ),
+    );
+    let smem = smem_alloc.alloc::<f32>(block_size);
+    let mut smem_chunk = smem.chunk_mut(MapLinear::new(1));
+
+    let warp_id = (thread_id::<DimX>() / warp.size()) as i32; // warp index in the block, 0,1,2,3
+    let lane_id = (thread_id::<DimX>() % warp.size()) as i32; // thread index in the warp, 0,1,2,...,31
+    let tl = (block_id::<DimX>() * warp.size()) as i32; // pointer to the start column for this block
+    let vstep = block_size / warp.size(); // number of warps in a block, e.g. 4
+
+    // pointer to the start of the column for one lane of threads
+    // so e.g. 4 threads (of the same lane_id) will reduce this one column
+    let dout_col = &dout[(tl + lane_id) as usize..]; // B*T*OC - bid * 32.
+
+    // column reductions by looping through the rows
+    // each of the 4 threads offsets by its warp_id and then skips by vstep
+    // together these 4 threads cover all B*T rows of this (lane_id) column
+    // importantly, consecutive threads (in threadId) are processing adjacent columns,
+    // leading to a coalesced memory access pattern
+    let mut dout_sum = 0.0f32;
+    for row in (warp_id..(B * T)).step_by(vstep) {
+        if row * OC > dout_col.len() as i32 {
+            gpu::println!(
+                "Error: row * OC = {} exceeds dout_col length {}",
+                row * OC,
+                dout_col.len()
+            );
+        }
+        dout_sum += dout_col[(row * OC) as usize].ldcs();
+    }
+    //lane_id + warp_id * warpSize
+    smem_chunk[0] = dout_sum;
+    sync_threads();
+
+    // warp_id 0 reduces the shared memory column-wise, linearly
+    dout_sum = 0.0f32;
+    if warp_id == 0 {
+        for j in 0..vstep {
+            dout_sum += *smem[lane_id as usize + (j * warp.size())];
+        }
+        dbias_chunk[0] += dout_sum;
+    }
 }
 
 /*
@@ -551,6 +652,7 @@ __global__ void adamw_kernel2(float* params_memory, float* grads_memory, float* 
    params_memory[i] -= learning_rate * (m / (sqrtf(v) + eps) + weight_decay * params_memory[i]);
 }
 */
+
 /// TODO: add tests
 #[gpu_macros::cuda_kernel]
 pub fn adamw_kernel2(
@@ -589,4 +691,196 @@ pub fn adamw_kernel2(
     let old_param = params_memory[0];
     params_memory[0] =
         old_param - learning_rate * (m_hat / (v_hat.sqrt() + eps) + weight_decay * old_param);
+}
+
+/*
+__global__ void __launch_bounds__(16*16, 2) matmul_forward_kernel4(float* out,
+                                                                   const float* inp, const float* weight, const float* bias,
+                                                                   int C, int OC) {
+    // out is (B,T,OC). OC is short for "output channels", e.g. OC = 4 * C
+    // inp is (B,T,C), weight is (OC, C), bias is (OC)
+    // each thread handles 8x8 elements; each block 128 by 128 elements.
+    int oc = 8*(blockIdx.y * blockDim.y + threadIdx.y);
+
+    // buffers to cache chunks of the input matrices
+    __shared__ float lhs_s[128][32];
+    __shared__ float rhs_s[128][32];
+
+    // adjust our pointers for the current block
+    inp += 128 * blockIdx.x * C;
+    weight += 128 * blockIdx.y * C;
+    out += 128 * blockIdx.x * OC + 128 * blockIdx.y;
+
+    float vals[8][8] = {};
+    if(bias != NULL) {
+        for (int i = 0; i < 8; i++) {
+            for (int j = 0; j < 8; j += 4) {
+                float4 b = ld_vec(bias + oc + j);
+                vals[i][j+0] = b.x;
+                vals[i][j+1] = b.y;
+                vals[i][j+2] = b.z;
+                vals[i][j+3] = b.w;
+            }
+        }
+    }
+
+    int si_start = 4*(16 * threadIdx.y + threadIdx.x);
+
+    for (int so = 0; so < C; so += 32) {
+        __syncthreads();
+        int xmod8 = threadIdx.x % 8;
+        int xby8 = threadIdx.x / 8;
+        int xo = 4 * xmod8;
+        for(int y = 2 * threadIdx.y + xby8; y < 128; y += 32) {
+            st_vec(&lhs_s[y][xo], ld_vec(inp + y * C + so + xo));
+            st_vec(&rhs_s[y][xo], ld_vec(weight + y * C + so + xo));
+        }
+        __syncthreads();
+
+        for (int si = si_start; si < si_start + 32; si += 4) {
+            float4 rhs[8];
+            for (int u = 0; u < 8; ++u) {
+                rhs[u] = ld_vec(&rhs_s[u + 8 * threadIdx.y][si % 32]);
+            }
+
+            for (int ii = 0; ii < 8; ++ii) {
+                float4 lhs = ld_vec(&lhs_s[ii + 8 * threadIdx.x][si % 32]);
+                for (int ji = 0; ji < 8; ++ji) {
+                    vals[ii][ji] += lhs.x * rhs[ji].x;
+                    vals[ii][ji] += lhs.y * rhs[ji].y;
+                    vals[ii][ji] += lhs.z * rhs[ji].z;
+                    vals[ii][ji] += lhs.w * rhs[ji].w;
+                }
+            }
+        }
+    }
+
+    for (int i = 0; i < 8; ++i) {
+        for (int j = 0; j < 8; j += 4) {
+            float4 result;
+            result.x = vals[i][j + 0];
+            result.y = vals[i][j + 1];
+            result.z = vals[i][j + 2];
+            result.w = vals[i][j + 3];
+            st_vec(out + (8*threadIdx.x+i) * OC + 8*threadIdx.y + j, result);
+        }
+    }
+}
+*/
+
+#[gpu_macros::cuda_kernel]
+#[gpu_macros::attr(skip_divergence_check)]
+#[allow(clippy::manual_memcpy)]
+pub fn matmul_forward_kernel4(
+    out: &mut [f32],
+    inp: &[f32],
+    weight: &[f32],
+    bias: &[f32],
+    C: i32,
+    OC: i32,
+) {
+    // precondition:
+    // 1. gdim_y = OC / (8*bdim_y) => gdim_y <= OC, bdim_y * 8 <= OC, dim_y * 8 <= OC,
+    // 2. gdim_x = B * T / (8* bdim_x)
+    assert!(Config::BDIM_X <= 16);
+    assert!(Config::BDIM_X >= 2);
+    assert!(Config::BDIM_Y <= 16);
+    assert!(Config::BDIM_Y >= 2);
+    assert!(OC % 128 == 0);
+    assert!(C % 32 == 0);
+    assert!(OC as usize == 8 * dim::<DimY>());
+    // out is (B,T,OC). OC is short for "output channels", e.g. OC = 4 * C
+    // inp is (B,T,C), weight is (OC, C), bias is (OC)
+    // each thread handles 8x8 elements; each block 128 by 128 elements.
+
+    let oc = 8 * (block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>());
+
+    //  128 * blockIdx.y + 128 * blockIdx.x * OC + i * OC + (8*threadIdx.y) + (8*threadIdx.x) * OC + j)
+    // do not swap 2 and 3 in permutation, otherwise we will have out of bound access.
+    let map = gpu::reshape_map!(
+        [8, 8] | [16, grid_dim::<DimX>(), 16, (grid_dim::<DimY>(), (OC as usize) / 128)]  =>
+        layout: [i0, t2, t3, i1, t0, t1]
+    );
+
+    let mut out_thread = chunk_mut(out, map);
+
+    // buffers to cache chunks of the input matrices
+    let mut lhs_s = GpuShared::<[f32; 32 * 128]>::zero();
+    let mut rhs_s = GpuShared::<[f32; 32 * 128]>::zero();
+
+    // adjust our immutable for the current block
+    let C_usize = C as usize;
+    let inp_offset = 128 * block_id::<DimX>() * C_usize;
+    let weight_offset = 128 * block_id::<DimY>() * C_usize;
+    let inp = &inp[inp_offset..];
+    let weight = &weight[weight_offset..];
+
+    let mut vals = [[0.0f32; 8]; 8];
+    if !bias.is_empty() {
+        for v in &mut vals {
+            for j in 0..8 {
+                v[j] = bias[oc + j];
+            }
+        }
+    }
+
+    let si_start = 4 * (16 * thread_id::<DimY>() + thread_id::<DimX>());
+
+    // (k * 32 * 32 + tid_y * 2 * 32 + xby8 * 32 + xmod8 * 4 + i)
+    let map = gpu::reshape_map!(
+        [4, 4] | [8, (block_dim::<DimX>().div_ceil(8), 2), (block_dim::<DimY>(), 16)] =>
+        layout: [i0, t0, t1, t2, i1]
+    );
+    for so in (0..C as usize).step_by(32) {
+        gpu::sync::sync_threads();
+        // Each thread handle [f32; 32].
+
+        let mut lhs_s_chunk = lhs_s.chunk_mut(map);
+        let mut rhs_s_chunk = rhs_s.chunk_mut(map);
+        let xmod8 = thread_id::<DimX>() % 8;
+        let xby8 = thread_id::<DimX>() / 8;
+        let xo = 4 * xmod8;
+        // 2 * threadIdx.y + xby8; y < 128; y += 32
+        for (k, y) in ((2 * thread_id::<DimY>() + xby8)..128)
+            .step_by(32)
+            .enumerate()
+        {
+            // st_vec(&lhs_s[y][xo], ld_vec(inp + y * C + so + xo));
+            let inp_index = y * C as usize + so + xo;
+            let lhs_vec = &inp[inp_index..inp_index + 4];
+
+            for i in 0..4 {
+                lhs_s_chunk[k * 4 + i] = lhs_vec[i];
+            }
+            // st_vec(&rhs_s[y][xo], ld_vec(weight + y * C + so + xo));
+            let rhs_vec = &weight[inp_index..inp_index + 4];
+            for i in 0..4 {
+                rhs_s_chunk[k * 4 + i] = rhs_vec[i];
+            }
+        }
+        gpu::sync::sync_threads();
+        for si in (si_start..si_start + 32).step_by(4) {
+            let mut rhs = [[0.0f32; 4]; 8];
+            for (u, rhs_elem) in rhs.iter_mut().enumerate() {
+                let rhs_idx = (u + 8 * thread_id::<DimY>()) * 32 + si % 32;
+                for i in 0..4 {
+                    rhs_elem[i] = rhs_s[rhs_idx + i];
+                }
+            }
+            for (ii, val) in vals.iter_mut().enumerate() {
+                let lhs_index = (ii + 8 * thread_id::<DimX>()) * 32 + (si % 32);
+                for ji in 0..8 {
+                    for i in 0..4 {
+                        val[ji] += lhs_s[lhs_index + i] * rhs[ji][i];
+                    }
+                }
+            }
+        }
+    }
+    for i in 0..8 {
+        let v = &vals[i];
+        for j in 0..8 {
+            out_thread[i * 8 + j] = v[j];
+        }
+    }
 }

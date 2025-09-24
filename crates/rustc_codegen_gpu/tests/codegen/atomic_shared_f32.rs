@@ -7,7 +7,7 @@
 
 #[gpu_macros::kernel(dynamic_shared)]
 #[no_mangle]
-pub fn test_atomic_shared(f: f32, b: &mut f32, mut smem_alloc: gpu::DynamicSharedAlloc) {
+pub fn test_atomic_shared(f: f32, b: &mut f32) {
     let mut smem = smem_alloc.alloc::<f32>(1);
     let atomic_smem = gpu::sync::SharedAtomic::new(&mut smem);
     atomic_smem.index(0).atomic_addf(f);

@@ -3,6 +3,7 @@ use core::marker::PhantomData;
 ///
 use core::ops::{Deref, DerefMut};
 
+#[cfg(not(feature = "codegen_tests"))]
 use cuda_bindings::SafeGpuConfig;
 
 use crate::assert_ptr;
@@ -55,6 +56,8 @@ impl DynamicSharedAlloc {
     #[gpu_codegen::device]
     #[inline(always)]
     #[gpu_codegen::memspace_shared(1000)]
+    #[gpu_codegen::sync_data(1)] // len is non-divergent
+    #[gpu_codegen::ret_sync_data(1000)] // return pointer is divergent
     pub fn alloc<T: Sized>(&mut self, len: usize) -> &'static mut GpuShared<[T]> {
         let size = core::mem::size_of::<T>() * len;
         assert!(size <= self.size);
@@ -72,6 +75,7 @@ pub trait DynamicSharedAllocBuilder {
     fn smem_alloc(&self) -> DynamicSharedAlloc;
 }
 
+#[cfg(not(feature = "codegen_tests"))]
 impl<Config: SafeGpuConfig> DynamicSharedAllocBuilder for Config {
     // This is host-side function.
     fn smem_alloc(&self) -> DynamicSharedAlloc {
@@ -79,6 +83,7 @@ impl<Config: SafeGpuConfig> DynamicSharedAllocBuilder for Config {
     }
 }
 
+#[cfg(not(feature = "codegen_tests"))]
 unsafe impl cuda_bindings::AsHostKernelParams for DynamicSharedAlloc {
     fn as_kernel_param_data(&self) -> alloc::vec::Vec<alloc::boxed::Box<dyn core::any::Any>> {
         alloc::vec![alloc::boxed::Box::new(self.size)]

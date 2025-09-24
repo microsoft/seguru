@@ -1,5 +1,14 @@
 use crate::dim::{lane_id, warp_id};
 
+#[derive(Copy, Clone)]
+pub struct Thread;
+
+#[derive(Copy, Clone)]
+pub struct Block;
+
+#[derive(Copy, Clone)]
+pub struct Grid;
+
 /// Similar a thread block tile in a GPU kernel.
 /// But the SIZE <= warp size (e.g., 32 for NVIDIA GPUs).
 /// If SIZE = 8, stride = 4, then the clusters will be:
@@ -60,6 +69,10 @@ pub trait WarpReduceOp<T, Op: ReduxKind> {
     fn redux(&self, op: Op, value: T) -> T;
 }
 
+pub trait CGOperations {
+    fn thread_rank(&self) -> usize;
+}
+
 ///
 ///
 /// ```rust
@@ -116,12 +129,6 @@ impl<const SIZE: usize> ThreadWarpTile<SIZE, 1> {
     pub(crate) fn _subgroup_id() -> usize {
         (warp_id() << Self::SHIFT_COUNT as usize)
             + ((lane_id() & !(Self::LANE_MASK as usize)) >> Self::SHIFT_COUNT as usize)
-    }
-
-    #[gpu_codegen::device]
-    #[inline(always)]
-    pub fn thread_rank(&self) -> u32 {
-        Self::_thread_rank()
     }
 
     #[gpu_codegen::device]
@@ -293,4 +300,24 @@ macro_rules! shuffle {
     (up, $value:expr, $offset:expr, $width:expr) => {{ $crate::cg::_shuffle($value, $offset, $width, "#gpu<shuffle_mode up>") }};
     (down, $value:expr, $offset:expr, $width:expr) => {{ $crate::cg::_shuffle($value, $offset, $width, "#gpu<shuffle_mode down>") }};
     (idx, $value:expr, $offset:expr, $width:expr) => {{ $crate::cg::_shuffle($value, $offset, $width, "#gpu<shuffle_mode idx>") }};
+}
+
+impl<const SIZE: usize> CGOperations for ThreadWarpTile<SIZE> {
+    #[gpu_codegen::device]
+    #[inline(always)]
+    fn thread_rank(&self) -> usize {
+        Self::_thread_rank() as _
+    }
+}
+
+impl Block {
+    #[gpu_codegen::device]
+    #[inline(always)]
+    pub fn thread_rank(&self) -> usize {
+        crate::dim::thread_id::<crate::dim::DimX>()
+            + crate::dim::block_dim::<crate::dim::DimX>()
+                * (crate::dim::thread_id::<crate::dim::DimY>()
+                    + crate::dim::block_dim::<crate::dim::DimY>()
+                        * crate::dim::thread_id::<crate::dim::DimZ>())
+    }
 }

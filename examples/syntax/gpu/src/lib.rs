@@ -2,6 +2,7 @@
 #![allow(clippy::too_many_arguments)]
 #![feature(stmt_expr_attributes)]
 
+use gpu::cg::CGOperations;
 use gpu::{thread_id, CacheStreamLoadStore, DimX, GPUDeviceFloatIntrinsics};
 
 type ThreadChunkMatrix2D<'a> = gpu::GlobalThreadChunk<'a, u32, gpu::Map2D>;

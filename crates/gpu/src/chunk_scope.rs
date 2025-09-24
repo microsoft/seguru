@@ -1,6 +1,6 @@
 use core::marker::PhantomData;
 
-pub use crate::cg::ThreadWarpTile;
+pub use crate::cg::{Block, Grid, Thread, ThreadWarpTile};
 use crate::chunk::ScopeUniqueMap;
 use crate::dim::{
     DimType, DimTypeID, DimX, DimY, DimZ, block_dim, block_id, block_size, dim, num_blocks,
@@ -17,13 +17,6 @@ trait SyncScope {}
 /// - thread_id_{x,y,z}, block_id_{x,y,z}
 /// - _, lane_id, warp_id, block_id_{x,y,z}
 pub const TID_MAX_LEN: usize = 6;
-
-#[derive(Copy, Clone)]
-pub struct Thread;
-#[derive(Copy, Clone)]
-pub struct Block;
-#[derive(Copy, Clone)]
-pub struct Grid;
 
 impl SyncScope for Thread {}
 

@@ -2,7 +2,7 @@
 #![allow(non_snake_case)]
 #![allow(clippy::too_many_arguments)]
 
-use gpu::cg::{ReduxAdd, ThreadWarpTile, WarpReduceOp};
+use gpu::cg::{CGOperations, ReduxAdd, ThreadWarpTile, WarpReduceOp};
 use gpu::chunk_scope::{build_chunk_scope, Grid, Thread};
 use gpu::{block_id, chunk_mut, float4, CacheStreamLoadStore, GPUDeviceFloatIntrinsics, MapLinear};
 
@@ -88,7 +88,7 @@ pub fn layernorm_forward_kernel3(
     N: i32,
     C: i32,
 ) {
-    let C = C as u32;
+    let C = C as usize;
     let N = N as u32;
     let warp = ThreadWarpTile::<32>;
     let grid2warp = build_chunk_scope(Grid, warp);

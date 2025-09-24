@@ -38,6 +38,18 @@ impl<'a, T> GpuGlobal<'a, [T]> {
     {
         GlobalGroupChunk::new(self, m)
     }
+
+    #[inline(always)]
+    #[gpu_codegen::device]
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
+    #[inline(always)]
+    #[gpu_codegen::device]
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
 }
 
 /// Never implement Deref to prevent direct read access to mutable data.

@@ -55,14 +55,12 @@ impl DynamicSharedAlloc {
     #[gpu_codegen::device]
     #[inline(always)]
     #[gpu_codegen::memspace_shared(1000)]
-    pub fn alloc<T: Sized>(&mut self, len: usize) -> &mut GpuShared<[T]> {
+    pub fn alloc<T: Sized>(&mut self, len: usize) -> &'static mut GpuShared<[T]> {
         let size = core::mem::size_of::<T>() * len;
-        let (remain_size, len) =
-            if size < self.size { (self.size - size, len) } else { (self.size, 0) };
-        self.size = remain_size;
-
+        assert!(size <= self.size);
+        self.size -= size;
         unsafe {
-            let raw = core::intrinsics::offset(Self::base_ptr(), remain_size);
+            let raw = core::intrinsics::offset(Self::base_ptr(), self.size);
             &mut *(core::ptr::slice_from_raw_parts_mut(raw as *mut T, len) as *const [T]
                 as *mut GpuShared<[T]>)
         }
@@ -78,6 +76,12 @@ impl<Config: SafeGpuConfig> DynamicSharedAllocBuilder for Config {
     // This is host-side function.
     fn smem_alloc(&self) -> DynamicSharedAlloc {
         DynamicSharedAlloc { size: self.shared_size() as usize }
+    }
+}
+
+unsafe impl cuda_bindings::AsHostKernelParams for DynamicSharedAlloc {
+    fn as_kernel_param_data(&self) -> alloc::vec::Vec<alloc::boxed::Box<dyn core::any::Any>> {
+        alloc::vec![alloc::boxed::Box::new(self.size)]
     }
 }
 

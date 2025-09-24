@@ -1117,15 +1117,18 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         let (lhs, rhs) = self.int_val_pair_cast(lhs, rhs);
         let op = melior::dialect::arith::subi(lhs, rhs, self.cur_loc());
         let ret = self.append_op_res(op);
-        let cmp_op = if signed { IntPredicate::IntSLT } else { IntPredicate::IntULT };
-        let lhs_smaller_rhs = self.icmp(cmp_op, lhs, rhs);
-        // if signed: overflow = (x < y) == (z > x)
+        // if signed: overflow = (y < 0) == (z < x)
         // if unsigned: overflow = (x < y)
         let overflow = if signed {
-            let lhs_smaller = self.icmp(cmp_op, lhs, ret);
-            self.icmp(IntPredicate::IntEQ, lhs_smaller_rhs, lhs_smaller)
+            let neg_rhs = self.icmp(IntPredicate::IntSLT, rhs, self.const_value(0, rhs.r#type()));
+            let pos_rhs = self.icmp(IntPredicate::IntSLT, rhs, self.const_value(0, rhs.r#type()));
+            let res_smaller_lhs = self.icmp(IntPredicate::IntSLT, ret, lhs);
+            let res_greater_lhs = self.icmp(IntPredicate::IntSLT, ret, lhs);
+            let c1 = self.and(res_smaller_lhs, neg_rhs);
+            let c2 = self.and(res_greater_lhs, pos_rhs);
+            self.or(c1, c2)
         } else {
-            lhs_smaller_rhs
+            self.icmp(IntPredicate::IntULT, lhs, rhs)
         };
         (ret, overflow)
     }
@@ -1144,9 +1147,10 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         // if unsigned, overflow = (y != 0 && x > z);
         let overflow = if signed {
             let x_xor_y = self.xor(lhs, rhs);
+            let x_xor_y_xor_z = self.xor(x_xor_y, ret);
             let x_xor_z = self.xor(lhs, ret);
-            let x_xor_y_and_x_xor_z = self.and(x_xor_y, x_xor_z);
-            self.icmp(IntPredicate::IntSLT, x_xor_y_and_x_xor_z, zero)
+            let check = self.and(x_xor_y_xor_z, x_xor_z);
+            self.icmp(IntPredicate::IntSLT, check, zero)
         } else {
             let lhs_greater = self.icmp(IntPredicate::IntUGT, lhs, ret);
             let rhs_not_zero = self.icmp(IntPredicate::IntNE, rhs, zero);
@@ -1782,9 +1786,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn neg(&mut self, v: Self::Value) -> Self::Value {
-        let op =
-            melior::dialect::arith::subi(self.const_value(0, self.type_index()), v, self.cur_loc());
-        self.append_op_res(op)
+        self.sub(self.const_value(0, v.r#type()), v)
     }
 
     fn fneg(&mut self, v: Self::Value) -> Self::Value {

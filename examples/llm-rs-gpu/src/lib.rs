@@ -3,7 +3,7 @@
 #![allow(clippy::too_many_arguments)]
 
 use gpu::cg::{CGOperations, ReduxAdd, ReduxMax, ThreadWarpTile, WarpReduceOp};
-use gpu::chunk_scope::{build_chunk_scope, Grid, Thread};
+use gpu::chunk_scope::{build_chunk_scope, Block, Grid, Thread};
 use gpu::{
     block_dim, block_id, chunk_mut, dim, float4, grid_dim, reshape_map, sync_threads, thread_id,
     CacheStreamLoadStore, DimX, DimY, GPUDeviceFloatIntrinsics, GpuShared, MapLinear,
@@ -634,24 +634,233 @@ pub fn matmul_backward_bias_kernel4(dbias: &mut [f32], dout: &[f32], B: i32, T: 
 }
 
 /*
-__global__ void adamw_kernel2(float* params_memory, float* grads_memory, float* m_memory, float* v_memory, long num_parameters,
-                              float learning_rate, float beta1, float beta2, float beta1_correction, float beta2_correction, float eps, float weight_decay) {
-   int i = blockIdx.x * blockDim.x + threadIdx.x;
-   if (i >= num_parameters) return;  // guard
-   float grad = grads_memory[i];
-   float m = m_memory[i];
-   float v = v_memory[i];
-   // update the first moment (momentum)
-   m = lerp(grad, m, beta1);
-   m_memory[i] = m;
-   // update the second moment (RMSprop)
-   v = lerp(grad * grad, v, beta2);
-   v_memory[i] = v;
-   m /= beta1_correction;  // m_hat
-   v /= beta2_correction;  // v_hat
-   params_memory[i] -= learning_rate * (m / (sqrtf(v) + eps) + weight_decay * params_memory[i]);
+__global__ void layernorm_backward_kernel2(float* dinp, float* dweight, float* dbias,
+                                           const float* dout, const float* inp, const float* weight, const float* mean, const float* rstd,
+                                           int B, int T, int C) {
+    extern __shared__ float shared[]; // size = 2 * C
+
+    namespace cg = cooperative_groups;
+    cg::thread_block block = cg::this_thread_block();
+    cg::thread_block_tile<32> warp = cg::tiled_partition<32>(block);
+    int idx = blockIdx.x * warp.meta_group_size() + warp.meta_group_rank();
+    int N = B * T;
+    if(idx >= N) { return; } // thread guards
+
+    int b = idx / T;
+    int t = idx % T;
+
+    const float* dout_bt = dout + b * T * C + t * C;
+    const float* inp_bt = inp + b * T * C + t * C;
+    float* dinp_bt = dinp + b * T * C + t * C;
+    const float mean_bt = mean[b * T + t];
+    const float rstd_bt = rstd[b * T + t];
+
+    // the first half of shared memory is bias, second is weight
+    float* dbias_shared = shared;
+    float* dweight_shared = shared + C;
+
+    // init shared memory to zero
+    #pragma unroll
+    for(int i = threadIdx.x; i < C; i+= blockDim.x){
+       dbias_shared[i] = 0.0f;
+       dweight_shared[i] = 0.0f;
+    }
+    __syncthreads();
+
+    // first: two reduce operations
+    float dnorm_mean = 0.0f;
+    float dnorm_norm_mean = 0.0f;
+    for (int i = warp.thread_rank(); i < C; i  += warp.size()) {
+        float norm_bti = (inp_bt[i] - mean_bt) * rstd_bt;
+        float dnorm_i = weight[i] * dout_bt[i];
+        dnorm_mean += dnorm_i;
+        dnorm_norm_mean += dnorm_i * norm_bti;
+    }
+    dnorm_mean = cg::reduce(warp, dnorm_mean, cg::plus<float>{});
+    dnorm_norm_mean = cg::reduce(warp, dnorm_norm_mean, cg::plus<float>{});
+    dnorm_mean = dnorm_mean / C;
+    dnorm_norm_mean = dnorm_norm_mean / C;
+
+    // now iterate again and accumulate all the gradients
+    for (int i = warp.thread_rank(); i < C; i += warp.size()) {
+        float norm_bti = (inp_bt[i] - mean_bt) * rstd_bt;
+        float dnorm_i = weight[i] * dout_bt[i];
+        // gradient contribution to bias
+        atomicAdd(&dbias_shared[i], dout_bt[i]);
+        // gradient contribution to weight
+        atomicAdd(&dweight_shared[i], norm_bti * dout_bt[i]);
+        // gradient contribution to input
+        float dval = 0.0f;
+        dval += dnorm_i; // term 1
+        dval -= dnorm_mean; // term 2
+        dval -= norm_bti * dnorm_norm_mean; // term 3
+        dval *= rstd_bt; // final scale
+        dinp_bt[i] += dval;
+    }
+    __syncthreads();
+
+    // write to global memory
+    for(int i = threadIdx.x; i < C; i+= blockDim.x){
+        atomicAdd(&dbias[i], dbias_shared[i]);
+        atomicAdd(&dweight[i], dweight_shared[i]);
+    }
 }
 */
+
+/*
+__global__ void softmax_autoregressive_backward_kernel(float* dpreatt, const float* datt, const float* att,
+                                                       int B, int T, int C, float scale) {
+    constexpr const int BlockSize = 256;
+    constexpr int T_per_block = 4;
+    cg::thread_block block = cg::this_thread_block();
+    cg::thread_block_tile<32> warp = cg::tiled_partition<32>(block);
+    __shared__ float block_acc[32];
+
+    int idx = blockIdx.y;
+    // go through blocks in reverse order, so the slowest block starts first
+    int t0 = T - 1 - T_per_block*blockIdx.x;
+
+    att += idx * T * T;
+    datt += idx * T * T;
+    dpreatt += idx * T * T;
+
+    if (warp.meta_group_rank() == 0) {
+        block_acc[warp.thread_rank()] = 0;
+    }
+
+    for(int to = 0; to < T_per_block; ++to) {
+        int t = t0 - to;
+        if(t < 0) return;
+        const float* att_bth = att + t * T;
+        const float* datt_bth = datt + t * T;
+        float* dpreatt_bth = dpreatt + t * T;
+
+        float local_sum = 0;
+        for (int t2 = block.thread_rank(); t2 <= t; t2 += BlockSize) {
+            local_sum += att_bth[t2] * datt_bth[t2];
+        }
+
+        block_acc[warp.meta_group_rank()] = cg::reduce(warp, local_sum, cg::plus<float>{});
+        block.sync();
+        local_sum = cg::reduce(warp, block_acc[warp.thread_rank()], cg::plus<float>{});
+
+        for (int t3 = block.thread_rank(); t3 <= t; t3 += BlockSize) {
+            // don't touch the cache. Some parts will still be here from the previous loop, and
+            // we want to exploit those.
+            // i0: 0..T_per_block
+            // (block - blockid - 1) * T_per_block * T + (T_per_block - 1 - i1) * T  + t3 * Block=
+            // block * T_per_block * T - T
+            // = T * T - T
+            // (T - 1 - T_per_block*blockIdx.x - i1) * T + i0 * BlockSize
+            float acc = __ldcs(att_bth + t3) * (__ldcs(datt_bth + t3) - local_sum);
+            __stcs(dpreatt_bth + t3, scale * acc);
+        }
+    }
+}
+*/
+
+#[gpu_macros::attr(skip_divergence_check)]
+#[gpu_macros::cuda_kernel]
+pub fn softmax_autoregressive_backward_kernel(
+    dpreatt: &mut [f32],
+    datt: &[f32],
+    att: &[f32],
+    _B: usize,
+    T: usize,
+    _C: usize,
+    scale: f32,
+) {
+    // dpreatt, datt, att shape: (B * NH, T, T)
+    assert!(Config::BDIM_Z == 1);
+    assert!(Config::BDIM_X * Config::BDIM_Y == 256);
+    const BLOCK_SIZE: usize = 256;
+    const T_PER_BLOCK: usize = 4;
+    // T / 4, B * NH
+    let block = Block;
+    let warp = ThreadWarpTile::<32>;
+    // Requires:
+    // - GDIM_X = T/4
+    // - GDIM_Y: unrestricted
+    // - BLOCK_SIZE = 256
+    // - T_PER_BLOCK = 4
+    // - T % 4 == 0 (BLOCK_SIZE/T)
+    // - T can be smaller or larger than BLOCK_SIZE.
+    // arr[][T/4][min(BLOCK_SIZE, T)][4][T/BLOCK_SIZE]
+    let arr_i0_size = T.div_ceil(BLOCK_SIZE);
+    let arr_t0_size = if BLOCK_SIZE < T { BLOCK_SIZE } else { T };
+    let arr_t1_size = T.div_ceil(T_PER_BLOCK);
+    let dpreatt_map = gpu::reshape_map!(
+        [arr_i0_size, T_PER_BLOCK] |
+        [
+            (BLOCK_SIZE, arr_t0_size),
+            (grid_dim::<DimX>(), arr_t1_size), //reversed
+            grid_dim::<DimY>(),
+        ] =>
+        layout: [t0, i0, -i1, -t1, t2]
+    );
+    let mut dpreatt_bth = chunk_mut(dpreatt, dpreatt_map);
+
+    let mut block_acc = gpu::GpuShared::<[f32; 32]>::zero();
+    let block2warp = build_chunk_scope(block, warp);
+    let warp2thread = build_chunk_scope(warp, Thread);
+
+    let idx = gpu::block_id::<gpu::DimY>();
+
+    // go through blocks in reverse order, so the slowest block starts first
+    let t0 = (T - 1) as isize - (T_PER_BLOCK * gpu::block_id::<gpu::DimX>()) as isize;
+
+    // Assign 32 elements to each warp
+    // and then assign 1 element to each thread in the warp
+    // Since block_acc.len() = 32, only the first warp writes to block_acc
+    let mut block_acc_init_chunk = block_acc
+        .chunk_to_scope(block2warp, gpu::MapLinear::new(32))
+        .chunk_to_scope(warp2thread, gpu::MapLinear::new(1));
+    if warp.subgroup_id() == 0 {
+        block_acc_init_chunk[0] = 0.0;
+    }
+
+    let lane_id = warp.thread_rank();
+    for to in 0..T_PER_BLOCK as isize {
+        let t = t0 - to;
+        if t < 0 {
+            return;
+        }
+        let t = t as usize;
+        let bth = idx * T * T + t * T;
+        let att_bth = &att[bth..];
+        let datt_bth = &datt[bth..];
+        let mut local_sum = 0.0f32;
+        for t2 in (block.thread_rank()..=t).step_by(BLOCK_SIZE) {
+            local_sum += att_bth[t2].ldcs() * datt_bth[t2].ldcs();
+        }
+        // warp-level reduction
+        let acc = warp.redux(ReduxAdd, local_sum);
+
+        // This is required to make sure block_acc is ready before the next step
+        // and required to make sure the write happens after the read in previous step
+        // Fix bug in LLM.c
+        sync_threads();
+
+        // block-level accumulation
+        // Thus only lane_0 can write to block_acc_chunk
+        let mut block_acc_chunk = block_acc
+            .chunk_to_scope(block2warp, gpu::MapLinear::new(1))
+            .chunk_to_scope(warp2thread, gpu::MapLinear::new(1));
+        if lane_id == 0 {
+            block_acc_chunk[0] = acc;
+        }
+        sync_threads();
+
+        // block-level reduction
+        local_sum = warp.redux(ReduxAdd, block_acc[lane_id]);
+
+        for (i, t3) in (block.thread_rank()..=t).step_by(BLOCK_SIZE).enumerate() {
+            let acc = att_bth[t3].ldcs() * (datt_bth[t3].ldcs() - local_sum);
+            let val = scale * acc;
+            dpreatt_bth[i + to as usize * arr_i0_size].stcs(val);
+        }
+    }
+}
 
 /// TODO: add tests
 #[gpu_macros::cuda_kernel]

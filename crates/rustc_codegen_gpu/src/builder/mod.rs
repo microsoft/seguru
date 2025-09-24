@@ -589,9 +589,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                     .into();
                 atomic_rmw_op.set_attribute("kind", kind);
 
-                self.append_op(atomic_rmw_op);
-
-                Ok(None)
+                Ok(Some(self.append_op(atomic_rmw_op)))
             }
             GpuItem::GetLocalMut2D => {
                 // Not a builtin.

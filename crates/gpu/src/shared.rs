@@ -3,6 +3,8 @@ use core::marker::PhantomData;
 ///
 use core::ops::{Deref, DerefMut};
 
+use cuda_bindings::SafeGpuConfig;
+
 use crate::assert_ptr;
 use crate::chunk::{ScopeUniqueMap, ScopeUniqueMapProvidedMethods};
 use crate::chunk_scope::{Block2ThreadScope, ChainedMap, ChainedScope, ChunkScope, Thread};
@@ -67,13 +69,15 @@ impl DynamicSharedAlloc {
     }
 }
 
-/// TODO(gpu): Check the use of DynamicSharedAlloc in kernel entry to ensure it
-/// is owned by the kernel and thus we will use it as a local variable.
-/// TODO(host): Link the host-side dynamic memory size with DynamicSharedAlloc.
-impl DynamicSharedAlloc {
-    /// Host-side constructor for shared memory allocation.
-    pub fn new(size: usize) -> Self {
-        Self { size }
+/// This trait is implemented for kernel config struct to provide dynamic shared memory allocation.
+pub trait DynamicSharedAllocBuilder {
+    fn smem_alloc(&self) -> DynamicSharedAlloc;
+}
+
+impl<Config: SafeGpuConfig> DynamicSharedAllocBuilder for Config {
+    // This is host-side function.
+    fn smem_alloc(&self) -> DynamicSharedAlloc {
+        DynamicSharedAlloc { size: self.shared_size() as usize }
     }
 }
 

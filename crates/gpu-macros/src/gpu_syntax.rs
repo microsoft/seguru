@@ -1,16 +1,44 @@
 use proc_macro::TokenStream;
 use quote::ToTokens;
+use syn::parse::Parse;
 use syn::visit_mut::VisitMut;
 use syn::{Path, parse_quote};
+
+#[derive(Clone, Debug)]
+pub(crate) struct KernelAttr {
+    pub dynamic_shared: bool,
+}
+
+impl Parse for KernelAttr {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let args =
+            syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated(input)?;
+        let mut dynamic_shared = false;
+        for arg in args {
+            match arg {
+                syn::Meta::Path(p) if p.is_ident("dynamic_shared") => dynamic_shared = true,
+                _ => {
+                    return Err(syn::Error::new_spanned(arg, "Unknown attribute argument"));
+                }
+            }
+        }
+        Ok(KernelAttr { dynamic_shared })
+    }
+}
 
 pub struct GpuFunctionRewriter {
     pub(crate) is_kernel_entry: bool,
     pub(crate) target: crate::CodegenTarget,
+    pub(crate) kernel_attr: KernelAttr,
 }
 
 impl GpuFunctionRewriter {
-    pub fn new(is_kernel_entry: bool, target: crate::CodegenTarget) -> Self {
-        GpuFunctionRewriter { is_kernel_entry, target }
+    pub fn new(
+        is_kernel_entry: bool,
+        kernel_attr: KernelAttr,
+        target: crate::CodegenTarget,
+    ) -> Self {
+        GpuFunctionRewriter { is_kernel_entry, kernel_attr, target }
     }
 }
 
@@ -64,6 +92,9 @@ impl VisitMut for GpuFunctionRewriter {
                 });
             }
         }
+        if self.kernel_attr.dynamic_shared {
+            f.sig.inputs.push(parse_quote!(mut smem_alloc: ::gpu::DynamicSharedAlloc));
+        }
         if !self.target.need_register_tool() {
             return;
         }
@@ -84,19 +115,22 @@ impl VisitMut for GpuFunctionRewriter {
 pub(crate) fn basic_rewrite_gpu_func(
     fun: &mut syn::ItemFn,
     is_kernel_entry: bool,
+    kernel_attr: KernelAttr,
     target: crate::CodegenTarget,
 ) {
-    let mut dev_rewriter = crate::gpu_syntax::GpuFunctionRewriter::new(is_kernel_entry, target);
+    let mut dev_rewriter =
+        crate::gpu_syntax::GpuFunctionRewriter::new(is_kernel_entry, kernel_attr, target);
     dev_rewriter.visit_item_fn_mut(fun);
 }
 
 pub(crate) fn rewrite_gpu_code(
-    _: TokenStream,
+    attr: TokenStream,
     input: TokenStream,
     is_kernel_entry: bool,
     target: crate::CodegenTarget,
 ) -> TokenStream {
+    let kernel_attr = syn::parse_macro_input!(attr as KernelAttr);
     let mut fun = syn::parse_macro_input!(input as syn::ItemFn);
-    basic_rewrite_gpu_func(&mut fun, is_kernel_entry, target);
+    basic_rewrite_gpu_func(&mut fun, is_kernel_entry, kernel_attr, target);
     fun.to_token_stream().into()
 }

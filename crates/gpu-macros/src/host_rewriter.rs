@@ -5,6 +5,7 @@ use syn::spanned::Spanned;
 use syn::{Expr, PatType, Stmt};
 
 use crate::CodegenTarget;
+use crate::gpu_syntax::KernelAttr;
 
 fn generic_ctxspace_bound(ident: syn::Ident, has_default: bool, span: Span) -> syn::GenericParam {
     let mut bounds = syn::punctuated::Punctuated::new();
@@ -55,6 +56,7 @@ fn kernel<..., Config: gpu_host::GPUConfig, C: gpu_host::GpuCtxSpace>(
 fn host_rewrite(
     host_func: &mut syn::ItemFn,
     mut kernel_fn_path: syn::Path,
+    smem_alloc: bool,
     span: Span,
     target: CodegenTarget,
 ) {
@@ -66,7 +68,7 @@ fn host_rewrite(
         Box::new(syn::parse_quote! { Result<(), gpu_host::CudaError> }), // u32
     );
 
-    let mut stmts = vec![];
+    host_func.block.stmts.clear();
 
     // 2. Build up argument list and add ctx, module, config to wrapper
     let wrapper_args = &host_func.sig.inputs;
@@ -77,7 +79,7 @@ fn host_rewrite(
     let ctx_type_arg = syn::Ident::new("CN", span);
     let config_type_arg = syn::Ident::new("Config", span);
 
-    let args = wrapper_args
+    let mut args = wrapper_args
         .iter()
         .map(|arg| {
             if let syn::FnArg::Typed(pat_type) = arg {
@@ -91,10 +93,16 @@ fn host_rewrite(
             }
         })
         .collect::<Vec<_>>();
-    stmts.push(Stmt::Expr(
-        Expr::Verbatim(quote_spanned! {span =>let #host_args = [#(&#args as &dyn gpu_host::AsHostKernelParams),*];}),
-        None,
-    ));
+    if smem_alloc {
+        let smem_ident = syn::Ident::new("smem_alloc", span);
+        host_func.block.stmts.push(Stmt::Expr(
+            Expr::Verbatim(quote!(
+                let #smem_ident = ::gpu::DynamicSharedAllocBuilder::smem_alloc(&#config_arg);
+            )),
+            None,
+        ));
+        args.push(syn::parse_quote!(#smem_ident));
+    }
 
     // Add generic param for context namespace.
     host_func.sig.generics.params.push(generic_config_bound(config_type_arg.clone(), false, span));
@@ -160,24 +168,6 @@ fn host_rewrite(
 
     if target.is_gpu_only() {
         host_func.attrs.push(syn::parse_quote! { #[allow(clippy::extra_unused_type_parameters)] });
-        host_func.block.stmts.clear();
-        let args = host_func
-            .sig
-            .inputs
-            .iter()
-            .skip(3)
-            .map(|arg| {
-                if let syn::FnArg::Typed(pat_type) = arg {
-                    if let syn::Pat::Ident(pat_ident) = *pat_type.pat.clone() {
-                        pat_ident.ident.clone()
-                    } else {
-                        panic!("You don't have a name for your arg");
-                    }
-                } else {
-                    panic!("Unexpected receiver argument");
-                }
-            })
-            .collect::<Vec<_>>();
         // Add call to kernel function so that gpu2gpu will be able to monomorphize the kernel.
         host_func.block.stmts.push(Stmt::Expr(
             Expr::Verbatim(quote!(
@@ -195,7 +185,7 @@ fn host_rewrite(
             #ctx_arg.launch_kernel(
                 #mod_arg,
                 &::gpu_host::get_fn_name(#kernel_fn_path),
-                config,
+                #config_arg,
                 &#host_args,
                 None,
                 #is_async,
@@ -203,10 +193,11 @@ fn host_rewrite(
         }
     };
 
-    stmts.push(Stmt::Expr(Expr::Verbatim(t), None));
-    // Insert everything into the blocks of the wrapper
-    host_func.block.stmts.clear();
-    host_func.block.stmts.extend(stmts);
+    host_func.block.stmts.push(Stmt::Expr(
+        Expr::Verbatim(quote_spanned! {span =>let #host_args = [#(&#args as &dyn gpu_host::AsHostKernelParams),*];}),
+        None,
+    ));
+    host_func.block.stmts.push(Stmt::Expr(Expr::Verbatim(t), None));
 }
 
 pub(crate) fn rewrite(attr: TokenStream, input: TokenStream, target: CodegenTarget) -> TokenStream {
@@ -215,19 +206,20 @@ pub(crate) fn rewrite(attr: TokenStream, input: TokenStream, target: CodegenTarg
     let kernel_fn_path = syn::parse_macro_input!(attr as syn::Path);
 
     // The newly generated function uses the same span as the attributes
-    host_rewrite(&mut fun, kernel_fn_path.clone(), fun_span, target);
+    host_rewrite(&mut fun, kernel_fn_path.clone(), false, fun_span, target);
     fun.to_token_stream().into()
 }
 
 pub(crate) fn create_host_from_kernel(
-    _attr: TokenStream,
+    attr: TokenStream,
     input: TokenStream,
     target: CodegenTarget,
 ) -> TokenStream {
+    let kernel_attr = syn::parse_macro_input!(attr as KernelAttr);
     let mut kfun = syn::parse_macro_input!(input as syn::ItemFn);
     let kname = kfun.sig.ident.clone();
     let mut fun = kfun.clone();
-    crate::gpu_syntax::basic_rewrite_gpu_func(&mut kfun, true, target);
+    crate::gpu_syntax::basic_rewrite_gpu_func(&mut kfun, true, kernel_attr.clone(), target);
     fun.block.stmts.clear();
     fun.vis = syn::parse_quote!(pub);
     fun.sig.ident = syn::Ident::new("launch", kname.span());
@@ -246,7 +238,7 @@ pub(crate) fn create_host_from_kernel(
         }
     });
     let span = fun.span();
-    host_rewrite(&mut fun, kernel_fn_path, span, target);
+    host_rewrite(&mut fun, kernel_fn_path, kernel_attr.dynamic_shared, span, target);
     quote_spanned! {span =>
             #kfun
             pub mod #kname {

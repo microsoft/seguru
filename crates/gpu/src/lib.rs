@@ -39,7 +39,7 @@ pub use global::GpuGlobal;
 pub use host_dev::HostToDev;
 pub use ldst::CacheStreamLoadStore;
 pub use print::{PushPrintfArg, printf};
-pub use shared::{DynamicSharedAlloc, GpuShared};
+pub use shared::{DynamicSharedAlloc, DynamicSharedAllocBuilder, GpuShared};
 pub use sync::sync_threads;
 
 /// Add an extra assertion before indexing operation.

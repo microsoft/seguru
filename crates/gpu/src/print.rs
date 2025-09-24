@@ -71,3 +71,26 @@ macro_rules! println {
         $crate::printf($fmt);
     }};
 }
+
+#[macro_export]
+macro_rules! println_once {
+    ($($any:tt)*) => {{
+        if $crate::thread_id::<$crate::DimX>() == 0 && $crate::thread_id::<$crate::DimY>() == 0 && $crate::thread_id::<$crate::DimZ>() == 0 && $crate::block_id::<$crate::DimX>() == 0 && $crate::block_id::<$crate::DimY>() == 0 && $crate::block_id::<$crate::DimZ>() == 0 {
+            $crate::println!($($any)*);
+        }
+    }}
+}
+
+#[cfg(debug_assertions)]
+#[macro_export]
+macro_rules! debug_once {
+    ($($any:tt)*) => {{
+        println_once!($($any)*);
+    }}
+}
+
+#[cfg(not(debug_assertions))]
+#[macro_export]
+macro_rules! debug_once {
+    ($($any:tt)*) => {{}};
+}

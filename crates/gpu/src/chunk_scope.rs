@@ -34,12 +34,16 @@ impl SyncScope for Grid {}
 #[expect(private_bounds)]
 pub trait BuildChunkScope<S2: SyncScope>: SyncScope {
     type CS: ChunkScope<FromScope = Self, ToScope = S2>;
+
+    #[gpu_codegen::device]
     fn build_chunk_scope(&self, to: S2) -> Self::CS;
 }
 
 // Block -> Warp
 impl<const SIZE: usize> BuildChunkScope<ThreadWarpTile<SIZE>> for Block {
     type CS = Block2WarpScope<SIZE>;
+    #[inline]
+    #[gpu_codegen::device]
     fn build_chunk_scope(&self, _to: ThreadWarpTile<SIZE>) -> Block2WarpScope<SIZE> {
         Block2WarpScope
     }
@@ -48,6 +52,8 @@ impl<const SIZE: usize> BuildChunkScope<ThreadWarpTile<SIZE>> for Block {
 // Block -> Thread
 impl BuildChunkScope<Thread> for Block {
     type CS = Block2ThreadScope;
+    #[inline]
+    #[gpu_codegen::device]
     fn build_chunk_scope(&self, _to: Thread) -> Block2ThreadScope {
         Block2ThreadScope
     }
@@ -56,6 +62,8 @@ impl BuildChunkScope<Thread> for Block {
 // Grid -> Block
 impl BuildChunkScope<Block> for Grid {
     type CS = Grid2BlockScope;
+    #[inline]
+    #[gpu_codegen::device]
     fn build_chunk_scope(&self, _to: Block) -> Grid2BlockScope {
         Grid2BlockScope
     }
@@ -64,6 +72,8 @@ impl BuildChunkScope<Block> for Grid {
 // Grid -> Warp
 impl<const SIZE: usize> BuildChunkScope<ThreadWarpTile<SIZE>> for Grid {
     type CS = Grid2WarpScope<SIZE>;
+    #[inline]
+    #[gpu_codegen::device]
     fn build_chunk_scope(&self, _to: ThreadWarpTile<SIZE>) -> Grid2WarpScope<SIZE> {
         Grid2WarpScope
     }
@@ -72,6 +82,8 @@ impl<const SIZE: usize> BuildChunkScope<ThreadWarpTile<SIZE>> for Grid {
 // Grid -> Thread
 impl BuildChunkScope<Thread> for Grid {
     type CS = Grid2ThreadScope;
+    #[inline]
+    #[gpu_codegen::device]
     fn build_chunk_scope(&self, _to: Thread) -> Grid2ThreadScope {
         Grid2ThreadScope
     }
@@ -80,11 +92,15 @@ impl BuildChunkScope<Thread> for Grid {
 /// Warp -> Thread
 impl<const SIZE: usize> BuildChunkScope<Thread> for ThreadWarpTile<SIZE> {
     type CS = Warp2ThreadScope<SIZE>;
+    #[inline]
+    #[gpu_codegen::device]
     fn build_chunk_scope(&self, _to: Thread) -> Warp2ThreadScope<SIZE> {
         Warp2ThreadScope
     }
 }
 
+#[inline]
+#[gpu_codegen::device]
 #[expect(private_bounds)]
 pub fn build_chunk_scope<S1, S2>(from: S1, to: S2) -> <S1 as BuildChunkScope<S2>>::CS
 where

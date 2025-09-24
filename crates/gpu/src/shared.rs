@@ -115,7 +115,7 @@ impl<'a, T: ?Sized + AsSharedSlice, CS: ChunkScope, Map: ScopeUniqueMap<CS>>
     #[inline]
     #[gpu_codegen::device]
     #[gpu_codegen::memspace_shared(0, 1000)]
-    #[gpu_codegen::sync_data(0, 1, 2)]
+    #[gpu_codegen::sync_data(1, 2)] // self is guaranteed to be non-divergent and so no check is required
     pub fn chunk_to_scope<CS2: ChunkScope, Map2: ScopeUniqueMap<CS2>>(
         self,
         _scope: CS2,

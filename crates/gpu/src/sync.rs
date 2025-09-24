@@ -1,6 +1,6 @@
 //! Synchronization and atomic operations for GPU programming.
 
-use crate::GpuGlobal;
+use crate::{GpuGlobal, GpuShared};
 
 /// Synchronization within a thread block.
 /// Disallow divergent control flow to
@@ -71,6 +71,44 @@ impl<'a, T: ?Sized> Atomic<'a, T> {
     }
 }
 
+pub struct SharedAtomic<'a, T: ?Sized> {
+    data: &'a GpuShared<T>,
+}
+
+/// Atomic read-modify-write operation with kind defined in
+/// [MLIR memref::atomic_rmw](https://mlir.llvm.org/docs/Dialects/MemRef/#memrefatomic_rmw-memrefatomicrmwop)
+impl<'a, T: ?Sized> SharedAtomic<'a, T> {
+    #[inline(never)]
+    #[gpu_codegen::device]
+    #[rustc_diagnostic_item = "gpu::sync::SharedAtomic::new"]
+    #[gpu_codegen::memspace_shared(1000)] // returned data is in shared memory
+    pub fn new(data: &'a mut GpuShared<T>) -> SharedAtomic<'a, T> {
+        Self { data }
+    }
+
+    #[inline(always)]
+    #[gpu_codegen::device]
+    #[expect(private_bounds)]
+    pub fn atomic_rmw<K: AtomicRMWKind>(&self, val: T) -> T
+    where
+        T: num_traits::Num,
+    {
+        unsafe { _atomic_rmw(self.data, val, K::NAME) }
+    }
+}
+
+impl<'a, T> SharedAtomic<'a, [T]> {
+    /// Get a reference to the data inside the Atomic struct.
+    /// This is unsafe because the user must ensure that no other thread
+    /// is accessing the data at the same time.
+    #[inline(always)]
+    #[gpu_codegen::device]
+    #[gpu_codegen::memspace_shared(1000)] // returned data is in shared memory
+    pub fn index(&'a self, i: usize) -> SharedAtomic<'a, T> {
+        SharedAtomic { data: &self.data[i] }
+    }
+}
+
 macro_rules! def_atomic_rmw_kind {
     ($t:ident, $val:literal, $atomic_fn: ident, $trait:path) => {
         #[doc = concat!("Atomic operation kind for [`Atomic<'a, T>::", stringify!($atomic_fn), "`]")]
@@ -81,6 +119,18 @@ macro_rules! def_atomic_rmw_kind {
 
         impl<'a, T: num_traits::Num> Atomic<'a, T> {
             #[doc = concat!("Equivalent to: atomic_rmw::<[`Atomic<'a, T>::", stringify!($t), "`]>")]
+            #[inline(always)]
+            #[gpu_codegen::device]
+            pub fn $atomic_fn(&self, val: T) -> T
+            where
+                T: $trait,
+            {
+                self.atomic_rmw::<$t>(val)
+            }
+        }
+
+        impl<'a, T: num_traits::Num> SharedAtomic<'a, T> {
+            #[doc = concat!("Equivalent to: atomic_rmw::<[`SharedAtomic<'a, T>::", stringify!($t), "`]>")]
             #[inline(always)]
             #[gpu_codegen::device]
             pub fn $atomic_fn(&self, val: T) -> T

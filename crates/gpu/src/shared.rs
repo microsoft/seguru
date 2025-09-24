@@ -1,10 +1,11 @@
+use core::marker::PhantomData;
 /// This file contains shared memory related APIs.
 ///
 use core::ops::{Deref, DerefMut};
 
 use crate::assert_ptr;
 use crate::chunk::{ScopeUniqueMap, ScopeUniqueMapProvidedMethods};
-use crate::chunk_scope::Block2ThreadScope;
+use crate::chunk_scope::{Block2ThreadScope, ChainedMap, ChainedScope, ChunkScope, Thread};
 
 /// Static GPU shared memory.
 #[rustc_diagnostic_item = "gpu::GpuShared"]
@@ -89,9 +90,37 @@ impl<T> core::ops::Index<usize> for GpuShared<[T]> {
 /// N:core::ops::Index dimension, 1, 2, 3
 /// Map: Mapping strategy
 #[allow(private_bounds)]
-pub struct SMemThreadChunk<'a, T: ?Sized + AsSharedSlice, Map: ScopeUniqueMap<Block2ThreadScope>> {
+pub struct SMemThreadChunk<'a, T: ?Sized + AsSharedSlice, CS: ChunkScope, Map: ScopeUniqueMap<CS>> {
     data: &'a mut GpuShared<T>, // Must be private.
     pub map_params: Map,
+    dummy: core::marker::PhantomData<CS>,
+}
+
+impl<'a, T: ?Sized + AsSharedSlice, CS: ChunkScope, Map: ScopeUniqueMap<CS>>
+    SMemThreadChunk<'a, T, CS, Map>
+{
+    #[inline]
+    #[gpu_codegen::device]
+    #[gpu_codegen::memspace_shared(0, 1000)]
+    #[gpu_codegen::sync_data(0, 1, 2)]
+    pub fn chunk_to_scope<CS2: ChunkScope, Map2: ScopeUniqueMap<CS2>>(
+        self,
+        _scope: CS2,
+        map_params: Map2,
+    ) -> SMemThreadChunk<'a, T, ChainedScope<CS, CS2>, ChainedMap<CS, CS2, Map, Map2>>
+    where
+        Map: ScopeUniqueMap<CS, IndexType = usize>,
+        CS: ChunkScope<ToScope = CS2::FromScope>,
+    {
+        if !map_params.precondition() {
+            core::intrinsics::abort();
+        }
+        SMemThreadChunk {
+            data: self.data,
+            map_params: ChainedMap::new(self.map_params, map_params),
+            dummy: PhantomData,
+        }
+    }
 }
 
 trait PrivateTraitGuard {}
@@ -153,16 +182,31 @@ impl<T: ?Sized + AsSharedSlice> GpuShared<T> {
     pub fn chunk_mut<'a, Map: ScopeUniqueMap<Block2ThreadScope>>(
         &'a mut self,
         map_params: Map,
-    ) -> SMemThreadChunk<'a, T, Map> {
+    ) -> SMemThreadChunk<'a, T, Block2ThreadScope, Map> {
         if !map_params.precondition() {
             core::intrinsics::abort();
         }
-        SMemThreadChunk { data: self, map_params }
+        SMemThreadChunk { data: self, map_params, dummy: PhantomData }
+    }
+
+    #[inline]
+    #[gpu_codegen::device]
+    #[gpu_codegen::memspace_shared(0, 1000)]
+    #[gpu_codegen::sync_data(0, 1, 2)]
+    pub fn chunk_to_scope<'a, CS: ChunkScope, Map: ScopeUniqueMap<CS>>(
+        &'a mut self,
+        _scope: CS,
+        map_params: Map,
+    ) -> SMemThreadChunk<'a, T, CS, Map> {
+        if !map_params.precondition() {
+            core::intrinsics::abort();
+        }
+        SMemThreadChunk { data: self, map_params, dummy: PhantomData }
     }
 }
 
-impl<'a, T: ?Sized + AsSharedSlice, Map: ScopeUniqueMap<Block2ThreadScope>>
-    core::ops::Index<Map::IndexType> for SMemThreadChunk<'a, T, Map>
+impl<'a, T: ?Sized + AsSharedSlice, CS: ChunkScope, Map: ScopeUniqueMap<CS>>
+    core::ops::Index<Map::IndexType> for SMemThreadChunk<'a, T, CS, Map>
 {
     type Output = T::Elem;
 
@@ -176,8 +220,10 @@ impl<'a, T: ?Sized + AsSharedSlice, Map: ScopeUniqueMap<Block2ThreadScope>>
     }
 }
 
-impl<'a, T: ?Sized + AsSharedSlice, Map: ScopeUniqueMap<Block2ThreadScope>>
-    core::ops::IndexMut<Map::IndexType> for SMemThreadChunk<'a, T, Map>
+impl<'a, T: ?Sized + AsSharedSlice, CS: ChunkScope, Map: ScopeUniqueMap<CS>>
+    core::ops::IndexMut<Map::IndexType> for SMemThreadChunk<'a, T, CS, Map>
+where
+    CS: ChunkScope<ToScope = Thread>,
 {
     #[inline(always)]
     #[gpu_codegen::device]

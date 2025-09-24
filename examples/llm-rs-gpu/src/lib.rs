@@ -2,11 +2,14 @@
 #![allow(non_snake_case)]
 #![allow(clippy::too_many_arguments)]
 
+use core::f32;
+
 use gpu::cg::{CGOperations, ReduxAdd, ReduxMax, ThreadWarpTile, WarpReduceOp};
-use gpu::chunk_scope::{build_chunk_scope, Block, Grid, Thread};
+use gpu::chunk_scope::{build_chunk_scope, Block, Grid, Grid2BlockScope, Thread};
 use gpu::{
     block_dim, block_id, chunk_mut, dim, float4, grid_dim, reshape_map, sync_threads, thread_id,
-    CacheStreamLoadStore, DimX, DimY, GPUDeviceFloatIntrinsics, GpuShared, MapLinear,
+    CacheStreamLoadStore, DimX, DimY, GPUDeviceFloatIntrinsics, GlobalGroupChunk, GpuShared,
+    MapLinear,
 };
 
 #[gpu_macros::device]
@@ -900,6 +903,256 @@ pub fn adamw_kernel2(
     let old_param = params_memory[0];
     params_memory[0] =
         old_param - learning_rate * (m_hat / (v_hat.sqrt() + eps) + weight_decay * old_param);
+}
+
+/*
+__device__ SoftmaxParams prepare_softmax_blockwide_nofloat4(cg::thread_block_tile<32>& warp,
+                                                   int idx, const float* inp, int V, int P) {
+    // same but not float4
+    // one row of inp, i.e. inp[idx, :] of shape (V,)
+
+    const float* x = inp + idx * P;
+    float thread_maxval = -INFINITY;
+    float thread_sumval = 0.0f;
+    // do the loop in reverse to maximise probability of L2 cache hits
+    // so even small L2s get some hits on the 2nd read of the same thread
+    for (int i = V + threadIdx.x - blockDim.x; i >= 0; i -= blockDim.x) {
+        float v = x[i];
+        float old_maxval = thread_maxval;
+        thread_maxval = fmaxf(thread_maxval, v);
+        thread_sumval *= expf((old_maxval - thread_maxval));
+        thread_sumval += expf(v - thread_maxval);
+    }
+
+    // two reductions of up to 1024 threads:
+    // 1) inside warp (shuffle), 2) cross-warp (shared memory), 3) inside warp (shuffle)
+    // this results in much cleaner assembly than a multi-warp cg::reduce
+    __shared__ float shared_maxval[32];
+    __shared__ float shared_sumval[32];
+    int num_warps = blockDim.x / 32;
+    int warp_id = threadIdx.x / 32;
+    int lane_id = threadIdx.x % 32;
+
+    // reduce maxval within each warp
+    float warp_maxval = cg::reduce(warp, thread_maxval, cg::greater<float>{});
+    // thread 0 in each warp writes to shared memory
+    if (lane_id == 0) { shared_maxval[warp_id] = warp_maxval; }
+    __syncthreads();
+    // each thread now loads the maxval across previous warps
+    // if the thread is "out of range" of data, use -FLT_MAX as the maxval
+    warp_maxval = (lane_id < num_warps) ? shared_maxval[lane_id] : -FLT_MAX;
+    // now reduce the maxval among the warp threads
+    float block_maxval = cg::reduce(warp, warp_maxval, cg::greater<float>{});
+    // each thread uses maxval to scale sumval to avoid numerical instability / overflow
+    thread_sumval *= expf(thread_maxval - block_maxval);
+    // (warp-level) reduce sumval, thread 0 in each warp saves result in shared memory
+    float warp_sumval = cg::reduce(warp, thread_sumval, cg::plus<float>{});
+    if (lane_id == 0) { shared_sumval[warp_id] = warp_sumval; }
+    __syncthreads();
+    // same strategy, now reduce sumval across warps
+    warp_sumval = (lane_id < num_warps) ? shared_sumval[lane_id] : 0.0f;
+    float block_sumval = cg::reduce(warp, warp_sumval, cg::plus<float>{});
+    // return the softmax parameters
+    return SoftmaxParams{1.f / block_sumval, block_maxval};
+}
+*/
+
+struct SoftmaxParams {
+    scale: f32,
+    offset: f32,
+}
+
+// inp: Shape(V,)
+#[inline(always)]
+#[gpu_macros::device]
+#[gpu_macros::attr(skip_divergence_check)]
+fn prepare_softmax_blockwide_nofloat4(
+    inp: &GlobalGroupChunk<'_, f32, Grid2BlockScope, MapLinear>,
+    V: usize,
+) -> SoftmaxParams {
+    // two reductions of up to 1024 threads:
+    // 1) inside warp (shuffle), 2) cross-warp (shared memory), 3) inside warp (shuffle)
+    // this results in much cleaner assembly than a multi-warp cg::reduce
+    let mut shared_maxval = gpu::GpuShared::<[f32; 32]>::zero();
+    let mut shared_sumval = gpu::GpuShared::<[f32; 32]>::zero();
+
+    let warp = ThreadWarpTile::<32>;
+    let block2warp = build_chunk_scope(Block, warp);
+    let warp2thread = build_chunk_scope(warp, Thread);
+    let mut shared_maxval_chunk = shared_maxval
+        .chunk_to_scope(block2warp, MapLinear::new(1))
+        .chunk_to_scope(warp2thread, MapLinear::new(1));
+
+    let mut shared_sumval_chunk = shared_sumval
+        .chunk_to_scope(block2warp, MapLinear::new(1))
+        .chunk_to_scope(warp2thread, MapLinear::new(1));
+
+    // bidx * P + i * bdimx
+    let mut thread_maxval = f32::NEG_INFINITY;
+    let mut thread_sumval = 0.0f32;
+
+    // do the loop in reverse to maximise probability of L2 cache hits
+    // so even small L2s get some hits on the 2nd read of the
+    let tid = thread_id::<gpu::DimX>();
+    let block_size = block_dim::<DimX>();
+    for i in (0..=V + tid - block_size).rev().step_by(block_size) {
+        let v = inp[i];
+        let old_maxval = thread_maxval;
+        thread_maxval = thread_maxval.max(v);
+        thread_sumval *= (old_maxval - thread_maxval).exp();
+        thread_sumval += (v - thread_maxval).exp();
+    }
+    let num_warps = warp.meta_group_size();
+    let lane_id = warp.thread_rank();
+    // reduce maxval within each warp
+    let warp_maxval = warp.redux(ReduxMax, thread_maxval);
+    // thread 0 in each warp writes to shared memory
+    if lane_id == 0 {
+        shared_maxval_chunk[0] = warp_maxval;
+    }
+    sync_threads();
+    // each thread now loads the maxval across previous warps
+    // if the thread is "out of range" of data, use -FLT_MAX as
+    let warp_maxval = if lane_id < num_warps {
+        // ensure shared_maxval[lane_id] is initialized
+        shared_maxval[lane_id]
+    } else {
+        f32::MIN
+    };
+    // now reduce the maxval among the warp threads
+    let block_maxval = warp.redux(ReduxMax, warp_maxval);
+    // each thread uses maxval to scale sumval to avoid numerical instability / overflow
+    thread_sumval *= (thread_maxval - block_maxval).exp();
+    // (warp-level) reduce sumval, thread 0 in each warp saves result in
+    let warp_sumval = warp.redux(ReduxAdd, thread_sumval);
+    if lane_id == 0 {
+        shared_sumval_chunk[0] = warp_sumval;
+    }
+
+    sync_threads();
+    // same strategy, now reduce sumval across warps
+    let warp_sumval = if lane_id < num_warps {
+        // ensure shared_sumval[lane_id] is initialized
+        shared_sumval[lane_id]
+    } else {
+        0.0
+    };
+    let block_sumval = warp.redux(ReduxAdd, warp_sumval);
+    // return the softmax parameters
+    SoftmaxParams {
+        scale: 1.0 / block_sumval,
+        offset: block_maxval,
+    }
+}
+
+/*// same as 2 but not using float4 (see dev/cuda/classifier_fused.cu)
+// will _update_ logits to logit gradients
+__global__ void fused_classifier_kernel3(float* logits, float* losses, float* probs,
+                                         const float* dlosses, const int* targets,
+                                         int B, int T, int V, int P) {
+    namespace cg = cooperative_groups;
+    cg::thread_block block = cg::this_thread_block();
+    cg::thread_block_tile<32> warp = cg::tiled_partition<32>(block);
+    int idx = blockIdx.x;
+    int ix = targets[idx];
+
+    // softmax (reading B * T * V, same logits read again below, hopefully still in cache)
+    SoftmaxParams sp = prepare_softmax_blockwide_nofloat4(warp, idx, logits, V, P);
+
+    // calculate the probability needed for the loss and update (single-threaded)
+    if(threadIdx.x == 0) {
+        float prob = expf(logits[idx * P + ix] - sp.Offset) * sp.Scale;
+        losses[idx] = -logf(prob);
+    }
+
+    // very sensible default for dlosses is 1/(B*T), which is the uniform loss
+    float dloss = dlosses != NULL ? dlosses[idx] : 1.0f / (B*T);
+    // calculate the gradients directly, saves bandwidth from probs during training
+    // but also supports writing probs for inference-only and debugging
+    const float* logits_vec = logits + idx * P;
+    for (int i = threadIdx.x; i < V; i += blockDim.x) {
+        // this is the 2nd read of logits after the one in prepare_softmax2
+        // this data will never be needed again, so we reduce cache persistence
+        float v = __ldcs(&logits_vec[i]);
+        float prob = expf(v - sp.Offset) * sp.Scale;
+        if (probs != NULL) {
+            probs[idx * P + i] = prob;
+        }
+        float indicator = (i == ix) ? 1.0f : 0.0f;
+        logits[idx * P + i] = (prob - indicator) * dloss;
+    }
+}
+*/
+
+// assert!(P >= V);
+#[gpu_macros::attr(skip_divergence_check)]
+#[gpu_macros::cuda_kernel]
+pub fn fused_classifier_kernel3(
+    logits: &mut [f32],
+    losses: &mut [f32],
+    probs: &mut [f32],
+    dlosses: &[f32],
+    targets: &[i32],
+    B: usize,
+    T: usize,
+    V: usize, // vocab_size
+    P: usize, // padded_vocab_size P >= V
+) {
+    let block = Block;
+    let grid2block = build_chunk_scope(Grid, block);
+    let block2thread = build_chunk_scope(block, Thread);
+
+    // chunk logits to (B*T, P)
+    let logits_block = logits.chunk_to_scope(grid2block, MapLinear::new(P)); // blockid * P + tid
+
+    let mut losses_chunk = losses
+        .chunk_to_scope(grid2block, MapLinear::new(1))
+        .chunk_to_scope(block2thread, MapLinear::new(1));
+
+    let idx = gpu::block_id::<gpu::DimX>();
+    if idx >= B * T {
+        return;
+    }
+    let ix = targets[idx] as usize;
+    // softmax (reading B * T * V, same logits read again below, hopefully still in cache)
+    // assert!(P >= V);
+    let sp = prepare_softmax_blockwide_nofloat4(&logits_block, V);
+    // calculate the probability needed for the loss and update (single-threaded)
+    if gpu::thread_id::<gpu::DimX>() == 0 {
+        let prob = ((logits_block[ix] - sp.offset).exp()) * sp.scale;
+        losses_chunk[0] = -prob.ln();
+    }
+    // very sensible default for dlosses is 1/(B*T), which is the uniform loss
+    let dloss = if !dlosses.is_empty() {
+        dlosses[idx]
+    } else {
+        1.0 / (B * T) as f32
+    };
+
+    // calculate the gradients directly, saves bandwidth from probs during training
+    // but also supports writing probs for inference-only and debugging
+    // sync safety: logits_block is only used in this thread block.
+    // prepare_softmax_blockwide_nofloat4 has sync_threads internally.
+    let mut logits_chunk = logits_block.chunk_to_scope(block2thread, MapLinear::new(1));
+    let prob_is_empty = probs.is_empty();
+    let mut probs_chunk = probs
+        .chunk_to_scope(grid2block, MapLinear::new(V))
+        .chunk_to_scope(block2thread, MapLinear::new(1));
+
+    for (k, i) in (gpu::thread_id::<gpu::DimX>()..V)
+        .step_by(gpu::block_dim::<gpu::DimX>())
+        .enumerate()
+    {
+        // this is the 2nd read of logits after the one in prepare_softmax2
+        // this data will never be needed again, so we reduce cache persistence
+        let v = logits_chunk[k].ldcs();
+        let prob = ((v - sp.offset).exp()) * sp.scale;
+        if !prob_is_empty {
+            probs_chunk[k] = prob;
+        }
+        let indicator = if i == ix { 1.0 } else { 0.0 };
+        logits_chunk[k] = (prob - indicator) * dloss;
+    }
 }
 
 /*

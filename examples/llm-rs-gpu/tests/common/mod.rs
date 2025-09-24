@@ -27,3 +27,9 @@ pub fn random_f32_vec(n: usize) -> Vec<f32> {
     let mut rng = rand::rng();
     (0..n).map(|_| rng.random::<f32>()).collect()
 }
+
+#[allow(dead_code)]
+pub fn random_i32_vec(n: usize) -> Vec<i32> {
+    let mut rng = rand::rng();
+    (0..n).map(|_| rng.random::<i32>()).collect()
+}

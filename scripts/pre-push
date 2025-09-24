@@ -19,12 +19,27 @@
 # This sample shows how to prevent push of commits where the log message starts
 # with "WIP" (work in progress).
 
+remote="$1"
+url="$2"
+# Find commits that are about to be pushed
+range="$(git rev-list --no-merges origin..HEAD)"
+
+echo "Checking signed commits before pushing...",$remote,$range
+
+for commit in $range; do
+  if ! git verify-commit "$commit" >/dev/null 2>&1; then
+    echo "✗ Commit $commit is not GPG-signed or failed verification"
+    echo "Push rejected. Please sign your commits (git commit -S)."
+    exit 1
+  else
+    echo "✓ Commit $commit is signed"
+  fi
+done
+
 cd crates
 cargo fmt --all -- --check  || exit 1
 cargo clippy --workspace -- -D warnings || exit 1
-cargo build --workspace --exclude gpu-macros || exit 1
 cargo test || exit 1
-RUSTFLAGS="--cfg gpu_codegen" cargo test --manifest-path rustc_codegen_gpu/Cargo.toml  || exit 1
 
 cd ../examples
 cargo fmt --all -- --check

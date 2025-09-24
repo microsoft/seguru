@@ -394,7 +394,7 @@ impl<const SIZE: usize> ChunkScope for Block2WarpScope<SIZE> {
     #[inline]
     #[gpu_codegen::device]
     fn global_id<D: DimType>(thread_ids: [usize; TID_MAX_LEN]) -> usize {
-        thread_ids[2]
+        if D::DIM_ID == 0 { thread_ids[2] } else { 0 }
     }
 }
 

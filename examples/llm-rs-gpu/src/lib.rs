@@ -6,6 +6,7 @@ use core::f32;
 
 use gpu::cg::{CGOperations, ReduxAdd, ReduxMax, ThreadWarpTile, WarpReduceOp};
 use gpu::chunk_scope::{build_chunk_scope, Block, Grid, Grid2BlockScope, Thread};
+use gpu::sync::{Atomic, SharedAtomic};
 use gpu::{
     block_dim, block_id, chunk_mut, dim, float4, grid_dim, reshape_map, sync_threads, thread_id,
     CacheStreamLoadStore, DimX, DimY, GPUDeviceFloatIntrinsics, GlobalGroupChunk, GpuShared,
@@ -709,6 +710,109 @@ __global__ void layernorm_backward_kernel2(float* dinp, float* dweight, float* d
     }
 }
 */
+
+#[gpu_macros::attr(skip_divergence_check)]
+#[gpu_macros::cuda_kernel(dynamic_shared)]
+pub fn layernorm_backward_kernel2(
+    dinp: &mut [f32],
+    dweight: &mut [f32],
+    dbias: &mut [f32],
+    dout: &[f32],
+    inp: &[f32],
+    weight: &[f32],
+    mean: &[f32],
+    rstd: &[f32],
+    B: usize,
+    T: usize,
+    C: usize,
+) {
+    // dinp, dout, inp shape: (B, T, C)
+    // weight, dbias shape: (C,)
+    // mean, rstd shape: (B, T)
+    let warp = ThreadWarpTile::<32>;
+    let grid2warp = build_chunk_scope(Grid, warp);
+    let warp2thread = build_chunk_scope(warp, Thread);
+
+    let global_warp_id = gpu::block_id::<gpu::DimX>() * warp.meta_group_size() + warp.subgroup_id();
+    let lane_id = warp.thread_rank();
+    let tid = thread_id::<gpu::DimX>();
+    let N = B * T;
+    if global_warp_id >= N {
+        return;
+    } // thread guards
+
+    let warp_offset = (global_warp_id / T) * T + global_warp_id % T;
+    // gdim = 32 * B * T;
+    // dinp_warp_chunk = dinp + warp_id/T * T * C + (warp_id % T) * C
+    // dinp_thread_chunk = dinp_warp_chunk + lane_id + i * warp_size
+    let mut dinp_chunk = dinp
+        .chunk_to_scope(
+            grid2warp,
+            //gpu::reshape_map!([B, T] | [C] => layout: [0, 1, 2]),
+            gpu::reshape_map!( [C] | [B, T] => layout: [i0, t0, t1]),
+        )
+        .chunk_to_scope(warp2thread, gpu::MapLinear::new(1));
+
+    let dout_bt = &dout[warp_offset * C..];
+    let inp_bt = &inp[warp_offset * C..];
+    let mean_bt = mean[warp_offset];
+    let rstd_bt = rstd[warp_offset];
+    // the first half of shared memory is bias, second is weight
+    let dbias_shared = smem_alloc.alloc::<f32>(C);
+    let mut dbias_shared_chunk = dbias_shared.chunk_mut(gpu::MapLinear::new(1));
+    let dweight_shared = smem_alloc.alloc::<f32>(C);
+    let mut dweight_shared_chunk = dweight_shared.chunk_mut(gpu::MapLinear::new(1));
+    // init shared memory to zero
+    for (i, _) in (tid..C).step_by(gpu::block_dim::<gpu::DimX>()).enumerate() {
+        dbias_shared_chunk[i] = 0.0;
+        dweight_shared_chunk[i] = 0.0;
+    }
+    sync_threads();
+
+    // first: two reduce operations
+    let mut dnorm_mean_local = 0.0f32;
+    let mut dnorm_norm_mean_local = 0.0f32;
+    for i in (lane_id..C).step_by(warp.size()) {
+        let norm_bti = (inp_bt[i] - mean_bt) * rstd_bt;
+        let dnorm_i = weight[i] * dout_bt[i];
+        dnorm_mean_local += dnorm_i;
+        dnorm_norm_mean_local += dnorm_i * norm_bti;
+    }
+
+    let dnorm_mean = warp.redux(ReduxAdd, dnorm_mean_local);
+    let dnorm_norm_mean = warp.redux(ReduxAdd, dnorm_norm_mean_local);
+    let dnorm_mean = dnorm_mean / C as f32;
+    let dnorm_norm_mean = dnorm_norm_mean / C as f32;
+
+    // now iterate again and accumulate all the gradients
+    let dbias_shared_atom = SharedAtomic::new(dbias_shared);
+    let dweight_shared_atom = SharedAtomic::new(dweight_shared);
+    for (k, i) in (lane_id..C).step_by(warp.size()).enumerate() {
+        let norm_bti = (inp_bt[i] - mean_bt) * rstd_bt;
+        let dnorm_i = weight[i] * dout_bt[i];
+        // gradient contribution to bias
+        dbias_shared_atom.index(i).atomic_addf(dout_bt[i]);
+        // gradient contribution to weight
+        let w = norm_bti * dout_bt[i];
+        dweight_shared_atom.index(i).atomic_addf(w);
+        // gradient contribution to input
+        let mut dval = 0.0f32;
+        dval += dnorm_i; // term 1
+        dval -= dnorm_mean; // term 2
+        dval -= norm_bti * dnorm_norm_mean; // term 3
+        dval *= rstd_bt; // final scale
+        dinp_chunk[k] += dval;
+    }
+    sync_threads(); // required before reading in shared memory
+
+    // write to global memory
+    let dbias = Atomic::new(dbias);
+    let dweight = Atomic::new(dweight);
+    for i in (tid..C).step_by(gpu::block_dim::<gpu::DimX>()) {
+        dbias.index(i).atomic_addf(*dbias_shared[i]);
+        dweight.index(i).atomic_addf(*dweight_shared[i]);
+    }
+}
 
 /*
 __global__ void softmax_autoregressive_backward_kernel(float* dpreatt, const float* datt, const float* att,

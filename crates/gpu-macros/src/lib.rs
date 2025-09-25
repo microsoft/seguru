@@ -70,5 +70,5 @@ pub fn attr(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 #[proc_macro]
 pub fn reshape_map(input: TokenStream) -> TokenStream {
-    reshape_map::reshape_map(input)
+    reshape_map::map_reshape_params(input)
 }

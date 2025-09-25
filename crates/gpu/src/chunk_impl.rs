@@ -1,6 +1,5 @@
 use crate::chunk::ScopeUniqueMap;
 use crate::chunk_scope::{ChunkScope, TID_MAX_LEN};
-
 /// Linear mapping for 1D array.
 /// N is the number of thread dimensions.
 /// width is the chunking window.
@@ -145,172 +144,6 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for Map2D {
     }
 }
 
-/// MapReshape should not be directly used by users.
-/// Instead, use the macro `reshape_map!` to create a specialized version
-/// that implements ScopeUniqueMap trait.
-#[doc(hidden)]
-#[derive(Clone, Copy)]
-pub struct MapReshape<const N: usize, const M: usize> {
-    max_tid: usize,
-    old_tid_w: [usize; N],
-    new_tid_w: [isize; N],
-    max_idx: usize,
-    old_idx_w: [usize; M],
-    new_idx_w: [isize; M],
-    offset: isize,
-}
-
-/// User will not be able to use MapReshape as a regular mapping strategy directly.
-impl<const N: usize, const M: usize, CS: ChunkScope> !ScopeUniqueMap<CS> for MapReshape<N, M> {}
-
-impl<const N: usize, const M: usize> MapReshape<N, M> {
-    #[doc(hidden)]
-    #[gpu_codegen::device]
-    #[gpu_codegen::ret_sync_data(1000)]
-    pub fn new_with_weight_no_check(
-        old_tid_w: [usize; N],
-        new_tid_w: [isize; N],
-        old_idx_w: [usize; M],
-        new_idx_w: [isize; M],
-        max_tid: usize,
-        max_idx: usize,
-        offset: isize,
-    ) -> Self {
-        Self { old_tid_w, new_tid_w, old_idx_w, new_idx_w, max_tid, max_idx, offset }
-    }
-    /// sizes: The shape of the input tensor, in terms of thread dimensions and index dimensions.
-    /// sizes = [D_0, D_1, ..., D_{N-1}, D_N, ..., D_{N+M}]
-    /// weights: The new strides for each dimension.
-    /// index_places: The permutation of dimensions, also indicating the sorted order of weights
-    #[gpu_codegen::device]
-    #[gpu_codegen::ret_sync_data(1000)]
-    pub fn new_with_weight<const LEN: usize>(
-        sizes: [usize; LEN],
-        weights: [isize; LEN],
-        offset: isize,
-    ) -> Self {
-        // helper closure: product of slice elements after position `i`
-        let suffix_prod = |arr: &[usize], i: usize| {
-            let mut w = 1;
-            arr[i..].iter().for_each(|v| w *= *v);
-            w
-        };
-        for i in 0..LEN {
-            let w = weights[i].unsigned_abs();
-            let mut sum = 0;
-            for j in 0..LEN {
-                let w2 = weights[j].unsigned_abs();
-                let s2 = sizes[j];
-                if i == j {
-                    continue;
-                }
-                if w2 <= w {
-                    sum *= (s2 - 1) * w2;
-                }
-            }
-            assert!(sum < w);
-        }
-
-        let mut old_tid_w = [0; N];
-        let mut new_tid_w = [0; N];
-        let mut old_idx_w = [0; M];
-        let mut new_idx_w = [0; M];
-        for i in 0..N {
-            old_tid_w[i] = suffix_prod(&sizes[0..N], i + 1);
-            new_tid_w[i] = weights[i];
-        }
-        for i in N..(N + M) {
-            old_idx_w[i - N] = suffix_prod(&sizes, i + 1);
-            new_idx_w[i - N] = weights[i];
-        }
-        Self {
-            old_tid_w,
-            new_tid_w,
-            old_idx_w,
-            new_idx_w,
-            max_tid: suffix_prod(&sizes[0..N], 0),
-            max_idx: suffix_prod(&sizes[N..N + M], 0),
-            offset,
-        }
-    }
-
-    /// sizes: The shape of the input tensor, in terms of thread dimensions and index dimensions.
-    /// sizes = [D_0, D_1, ..., D_{N-1}, D_N, ..., D_{N+M}]
-    /// index_places: The permutation of dimensions, indicating where each original dimension should go in the new layout.
-    /// index_places p = [p_0, p_1, ..., p_{N+M-1}],
-    /// Requires:
-    ///   sizes[k] > 0,
-    ///   index_places is a permutation of (0.. N+M)
-    #[gpu_codegen::device]
-    #[gpu_codegen::ret_sync_data(1000)]
-    pub fn new<const LEN: usize>(sizes: [usize; LEN], index_places: [usize; LEN]) -> Self {
-        let mut new_sizes = sizes;
-        for i in 0..N + M {
-            new_sizes[index_places[i]] = sizes[i];
-        }
-        // helper closure: product of slice elements after position `i`
-        let suffix_prod = |arr: &[usize], i: usize| {
-            let mut w = 1;
-            arr[i..].iter().for_each(|v| w *= *v);
-            w
-        };
-
-        let mut old_tid_w = [0; N];
-        let mut new_tid_w = [0; N];
-        let mut old_idx_w = [0; M];
-        let mut new_idx_w = [0; M];
-        for i in 0..N {
-            old_tid_w[i] = suffix_prod(&sizes[0..N], i + 1);
-            new_tid_w[i] = suffix_prod(&new_sizes, index_places[i] + 1) as isize;
-        }
-        for i in N..(N + M) {
-            old_idx_w[i - N] = suffix_prod(&sizes, i + 1);
-            new_idx_w[i - N] = suffix_prod(&new_sizes, index_places[i] + 1) as isize;
-        }
-        Self {
-            old_tid_w,
-            new_tid_w,
-            old_idx_w,
-            new_idx_w,
-            max_tid: suffix_prod(&sizes[0..N], 0),
-            max_idx: suffix_prod(&sizes[N..], 0),
-            offset: 0,
-        }
-    }
-
-    #[inline]
-    #[gpu_codegen::device]
-    pub fn map<CS: ChunkScope>(
-        &self,
-        extra_id: usize,
-        thread_ids: [usize; TID_MAX_LEN],
-    ) -> (bool, usize) {
-        let tid = CS::global_id_x(thread_ids)
-            + CS::global_dim_x()
-                * (CS::global_id_y(thread_ids) + CS::global_dim_y() * CS::global_id_z(thread_ids));
-        let mut remain = tid;
-        let mut index = self.offset;
-        for i in 0..N {
-            index += (remain / self.old_tid_w[i]) as isize * self.new_tid_w[i];
-            remain %= self.old_tid_w[i];
-        }
-        let valid = tid < self.max_tid && extra_id < self.max_idx;
-        let mut remain = extra_id;
-        for i in 0..M {
-            let id = remain / self.old_idx_w[i];
-            index += id as isize * self.new_idx_w[i];
-            remain %= self.old_idx_w[i];
-        }
-        (valid, index as usize)
-    }
-}
-
-#[macro_export]
-macro_rules! count_literals {
-    () => {0};
-    ($head:literal $(, $tail:literal)*) => {1 + $crate::count_literals!($($tail),*)};
-}
-
 /// Maps a multi-dimensional thread/index layout into a reshaped linear index.
 ///
 /// The `reshape_map!` macro generates a `MapReshape` struct that reshape
@@ -323,26 +156,33 @@ macro_rules! count_literals {
 ///
 /// ## Using layout to get a permutation of thread and index to access the array.
 /// ```text
-/// reshape_map!(tsizes, extra_sizes => layout: index_places)
+/// reshape_map!(local_id_dims | thread_id_dims => layout: permutation)
 /// ```
-/// - `tsizes`: array expression specifying the shape of the thread ID, including both thread:
-///   `[D_0, D_1, ..., D_{N-1}]`. // go from high-order to low-order
-/// - `extra_sizes`: array expression specifying the shape of the extra index.
-///   `[D_{N+M-1}]`.
-/// - `index_places`: permutation of dimensions in the new layout:
-///   `[p_0, p_1, ..., p_{N+M-1}]` // go from high-order to low-order
+/// - `local_id_dims`: array expression specifying the shape of local index, and the array shape corresponding to the local index:
+///   `[(D_0, D'_0), (D_1, D'_1), ..., (D_{N-1}, D'_{N-1})]`. // go from low to high dimention dimention
+/// - `thread_id_dims`: array expression specifying the shape of thread index, and the array shape corresponding to the local index: `[(D_N, D'_N), ... (D_{N+M-1}, D'_{N+M-1})]`.
+/// - When D'_k is omitted, it is assumed to be D_k.
+/// - `permutation`: permutation of dimensions in the new layout:
+///   `[p_0, p_1, ..., p_{N+M-1}]` // go from low to high dimention dimention
 ///   - `0 <= p_k < N` for thread dimensions
-///   - `N <= p_k < N+M` for index dimensions  
-///   - `index_places` must be a valid and constant permutation.
+///   - `N <= p_k < N+M` for index dimensions
+///   - `permutation` must be a valid and constant permutation.
+///   - when it is omitted, it is assumed to be `[0, 1, ..., N+M-1]`.
+///   - negative index `-k` is allowed to indicate using `D'_k - id_k` instead of `id_k`.
+///   - `-0` is allowed.
+///   - `p_k` can be a constant literal or an readable name like `t<k-N>`, `i<k>` for thread and index dimensions.
 ///
 /// # Behavior
-/// - Translates `global_thread_id < D_0 * D_1 * ... * D_{N-1}` into multi-dimensional thread IDs:
-///   `(tid_0, tid_1, ..., tid_{N-1})`.
+/// - Translates `linear_thread_id` to software-defined multi-dimensional thread IDs:
+///   tid = `(tid_0, tid_1, ..., tid_{N-1})`. // low -> high
 /// - Merges thread IDs with index IDs:
-///   `(tid_0, ..., tid_{N-1}, idx_0, ..., idx_{M-1})`.
+///   id = `(lid_0, ..., lid_{M-1}, tid_0, ..., tid_{N-1})`. // low -> high
+/// - Treat array as of shape arr_sizes = `[D'_0, D'_1, ..., D'_{N+M-1}]`
+/// - If arr_sizes[k] != idx_sizes[k], some threads or indices will be skipped.
+///   Thus, valid access range is: `0 <= id_k < min(D_k, D'_k)`.
+///   This usually implies the dim and array size assumption in kernel impl.
 /// - Accesses the array in permuted order:
 ///   `arr[id_{p_0}][id_{p_1}]...[id_{p_{N+M-1}}]`.
-/// - Precomputes strides for efficient linear index computation in both old and new layouts.
 ///
 /// # Safety
 /// - Users cannot create `MapReshape` instances outside the macro without `unsafe {}`.
@@ -357,43 +197,86 @@ macro_rules! count_literals {
 /// **Example 1:** no permutation
 ///
 /// Similar to MapLinear(3) when num_thread = 4.
-/// ```rust
-/// gpu::reshape_map!([4] | [3] => layout: [0, 1]);
+///```rust
+/// gpu::reshape_map!([3] | [4]  => layout: [0, 1]);
+/// gpu::reshape_map!([3] | [4] => layout: [i0, t0]);
+/// // local index shape: [3]
 /// // thread shape: [4]
-/// // extra index shape: [3]
 /// // Access: arr[tid0][idx0]
-/// // Linear mapping of tid: [0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3]
+/// // access -> tid: [0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3]
 /// ```
-/// **Example 2:** permutation swaps a thread id and extra_id
+/// **Example 2:** permutation swaps a thread id and local_id
 ///
 /// Similar to MapLinear(1) when num_thread = 4, arr.len = 12.
 /// ```rust
-/// gpu::reshape_map!([4] | [4] => layout: [1, 0]);
+/// gpu::reshape_map!([3] | [4] => layout: [1, 0]);
+/// gpu::reshape_map!([3] | [4] => layout: [t0, i0]);
+/// // local index shape: [3]
 /// // thread shape: [4]
-/// // extra index shape: [3]
 /// // Access: arr[idx0][tid0]
-/// // Linear mapping of tid: [0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3]
+/// // access -> tid: [0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3]
 /// ```
 /// **Example 3:** software-defined thread dimension > 1
 ///
 /// Allowing swap thread index, and so thread order changes.
 /// ```rust
-/// gpu::reshape_map!([2, 2] | [3] => layout: [1, 0, 2]);
+/// gpu::reshape_map!([3] | [2, 2] => layout: [0, 2, 1]);
+/// gpu::reshape_map!([3] | [2, 2] => layout: [i0, t1, t0]);
+/// // local index shape: [3]
 /// // thread shape: [2, 2]
-/// // extra index shape: [3]
 /// // Access: arr[tid1][tid0][idx0]
-/// // Linear mapping of tid: [0, 0, 0, 2, 2, 2, 1, 1, 1, 3, 3, 3]
+/// // access -> tid: [0, 0, 0, 2, 2, 2, 1, 1, 1, 3, 3, 3]
 /// ```
 ///
 /// **Example 4:** swap tid and extra_id, with thread dimension > 1**
 ///
 /// ```rust
-/// gpu::reshape_map!([2, 2] | [3] => layout: [2, 0, 1]);
+/// gpu::reshape_map!([3] | [2, 2] => layout: [2, 0, 1]);
+/// gpu::reshape_map!([3] | [2, 2] => layout: [t1, i0, t0]);
+/// // local index shape: [3]
 /// // thread shape: [2, 2]
-/// // extra index shape: [3]
 /// // Access: arr[tid1][idx0][tid0]
-/// // Linear mapping of tid: [0, 2, 0, 2, 0, 2, 1, 3, 1, 3, 1, 3]
+/// // access -> tid: [0, 2, 0, 2, 0, 2, 1, 3, 1, 3, 1, 3]
 /// ```
+///
+/// **Example 5:** reverse a thread dimension
+/// ```rust
+/// gpu::reshape_map!([3] | [2, 2] => layout: [0, -1, 2]);
+/// gpu::reshape_map!([3] | [2, 2] => layout: [i0, -t0, t1]);
+///
+/// // local index shape: [3]
+/// // thread shape: [2, 2]
+/// // Access: arr[tid1][(max_tid0 - tid0)][idx0]
+/// ```
+/// **Example 6:** Skip some threads by setting a smaller new size
+///
+/// ```rust
+/// gpu::reshape_map!([3] | [2, (2, 1)] => layout: [0, 1, 2]);
+/// gpu::reshape_map!([3] | [2, (2, 1)] => layout: [i0, t0, t1]);
+/// ```
+/// // local index shape: [3]
+/// // thread shape: [4, 2]
+/// // Access: `arr[tid0][tid1][idx0]`
+/// // valid access range:
+/// // 0 <= lid0 < 3
+/// // 0 <= tid0 < 2
+/// // 0 <= tid1 < 1
+/// // access -> tid: [0, 0, 0, 1, 1, 1, _, _, _, _, _, _]
+///
+/// **Example 7:** Skip some data by setting a larger size
+///
+/// ```rust
+/// gpu::reshape_map!([3] | [(2, 4), 2] => layout: [0, 1, 2]);
+/// gpu::reshape_map!([3] | [(2, 4), 2] => layout: [i0, t0, t1]);
+/// ```
+/// // local index shape: [3]
+/// // thread shape: [4, 2]
+/// // Access: arr[tid0][tid1][idx0]
+/// // valid access range:
+/// // 0 <= lid0 < 3
+/// // 0 <= tid0 < 2
+/// // 0 <= tid1 < 1
+/// // access -> tid: [0, 0, 0, _, 1, 1, 1, _, 2, 2, 2, _, 3, 3, 3, _, ...]
 ///
 /// # Invalid Examples
 ///
@@ -405,61 +288,103 @@ macro_rules! count_literals {
 /// ```rust,compile_fail
 /// gpu::reshape_map!([2] | [2, 3] => layout: [0, 0, 1]);
 /// ```
+///
+/// ```rust,compile_fail
+/// gpu::reshape_map!([2] | [2, 3] => layout: [t0, t0, i0]);
+/// ```
+///
 /// **Example 3:** Invalid thread dimension (<1)
 /// ```rust,compile_fail
-/// gpu::reshape_map!([] | [2, 3] => layout: [0, 1, 2]);
+/// gpu::reshape_map!([2, 3] | [] => layout: [0, 1, 2]);
 /// ```
 /// **Example 4:** Invalid index dimension (<1)
 /// ```rust,compile_fail
-/// gpu::reshape_map!([2, 2] | [] => layout: [0, 1]);
-/// ```
-///
-/// ## Using `weights` to get a more flexible, compile-time unchecked, runtime checked mapping.
-///
-/// ```text
-/// reshape_map!(tsizes, extra_sizes => weights: weights_array)
-/// ```
-/// - `tsizes`: array expression specifying the shape of the thread ID, including both thread
-///   `[D_0, D_1, ..., D_{N-1}]`.
-/// - `extra_sizes`: array expression specifying the shape of the extra index.
-///   `[D_{N+M-1}]`.
-/// - `weights_array`: array expression specifying the new weights for all dimensions.
-///   `[W_0, W_1, ..., W_{N+M-1}]`.
-///
-/// # Behavior
-/// - Translates `global_thread_id < D_0 * D_1 * ... * D_{N-1}` into multi-dimensional thread IDs:
-///   `(tid_0, tid_1, ..., tid_{N-1})`.
-/// - Merges thread IDs with index IDs:
-///   `(tid_0, ..., tid_{N-1}, idx_0, ..., idx_{M-1})`.
-/// - Accesses the array at
-///   `tid_0 * W_0 + tid_1 * W_1 + ... + idx_0 * W_{N} + ... + idx_{M-1} * W_{N+M-1}`.
-///
-/// # Safety
-///
-/// - Users cannot create `MapReshape` instances outside the macro without `unsafe
-/// {}`.
-/// - Sizes and Weights guarantee unique indexing at runtime,
-///   which is checked at runtime; invalid sizes or weights trigger runtime errors and
-///   should be treated as functionality errors and will not violate race-free guarantee.
-/// - If passing constant sizes and weights, the macro will check the validity at compile time.
-///
-/// # Examples
-///
-/// **Example 1:** Constant and correct weights.
-/// ```rust
-/// // Example 1: no permutation, similar to MapLinear(3) when num_thread = 4.
-/// let map_reshape = gpu::reshape_map!([4] | [3] => weights: [3, 1]);
-/// ```
-///
-/// **Example 2:** Constant but incorrect weights.
-///
-/// ```rust,compile_fail
-/// // error: weight 1 too small for size 4
-/// let map_reshape = gpu::reshape_map!([4] | [3] => weights: [1, 1]);
+/// gpu::reshape_map!( [] | [2, 2] => layout: [0, 1]);
 /// ```
 #[macro_export]
 macro_rules! reshape_map {
     ($($any: tt)*) => {
         gpu_macros::reshape_map!($crate, $($any)*)
     };
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::chunk_scope::test::MockWarp2ThreadScope;
+
+    macro_rules! assert_access_map {
+        ($cs:ty, $m:expr, $thread_num:expr, $id_num:expr, $expected:expr) => {
+            let access = get_access_map::<$thread_num, $cs>(&$m, $id_num);
+            assert!(access == $expected, "access_map = {:?}, expected = {:?}", access, $expected)
+        };
+    }
+
+    fn get_access_map<const NTHREADS: usize, CS: ChunkScope>(
+        map: &impl ScopeUniqueMap<CS, IndexType = usize>,
+        n: usize,
+    ) -> alloc::vec::Vec<isize>
+    where
+        CS: ChunkScope<FromScope = crate::cg::ThreadWarpTile<NTHREADS>, ToScope = crate::cg::Thread>,
+    {
+        let mut access_map = alloc::vec![-1isize; n];
+        assert!(NTHREADS <= 32);
+        for t in 0..NTHREADS {
+            for i in 0..n {
+                let tids = [0, t, 0, 0, 0, 0];
+                let (valid, mapped_idx) = ScopeUniqueMap::<CS>::map(map, i, tids);
+                if valid && mapped_idx < n {
+                    access_map[mapped_idx] = t as _;
+                }
+            }
+        }
+        access_map
+    }
+
+    #[test]
+    pub(crate) fn test_reshape_map_example3() {
+        type S = MockWarp2ThreadScope<4, 0>; // a group of 4 threads.
+        let map_reshape = reshape_map!([3] | [2, 2] => layout: [0, 2, 1]);
+        assert_access_map!(S, map_reshape, 4, 12, [0, 0, 0, 2, 2, 2, 1, 1, 1, 3, 3, 3]);
+    }
+
+    #[test]
+    pub(crate) fn test_reshape_map_example4() {
+        type S = MockWarp2ThreadScope<4, 0>; // a group of 4 threads.
+        let map_reshape = reshape_map!([3] | [2, 2] => layout: [2, 0, 1]);
+        assert_access_map!(S, map_reshape, 4, 12, [0, 2, 0, 2, 0, 2, 1, 3, 1, 3, 1, 3]);
+        let map_reshape = reshape_map!([3] | [2, 2] => layout: [t1, i0, t0]);
+        assert_access_map!(S, map_reshape, 4, 12, [0, 2, 0, 2, 0, 2, 1, 3, 1, 3, 1, 3]);
+    }
+
+    #[test]
+    pub(crate) fn test_reshape_map_example5() {
+        type S = MockWarp2ThreadScope<4, 0>; // a group of 4 threads.
+        let map_reshape = crate::reshape_map!([3] | [2, 2] => layout: [i0, -t0, t1]);
+        assert_access_map!(S, map_reshape, 4, 12, [1, 1, 1, 0, 0, 0, 3, 3, 3, 2, 2, 2]);
+    }
+
+    #[test]
+    pub(crate) fn test_reshape_map_example5_2() {
+        type S = MockWarp2ThreadScope<4, 0>; // a group of 4 threads.
+        let map_reshape = crate::reshape_map!([3] | [2, 2] => layout: [-t0, -i0, t1]);
+        assert_access_map!(S, map_reshape, 4, 12, [1, 0, 1, 0, 1, 0, 3, 2, 3, 2, 3, 2]);
+    }
+
+    #[test]
+    pub(crate) fn test_reshape_map_example6() {
+        type S = MockWarp2ThreadScope<4, 0>; // a group of 4 threads.
+        // Skip some threads by setting a smaller new size
+        let map_reshape = crate::reshape_map!([3] | [2, (2, 1)] => layout: [i0, t0, t1]);
+        // warp2thread and so use tid[1] only
+        assert_access_map!(S, map_reshape, 4, 12, [0, 0, 0, 1, 1, 1, -1, -1, -1, -1, -1, -1]);
+    }
+
+    #[test]
+    pub(crate) fn test_reshape_map_example7() {
+        type S = MockWarp2ThreadScope<4, 0>; // a group of 4 threads.
+        //Skip some data by setting a larger size
+        let map_reshape = crate::reshape_map!([(3, 4)] | [2, 2] => layout: [i0, t0, t1]);
+        assert_access_map!(S, map_reshape, 4, 12, [0, 0, 0, -1, 1, 1, 1, -1, 2, 2, 2, -1]);
+    }
 }

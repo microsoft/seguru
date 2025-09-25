@@ -1,87 +1,15 @@
 use proc_macro::TokenStream;
 use quote::quote_spanned;
 use syn::parse::Parse;
-use syn::{Expr, ExprArray, ExprGroup, Ident, Path};
+use syn::spanned::Spanned;
+use syn::{Expr, ExprArray, ExprBinary, ExprGroup, ExprTuple, ExprUnary, Ident, Path};
 
-// map!([4,4] | [2,2] => weights: [1, 4, 10, 1000])
-// map!([4,4] | [2,2] => layout: [0, 1, 2, 3])
-struct MapArgs {
-    span: proc_macro2::Span,
-    gpu_crate: Path,
-    _comma: syn::Token![,],
-    sizes: ExprArray,
-    _semi: syn::Token![|],
-    extra_sizes: ExprArray,
-    _holder: syn::Token![=>],
-    weights: Option<ExprArray>,
-    layout: Option<ExprArray>,
-    offset: Option<Expr>,
-}
-
-impl Parse for MapArgs {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let gpu_crate = input.parse()?;
-        let _comma = input.parse()?;
-        let sizes = input.parse()?;
-        let _semi: syn::Token![|] = input.parse()?;
-        let extra_sizes = input.parse()?;
-        let _holder: syn::Token![=>] = input.parse()?;
-        let mut weights = None;
-        let mut layout = None;
-        let mut offset = None;
-        loop {
-            let kind: Ident = input.parse()?;
-            let _: syn::Token![:] = input.parse()?;
-            match kind.to_string().as_str() {
-                "weights" => {
-                    let expr = input.parse()?;
-                    weights = Some(expr);
-                }
-                "layout" => {
-                    let expr = input.parse()?;
-                    layout = Some(expr);
-                }
-                "offset" => {
-                    let expr = input.parse()?;
-                    offset = Some(expr);
-                }
-                _ => {
-                    return Err(syn::Error::new(
-                        kind.span(),
-                        "Expected either 'weights', 'layout', or 'offset'",
-                    ));
-                }
-            }
-            if input.peek(syn::Token![,]) {
-                let _: syn::Token![,] = input.parse()?;
-                continue;
-            } else {
-                break;
-            }
-        }
-        assert!(weights.is_some() || layout.is_some(), "Expected either weights or layout");
-        Ok(MapArgs {
-            span: input.span(),
-            gpu_crate,
-            _comma,
-            sizes,
-            _semi,
-            extra_sizes,
-            _holder,
-            weights,
-            layout,
-            offset,
-        })
-    }
-}
-
-fn check_permutation(values: &[isize]) -> Result<(), syn::Error> {
+fn check_permutation(values: &[usize]) -> Result<(), syn::Error> {
     let n = values.len();
 
     // Check permutation validity
     let mut seen = vec![false; n];
     for &v in values {
-        let v = v as usize;
         if v >= n {
             return Err(syn::Error::new(
                 proc_macro2::Span::call_site(),
@@ -91,7 +19,7 @@ fn check_permutation(values: &[isize]) -> Result<(), syn::Error> {
         if seen[v] {
             return Err(syn::Error::new(
                 proc_macro2::Span::call_site(),
-                format!("duplicate value {}", v),
+                format!("duplicated idx {}", v),
             ));
         }
         seen[v] = true;
@@ -99,229 +27,304 @@ fn check_permutation(values: &[isize]) -> Result<(), syn::Error> {
     Ok(())
 }
 
-fn get_const_array<T>(expr: impl Iterator<Item = Expr>) -> Result<Vec<T>, syn::Error>
-where
-    T: std::str::FromStr,
-    T::Err: std::fmt::Display,
-{
-    let mut const_array = vec![];
-    for size in expr {
-        if let Expr::Lit(expr_lit) | Expr::Group(ExprGroup { expr: box Expr::Lit(expr_lit), .. }) =
-            size
-        {
-            if let syn::Lit::Int(lit_int) = &expr_lit.lit {
-                let val = lit_int.base10_parse::<T>().unwrap();
-                const_array.push(val);
-            } else {
+fn get_size_pairs(exprs: impl Iterator<Item = Expr>) -> Result<(Vec<Expr>, Vec<Expr>), syn::Error> {
+    let mut old_sizes = vec![];
+    let mut new_sizes = vec![];
+    for e in exprs {
+        match e {
+            Expr::Tuple(ExprTuple { elems, .. }) if elems.len() == 2 => {
+                old_sizes.push(elems[0].clone());
+                new_sizes.push(elems[1].clone());
+            }
+            Expr::Tuple(_) => {
                 return Err(syn::Error::new(
                     proc_macro2::Span::call_site(),
-                    format!("Expected integer literal in sizes array {:?}", expr_lit),
+                    "size pair must have exactly two elements",
                 ));
             }
-        } else {
-            return Err(syn::Error::new(
-                proc_macro2::Span::call_site(),
-                format!("Expected integer literal in sizes array {:?}", size),
-            ));
-        }
-    }
-    Ok(const_array)
-}
-
-#[allow(clippy::type_complexity)]
-fn check_weight(
-    sizes: &ExprArray,
-    extra_sizes: &ExprArray,
-    weights: &ExprArray,
-) -> Result<Option<(Vec<usize>, Vec<isize>, usize, Vec<usize>, Vec<isize>, usize)>, syn::Error> {
-    let const_weight = match get_const_array::<isize>(weights.elems.iter().cloned()) {
-        Ok(w) => w,
-        Err(_) => return Ok(None), // Not constant, skip check
-    };
-    let nsize = sizes.elems.len();
-    let msize = extra_sizes.elems.len();
-    let const_sizes =
-        match get_const_array::<usize>(sizes.elems.iter().chain(extra_sizes.elems.iter()).cloned())
-        {
-            Ok(s) => s,
-            Err(_) => return Ok(None), // Not constant, skip check
-        };
-    let mut old_tid_weights = vec![];
-    for i in 0..sizes.elems.len() {
-        old_tid_weights.push(const_sizes[i + 1..].iter().product::<usize>());
-    }
-    let max_tid = const_sizes[..nsize].iter().product::<usize>() as usize;
-    let mut old_idx_weights = vec![];
-    for i in nsize..const_sizes.len() {
-        old_idx_weights.push(const_sizes[i + 1..].iter().product::<usize>());
-    }
-    let max_idx = const_sizes[nsize..].iter().product::<usize>();
-    if const_weight.len() != const_sizes.len() {
-        return Err(syn::Error::new(
-            proc_macro2::Span::call_site(),
-            format!(
-                "weight array length ({}) must match sizes length {}",
-                const_weight.len(),
-                nsize + msize
-            ),
-        ));
-    }
-    // Check all weights are non-zero
-    for (i, &w) in const_weight.iter().enumerate() {
-        let mut sum = 0;
-        for j in 0..const_weight.len() {
-            if i != j && const_weight[j].abs() <= w.abs() {
-                sum += const_weight[j].unsigned_abs() * (const_sizes[j] - 1);
+            _ => {
+                old_sizes.push(e.clone());
+                new_sizes.push(e);
             }
         }
-        if sum >= w.unsigned_abs() && const_sizes[0] > 1 {
-            return Err(syn::Error::new(
-                proc_macro2::Span::call_site(),
-                format!(
-                    "weight {} too small, other can sum up to  {}: {:?} {:?}",
-                    w, sum, const_sizes, const_weight
-                ),
-            ));
-        }
     }
-    Ok(Some((
-        old_tid_weights,
-        const_weight[..nsize].to_vec(),
-        max_tid,
-        old_idx_weights,
-        const_weight[nsize..].to_vec(),
-        max_idx,
-    )))
+    Ok((old_sizes, new_sizes))
 }
 
-pub fn reshape_map(input: TokenStream) -> TokenStream {
-    let args: MapArgs = syn::parse(input)
-        .expect("Map args must be of the form map!(gpu_crate, [sizes] | [extra_sizes] => weights: [...] or layout: [...])");
+// map!([4,4] | [2,2] => weights: [1, 4, 10, 1000])
+// map!([4,4] | [2,2] => layout: [0, 1, 2, 3])
+struct MapPermuteArgs {
+    span: proc_macro2::Span,
+    gpu_crate: Path,
+    idx_sizes: ExprArray,
+    _semi: syn::Token![|],
+    tid_sizes: ExprArray,
+    layout: Option<ExprArray>,
+    offset: Option<Expr>,
+}
 
-    let sizes = args.sizes;
-    let extra_sizes = args.extra_sizes;
-    let nsize = sizes.elems.len();
-    if nsize < 1 {
+impl Parse for MapPermuteArgs {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let span = input.span();
+        let gpu_crate = input.parse()?;
+        let _comma: syn::Token![,] = input.parse()?;
+        let idx_sizes = input.parse()?;
+        let _semi: syn::Token![|] = input.parse()?;
+        let tid_sizes = input.parse()?;
+        let mut layout = None;
+        let mut offset = None;
+        if input.peek(syn::Token![=>]) {
+            let _: syn::Token![=>] = input.parse()?;
+            loop {
+                let kind: Ident = input.parse()?;
+                let _: syn::Token![:] = input.parse()?;
+                match kind.to_string().as_str() {
+                    "layout" => {
+                        let expr = input.parse()?;
+                        layout = Some(expr);
+                    }
+                    "offset" => {
+                        let expr = input.parse()?;
+                        offset = Some(expr);
+                    }
+                    _ => {
+                        return Err(syn::Error::new(
+                            kind.span(),
+                            "Expected optional 'layout' and 'offset'",
+                        ));
+                    }
+                }
+                if input.peek(syn::Token![,]) {
+                    let _: syn::Token![,] = input.parse()?;
+                    continue;
+                } else {
+                    break;
+                }
+            }
+        }
+        Ok(MapPermuteArgs { gpu_crate, span, idx_sizes, _semi, tid_sizes, layout, offset })
+    }
+}
+
+pub(crate) fn map_reshape_params(tokens: TokenStream) -> TokenStream {
+    let args: MapPermuteArgs = syn::parse(tokens).expect(
+        "Map args must be of the form map_reshape_params!([sizes] | [extra_sizes] => [...])",
+    );
+    let local_id_len = args.idx_sizes.elems.len();
+    let tid_len = args.tid_sizes.elems.len();
+    let len = local_id_len + tid_len;
+    let mut all_sizes = args.idx_sizes.clone();
+    if tid_len < 1 {
         return syn::Error::new(
             proc_macro2::Span::call_site(),
-            "thread index sizes must have at least one dimension",
+            "thread index must have at least one dimension",
         )
         .to_compile_error()
         .into();
     }
-    let msize = extra_sizes.elems.len();
-    if msize < 1 {
+
+    if local_id_len < 1 {
         return syn::Error::new(
             proc_macro2::Span::call_site(),
-            "extra index sizes must have at least one dimension",
+            "local index must have at least one dimension",
         )
         .to_compile_error()
         .into();
     }
 
+    all_sizes.elems.extend(args.tid_sizes.elems.iter().cloned());
     let span = args.span;
+    let (permutation, reversed) = if let Some(layout) = args.layout {
+        match get_const_array(layout.elems.iter().cloned(), local_id_len) {
+            Ok(l) => l,
+            Err(e) => return e.to_compile_error().into(),
+        }
+    } else {
+        ((0..len).collect::<Vec<_>>(), vec![false; len])
+    };
+    if let Err(e) = check_permutation(&permutation) {
+        return e.to_compile_error().into();
+    }
+    let (old_sizes, new_sizes) = match get_size_pairs(all_sizes.elems.iter().cloned()) {
+        Ok(p) => p,
+        Err(e) => return e.to_compile_error().into(),
+    };
+
+    let offset = if let Some(offset) = args.offset {
+        quote_spanned! {
+            span => #offset
+        }
+    } else {
+        quote_spanned! {
+            span => 0
+        }
+    };
+
+    let mut cached_weights = vec![];
+    for i in 0..len {
+        cached_weights.push(all_sizes.elems[i].clone());
+    }
+    for i in 0..len {
+        let span = all_sizes.elems[i].span();
+        let mut w = None;
+        for &proj in permutation.iter().take(i) {
+            let s = new_sizes[proj].clone();
+            w = if let Some(oldw) = w {
+                Some(Expr::Binary(ExprBinary {
+                    attrs: vec![],
+                    left: Box::new(oldw),
+                    right: Box::new(s.clone()),
+                    op: syn::BinOp::Mul(syn::token::Star { spans: [span] }),
+                }))
+            } else {
+                Some(s.clone())
+            }
+        }
+        cached_weights[permutation[i]] = w.unwrap_or_else(|| syn::parse_quote! {1});
+    }
+
+    let lid = Ident::new("lid", span);
+    let tid = Ident::new("tid", span);
+    let global_idx = Ident::new("global_idx", span);
+    let valid = Ident::new("valid", span);
+    let remain_id = Ident::new("remain_id", span);
+    let old_s = Ident::new("old_s", span);
+    let new_s = Ident::new("new_s", span);
+    let weights = Ident::new("weights", span);
+    let mut gen_global_id = quote_spanned! {span =>
+        let mut #global_idx = self.offset;
+        let mut #valid = true;
+        let mut #remain_id = #lid;
+    };
+
+    for (i, &is_reversed) in reversed.iter().enumerate() {
+        let span = all_sizes.elems[i].span();
+        let old_s_i = Ident::new(&format!("old_s_{}", i), span);
+        let new_s_i = Ident::new(&format!("new_s_{}", i), span);
+        if i == local_id_len {
+            gen_global_id = quote_spanned! { span =>
+                #gen_global_id
+                #remain_id = #tid;
+            };
+        }
+
+        let id_i = if is_reversed {
+            Expr::Verbatim(quote_spanned! { span =>
+                (#new_s_i - 1 - (#remain_id % #old_s_i))
+            })
+        } else {
+            Expr::Verbatim(quote_spanned! { span =>
+                (#remain_id % #old_s_i)
+            })
+        };
+        gen_global_id = quote_spanned! { span =>
+            #gen_global_id
+            let #new_s_i = #new_s[#i];
+            let #old_s_i = #old_s[#i];
+            #global_idx += #id_i * #weights[#i];
+            #valid &= #id_i < #new_s_i;
+        };
+        // avoid warning: value assigned to `remain_id` is never read
+        if i != local_id_len - 1 {
+            gen_global_id = quote_spanned! { span =>
+                #gen_global_id
+                #remain_id /= #old_s_i;
+            };
+        }
+    }
+    // ensure all tid are consumed
+    gen_global_id = quote_spanned! { span =>
+        #gen_global_id
+        #valid &= #remain_id == 0;
+    };
     let gpu_crate = args.gpu_crate;
-    let def = quote_spanned! {
-        span =>
+    quote_spanned! { span => {
         #[derive(Clone, Copy)]
-        struct PrivateReshapedMap(#gpu_crate::MapReshape<#nsize, #msize>);
-        // #Safety
-        // This is safe because the inner map is safe.
-        unsafe impl<CS: #gpu_crate::chunk_scope::ChunkScope>
-            #gpu_crate::chunk::ScopeUniqueMap<CS> for PrivateReshapedMap
+        struct PrivateMapReshapeShuffle{
+            old_sizes: [usize; #len],
+            new_sizes: [usize; #len],
+            offset: usize,
+            cached_weights: [usize; #len],
+        }
+        unsafe impl<CS: #gpu_crate::chunk_scope::ChunkScope> #gpu_crate::chunk::ScopeUniqueMap<CS> for PrivateMapReshapeShuffle
         {
             type IndexType = usize;
 
-            #[inline]
-            #[gpu_macros::device]
-            fn map(
-                &self,
-                idx: Self::IndexType,
-                thread_ids: [usize; #gpu_crate::chunk_scope::TID_MAX_LEN],
-            ) -> (bool, usize) {
-                self.0.map::<CS>(idx, thread_ids)
-            }
+            fn map(&self, #lid: usize, thread_ids: [usize; #gpu_crate::chunk_scope::TID_MAX_LEN]) -> (bool, usize) {
+                 let #tid = CS::global_id_x(thread_ids)
+            + CS::global_dim_x()
+                * (CS::global_id_y(thread_ids) + CS::global_dim_y() * CS::global_id_z(thread_ids));
+            let #old_s = self.old_sizes;
+            let #new_s = self.new_sizes;
+            let #weights = self.cached_weights;
+            #gen_global_id
+            (#valid, #global_idx)
         }
-    };
-    let mut all_sizes = sizes.clone();
-    all_sizes.elems.extend(extra_sizes.elems.iter().cloned());
-    if let Some(weights) = args.weights {
-        if weights.elems.len() != msize + nsize {
-            return syn::Error::new(
-                proc_macro2::Span::call_site(),
-                format!("weight array length ({}) must match thread index sizes {} + extra index sizes {}", weights.elems.len(), nsize, msize),
-            )
-            .to_compile_error()
-            .into();
-        }
-        // Check weights validity if it is constant.
-        let check = check_weight(&sizes, &extra_sizes, &weights);
-        let offset = args.offset.unwrap_or_else(|| syn::parse_quote! {0});
-        let inner = match check {
-            Ok(Some((
-                old_tid_weights,
-                const_weight,
-                max_tid,
-                old_idx_weights,
-                const_weight_idx,
-                max_idx,
-            ))) => {
-                quote_spanned! {
-                    span => {
-                        // This is safe because we have checked the weights at compile time.
-                        let inner = gpu::MapReshape::<#nsize, #msize>::new_with_weight_no_check(
-                            [#(#old_tid_weights),*],
-                            [#(#const_weight),*],
-                            [#(#old_idx_weights),*],
-                            [#(#const_weight_idx),*],
-                            #max_tid,
-                            #max_idx,
-                            #offset,
-                        );
-
-                        PrivateReshapedMap(inner)
-                    }
-                }
-            }
-            Ok(_) => {
-                quote_spanned! {
-                    span => {
-                        // This is dynamically checked to be safe at runtime.
-                        let inner = #gpu_crate::MapReshape::<#nsize, #msize>::new_with_weight(#all_sizes, #weights, #offset);
-                        PrivateReshapedMap(inner)
-                    }
-                }
-            }
-            Err(e) => return e.to_compile_error().into(),
-        };
-
-        quote_spanned! {
-            span => {
-                #def
-                #inner
-            }
-        }
-        .into()
-    } else if let Some(layout) = args.layout {
-        let const_layout = match get_const_array(layout.elems.iter().cloned()) {
-            Ok(l) => l,
-            Err(e) => return e.to_compile_error().into(),
-        };
-        if let Err(e) = check_permutation(&const_layout) {
-            e.to_compile_error().into()
-        } else {
-            quote_spanned! {
-                span => {
-                    #def
-                    let inner = #gpu_crate::MapReshape::<#nsize, #msize>::new(#all_sizes, #layout);
-                    PrivateReshapedMap(inner)
-                }
-            }
-            .into()
-        }
-    } else {
-        syn::Error::new(proc_macro2::Span::call_site(), "Must provide either weights or layout")
-            .to_compile_error()
-            .into()
     }
+    PrivateMapReshapeShuffle {
+        old_sizes: [#(#old_sizes,)*],
+        new_sizes:  [#(#new_sizes,)*],
+        offset:     #offset,
+        cached_weights: [#(#cached_weights,)*]
+    }
+    }}.into()
+}
+
+fn get_const_array(
+    exprs: impl Iterator<Item = Expr>,
+    lid_len: usize,
+) -> Result<(Vec<usize>, Vec<bool>), syn::Error> {
+    let mut const_array = vec![];
+    let mut const_neg = vec![];
+
+    let get_const_val = |size: Expr| match size {
+        Expr::Lit(expr_lit) | Expr::Group(ExprGroup { expr: box Expr::Lit(expr_lit), .. }) => {
+            if let syn::Lit::Int(lit_int) = &expr_lit.lit {
+                let val = lit_int.base10_parse::<usize>().unwrap();
+                Some(val)
+            } else {
+                None
+            }
+        }
+        Expr::Path(path) => {
+            // use i0..iN represent 0..N, t0..tM represent N+0..N+M
+            if path.path.segments.len() == 1 {
+                let ident = &path.path.segments[0].ident;
+                let s = ident.to_string();
+                let is_local_id = s.starts_with('i');
+                let is_thread_id = s.starts_with('t');
+                let offset = if is_thread_id { lid_len } else { 0 };
+                if is_local_id || is_thread_id {
+                    if let Ok(v) = s[1..].parse::<usize>() { Some(v + offset) } else { None }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+    for expr in exprs {
+        let span = expr.span();
+        let (val, neg) = match expr {
+            Expr::Unary(ExprUnary { op: syn::UnOp::Neg(_), box expr, .. }) => {
+                (get_const_val(expr), true)
+            }
+            _ => (get_const_val(expr), false),
+        };
+        let Some(val) = val else {
+            return Err(syn::Error::new(
+                span,
+                "All elements in layout must be constant usize or i0..iN/t0..tM",
+            ));
+        };
+        const_array.push(val);
+        const_neg.push(neg);
+    }
+    let mut reversed = vec![false; const_neg.len()];
+    for (i, &val) in const_array.iter().enumerate() {
+        reversed[val] = const_neg[i];
+    }
+    Ok((const_array, reversed))
 }

@@ -1992,16 +1992,13 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
                     let data = if ty.is_index() || ty.is_integer() {
                         data.to_string()
                     } else if ty.is_float() {
-                        let mut data = match int.size().bits() {
-                            16 => int.to_f16().to_string(),
-                            32 => int.to_f32().to_string(),
-                            64 => int.to_f64().to_string(),
+                        let val = int.to_bits(int.size());
+                        match int.size().bits() {
+                            16 => format!("0x{:04X}", val),
+                            32 => format!("0x{:08X}", val),
+                            64 => format!("0x{:016X}", val),
                             _ => panic!("Unsupported float size: {:?}", int.size()),
-                        };
-                        if !data.contains(".") {
-                            data.push_str(".0");
                         }
-                        data
                     } else {
                         self.emit_error(
                             format!("Unsupported type for scalar: {:?}", ty),
@@ -2014,7 +2011,12 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             rustc_const_eval::interpret::Scalar::Ptr(ptr, s) => {
                 let (prov, offset) = ptr.into_parts();
                 let alloc_id = prov.alloc_id();
-                trace!("scalar_to_backend ptr: {:?}", self.tcx.global_alloc(alloc_id));
+                eprintln!(
+                    "scalar_to_backend ptr: {:?} {:?} {}",
+                    self.tcx.global_alloc(alloc_id),
+                    alloc_id,
+                    s
+                );
                 self.const_data_memref_from_alloc_id(alloc_id)
             }
         }

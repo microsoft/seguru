@@ -1,4 +1,4 @@
-use crate::dim::{lane_id, warp_id};
+use crate::dim::lane_id;
 
 #[derive(Copy, Clone)]
 pub struct Thread;
@@ -127,7 +127,7 @@ impl<const SIZE: usize> ThreadWarpTile<SIZE, 1> {
     #[gpu_codegen::device]
     #[inline(always)]
     pub(crate) fn _subgroup_id() -> usize {
-        (warp_id() << Self::SHIFT_COUNT as usize)
+        ((Block.thread_rank() >> 5) << Self::SHIFT_COUNT as usize)
             + ((lane_id() & !(Self::LANE_MASK as usize)) >> Self::SHIFT_COUNT as usize)
     }
 

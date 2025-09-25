@@ -55,10 +55,14 @@ def_dim_fn!(block_id, _block_id, block_id,);
 def_dim_fn!(block_dim, _block_dim, block_dim, #[gpu_codegen::ret_sync_data(1000)]);
 def_dim_fn!(grid_dim, _grid_dim, grid_dim, #[gpu_codegen::ret_sync_data(1000)]);
 
+/// This is the hardware warp id indicating
+/// the warp within a SM.
+/// Thus, it is different from the subgroup id /warp id
+/// we usually use inside BlockTile.
 #[gpu_codegen::device]
 #[inline(always)]
 #[allow(dead_code)]
-pub fn warp_id() -> usize {
+pub fn sm_warp_id() -> usize {
     let mut ret: u32;
     unsafe {
         core::arch::asm!("mov.u32 {0:e}, %warpid;", out(reg) ret);

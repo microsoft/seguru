@@ -29,6 +29,7 @@ pub trait BuildChunkScope<S2: SyncScope>: SyncScope {
     type CS: ChunkScope<FromScope = Self, ToScope = S2>;
 
     #[gpu_codegen::device]
+    #[gpu_codegen::ret_sync_data(1000)]
     fn build_chunk_scope(&self, to: S2) -> Self::CS;
 }
 
@@ -95,6 +96,7 @@ impl<const SIZE: usize> BuildChunkScope<Thread> for ThreadWarpTile<SIZE> {
 #[inline]
 #[gpu_codegen::device]
 #[expect(private_bounds)]
+#[gpu_codegen::ret_sync_data(1000)]
 pub fn build_chunk_scope<S1, S2>(from: S1, to: S2) -> <S1 as BuildChunkScope<S2>>::CS
 where
     S2: SyncScope,

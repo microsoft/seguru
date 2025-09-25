@@ -100,7 +100,7 @@ impl<'a, T, CS: ChunkScope, Map: ScopeUniqueMap<CS>> GlobalGroupChunk<'a, T, CS,
     /// Convert GlobalGroupChunk to another GlobalGroupChunk with different ChunkScope and Map.
     /// See `ChunkScope` for more details about chunk scope.
     #[gpu_codegen::device]
-    #[gpu_codegen::sync_data(0, 1)]
+    #[gpu_codegen::sync_data(2)]
     pub fn chunk_to_scope<CS2: ChunkScope, Map2: ScopeUniqueMap<CS2>>(
         self,
         _cs: CS2,

@@ -2011,12 +2011,6 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             rustc_const_eval::interpret::Scalar::Ptr(ptr, s) => {
                 let (prov, offset) = ptr.into_parts();
                 let alloc_id = prov.alloc_id();
-                eprintln!(
-                    "scalar_to_backend ptr: {:?} {:?} {}",
-                    self.tcx.global_alloc(alloc_id),
-                    alloc_id,
-                    s
-                );
                 self.const_data_memref_from_alloc_id(alloc_id)
             }
         }

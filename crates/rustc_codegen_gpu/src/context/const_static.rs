@@ -3,11 +3,11 @@ use melior::helpers::ArithBlockExt;
 use melior::ir::attribute::StringAttribute;
 use melior::ir::operation::OperationMutLike;
 use melior::ir::{self as mlir_ir, BlockLike, Location, r#type as mlir_type};
-use rustc_abi::Size;
+use rustc_abi::{HasDataLayout, Size};
 use rustc_codegen_ssa_gpu::traits::{
     BackendTypes, BaseTypeCodegenMethods, ConstCodegenMethods, StaticCodegenMethods,
 };
-use rustc_const_eval::interpret::{GlobalAlloc, alloc_range};
+use rustc_const_eval::interpret::{GlobalAlloc, PointerArithmetic, alloc_range};
 use tracing::{debug, trace};
 
 use super::GPUCodegenContext;
@@ -94,36 +94,42 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         alloc: rustc_const_eval::interpret::ConstAllocation<'_>,
         name: &str,
     ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Value {
-        assert!(alloc.inner().size().bytes() > 0);
-        let ty = self.type_array(self.type_i8(), alloc.inner().len() as u64);
-        let ref_ty =
-            mlir_type::MemRefType::new(self.type_i8(), &[alloc.inner().len() as i64], None, None);
-        let bytes =
-            alloc.inner().get_bytes_unchecked(alloc_range(Size::ZERO, alloc.inner().size()));
-        debug!(
-            "const_data_memref_from_alloc: {} {} {:?} {}",
-            alloc.inner().len(),
-            alloc.inner().size().bytes(),
-            bytes,
-            ty
-        );
-        let value = mlir_ir::attribute::DenseElementsAttribute::new(
-            ty,
-            &bytes
-                .iter()
-                .map(|v| {
-                    mlir_ir::attribute::IntegerAttribute::new(self.type_i8(), *v as i64).into()
-                })
-                .collect::<Vec<_>>(),
-        )
-        .unwrap()
-        .into();
+        let dl = self.data_layout();
+        let pointer_size = dl.pointer_size();
+        let mem_len = pointer_size.bytes() as usize;
+        let ty = self.type_array(self.type_i8(), mem_len as _);
+        let ref_ty = mlir_type::MemRefType::new(self.type_i8(), &[mem_len as _], None, None);
+        let value = if alloc.inner().size().bytes() == 0 {
+            None
+        } else {
+            let bytes =
+                alloc.inner().get_bytes_unchecked(alloc_range(Size::ZERO, alloc.inner().size()));
+            debug!(
+                "const_data_memref_from_alloc: {} {} {:?} {}",
+                alloc.inner().len(),
+                alloc.inner().size().bytes(),
+                bytes,
+                ty
+            );
+            let value = mlir_ir::attribute::DenseElementsAttribute::new(
+                ty,
+                &bytes
+                    .iter()
+                    .map(|v| {
+                        mlir_ir::attribute::IntegerAttribute::new(self.type_i8(), *v as i64).into()
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap()
+            .into();
+            Some(value)
+        };
         let op = mlir_memref::global(
             self.mlir_ctx,
             name,
             None,
             ref_ty,
-            Some(value),
+            value,
             true,
             None,
             self.unknown_loc(),

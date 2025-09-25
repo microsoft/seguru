@@ -5,8 +5,8 @@ use gpu_host::cuda_ctx;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let mut n: usize = 1024;
-    let mut dim: u32 = 128;
+    let mut n: usize = 32;
+    let mut dim: u32 = 16;
 
     if args.len() >= 2 {
         // Take length here
@@ -20,5 +20,12 @@ fn main() {
     }
     cuda_ctx(0, |ctx, m| {
         matmul_host::run_host_matmul(ctx, m, n, dim).expect("Failed to run host arithmetic");
+    });
+}
+
+#[test]
+fn test_naive_matmul() {
+    cuda_ctx(0, |ctx, m| {
+        matmul_host::run_host_matmul(ctx, m, 32, 16).expect("Failed to run host arithmetic");
     });
 }

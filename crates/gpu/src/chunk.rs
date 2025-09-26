@@ -116,6 +116,12 @@ impl<'a, T, CS: ChunkScope, Map: ScopeUniqueMap<CS>> GlobalGroupChunk<'a, T, CS,
             dummy: PhantomData,
         }
     }
+
+    #[gpu_codegen::device]
+    #[inline]
+    pub fn local2global(&self, idx: <Map as ScopeUniqueMap<CS>>::IndexType) -> usize {
+        self.map_params.local_to_global_index(idx).1
+    }
 }
 
 #[cfg(not(feature = "codegen_tests"))]

@@ -144,60 +144,78 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for Map2D {
     }
 }
 
-/// Maps a multi-dimensional thread/index layout into a reshaped linear index.
+/// Maps a multi-dimensional local index and thread layout into a reshaped global index.
+/// The idea is that the user need to specify the dimensions of logical index (local + thread ids), and the target tensor dimensions, then we map the logical index into the corresponding target multi-dimension tensor.
+/// We have:
+/// - Logical index —  e.g., (threadId, local_access_id) in CUDA.
+/// - Target tensor dimensions — e.g., a tensor of shape $(\hat{D}_0, \hat{D}_1, ... \hat{D}_{N+M})$
 ///
-/// The `reshape_map!` macro generates a `MapReshape` struct that reshape
-/// local thread ID and index to a shape and then create a linearized combination
-/// of them according to a specified layout or weights to get global access index.
-///
-/// # Macro Signature
-///
-/// The macro takes either layout or weights to specify the new layout.
-///
-/// ## Using layout to get a permutation of thread and index to access the array.
+/// We  want to map the logical linear or multi-dimensional index into the corresponding tensor element, possibly in a flattened memory layout.
+/// To ensure we can access the tensor properly, developers need to do linear2vec operation to convert threadid to $tids[D_{N+M}][...][`D_N`]$, and local_access_id to $lids[D_N][...][D_0]$
+/// The `reshape_map!` macro generates a `MapReshape` struct that reshapes
+/// local thread ID and index to a shape and then creates a linearized combination
+/// of them according to a specified layout or weights to get a global access index.
+/// ## Macro Signature
+/// The macro takes dimension sizes and optional `layout` `offset` to specify the new layout.
 /// ```text
-/// reshape_map!(local_id_dims | thread_id_dims => layout: permutation)
+/// gpu::reshape_map!(
+///     [($local_id_dim, $tensor_dim?),*]  // local id + corresponding tensor dimension
+///     |
+///     [($thread_id_dim, $tensor_dim?),*] // thread + corresponding tensor dimension
+///     =>
+///     layout: [-?i1, -?i2, ...]          // permutation of dimensions in the new layout
+///     offset: $offset                // optional offset (default 0)
+/// )
 /// ```
-/// - `local_id_dims`: array expression specifying the shape of local index, and the array shape corresponding to the local index:
-///   `[(D_0, D'_0), (D_1, D'_1), ..., (D_{N-1}, D'_{N-1})]`. // go from low to high dimention dimention
-/// - `thread_id_dims`: array expression specifying the shape of thread index, and the array shape corresponding to the local index: `[(D_N, D'_N), ... (D_{N+M-1}, D'_{N+M-1})]`.
-/// - When D'_k is omitted, it is assumed to be D_k.
-/// - `permutation`: permutation of dimensions in the new layout:
-///   `[p_0, p_1, ..., p_{N+M-1}]` // go from low to high dimention dimention
-///   - `0 <= p_k < N` for thread dimensions
-///   - `N <= p_k < N+M` for index dimensions
-///   - `permutation` must be a valid and constant permutation.
-///   - when it is omitted, it is assumed to be `[0, 1, ..., N+M-1]`.
-///   - negative index `-k` is allowed to indicate using `D'_k - id_k` instead of `id_k`.
-///   - `-0` is allowed.
-///   - `p_k` can be a constant literal or an readable name like `t<k-N>`, `i<k>` for thread and index dimensions.
+/// - `lid_tensor_Dims`: array expression specifying the shape of local index, and the array shape corresponding to the local index:  
+///   ```math
+///   [(D_0, TD_0), (D_1, TD_1), ..., (D_{N-1}, TD_{N-1})]
+///   ```
+/// - `tid_tensor_Dims`: array expression specifying the shape of thread index, and the array shape corresponding to the local index:  
+///   $[(D_N, TD_N), ..., (D_{N+M-1}, TD_{N+M-1)]$
+/// - When $TD_k$ is omitted, it is assumed to be $D_k$.
+/// - `permutation`: permutation of dimensions in the new layout:  
+///   $[p_0, p_1, ..., p_{N+M-1}]$ (low → high dimension)
+///   - $0 \le p_k < N$ for thread dimensions  
+///   - $N \le p_k < N+M$ for index dimensions  
+///   - Must be a valid constant permutation  [0, 1, 2, 3] or [i0, i1, t0, t1]
+///   - If omitted, defaults to $[0, 1, ..., N+M-1]$
+///   - Negative index `-k` is allowed to indicate $TD_k - 1 - id_k$ instead of $id_k$
+///   - `-0` is allowed  
+///   - `p_k` can be a constant literal or a readable name like `t<k-N>` or `i<k>` for thread and index dimensions
+/// ## Behavior
+/// - Translates `linear_thread_id` and `local_id` to software-defined multi-dimensional thread IDs:  
+///   $lid_k = lid / \prod_{j=0}^{k - 1}(D_j) \mod D_k$
+///   $lid = \sum_{k=0}^{N}(lid_k * \prod_{j=0}^{k - 1}(D_j))$
+///   $tid_k = tid / \prod_{j=N}^{k - 1}(D_{j+N}) \mod D_{k+N}$
+///   $tid = (tid_0, tid_1, ..., tid_{N-1})$ (low → high)
+/// - Merges thread IDs with index IDs:  
+///   $id = (lid_0, ..., lid_{M-1}, tid_0, ..., tid_{N-1})$ (low → high)
+///   Thus, the logical index has dimention $idxDim = [D_0, D_1, ... D_{N+M+1}]$
+/// - Treats array as shape:  
+///   $\hat{D} = [TD_0, TD_1, .., TD_{N+M-1]$
+/// - If $TD_k \ne $D_k$, some threads or indices will be skipped.  
+///   Valid access range:  
+///   $0 \le id_k < \min(D_k, TD_k)$
+/// - Apply reversed flag to index
+///   id'_k =if reversed_k {TD_k - 1 - id_k} else {id_k}
+/// - Global ID
+///   $globalid =  sum_{k=0}^{N+M}( id'_{p_{k}} prod_{j=0}^{k - 1}(TD_{p_j}))$
+/// - Accesses the array in permuted order, when all index are not used in reversed order.
+///   $arr[id_{p_0}][id_{p_1}]...[id_{p_{N+M-1}}]$
+/// - If an index is set to be used in reversed order, e.g., layout: [i0, -t0, ...]
+///   $arr[id_{p_0}][id_{p_1}]...[id_{p_{N+M-1}}]$
 ///
-/// # Behavior
-/// - Translates `linear_thread_id` to software-defined multi-dimensional thread IDs:
-///   tid = `(tid_0, tid_1, ..., tid_{N-1})`. // low -> high
-/// - Merges thread IDs with index IDs:
-///   id = `(lid_0, ..., lid_{M-1}, tid_0, ..., tid_{N-1})`. // low -> high
-/// - Treat array as of shape arr_sizes = `[D'_0, D'_1, ..., D'_{N+M-1}]`
-/// - If arr_sizes[k] != idx_sizes[k], some threads or indices will be skipped.
-///   Thus, valid access range is: `0 <= id_k < min(D_k, D'_k)`.
-///   This usually implies the dim and array size assumption in kernel impl.
-/// - Accesses the array in permuted order:
-///   `arr[id_{p_0}][id_{p_1}]...[id_{p_{N+M-1}}]`.
-///
-/// # Safety
+/// ## Safety
 /// - Users cannot create `MapReshape` instances outside the macro without `unsafe {}`.
-/// - Sizes must be non-zero, which is not checked at compile-time; `size = 0` triggers runtime errors and
-///   should be treated as functionality errors and will not violate race-free guarantee.
+/// - Sizes must be non-zero; `size = 0` triggers runtime errors and should be treated as functionality errors.  
+///   This will not violate race-free guarantees.
 /// - Guarantees safe mapping for valid permutations to ensure race-free chunking.
-///
-/// # Examples
-///
+/// ## Examples
 /// See more tests in `chunk_scope::test_reshape_map`.
-///
-/// **Example 1:** no permutation
-///
-/// Similar to MapLinear(3) when num_thread = 4.
-///```rust
+/// ### Example 1: No permutation
+/// Similar to `MapLinear(3)` when `num_thread = 4`.
+/// ```rust
 /// gpu::reshape_map!([3] | [4]  => layout: [0, 1]);
 /// gpu::reshape_map!([3] | [4] => layout: [i0, t0]);
 /// // local index shape: [3]
@@ -205,9 +223,8 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for Map2D {
 /// // Access: arr[tid0][idx0]
 /// // access -> tid: [0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3]
 /// ```
-/// **Example 2:** permutation swaps a thread id and local_id
-///
-/// Similar to MapLinear(1) when num_thread = 4, arr.len = 12.
+/// ### Example 2: Permutation swaps a thread id and local_id
+/// Similar to `MapLinear(1)` when `num_thread = 4, arr.len = 12`.
 /// ```rust
 /// gpu::reshape_map!([3] | [4] => layout: [1, 0]);
 /// gpu::reshape_map!([3] | [4] => layout: [t0, i0]);
@@ -216,9 +233,7 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for Map2D {
 /// // Access: arr[idx0][tid0]
 /// // access -> tid: [0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3]
 /// ```
-/// **Example 3:** software-defined thread dimension > 1
-///
-/// Allowing swap thread index, and so thread order changes.
+/// ### Example 3: Software-defined thread dimension > 1
 /// ```rust
 /// gpu::reshape_map!([3] | [2, 2] => layout: [0, 2, 1]);
 /// gpu::reshape_map!([3] | [2, 2] => layout: [i0, t1, t0]);
@@ -227,9 +242,7 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for Map2D {
 /// // Access: arr[tid1][tid0][idx0]
 /// // access -> tid: [0, 0, 0, 2, 2, 2, 1, 1, 1, 3, 3, 3]
 /// ```
-///
-/// **Example 4:** swap tid and extra_id, with thread dimension > 1**
-///
+/// ### Example 4: Swap tid and extra_id, thread dimension > 1
 /// ```rust
 /// gpu::reshape_map!([3] | [2, 2] => layout: [2, 0, 1]);
 /// gpu::reshape_map!([3] | [2, 2] => layout: [t1, i0, t0]);
@@ -238,37 +251,31 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for Map2D {
 /// // Access: arr[tid1][idx0][tid0]
 /// // access -> tid: [0, 2, 0, 2, 0, 2, 1, 3, 1, 3, 1, 3]
 /// ```
-///
-/// **Example 5:** reverse a thread dimension
+/// ### Example 5: Reverse a thread dimension
 /// ```rust
 /// gpu::reshape_map!([3] | [2, 2] => layout: [0, -1, 2]);
 /// gpu::reshape_map!([3] | [2, 2] => layout: [i0, -t0, t1]);
-///
 /// // local index shape: [3]
 /// // thread shape: [2, 2]
 /// // Access: arr[tid1][(max_tid0 - tid0)][idx0]
 /// ```
-/// **Example 6:** Skip some threads by setting a smaller new size
-///
+/// ### Example 6: Skip some threads by setting a smaller new size
 /// ```rust
 /// gpu::reshape_map!([3] | [2, (2, 1)] => layout: [0, 1, 2]);
 /// gpu::reshape_map!([3] | [2, (2, 1)] => layout: [i0, t0, t1]);
-/// ```
 /// // local index shape: [3]
 /// // thread shape: [4, 2]
-/// // Access: `arr[tid0][tid1][idx0]`
+/// // Access: arr[tid0][tid1][idx0]
 /// // valid access range:
 /// // 0 <= lid0 < 3
 /// // 0 <= tid0 < 2
 /// // 0 <= tid1 < 1
 /// // access -> tid: [0, 0, 0, 1, 1, 1, _, _, _, _, _, _]
-///
-/// **Example 7:** Skip some data by setting a larger size
-///
+/// ```
+/// ### Example 7: Skip some data by setting a larger size
 /// ```rust
 /// gpu::reshape_map!([3] | [(2, 4), 2] => layout: [0, 1, 2]);
 /// gpu::reshape_map!([3] | [(2, 4), 2] => layout: [i0, t0, t1]);
-/// ```
 /// // local index shape: [3]
 /// // thread shape: [4, 2]
 /// // Access: arr[tid0][tid1][idx0]
@@ -277,27 +284,22 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for Map2D {
 /// // 0 <= tid0 < 2
 /// // 0 <= tid1 < 1
 /// // access -> tid: [0, 0, 0, _, 1, 1, 1, _, 2, 2, 2, _, 3, 3, 3, _, ...]
-///
-/// # Invalid Examples
-///
-/// **Example 1:** Invalid permutation (index out of range)
+/// ```
+/// ## Invalid Examples
+/// ### Example 1: Invalid permutation (index out of range)
 /// ```rust,compile_fail
 /// gpu::reshape_map!([2] | [2, 3] => layout: [1, 2, 3]);
 /// ```
-/// **Example 2:** Invalid permutation (duplicate indices)
+/// ### Example 2: Invalid permutation (duplicate indices)
 /// ```rust,compile_fail
 /// gpu::reshape_map!([2] | [2, 3] => layout: [0, 0, 1]);
-/// ```
-///
-/// ```rust,compile_fail
 /// gpu::reshape_map!([2] | [2, 3] => layout: [t0, t0, i0]);
 /// ```
-///
-/// **Example 3:** Invalid thread dimension (<1)
+/// ### Example 3: Invalid thread dimension (<1)
 /// ```rust,compile_fail
 /// gpu::reshape_map!([2, 3] | [] => layout: [0, 1, 2]);
 /// ```
-/// **Example 4:** Invalid index dimension (<1)
+/// ### Example 4: Invalid index dimension (<1)
 /// ```rust,compile_fail
 /// gpu::reshape_map!( [] | [2, 2] => layout: [0, 1]);
 /// ```
@@ -320,7 +322,7 @@ mod test {
         };
     }
 
-    fn get_access_map<const NTHREADS: usize, CS: ChunkScope>(
+    fn get_access_map<const NTHREADS: usize, CS>(
         map: &impl ScopeUniqueMap<CS, IndexType = usize>,
         n: usize,
     ) -> alloc::vec::Vec<isize>

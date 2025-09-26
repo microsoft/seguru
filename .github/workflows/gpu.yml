@@ -49,6 +49,7 @@ jobs:
         working-directory: examples
         run: |
           cargo test
+          cargo test --release
 
       - name: Run examples
         working-directory: examples

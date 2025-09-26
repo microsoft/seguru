@@ -1296,8 +1296,21 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         let ty = ptr.r#type();
         let nullptr = self.null_ptr(ty);
         let cond = self.use_value_as_ty(cond, self.type_i1());
-
-        self.select(cond, ptr, nullptr)
+        let debug = self.tcx.sess.opts.debug_assertions;
+        if debug {
+            self.assert(cond, "assert_ptr");
+            ptr
+        } else {
+            #[cfg(feature = "inplace_bound_check")]
+            {
+                self.select(cond, ptr, nullptr)
+            }
+            #[cfg(not(feature = "inplace_bound_check"))]
+            {
+                self.assert(cond, "assert_ptr");
+                ptr
+            }
+        }
     }
 
     fn assert(&mut self, cond: mlir_ir::Value<'ml, 'a>, msg: &str) {
@@ -2030,6 +2043,10 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     #[cfg(not(feature = "trap_bound_check"))]
     fn emit_bound_check(&mut self, idx: Self::Value, len: Self::Value, ptr: Self::Value) -> bool {
         // Constant index can be evaluated at compile time
+        let debug = self.tcx.sess.opts.debug_assertions;
+        if debug {
+            return false; // use default trap-based bound check
+        }
         if let Some(v1) = crate::mlir::mlir_val_to_const_int(idx) {
             if let Some(v2) = crate::mlir::mlir_val_to_const_int(len) {
                 if v1 < v2 {

@@ -14,11 +14,27 @@ fn test_cuda_mem_single_ctx() {
     let mut value2: [f32; 10] = [456f32; 10];
     assert!(value1 != value2);
     cuda_ctx_no_mod(0, |ctx| {
-        let x = ctx.new_gmem_with_len::<f32>(10, &[0f32; 10]).unwrap();
-        x.copy_from_host(&value1, 10, ctx).expect("Failed to copy memory to host");
-        x.copy_to_host(&mut value2, 10, ctx).unwrap();
+        let x = ctx.new_tensor_view(&value1).unwrap();
+        x.copy_to_host(&mut value2).unwrap();
     });
-    assert!(value1 == value2);
+    assert!(value1 == value2, "value1: {:?}, value2: {:?}", value1, value2);
+}
+
+#[test]
+fn test_tensor_index() {
+    let value1: [f32; 10] = (0..10).map(|x| x as f32).collect::<Vec<_>>().try_into().unwrap();
+    cuda_ctx_no_mod(0, |ctx| {
+        let mut x = ctx.new_tensor_view(&value1).unwrap();
+        for i in 0..9 {
+            let mut e = x.index_mut(i..i + 2);
+            let x = &mut e;
+            assert!(x.len() == 2);
+            let mut host_value = [0.0f32; 2];
+            assert!(x.copy_to_host(&mut host_value).is_ok());
+            assert!(host_value[0] == i as f32);
+            assert!(host_value[1] == (i + 1) as f32);
+        }
+    });
 }
 
 #[test]
@@ -37,19 +53,17 @@ fn test_cuda_mem_multiple_ctx() {
         let (ctx_h, ct) = GpuCtxHandle::new(ct, 0, CUctx_flags::CU_CTX_SCHED_AUTO);
         let x = {
             let ctx = ctx_h.activate(active);
-            let x = ctx.new_gmem::<u32>(0).unwrap();
-            x.copy_from_host(&value1, &ctx).expect("Failed to copy memory to host");
-            let _ = ctx.new_gmem_with_len::<u32>(10, &[0; 10]);
+            let x = ctx.new_tensor::<u32>(&value1).unwrap();
+            let _ = ctx.new_tensor_view(&[0; 10]);
             x
         };
         let (ctx_h2, _) = GpuCtxHandle::new(ct, 0, CUctx_flags::CU_CTX_SCHED_AUTO);
         {
             let ctx2 = ctx_h2.activate(active);
-            let z = ctx2.new_gmem_with_len::<u32>(10, &[0; 10]).unwrap();
-            z.copy_from_host(&[0; 10], 10, &ctx2).expect("Failed to copy memory to host");
+            let _ = ctx2.new_tensor(&[0; 10]).unwrap();
         }
         let ctx1: GpuCtxGuard<'_, '_, _> = ctx_h.activate(active);
-        x.copy_to_host(&mut value2, &ctx1).unwrap();
+        x.as_tensor_view_mut(&ctx1).copy_to_host(&mut value2).unwrap();
         assert!(value1 == value2);
     });
 }

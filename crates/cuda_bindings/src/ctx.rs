@@ -28,7 +28,7 @@ macro_rules! eprintln {
 /// CtxSpace is a trait to ensure that we can create a GPU context per context space N.
 /// This is used to ensure that only one context is created per context space N.
 /// After a context with space N is created, we can only create a context with space `Succ<N>`.
-pub trait GpuCtxSpace {}
+pub trait GpuCtxSpace: 'static {}
 pub struct CtxSpaceZero;
 pub struct Succ<N: GpuCtxSpace>(core::marker::PhantomData<N>);
 

@@ -1,6 +1,4 @@
-mod host;
-
-use host::{inner_product_kernel, inner_product_kernel2};
+use matmul_gpu::{inner_product_kernel, inner_product_kernel2};
 
 fn cpu_inner_product(a: &[f32], b: &[f32], c: &mut [f32], n: usize) {
     for i in 0..n {
@@ -53,9 +51,9 @@ pub fn run_host_matmul<'ctx>(
     let h_c: &mut [f32] = &mut initial_c.clone();
     let h_c_cpu: &mut [f32] = &mut initial_c;
 
-    let d_a = ctx.new_gmem_with_len::<f32>(n * n, h_a)?;
-    let d_b = ctx.new_gmem_with_len::<f32>(n * n, h_b)?;
-    let d_c = ctx.new_gmem_with_len::<f32>(n * n, h_c)?;
+    let d_a = ctx.new_tensor_view::<[f32]>(h_a)?;
+    let d_b = ctx.new_tensor_view::<[f32]>(h_b)?;
+    let mut d_c = ctx.new_tensor_view::<[f32]>(h_c)?;
 
     // Now do the kernel
     // block_dim_x * block_dim_y * block_dim_z must be less than or equal to 1024
@@ -65,18 +63,20 @@ pub fn run_host_matmul<'ctx>(
 
     let config = gpu_host::gpu_config!(grid_dim, grid_dim, 1, block_dim, block_dim, 1, 0);
     let start = std::time::Instant::now();
-    inner_product_kernel(config, ctx, m, d_a, d_b, d_c, n).expect("Kernel execution failed");
+    inner_product_kernel::launch(config, ctx, m, &d_a, &d_b, &mut d_c, n)
+        .expect("Kernel execution failed");
     let elapsed = start.elapsed();
     println!("GPU execution time: {:?}", elapsed);
 
     let config = gpu_host::gpu_config!(grid_dim, grid_dim, 1, block_dim, block_dim, 1, 0);
-    let d_c_c = gpu::GlobalThreadChunk::new_from_host(d_c, gpu::Map2D::new(n));
+    let d_c_c = gpu::GlobalThreadChunk::new_from_host(&mut d_c, gpu::Map2D::new(n));
     let start = std::time::Instant::now();
-    inner_product_kernel2(config, ctx, m, d_a, d_b, d_c_c, n).expect("Kernel execution failed");
+    inner_product_kernel2::launch(config, ctx, m, &d_a, &d_b, d_c_c, n)
+        .expect("Kernel execution failed");
     let elapsed = start.elapsed();
     println!("GPU execution time: {:?}", elapsed);
 
-    d_c.copy_to_host(h_c, n * n, ctx)?;
+    d_c.copy_to_host(h_c)?;
 
     // Perform CPU side validation
     println!("running on cpu...");

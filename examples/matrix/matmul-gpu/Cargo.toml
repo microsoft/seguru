@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 gpu = {workspace = true}
+gpu_host = {workspace = true}
 gpu_macros = {workspace = true}
 
 [features]

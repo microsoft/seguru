@@ -2,7 +2,7 @@
 #![feature(generic_const_exprs)]
 use gpu::SafeGpuConfig;
 
-#[gpu_macros::kernel]
+#[gpu_macros::cuda_kernel]
 pub fn kernel(input: &[f32; Config::BDIM_X as _]) {
     gpu::println!(
         "Hello world... input = {}",
@@ -10,13 +10,12 @@ pub fn kernel(input: &[f32; Config::BDIM_X as _]) {
     );
 }
 
-#[gpu_macros::host(kernel)]
-pub fn host(input: &gpu_host::CudaMemBox<[f32; Config::BDIM_X as _]>) {}
-
 fn main() {
     gpu_host::cuda_ctx(0, |ctx, m| {
-        let input = ctx.new_gmem([1.01; 1]).expect("Failed to allocate input");
+        let input = ctx
+            .new_tensor_view(&[1.01; 1])
+            .expect("Failed to allocate input");
         let config = gpu_host::gpu_config!(1, 1, 1, 1, 1, 1, 0);
-        host(config, ctx, m, input).expect("Failed to run host arithmetic");
+        kernel::launch(config, ctx, m, &input).expect("Failed to run host arithmetic");
     });
 }

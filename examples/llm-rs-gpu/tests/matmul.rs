@@ -69,24 +69,24 @@ fn matmul_forward(
     );
     //assert!(OC == 8 * gdim_y as usize * SQRT_BDIM);
     cuda_ctx(0, |ctx, m| {
-        let d_inp = ctx.new_gmem_with_len(inp.len(), inp).unwrap();
-        let d_outp = ctx.new_gmem_with_len(out.len(), out).unwrap();
-        let d_weight = ctx.new_gmem_with_len(weight.len(), weight).unwrap();
-        let d_bias = ctx.new_gmem_with_len(bias.len(), bias).unwrap();
+        let d_inp = ctx.new_tensor_view(inp).unwrap();
+        let mut d_outp = ctx.new_tensor_view(out).unwrap();
+        let d_weight = ctx.new_tensor_view(weight).unwrap();
+        let d_bias = ctx.new_tensor_view(bias).unwrap();
         let config = gpu_host::gpu_config!(gdim_x, gdim_y, 1, @const (SQRT_BDIM as u32), @const (SQRT_BDIM as u32), 1, 0);
         llm_rs_gpu::matmul_forward_kernel4::launch(
             config,
             ctx,
             m,
-            d_outp,
-            d_inp,
-            d_weight,
-            d_bias,
+            &mut d_outp,
+            &d_inp,
+            &d_weight,
+            &d_bias,
             c_size as i32,
             oc_size as i32,
         )
         .expect("launch failed");
-        d_outp.copy_to_host(out, out.len(), ctx).unwrap();
+        d_outp.copy_to_host(out).unwrap();
     });
 }
 
@@ -170,15 +170,22 @@ fn matmul_backward_bias(
     assert!(dbias.len() == oc);
     let expected = matmul_backward_bias_cpu(dout, b, t, oc);
     cuda_ctx(0, |ctx, m| {
-        let d_dout = ctx.new_gmem_with_len(dout.len(), dout).unwrap();
-        let d_dbias = ctx.new_gmem_with_len(dbias.len(), dbias).unwrap();
+        let d_dout = ctx.new_tensor_view(dout).unwrap();
+        let mut d_dbias = ctx.new_tensor_view(dbias).unwrap();
 
         let config = gpu_host::gpu_config!(gdim_x, 1, 1, @const BSIZE, 1, 1, @const SHARED_SIZE);
         llm_rs_gpu::matmul_backward_bias_kernel4::launch(
-            config, ctx, m, d_dbias, d_dout, b as i32, t as i32, oc as i32,
+            config,
+            ctx,
+            m,
+            &mut d_dbias,
+            &d_dout,
+            b as i32,
+            t as i32,
+            oc as i32,
         )
         .expect("launch failed");
-        d_dbias.copy_to_host(dbias, dbias.len(), ctx).unwrap();
+        d_dbias.copy_to_host(dbias).unwrap();
     });
     assert!(
         f32_eq(dbias, &expected, epsilon),

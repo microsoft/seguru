@@ -23,22 +23,21 @@ fn test_permute_kernel(
         let num_blocks = (total_threads as u32).div_ceil(BLOCK_SIZE);
         let config = gpu_host::gpu_config!(num_blocks, 1, 1, @const BLOCK_SIZE, 1, 1, 0);
         // define GPU mem
-        let inp = ctx.new_gmem_with_len(h_dinp.len(), h_dinp).unwrap();
-        let dq = ctx.new_gmem_with_len(h_dq.len(), h_dq).unwrap();
-        let dk = ctx.new_gmem_with_len(h_dk.len(), h_dk).unwrap();
-        let dv = ctx.new_gmem_with_len(h_dv.len(), h_dv).unwrap();
+        let mut inp = ctx.new_tensor_view(h_dinp).unwrap();
+        let mut dq = ctx.new_tensor_view(h_dq).unwrap();
+        let mut dk = ctx.new_tensor_view(h_dk).unwrap();
+        let mut dv = ctx.new_tensor_view(h_dv).unwrap();
         llm_rs_gpu::permute_kernel::launch(
-            config, ctx, m, dq, dk, dv, inp, b_len, n_len, nh_len, d_len,
+            config, ctx, m, &mut dq, &mut dk, &mut dv, &inp, b_len, n_len, nh_len, d_len,
         )
         .expect("Failed to run permute_kernel");
         let config = gpu_host::gpu_config!(num_blocks, 1, 1, @const BLOCK_SIZE, 1, 1, 0);
         llm_rs_gpu::permute_kernel_backward::launch(
-            config, ctx, m, inp, dq, dk, dv, b_len, n_len, nh_len, d_len,
+            config, ctx, m, &mut inp, &mut dq, &mut dk, &mut dv, b_len, n_len, nh_len, d_len,
         )
         .expect("Failed to run permute_kernel_backward");
         let mut h_dinp2 = vec![0.0f32; h_dinp.len()];
-        inp.copy_to_host(&mut h_dinp2, h_dinp.len(), ctx)
-            .expect("copy to host failed");
+        inp.copy_to_host(&mut h_dinp2).expect("copy to host failed");
         assert!(
             common::f32_eq(h_dinp, &h_dinp2, 1e-5),
             "h_dinp not match:\n\n{:?}\n\n{:?}",
@@ -101,20 +100,19 @@ fn test_unpermute_kernel(
         let num_blocks = (total_threads as u32).div_ceil(BLOCK_SIZE);
         let config = gpu_host::gpu_config!(num_blocks, 1, 1, @const BLOCK_SIZE, 1, 1, 0);
         // define GPU mem
-        let inp = ctx.new_gmem_with_len(h_dinp.len(), h_dinp).unwrap();
-        let outp = ctx.new_gmem_with_len(h_doutp.len(), h_doutp).unwrap();
+        let mut inp = ctx.new_tensor_view(h_dinp).unwrap();
+        let mut outp = ctx.new_tensor_view(h_doutp).unwrap();
         llm_rs_gpu::unpermute_kernel::launch(
-            config, ctx, m, inp, outp, b_len, n_len, nh_len, d_len,
+            config, ctx, m, &inp, &mut outp, b_len, n_len, nh_len, d_len,
         )
         .expect("Failed to run unpermute_kernel");
         let config = gpu_host::gpu_config!(num_blocks, 1, 1, @const BLOCK_SIZE, 1, 1, 0);
         llm_rs_gpu::unpermute_kernel_backward::launch(
-            config, ctx, m, inp, outp, b_len, n_len, nh_len, d_len,
+            config, ctx, m, &mut inp, &outp, b_len, n_len, nh_len, d_len,
         )
         .expect("Failed to run unpermute_kernel_backward");
         let mut h_dinp2 = vec![0.0f32; h_dinp.len()];
-        inp.copy_to_host(&mut h_dinp2, h_dinp.len(), ctx)
-            .expect("copy to host failed");
+        inp.copy_to_host(&mut h_dinp2).expect("copy to host failed");
         assert!(
             common::f32_eq(h_dinp, &h_dinp2, 1e-5),
             "h_dinp not match:\n\n{:?}\n\n{:?}",

@@ -117,8 +117,28 @@ impl<N: GpuCtxSpace> core::ops::Deref for GpuCtxHandle<N> {
 pub struct GpuCtxHandleInner {
     ctx: CUcontext,
     dev_prop: CUdevprop, // TODO: Put it to dev-specific struct.
+    major: i32,
+    minor: i32,
     _flags: CUctx_flags, // TODO: This is not used yet, but we may delete it later.
     _dev: CUdevice,      // TODO: This is not used yet, but we may delete it later.
+}
+
+impl GpuCtxHandleInner {
+    pub fn get_dev_prop(&self) -> &CUdevprop {
+        &self.dev_prop
+    }
+
+    pub fn get_compute_capability(&self) -> (i32, i32) {
+        (self.major, self.minor)
+    }
+
+    pub fn get_ctx(&self) -> CUcontext {
+        self.ctx
+    }
+
+    pub fn get_dev(&self) -> CUdevice {
+        self._dev
+    }
 }
 
 /// GpuCtxGuard<'ctx, 'a, N> can only be created by GpuCtxHandle<'ctx, N> + GpuActiveToken<'a>.
@@ -196,10 +216,22 @@ impl<'ctx, N: GpuCtxSpace> GpuCtxHandle<N> {
             assert!(err == CUDA_SUCCESS, "Failed to get device({}) properties", dev_id);
             dev_prop_uninit.assume_init()
         };
+
+        let (major, minor) = unsafe {
+            let mut major_uninit = MaybeUninit::<i32>::uninit();
+            let mut minor_uninit = MaybeUninit::<i32>::uninit();
+            err = cuDeviceComputeCapability(
+                major_uninit.as_mut_ptr(),
+                minor_uninit.as_mut_ptr(),
+                dev,
+            );
+            assert!(err == CUDA_SUCCESS, "Failed to get device({}) compute capability", dev_id);
+            (major_uninit.assume_init(), minor_uninit.assume_init())
+        };
         (
             GpuCtxHandle::<N> {
                 arena: Arena::new(),
-                inner: GpuCtxHandleInner { ctx, dev_prop, _flags: flags, _dev: dev },
+                inner: GpuCtxHandleInner { ctx, dev_prop, major, minor, _flags: flags, _dev: dev },
                 _marker: PhantomData,
             },
             GpuCtxToken { gpu: ctx_token.gpu, token: GpuCtxIdToken { _marker: PhantomData } },

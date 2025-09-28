@@ -108,23 +108,21 @@ fn test_softmax_forward_kernel5(N: usize, T: usize) {
     let grid_size = (N * T * 32).div_ceil(BLOCK_SIZE as usize) as u32;
 
     cuda_ctx(0, |ctx, m| {
-        let d_inp = ctx.new_gmem_with_len(LEN, &inp).expect("alloc failed");
-        let d_out = ctx.new_gmem_with_len(LEN, &out).expect("alloc failed");
+        let d_inp = ctx.new_tensor_view::<[f32]>(&inp).expect("alloc failed");
+        let mut d_out = ctx.new_tensor_view::<[f32]>(&out).expect("alloc failed");
         let config = gpu_host::gpu_config!(grid_size, 1, 1, @const BLOCK_SIZE, 1, 1, 0);
         softmax_forward_kernel5::launch(
             config,
             ctx,
             m,
-            d_out,
+            &mut d_out,
             inv_temperature,
-            d_inp,
+            &d_inp,
             N as i32,
             T as i32,
         )
         .expect("Failed to run softmax_forward_kernel5");
-        d_out
-            .copy_to_host(&mut out, LEN, ctx)
-            .expect("copy to host failed");
+        d_out.copy_to_host(&mut out).expect("copy to host failed");
     });
     assert!(
         f32_eq(&out, &expected, 1e-5),
@@ -148,16 +146,27 @@ fn test_softmax_autoregressive_backward_kernel(B: usize, T: usize, C: usize, NH:
     let gdim_y = (B * NH) as u32;
     let expected = softmax_autoregressive_backward_kernel_cpu(&datt, &att, B, T, NH, scale);
     cuda_ctx(0, |ctx, m| {
-        let d_att = ctx.new_gmem_with_len(len, &att).expect("alloc failed");
-        let d_datt = ctx.new_gmem_with_len(len, &datt).expect("alloc failed");
-        let d_dpreatt = ctx.new_gmem_with_len(len, &dpreatt).expect("alloc failed");
+        let d_att = ctx.new_tensor_view::<[f32]>(&att).expect("alloc failed");
+        let d_datt = ctx.new_tensor_view::<[f32]>(&datt).expect("alloc failed");
+        let mut d_dpreatt = ctx
+            .new_tensor_view::<[f32]>(&dpreatt)
+            .expect("alloc failed");
         let config = gpu_host::gpu_config!(gdim_x, gdim_y, 1, @const BLOCK_SIZE, 1, 1, 0);
         llm_rs_gpu::softmax_autoregressive_backward_kernel::launch(
-            config, ctx, m, d_dpreatt, d_datt, d_att, B, T, C, scale,
+            config,
+            ctx,
+            m,
+            &mut d_dpreatt,
+            &d_datt,
+            &d_att,
+            B,
+            T,
+            C,
+            scale,
         )
         .expect("Failed to run softmax_autoregressive_backward_kernel");
         d_dpreatt
-            .copy_to_host(&mut dpreatt, len, ctx)
+            .copy_to_host(&mut dpreatt)
             .expect("copy to host failed");
     });
     assert!(

@@ -90,8 +90,17 @@ where
     /// host to device naturally avoids the problem of rechunking the global
     /// mem.
     #[cfg(not(feature = "codegen_tests"))]
-    pub fn new_from_host(slice: &'a cuda_bindings::CudaMemBox<[T]>, map_params: Map) -> Self {
-        unsafe { Self { data: &mut *(slice.as_ptr() as *mut [T]), map_params, dummy: PhantomData } }
+    pub fn new_from_host<'b: 'a>(
+        slice: &'a mut cuda_bindings::TensorViewMut<'b, [T]>,
+        map_params: Map,
+    ) -> Self {
+        unsafe {
+            Self {
+                data: &mut *(slice.as_flat_devptr() as *mut [T]),
+                map_params,
+                dummy: PhantomData,
+            }
+        }
     }
 }
 

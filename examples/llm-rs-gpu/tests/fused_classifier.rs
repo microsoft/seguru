@@ -134,34 +134,31 @@ fn test_fused_classifier_kernel3(
     );
     cuda_ctx(0, |ctx, m| {
         let config = gpu_host::gpu_config!(bt_len as u32, 1, 1, block_size as u32, 1, 1, 0);
-        let logits = ctx.new_gmem_with_len(h_logits.len(), &h_logits).unwrap();
-        let targets = ctx.new_gmem_with_len(h_targets.len(), &h_targets).unwrap();
-        let dlosses = ctx.new_gmem_with_len(h_dlosses.len(), &h_dlosses).unwrap();
-        let losses = ctx.new_gmem_with_len(h_losses.len(), &h_losses).unwrap();
-        let probs = ctx.new_gmem_with_len(h_probs.len(), &h_probs).unwrap();
+        let mut logits = ctx.new_tensor_view::<[f32]>(h_logits.as_slice()).unwrap();
+        let mut losses = ctx.new_tensor_view(h_losses.as_slice()).unwrap();
+        let mut probs = ctx.new_tensor_view(h_probs.as_slice()).unwrap();
+
+        let targets = ctx.new_tensor_view(h_targets.as_slice()).unwrap();
+        let dlosses = ctx.new_tensor_view(h_dlosses.as_slice()).unwrap();
         llm_rs_gpu::fused_classifier_kernel3::launch(
             config,
             ctx,
             m,
-            logits,
-            losses,
-            probs,
-            dlosses,
-            targets,
+            &mut logits,
+            &mut losses,
+            &mut probs,
+            &dlosses,
+            &targets,
             batch as _,
             t_len as _,
             vocab_len as _,
             padded_vocab_len as _,
         )
         .expect("Failed to run host arithmetic");
-        logits
-            .copy_to_host(&mut h_logits, bt_padded_len, ctx)
-            .unwrap();
-        losses.copy_to_host(&mut h_losses, bt_len, ctx).unwrap();
+        logits.copy_to_host(&mut h_logits).unwrap();
+        losses.copy_to_host(&mut h_losses).unwrap();
         if !h_probs.is_empty() {
-            probs
-                .copy_to_host(&mut h_probs, bt_padded_len, ctx)
-                .unwrap();
+            probs.copy_to_host(&mut h_probs).unwrap();
         }
     });
 

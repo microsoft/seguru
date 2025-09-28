@@ -62,19 +62,19 @@ pub fn test_layernorm_forward_kernel3<const N: usize, const C: usize, const LEN:
         let (cpu_out, cpu_mean, cpu_rstd) = layernorm_forward_cpu(h_input, h_weight, h_bias, N, C);
         let gsize: u32 = N as u32 * 32 / 512;
         let config = gpu_host::gpu_config!(gsize, 1, 1, @const 512, 1, 1, 0);
-        let out = ctx.new_gmem_with_len(h_output.len(), &h_output).unwrap();
-        let mean = ctx.new_gmem_with_len(h_mean.len(), &h_mean).unwrap();
-        let rstd = ctx.new_gmem_with_len(h_rstd.len(), &h_rstd).unwrap();
-        let inp = ctx.new_gmem_with_len(h_input.len(), h_input).unwrap();
-        let weight = ctx.new_gmem_with_len(h_weight.len(), h_weight).unwrap();
-        let bias = ctx.new_gmem_with_len(h_bias.len(), h_bias).unwrap();
+        let mut out = ctx.new_tensor_view(h_output.as_slice()).unwrap();
+        let mut mean = ctx.new_tensor_view(h_mean.as_slice()).unwrap();
+        let mut rstd = ctx.new_tensor_view(h_rstd.as_slice()).unwrap();
+        let inp = ctx.new_tensor_view(h_input).unwrap();
+        let weight = ctx.new_tensor_view(h_weight).unwrap();
+        let bias = ctx.new_tensor_view(h_bias).unwrap();
         llm_rs_gpu::layernorm_forward_kernel3::launch(
-            config, ctx, m, out, mean, rstd, inp, weight, bias, N as _, C as _,
+            config, ctx, m, &mut out, &mut mean, &mut rstd, &inp, &weight, &bias, N as _, C as _,
         )
         .expect("Failed to run host arithmetic");
-        out.copy_to_host(&mut h_output, LEN, ctx).unwrap();
-        mean.copy_to_host(&mut h_mean, N, ctx).unwrap();
-        rstd.copy_to_host(&mut h_rstd, N, ctx).unwrap();
+        out.copy_to_host(&mut h_output).unwrap();
+        mean.copy_to_host(&mut h_mean).unwrap();
+        rstd.copy_to_host(&mut h_rstd).unwrap();
         assert!(
             f32_eq(&cpu_rstd, &h_rstd, 1e-5),
             "rstd not match:\n\n{:?}\n\n{:?}",
@@ -225,22 +225,34 @@ fn test_layernorm_backward_kernel2() {
     cuda_ctx(0, |ctx, m| {
         let config =
             gpu_host::gpu_config!(gsize, 1, 1, @const BLOCK_SIZE, 1, 1, @const (SMEM as u32));
-        let dinp = ctx.new_gmem_with_len(h_dinp.len(), &h_dinp).unwrap();
-        let dweight = ctx.new_gmem_with_len(h_dweight.len(), &h_dweight).unwrap();
-        let dbias = ctx.new_gmem_with_len(h_dbias.len(), &h_dbias).unwrap();
-        let dout = ctx.new_gmem_with_len(h_dout.len(), &h_dout).unwrap();
-        let inp = ctx.new_gmem_with_len(h_inp.len(), &h_inp).unwrap();
-        let weight = ctx.new_gmem_with_len(h_weight.len(), &h_weight).unwrap();
-        let mean = ctx.new_gmem_with_len(h_mean.len(), &h_mean).unwrap();
-        let rstd = ctx.new_gmem_with_len(h_rstd.len(), &h_rstd).unwrap();
+        let mut dinp = ctx.new_tensor_view(h_dinp.as_slice()).unwrap();
+        let mut dweight = ctx.new_tensor_view(h_dweight.as_slice()).unwrap();
+        let mut dbias = ctx.new_tensor_view(h_dbias.as_slice()).unwrap();
+        let dout = ctx.new_tensor_view(h_dout.as_slice()).unwrap();
+        let inp = ctx.new_tensor_view(h_inp.as_slice()).unwrap();
+        let weight = ctx.new_tensor_view(h_weight.as_slice()).unwrap();
+        let mean = ctx.new_tensor_view(h_mean.as_slice()).unwrap();
+        let rstd = ctx.new_tensor_view(h_rstd.as_slice()).unwrap();
         llm_rs_gpu::layernorm_backward_kernel2::launch(
-            config, ctx, m, dinp, dweight, dbias, dout, inp, weight, mean, rstd, B as _, T as _,
+            config,
+            ctx,
+            m,
+            &mut dinp,
+            &mut dweight,
+            &mut dbias,
+            &dout,
+            &inp,
+            &weight,
+            &mean,
+            &rstd,
+            B as _,
+            T as _,
             C as _,
         )
         .expect("Failed to run host arithmetic");
-        dinp.copy_to_host(&mut h_dinp, LEN, ctx).unwrap();
-        dweight.copy_to_host(&mut h_dweight, C, ctx).unwrap();
-        dbias.copy_to_host(&mut h_dbias, C, ctx).unwrap();
+        dinp.copy_to_host(&mut h_dinp).unwrap();
+        dweight.copy_to_host(&mut h_dweight).unwrap();
+        dbias.copy_to_host(&mut h_dbias).unwrap();
     });
     let (expected_dinp, expected_dweight, expected_dbias) =
         layernorm_backward_cpu(&h_dout, &h_inp, &h_weight, &h_mean, &h_rstd, B, T, C);

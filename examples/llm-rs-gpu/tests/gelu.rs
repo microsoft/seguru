@@ -26,12 +26,13 @@ fn test_gelu() {
     let mut h_doutp = [0.0f32; N];
     const BLOCK_SIZE: u32 = 256;
     cuda_ctx(0, |ctx, m| {
-        let inp = ctx.new_gmem_with_len(N, &h_dinp).unwrap();
-        let outp = ctx.new_gmem_with_len(N, &h_doutp).unwrap();
+        let inp = ctx.new_tensor_view(h_dinp.as_slice()).unwrap();
+        let mut outp = ctx.new_tensor_view(h_doutp.as_slice()).unwrap();
         let grid_size = N.div_ceil(BLOCK_SIZE as usize);
         let config = gpu_host::gpu_config!(grid_size as u32, 1, 1, @const BLOCK_SIZE, 1, 1, 0);
-        gelu_forward_kernel::launch(config, ctx, m, outp, inp, N as i32).expect("launch failed");
-        outp.copy_to_host(&mut h_doutp, N, ctx)
+        gelu_forward_kernel::launch(config, ctx, m, &mut outp, &inp, N as i32)
+            .expect("launch failed");
+        outp.copy_to_host(&mut h_doutp)
             .expect("copy to host failed");
     });
     let expected = gelu_forward_cpu(&h_dinp);
@@ -68,15 +69,14 @@ fn test_gelu_backward() {
     let mut h_dinp = [0.0f32; N];
     const BLOCK_SIZE: u32 = 128;
     cuda_ctx(0, |ctx, m| {
-        let inp = ctx.new_gmem_with_len(N, &h_inp).unwrap();
-        let dout = ctx.new_gmem_with_len(N, &h_dout).unwrap();
-        let dinp = ctx.new_gmem_with_len(N, &h_dinp).unwrap();
+        let inp = ctx.new_tensor_view(h_inp.as_slice()).unwrap();
+        let dout = ctx.new_tensor_view(h_dout.as_slice()).unwrap();
+        let mut dinp = ctx.new_tensor_view(h_dinp.as_slice()).unwrap();
         let grid_size = N.div_ceil(BLOCK_SIZE as usize);
         let config = gpu_host::gpu_config!(grid_size as u32, 1, 1, @const BLOCK_SIZE, 1, 1, 0);
-        llm_rs_gpu::gelu_backward_kernel::launch(config, ctx, m, dinp, inp, dout, N as i32)
+        llm_rs_gpu::gelu_backward_kernel::launch(config, ctx, m, &mut dinp, &inp, &dout, N as i32)
             .expect("launch failed");
-        dinp.copy_to_host(&mut h_dinp, N, ctx)
-            .expect("copy to host failed");
+        dinp.copy_to_host(&mut h_dinp).expect("copy to host failed");
     });
     let expected = gelu_backward_cpu(&h_inp, &h_dout);
     assert!(

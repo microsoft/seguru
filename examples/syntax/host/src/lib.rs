@@ -19,22 +19,24 @@ pub fn run_host_arith<'ctx>(
     let h_g = (1..(1 + len)).map(|x| x as f32 * 1.1).collect::<Vec<f32>>();
     let mut h_h = 0.0f32;
 
-    let d_a = ctx.new_gmem_with_len::<u32>(len, &h_a)?;
-    let d_b = ctx.new_gmem_with_len::<u32>(len, &h_b)?;
-    let d_c = ctx.new_gmem_with_len::<u32>(len, &h_c)?;
-    let d_f = ctx.new_gmem_with_len::<f32>(len, &h_f)?;
-    let d_g = ctx.new_gmem_with_len::<f32>(len, &h_g)?;
-    let d_b_c = gpu::GlobalThreadChunk::new_from_host(d_b, gpu::Map2D::new(w));
-    let d_h = ctx.new_gmem(h_h)?;
+    let d_a = ctx.new_tensor_view::<[u32]>(&h_a)?;
+    let mut d_b = ctx.new_tensor_view::<[u32]>(&h_b)?;
+    let d_c = ctx.new_tensor_view::<[u32]>(&h_c)?;
+    let mut d_f = ctx.new_tensor_view::<[f32]>(&h_f)?;
+    let d_g = ctx.new_tensor_view::<[f32]>(&h_g)?;
+    let d_b_c = gpu::GlobalThreadChunk::new_from_host(&mut d_b, gpu::Map2D::new(w));
+    let mut d_h = ctx.new_tensor_view(&h_h)?;
 
     // Now do the kernel
     const BDIM_Y: u32 = 4;
     let config = gpu_host::gpu_config!(1, 1, 1, 1, @const BDIM_Y, 1, 0);
-    kernel_arith(config, ctx, m, d_a, d_b_c, d_c, d_f, w, d_g, d_h)
-        .expect("Kernel execution failed");
-    d_b.copy_to_host(&mut h_b, len, ctx)?;
-    d_f.copy_to_host(&mut h_f, len, ctx)?;
-    d_h.copy_to_host(&mut h_h, ctx)?;
+    kernel_arith(
+        config, ctx, m, &d_a, d_b_c, &d_c, &mut d_f, w, &d_g, &mut d_h,
+    )
+    .expect("Kernel execution failed");
+    d_b.copy_to_host(&mut h_b)?;
+    d_f.copy_to_host(&mut h_f)?;
+    d_h.copy_to_host(&mut h_h)?;
 
     for (i, bi) in h_b.iter().enumerate().take(BDIM_Y as _) {
         println!("b[{}] = {}", i, bi);
@@ -61,36 +63,36 @@ pub fn run_host_arith<'ctx>(
 
 pub fn test_oob1() {
     cuda_ctx(0, |ctx, m| {
-        let out = ctx.new_gmem_with_len(16, &[0.0; 16]).unwrap();
+        let mut out = ctx.new_tensor_view::<[f32]>(&[0.0; 16]).unwrap();
         let config = gpu_host::gpu_config!(1, 1, 1, 16, 1, 1, 0);
-        host::oob1(config, ctx, m, 1.1, out, 1)
+        host::oob1(config, ctx, m, 1.1, &mut out, 1)
     })
     .expect("Kernel execution failed");
 }
 
 pub fn test_oob2() {
     cuda_ctx(0, |ctx, m| {
-        let out = ctx.new_gmem_with_len(16, &[0.0; 16]).unwrap();
+        let mut out = ctx.new_tensor_view::<[f32]>(&[0.0; 16]).unwrap();
         let config = gpu_host::gpu_config!(1, 1, 1, 8, 1, 1, 0);
-        host::oob2(config, ctx, m, 1.1, out, 4)
+        host::oob2(config, ctx, m, 1.1, &mut out, 4)
     })
     .expect("Kernel execution failed");
 }
 
 pub fn test_oob3() {
     cuda_ctx(0, |ctx, m| {
-        let out = ctx.new_gmem_with_len(16, &[0.0; 16]).unwrap();
+        let mut out = ctx.new_tensor_view::<[f32]>(&[0.0; 16]).unwrap();
         let config = gpu_host::gpu_config!(1, 1, 1, 8, 1, 1, 0);
-        host::oob3(config, ctx, m, 1.1, out, 16)
+        host::oob3(config, ctx, m, 1.1, &mut out, 16)
     })
     .expect("Kernel execution failed");
 }
 
 pub fn test_oob_no_fails() {
     cuda_ctx(0, |ctx, m| {
-        let out = ctx.new_gmem_with_len(16, &[0.0; 16]).unwrap();
+        let mut out = ctx.new_tensor_view::<[f32]>(&[0.0; 16]).unwrap();
         let config = gpu_host::gpu_config!(1, 1, 1, 8, 1, 1, 0);
-        host::oob_no_fails(config, ctx, m, 1.1, out, 16)
+        host::oob_no_fails(config, ctx, m, 1.1, &mut out, 16)
     })
     .expect("Kernel execution failed");
 }

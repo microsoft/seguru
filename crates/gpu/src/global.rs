@@ -1,3 +1,6 @@
+#[cfg(not(feature = "codegen_tests"))]
+use cuda_bindings::TensorViewMut;
+
 use crate::GlobalGroupChunk;
 use crate::chunk::ScopeUniqueMap;
 use crate::chunk_scope::{ChunkScope, Grid};
@@ -17,8 +20,8 @@ pub struct GpuGlobal<'a, T: ?Sized> {
 impl<'a, T: ?Sized> GpuGlobal<'a, T> {
     // This is a host-side function.
     #[cfg(not(feature = "codegen_tests"))]
-    pub fn new(slice: &'a mut cuda_bindings::CudaMemBox<T>) -> Self {
-        unsafe { GpuGlobal { data: &mut *(slice.as_ptr() as *mut T) } }
+    pub fn new<'b: 'a>(slice: TensorViewMut<'a, T>) -> Self {
+        unsafe { GpuGlobal { data: &mut *(slice.as_flat_devptr() as *mut T) } }
     }
 }
 

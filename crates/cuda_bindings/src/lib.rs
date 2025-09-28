@@ -4,6 +4,7 @@
 #![allow(non_snake_case)]
 #![feature(register_tool)]
 #![feature(negative_impls)]
+#![feature(raw_slice_split)]
 #![allow(internal_features)]
 #![feature(rustc_attrs)]
 #![register_tool(gpu_codegen)]
@@ -14,6 +15,7 @@ use alloc::string::{String, ToString};
 mod ctx;
 mod mem;
 pub mod params;
+mod sized_or_slice;
 
 // This matches bindgen::Builder output
 #[allow(dead_code)]
@@ -28,7 +30,7 @@ pub use ctx::{
     CtxSpaceZero, GpuActiveToken, GpuCtxCreateAndUseToken, GpuCtxGuard, GpuCtxHandle, GpuCtxSpace,
     GpuCtxToken, GpuCtxZeroGuard, GpuFunction, GpuModule, GpuToken,
 };
-pub use mem::CudaMemBox;
+pub use mem::{TensorMut, TensorRef, TensorView, TensorViewMut};
 pub use params::{AsHostKernelParams, GPUConfig, GPUDynamicConfig, GPUStaticConfig, SafeGpuConfig};
 pub use unsafe_bindings::{CUctx_flags, CUdevprop};
 
@@ -40,6 +42,7 @@ pub const CUDA_SUCCESS: CUresult = CUresult::CUDA_SUCCESS;
 pub enum CudaError {
     Err(CUresult),
     Unknown(String),
+    MemAlignmentTooHigh(usize, usize),
     MemCopyOutOfBound,
 }
 
@@ -64,6 +67,9 @@ impl core::fmt::Debug for CudaError {
             }
             CudaError::MemCopyOutOfBound => write!(f, "CUDA Error: Memory copy out of bounds"),
             CudaError::Unknown(msg) => write!(f, "CUDA Error: {}", msg),
+            CudaError::MemAlignmentTooHigh(max_align, actual) => {
+                write!(f, "Memory alignment too high (max: {}, actual: {})", max_align, actual)
+            }
         }
     }
 }

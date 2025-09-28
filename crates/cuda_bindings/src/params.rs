@@ -3,9 +3,8 @@ use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::CudaMemBox;
-use crate::ctx::GpuCtxSpace;
-use crate::mem::GpuDataMarker;
+use crate::mem::{GpuDataMarker, TensorView, TensorViewMut};
+use crate::sized_or_slice::SizedOrSlice;
 use crate::unsafe_bindings::CUdevprop;
 
 #[rustc_diagnostic_item = "gpu_params::MAX_THREAD_PER_BLOCK"]
@@ -448,33 +447,28 @@ pub unsafe trait AsHostKernelParams {
 }
 
 /// We only allow the CudaMemBox to store a type T that is allowed as GpuDataMarker.
-unsafe impl<T: Sized + GpuDataMarker, N: GpuCtxSpace> AsHostKernelParams for CudaMemBox<T, N> {
-    fn as_kernel_param_data(&self) -> Vec<Box<dyn core::any::Any>> {
-        vec![Box::new(self.as_ptr() as usize)]
-    }
-}
-
-unsafe impl<T: ?Sized + GpuDataMarker, N: GpuCtxSpace> AsHostKernelParams for &CudaMemBox<T, N>
-where
-    CudaMemBox<T, N>: AsHostKernelParams,
+unsafe impl<'a, 'b, T: ?Sized + SizedOrSlice + GpuDataMarker> AsHostKernelParams
+    for &'a TensorView<'b, T>
 {
     fn as_kernel_param_data(&self) -> Vec<Box<dyn core::any::Any>> {
-        CudaMemBox::<T, N>::as_kernel_param_data(*self)
+        if let Some(len) = self.try_get_slice_len() {
+            vec![Box::new(self.as_devptr()), Box::new(len)]
+        } else {
+            vec![Box::new(self.as_devptr())]
+        }
     }
 }
 
-unsafe impl<T: ?Sized + Send, N: GpuCtxSpace> AsHostKernelParams for &mut CudaMemBox<T, N>
-where
-    CudaMemBox<T, N>: AsHostKernelParams,
+/// We only allow the CudaMemBox to store a type T that is allowed as GpuDataMarker.
+unsafe impl<'a, 'b, T: ?Sized + SizedOrSlice + GpuDataMarker> AsHostKernelParams
+    for &'a mut TensorViewMut<'b, T>
 {
     fn as_kernel_param_data(&self) -> Vec<Box<dyn core::any::Any>> {
-        CudaMemBox::<T, N>::as_kernel_param_data(*self)
-    }
-}
-
-unsafe impl<T: Sized + Send, N: GpuCtxSpace> AsHostKernelParams for CudaMemBox<[T], N> {
-    fn as_kernel_param_data(&self) -> Vec<Box<dyn core::any::Any>> {
-        vec![Box::new(self.as_ptr() as *const T as usize), Box::new(self.as_ptr().len())]
+        if let Some(len) = self.try_get_slice_len() {
+            vec![Box::new(self.as_devptr()), Box::new(len)]
+        } else {
+            vec![Box::new(self.as_devptr())]
+        }
     }
 }
 

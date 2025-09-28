@@ -7,7 +7,7 @@
 #![allow(internal_features)]
 #![feature(rustc_attrs)]
 #![register_tool(gpu_codegen)]
-#![no_std]
+#![cfg_attr(feature = "gpu", no_std)]
 
 extern crate alloc;
 use alloc::string::{String, ToString};

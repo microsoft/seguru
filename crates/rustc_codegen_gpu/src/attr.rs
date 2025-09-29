@@ -138,7 +138,7 @@ impl TryFrom<&str> for GpuItem {
             {
                 GpuItem::CoreFn(s.to_string())
             }
-            s if s.starts_with("core") => {
+            s if s.starts_with("core") || s.starts_with("std") => {
                 if let Some(i) = lang_item_from_str(s) {
                     GpuItem::Core(i)
                 } else {
@@ -311,7 +311,7 @@ impl GpuAttributes {
                 true
             }
             Some(GpuItem::CoreFn(path))
-                if ![
+                if [
                     "core::slice::index::slice_index_order_fail",
                     "core::slice::index::slice_start_index_len_fail",
                     "core::slice::index::slice_end_index_len_fail",

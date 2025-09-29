@@ -73,6 +73,7 @@ fn find_gpu_related_mono_items<'tcx>(
 ) -> Vec<(MonoItem<'tcx>, rustc_middle::mir::mono::MonoItemData)> {
     let tcx = cx.tcx;
     let mut gpu_items = FxHashSet::default();
+    let mut visited = FxHashSet::default();
     let mut results = vec![];
     let mut worklist = VecDeque::new();
     // Start from roots
@@ -83,7 +84,10 @@ fn find_gpu_related_mono_items<'tcx>(
                 worklist.push_back(*item);
             }
             if let MonoItem::Fn(instance) = item {
-                gpu_items.insert(*instance);
+                visited.insert(*instance);
+                if !attr.is_builtin() {
+                    gpu_items.insert(*instance);
+                }
                 cx.gpu_attrs.insert(*instance, attr);
             } else {
                 // Static and GlobalAsm items are not traversed further
@@ -97,14 +101,18 @@ fn find_gpu_related_mono_items<'tcx>(
         match item {
             MonoItem::Fn(instance) => {
                 for callee in callees_of_instance(cx, instance) {
-                    if !gpu_items.contains(&callee) {
-                        gpu_items.insert(callee);
+                    if !visited.contains(&callee) {
+                        visited.insert(callee);
                         let original_attr = cx.gpu_attrs(&callee);
+                        if original_attr.is_builtin() {
+                            continue;
+                        }
+                        gpu_items.insert(callee);
                         if !original_attr.is_gpu_related() {
                             cx.gpu_attrs
                                 .insert(callee, crate::attr::GpuAttributes::callee_device());
                             worklist.push_back(MonoItem::Fn(callee));
-                        } else if !original_attr.is_builtin() {
+                        } else {
                             // If the callee is a builtin, we don't need to traverse it further
                             worklist.push_back(MonoItem::Fn(callee));
                         }
@@ -123,6 +131,25 @@ fn find_gpu_related_mono_items<'tcx>(
                 results.push((*item, *data));
             }
         }
+    }
+
+    for instance in gpu_items {
+        let mono_item = MonoItem::Fn(instance);
+        if results.iter().any(|(it, _)| *it == mono_item) {
+            continue;
+        }
+        if instance.def.def_id_if_not_guaranteed_local_codegen().is_none() {
+            continue;
+        }
+        results.push((
+            mono_item,
+            rustc_middle::mir::mono::MonoItemData {
+                inlined: true,
+                linkage: rustc_middle::mir::mono::Linkage::Internal,
+                visibility: rustc_middle::mir::mono::Visibility::Default,
+                size_estimate: 0,
+            },
+        ));
     }
 
     results

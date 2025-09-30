@@ -1,4 +1,4 @@
-// compile-flags: -C llvm-args=--fp-contract=contract -C llvm-args=--denormal-fp-math=ieee -C llvm-args=--denormal-fp-math-f32=ieee --emit=llvm-ir
+// compile-flags: --emit=llvm-ir -C llvm-args="--fp-contract=fast" -C llvm-args="--denormal-fp-math=preserve-sign" -C llvm-args="--denormal-fp-math-f32=preserve-sign"
 // compile-pass
 #![feature(register_tool)]
 #![register_tool(gpu_codegen)]
@@ -17,7 +17,7 @@ pub fn add_float4(a: &float4, b: &float4) -> float4 {
         x: a.x + b.x + f,
         y: a.y + b.y,
         z: a.z + b.z,
-        w: a.w + b.w,
+        w: a.w / b.w,
     }
 }
 
@@ -29,6 +29,7 @@ pub fn test_float4(out: &mut [float4], in1: &float4, in2: &float4) {
 }
 
 // CHECK: @gpu_bin_cst = internal constant
-// PTX_CHECK: .visible .entry float4
-// PTX_CHECK: add.rn.f32
+// PTX_CHECK: .visible .entry float
+// PTX_CHECK: add.ftz.f32
+// PTX_CHECK: div.approx.ftz.f32
 // PTX_CHECK: 0f3F9DF3B6

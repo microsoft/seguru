@@ -7,6 +7,22 @@ use tracing::{debug, trace};
 
 use crate::backend::{GPUCodeGenModule, GPUCodegenBackend};
 
+pub(crate) fn get_compile_config(config: &rustc_session::config::CodegenOptions) -> CompileConfig {
+    let mut cconfig = CompileConfig::default();
+    config.llvm_args.iter().for_each(|arg| {
+        if let Some(fp_contract) = arg.strip_prefix("--fp-contract=") {
+            cconfig.use_fast = false; // diable default fast-math and rely on llvm_args to control fast-math
+            cconfig.llc_ptx_extra.push(arg.to_string());
+        } else if let Some(denormal_fp_math) = arg.strip_prefix("--denormal-fp-math=") {
+            cconfig.use_ftz = false; // diable default ftz and rely on llvm_args to control ftz
+            cconfig.llc_ptx_extra.push(arg.to_string());
+        } else {
+            cconfig.llc_ptx_extra.push(arg.to_string());
+        }
+    });
+    cconfig
+}
+
 pub(crate) fn codegen(
     cgcx: &CodegenContext<GPUCodegenBackend>,
     dcx: DiagCtxtHandle<'_>,
@@ -39,7 +55,7 @@ pub(crate) fn codegen(
         std::fs::write(&out, &content).unwrap();
         debug!("[Done]write MLIR module to {:?}", out);
         // mlir-opt must use "shell" in order to pass correct arguments.
-        CompileConfig::new()
+        get_compile_config(&cgcx.opts.cg)
             .mlir_compile(&out, &out_object)
             .expect("Failed to compile MLIR to object file");
 

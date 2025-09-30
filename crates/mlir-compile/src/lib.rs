@@ -4,6 +4,7 @@ use std::process::Command;
 
 use tracing::info;
 
+#[derive(Debug)]
 pub struct CompileConfig {
     pub opt_level: u8,
     pub cubin_chip: String,
@@ -12,6 +13,7 @@ pub struct CompileConfig {
     pub use_fast: bool,
     pub use_ftz: bool,
     pub dep_device_bc_files: Vec<PathBuf>,
+    pub llc_ptx_extra: Vec<String>,
 }
 
 impl Default for CompileConfig {
@@ -24,6 +26,7 @@ impl Default for CompileConfig {
             use_fast: true,
             use_ftz: true,
             dep_device_bc_files: vec![find_libdevice().unwrap()],
+            llc_ptx_extra: vec![],
         }
     }
 }
@@ -186,15 +189,26 @@ impl CompileConfig {
 
     fn llc_ptx(&self, inpath: &Path, outpath: &Path) -> std::io::Result<()> {
         info!("[llc] {:?} outputs {:?}", inpath, outpath);
-        let args = [
-            "-march=nvptx64",
-            &format!("-mcpu={}", self.cubin_chip),
-            &format!("-mattr={}", self.cubin_features),
-            &self.opt_flag(),
-            inpath.to_str().unwrap(),
-            "-o",
-            outpath.to_str().unwrap(),
+        let mut args = vec![
+            "-march=nvptx64".into(),
+            format!("-mcpu={}", self.cubin_chip),
+            format!("-mattr={}", self.cubin_features),
+            self.opt_flag(),
+            inpath.to_str().unwrap().into(),
+            "-o".into(),
+            outpath.to_str().unwrap().into(),
         ];
+        if self.use_fast {
+            args.push("--fp-contract=fast".into());
+            args.push("--nvptx-prec-divf32=0".into());
+            args.push("--nvptx-approx-log2f32".into());
+            args.push("--nvptx-prec-sqrtf32=0".into());
+            args.push("--nvptx-rsqrt-approx-opt".into());
+        }
+        if self.use_ftz {
+            args.push("--denormal-fp-math-f32=preserve-sign".into());
+            args.push("--denormal-fp-math=preserve-sign".into());
+        }
         command("llc", args)
     }
 

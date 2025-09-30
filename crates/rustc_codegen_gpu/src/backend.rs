@@ -1,7 +1,6 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use mlir_compile::CompileConfig;
 use rustc_codegen_ssa_gpu::traits::{CodegenBackend, ExtraBackendMethods, WriteBackendMethods};
 use rustc_codegen_ssa_gpu::{CodegenResults, ModuleCodegen};
 use rustc_data_structures::fx::FxIndexMap;
@@ -12,6 +11,7 @@ use rustc_session::Session;
 use rustc_span::Symbol;
 
 use crate::mlir::{create_mlir_ctx, new_empty_module};
+use crate::write::get_compile_config;
 
 #[derive(Clone)]
 pub struct GPUCodegenBackend();
@@ -276,7 +276,7 @@ impl CodegenBackend for GPUCodegenBackend {
                 bytecode_paths.push(bytecode_path.clone());
             }
         }
-        let mlir_compile_config = CompileConfig::new();
+        let mlir_compile_config = get_compile_config(&sess.opts.cg);
         let bc_file = outputs.with_extension("gpu.bc");
         let bc_lib_file = bc_file
             .parent()

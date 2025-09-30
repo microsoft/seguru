@@ -1,4 +1,4 @@
-// compile-flags: --emit=llvm-ir --emit=mir
+// compile-flags: -C llvm-args=--fp-contract=contract -C llvm-args=--denormal-fp-math=ieee --emit=llvm-ir --emit=mir
 // compile-pass
 #![feature(register_tool)]
 #![register_tool(gpu_codegen)]

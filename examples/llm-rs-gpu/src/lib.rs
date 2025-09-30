@@ -24,6 +24,24 @@ pub fn add_float4(a: &float4, b: &float4) -> float4 {
     }
 }
 
+/*
+__global__ void encoder_forward_kernel3(float4* out,
+                               const int* inp, const float4* wte, const float4* wpe,
+                               int B, int T, int C) {
+    int C4 = C / 4;
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int N = B * T * C4;
+    if (idx < N) {
+        int bt = idx / C4;
+        int b = bt / T;
+        int t = bt % T;
+        int c4 = idx % C4;
+        int ix = inp[b * T + t];
+        out[b * T * C4 + t * C4 + c4] = add_float4(wte[ix * C4 + c4], wpe[t * C4 + c4]);
+    }
+}
+*/
+
 #[gpu_macros::cuda_kernel]
 pub fn encoder_forward_kernel3(
     out: &mut [float4],
@@ -36,8 +54,8 @@ pub fn encoder_forward_kernel3(
 ) {
     let mut out = chunk_mut(out, MapLinear::new(1));
     let C4 = C / 4;
-    let idx = (gpu::block_dim::<gpu::DimX>() * gpu::block_id::<gpu::DimX>()
-        + gpu::thread_id::<gpu::DimX>()) as i32;
+    let idx =
+        (block_dim::<gpu::DimX>() * block_id::<gpu::DimX>() + thread_id::<gpu::DimX>()) as i32;
     let N = B * T * C4;
     if idx < N {
         let bt = idx / C4;
@@ -53,6 +71,30 @@ pub fn encoder_forward_kernel3(
     }
 }
 
+/*
+__global__ void encoder_backward_kernel(float* dwte, float* dwpe,
+                                        const float* dout, const int* inp,
+                                        int B, int T, int C) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int N = B * T * C;
+
+    if (idx < N) {
+        int bt = idx / C;
+        int b = bt / T;
+        int t = bt % T;
+        int c = idx % C;
+
+        int ix = inp[b * T + t];
+
+        const float* dout_btc = dout + b * T * C + t * C + c;
+        float* dwte_ix = dwte + ix * C + c;
+        float* dwpe_tc = dwpe + t * C + c;
+
+        atomicAdd(dwte_ix, *dout_btc);
+        atomicAdd(dwpe_tc, *dout_btc);
+    }
+}
+*/
 /// really bad naive kernel with atomicAdd
 #[gpu_macros::cuda_kernel]
 pub fn encoder_backward_kernel(
@@ -64,8 +106,7 @@ pub fn encoder_backward_kernel(
     T: i32,
     C: i32,
 ) {
-    let idx = (gpu::block_dim::<gpu::DimX>() * gpu::block_id::<gpu::DimX>()
-        + gpu::thread_id::<gpu::DimX>()) as i32;
+    let idx = (block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>()) as i32;
     let N = B * T * C;
     let dwte = gpu::sync::Atomic::new(dwte);
     let dwpe = gpu::sync::Atomic::new(dwpe);

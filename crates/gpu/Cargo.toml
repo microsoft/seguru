@@ -6,7 +6,11 @@ edition = "2021"
 [dependencies]
 cuda_bindings = { workspace = true, features = ["gpu"]}
 num-traits = { workspace = true }
+gpu_macros = {workspace = true}
 
+
+[dev-dependencies]
+gpu_macros = {workspace = true}
 [features]
 default = []
 codegen_tests = []

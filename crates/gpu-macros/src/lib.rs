@@ -6,6 +6,7 @@ use proc_macro::TokenStream;
 use quote::ToTokens;
 mod gpu_syntax;
 mod host_rewriter;
+mod reshape_map;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
 pub(crate) enum CodegenTarget {
@@ -65,4 +66,9 @@ pub fn attr(attr: TokenStream, item: TokenStream) -> TokenStream {
         kfun.attrs.push(syn::parse_quote!(#[gpu_codegen::#attr]));
     }
     kfun.into_token_stream().into()
+}
+
+#[proc_macro]
+pub fn reshape_map(input: TokenStream) -> TokenStream {
+    reshape_map::map_reshape_params(input)
 }

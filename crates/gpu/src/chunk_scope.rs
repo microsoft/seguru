@@ -27,7 +27,6 @@ impl SyncScope for Grid {}
 #[expect(private_bounds)]
 pub trait BuildChunkScope<S2: SyncScope>: SyncScope {
     type CS: ChunkScope<FromScope = Self, ToScope = S2>;
-
     #[gpu_codegen::device]
     #[gpu_codegen::ret_sync_data(1000)]
     fn build_chunk_scope(&self, to: S2) -> Self::CS;
@@ -533,11 +532,11 @@ where
     }
 }
 
-#[cfg(test)]
-mod test {
+#[cfg(any(test, doctest))]
+pub mod test {
     use super::*;
     #[derive(Clone)]
-    struct MockBlock2WarpScope<const SIZE: usize, const WARP_ID: usize, const BLOCK_SIZE: usize>;
+    pub struct MockBlock2WarpScope<const SIZE: usize, const WARP_ID: usize, const BLOCK_SIZE: usize>;
     impl<const SIZE: usize, const WARP_ID: usize, const BLOCK_SIZE: usize> PrivateTraitGuard
         for MockBlock2WarpScope<SIZE, WARP_ID, BLOCK_SIZE>
     {
@@ -559,7 +558,7 @@ mod test {
     }
 
     #[derive(Clone)]
-    struct MockWarp2ThreadScope<const SIZE: usize, const LANE_ID: usize>;
+    pub struct MockWarp2ThreadScope<const SIZE: usize, const LANE_ID: usize>;
     impl<const SIZE: usize, const LANE_ID: usize> PrivateTraitGuard
         for MockWarp2ThreadScope<SIZE, LANE_ID>
     {

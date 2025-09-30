@@ -12,7 +12,7 @@
 extern crate alloc;
 
 pub mod cg;
-mod chunk;
+pub mod chunk;
 mod chunk_impl;
 pub mod chunk_scope;
 mod device_intrinsic;

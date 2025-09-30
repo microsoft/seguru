@@ -106,7 +106,7 @@ fn test_matmul() {
 
     // CPU and GPU result may differ a bit due to precision issue
     assert!(
-        f32_eq(&expected, &h_doutp, 2.0),
+        f32_eq(&expected, &h_doutp, 1e-5),
         "expected {:?} \n\n got {:?}",
         &expected[0..64],
         &h_doutp[0..64]
@@ -128,7 +128,7 @@ fn test_matmul2() {
 
     // CPU and GPU result may differ a bit due to precision issue
     assert!(
-        f32_eq(&expected, &h_doutp, 2.0),
+        f32_eq(&expected, &h_doutp, 1e-5),
         "expected {:?} \n\n got {:?}",
         &expected[0..64],
         &h_doutp[0..64]

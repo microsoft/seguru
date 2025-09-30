@@ -61,6 +61,7 @@ pub const fn add_mlir_string_attr(_: &'static str) -> usize {
     unimplemented!()
 }
 
+#[derive(Clone, Copy, Default, Debug)]
 #[repr(C)]
 pub struct float4 {
     pub x: f32,

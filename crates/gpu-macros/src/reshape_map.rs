@@ -51,8 +51,7 @@ fn get_size_pairs(exprs: impl Iterator<Item = Expr>) -> Result<(Vec<Expr>, Vec<E
     Ok((old_sizes, new_sizes))
 }
 
-// map!([4,4] | [2,2] => weights: [1, 4, 10, 1000])
-// map!([4,4] | [2,2] => layout: [0, 1, 2, 3])
+// map!([4,4] | [2,2] => layout: [0, 1, 2, 3], offset: 10)
 struct MapPermuteArgs {
     span: proc_macro2::Span,
     gpu_crate: Path,

@@ -151,7 +151,7 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for Map2D {
 /// - Target tensor dimensions — e.g., a tensor of shape $(\hat{D}_0, \hat{D}_1, ... \hat{D}_{N+M})$
 ///
 /// We  want to map the logical linear or multi-dimensional index into the corresponding tensor element, possibly in a flattened memory layout.
-/// To ensure we can access the tensor properly, developers need to do linear2vec operation to convert threadid to $tids[D_{N+M}][...][`D_N`]$, and local_access_id to $lids[D_N][...][D_0]$
+/// To ensure we can access the tensor properly, developers need to do linear2vec operation to convert threadid to $tids[D_{N+M}][...][D_N]$, and local_access_id to $lids[D_N][...][D_0]$
 /// The `reshape_map!` macro generates a `MapReshape` struct that reshapes
 /// local thread ID and index to a shape and then creates a linearized combination
 /// of them according to a specified layout or weights to get a global access index.
@@ -161,7 +161,7 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for Map2D {
 /// gpu::reshape_map!(
 ///     [($local_id_dim, $tensor_dim?),*]  // local id + corresponding tensor dimension
 ///     |
-///     [($thread_id_dim, $tensor_dim?),*] // thread + corresponding tensor dimension
+///     [($thread_id_dim, $tensor_dim?),*] // thread id + corresponding tensor dimension
 ///     =>
 ///     layout: [-?i1, -?i2, ...]          // permutation of dimensions in the new layout
 ///     offset: $offset                // optional offset (default 0)
@@ -201,10 +201,8 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for Map2D {
 ///   id'_k =if reversed_k {TD_k - 1 - id_k} else {id_k}
 /// - Global ID
 ///   $globalid =  sum_{k=0}^{N+M}( id'_{p_{k}} prod_{j=0}^{k - 1}(TD_{p_j}))$
-/// - Accesses the array in permuted order, when all index are not used in reversed order.
-///   $arr[id_{p_0}][id_{p_1}]...[id_{p_{N+M-1}}]$
-/// - If an index is set to be used in reversed order, e.g., layout: [i0, -t0, ...]
-///   $arr[id_{p_0}][id_{p_1}]...[id_{p_{N+M-1}}]$
+/// - Accesses the array in permuted order
+///   $arr[id'_{p_0}][id'_{p_1}]...[id'_{p_{N+M-1}}]$
 ///
 /// ## Safety
 /// - Users cannot create `MapReshape` instances outside the macro without `unsafe {}`.
@@ -217,6 +215,9 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for Map2D {
 /// Similar to `MapLinear(3)` when `num_thread = 4`.
 /// ```rust
 /// gpu::reshape_map!([3] | [4]  => layout: [0, 1]);
+/// ```
+/// which is equivalent to
+/// ```rust
 /// gpu::reshape_map!([3] | [4] => layout: [i0, t0]);
 /// // local index shape: [3]
 /// // thread shape: [4]
@@ -227,19 +228,27 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for Map2D {
 /// Similar to `MapLinear(1)` when `num_thread = 4, arr.len = 12`.
 /// ```rust
 /// gpu::reshape_map!([3] | [4] => layout: [1, 0]);
+/// ```
+/// which is equivalent to
+/// ```rust
 /// gpu::reshape_map!([3] | [4] => layout: [t0, i0]);
 /// // local index shape: [3]
 /// // thread shape: [4]
+/// // array shape: arr[4][3]
 /// // Access: arr[idx0][tid0]
 /// // access -> tid: [0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3]
 /// ```
 /// ### Example 3: Software-defined thread dimension > 1
 /// ```rust
 /// gpu::reshape_map!([3] | [2, 2] => layout: [0, 2, 1]);
+/// ```
+/// which is equivalent to
+///
+///  ```rust
 /// gpu::reshape_map!([3] | [2, 2] => layout: [i0, t1, t0]);
 /// // local index shape: [3]
 /// // thread shape: [2, 2]
-/// // Access: arr[tid1][tid0][idx0]
+/// // Access: arr[tid0][tid1][idx0]
 /// // access -> tid: [0, 0, 0, 2, 2, 2, 1, 1, 1, 3, 3, 3]
 /// ```
 /// ### Example 4: Swap tid and extra_id, thread dimension > 1
@@ -248,7 +257,8 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for Map2D {
 /// gpu::reshape_map!([3] | [2, 2] => layout: [t1, i0, t0]);
 /// // local index shape: [3]
 /// // thread shape: [2, 2]
-/// // Access: arr[tid1][idx0][tid0]
+/// // array shape: arr[2][2][3]
+/// // Access: arr[tid0][idx0][tid1]
 /// // access -> tid: [0, 2, 0, 2, 0, 2, 1, 3, 1, 3, 1, 3]
 /// ```
 /// ### Example 5: Reverse a thread dimension
@@ -264,8 +274,9 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for Map2D {
 /// gpu::reshape_map!([3] | [2, (2, 1)] => layout: [0, 1, 2]);
 /// gpu::reshape_map!([3] | [2, (2, 1)] => layout: [i0, t0, t1]);
 /// // local index shape: [3]
-/// // thread shape: [4, 2]
-/// // Access: arr[tid0][tid1][idx0]
+/// // thread shape: [2, 2]
+/// // array shape: arr[1][2][3]
+/// // Access: arr[tid1][tid0][idx0]
 /// // valid access range:
 /// // 0 <= lid0 < 3
 /// // 0 <= tid0 < 2
@@ -274,15 +285,12 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for Map2D {
 /// ```
 /// ### Example 7: Skip some data by setting a larger size
 /// ```rust
-/// gpu::reshape_map!([3] | [(2, 4), 2] => layout: [0, 1, 2]);
-/// gpu::reshape_map!([3] | [(2, 4), 2] => layout: [i0, t0, t1]);
+/// gpu::reshape_map!([(3, 4)] | [2, 2] => layout: [0, 1, 2]);
+/// gpu::reshape_map!([(3, 4)] | [2, 2] => layout: [i0, t0, t1]);
 /// // local index shape: [3]
-/// // thread shape: [4, 2]
-/// // Access: arr[tid0][tid1][idx0]
-/// // valid access range:
-/// // 0 <= lid0 < 3
-/// // 0 <= tid0 < 2
-/// // 0 <= tid1 < 1
+/// // thread shape: [2, 2]
+/// // array shape: arr[2][2][4]
+/// // Access: arr[tid1][tid0][idx0]
 /// // access -> tid: [0, 0, 0, _, 1, 1, 1, _, 2, 2, 2, _, 3, 3, 3, _, ...]
 /// ```
 /// ## Invalid Examples

@@ -1,4 +1,6 @@
 use gpu_host::cuda_ctx;
+mod common;
+use common::{f32_eq, random_f32_vec};
 
 fn layernorm_forward_cpu(
     inp: &[f32],    // length = LEN
@@ -44,24 +46,10 @@ fn layernorm_forward_cpu(
     (out, means, rstds)
 }
 
-/// Due to CPU and GPU precision issue,
-/// we use this function to compare two f32 slices.
-fn f32_eq(a: &[f32], b: &[f32]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    for i in 0..a.len() {
-        if (a[i] - b[i]).abs() > 1e-5 {
-            return false;
-        }
-    }
-    true
-}
-
 pub fn test_layernorm_forward_kernel3<const N: usize, const C: usize, const LEN: usize>(
-    input: [f32; LEN],
-    weight: [f32; C],
-    bias: [f32; C],
+    input: &[f32],
+    weight: &[f32],
+    bias: &[f32],
 ) {
     cuda_ctx(0, |ctx, m| {
         assert!(LEN == C * N);
@@ -89,19 +77,19 @@ pub fn test_layernorm_forward_kernel3<const N: usize, const C: usize, const LEN:
         mean.copy_to_host(&mut h_mean, N, ctx).unwrap();
         rstd.copy_to_host(&mut h_rstd, N, ctx).unwrap();
         assert!(
-            f32_eq(&cpu_rstd, &h_rstd),
+            f32_eq(&cpu_rstd, &h_rstd, 1e-5),
             "rstd not match:\n\n{:?}\n\n{:?}",
             &cpu_rstd[0..32],
             &h_rstd[0..32],
         );
         assert!(
-            f32_eq(&cpu_mean, &h_mean),
+            f32_eq(&cpu_mean, &h_mean, 1e-5),
             "mean not match:\n\n{:?}\n\n{:?}",
             &cpu_mean[0..32],
             &h_mean[0..32],
         );
         assert!(
-            f32_eq(&cpu_out, &h_output),
+            f32_eq(&cpu_out, &h_output, 1e-5),
             "out not match:\n\n{:?}\n\n{:?}",
             &cpu_out[0..N * 2],
             &h_output[0..N * 2]
@@ -114,7 +102,7 @@ fn test_zero() {
     const N: usize = 32;
     const C: usize = 32;
     const LEN: usize = N * C;
-    test_layernorm_forward_kernel3::<N, C, LEN>([0.0f32; LEN], [1.0f32; C], [0.0f32; C]);
+    test_layernorm_forward_kernel3::<N, C, LEN>(&[0.0f32; LEN], &[1.0f32; C], &[0.0f32; C]);
 }
 
 #[test]
@@ -122,11 +110,11 @@ fn test_basic() {
     const N: usize = 32;
     const C: usize = 32;
     const LEN: usize = N * C;
-    let mut input = [0.0f32; LEN];
+    let mut input = random_f32_vec(LEN);
     for (i, input_elem) in input.iter_mut().enumerate() {
         *input_elem = i as _;
     }
-    test_layernorm_forward_kernel3::<N, C, LEN>(input, [1.0f32; C], [0.0f32; C]);
+    test_layernorm_forward_kernel3::<N, C, LEN>(&input, &[1.0f32; C], &[0.0f32; C]);
 }
 
 #[test]
@@ -134,9 +122,9 @@ fn test_large() {
     const N: usize = 128;
     const C: usize = 64;
     const LEN: usize = N * C;
-    let mut input = [0.0f32; LEN];
+    let mut input = random_f32_vec(LEN);
     for (i, input_elem) in input.iter_mut().enumerate() {
         *input_elem = i as _;
     }
-    test_layernorm_forward_kernel3::<N, C, LEN>(input, [1.0f32; C], [0.0f32; C]);
+    test_layernorm_forward_kernel3::<N, C, LEN>(&input, &[1.0f32; C], &[0.0f32; C]);
 }

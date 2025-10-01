@@ -1094,6 +1094,10 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         let (lhs, rhs) = self.int_val_pair_cast(lhs, rhs);
         let op = melior::dialect::arith::addi(lhs, rhs, self.cur_loc());
         let ret = self.append_op_res(op);
+        if self.tcx.sess.opts.cg.overflow_checks != Some(true) {
+            let overflow = self.const_value(0, self.type_i1());
+            return (ret, overflow);
+        }
         let cmp_op = if signed { IntPredicate::IntSGT } else { IntPredicate::IntUGT };
         let lhs_greater = self.icmp(cmp_op, lhs, ret);
         // overflow = (z < x) == (y > 0)
@@ -1116,6 +1120,10 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         let (lhs, rhs) = self.int_val_pair_cast(lhs, rhs);
         let op = melior::dialect::arith::subi(lhs, rhs, self.cur_loc());
         let ret = self.append_op_res(op);
+        if self.tcx.sess.opts.cg.overflow_checks != Some(true) {
+            let overflow = self.const_value(0, self.type_i1());
+            return (ret, overflow);
+        }
         // if signed: overflow = (y < 0) == (z < x)
         // if unsigned: overflow = (x < y)
         let overflow = if signed {
@@ -1141,6 +1149,10 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         let (lhs, rhs) = self.int_val_pair_cast(lhs, rhs);
         let op = melior::dialect::arith::muli(lhs, rhs, self.cur_loc());
         let ret = self.append_op_res(op);
+        if self.tcx.sess.opts.cg.overflow_checks != Some(true) {
+            let overflow = self.const_value(0, self.type_i1());
+            return (ret, overflow);
+        }
         let zero = self.const_value(0, rhs.r#type());
         // if signed, overflow = (((x ^ y ^ z) & (x ^ z)) < 0);
         // if unsigned, overflow = (y != 0 && x > z);
@@ -1315,6 +1327,9 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
     }
 
     fn assert(&mut self, cond: mlir_ir::Value<'ml, 'a>, msg: &str) {
+        if !self.tcx.sess.opts.debug_assertions {
+            return;
+        }
         // trap-based bound check is handled by assert op.
         let cond = self.use_value_as_ty(cond, self.type_i1());
         let msg = format!("{} {}", msg, self.cur_loc());

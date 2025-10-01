@@ -59,16 +59,15 @@ pub fn test_layernorm_forward_kernel3<const N: usize, const C: usize, const LEN:
         let mut h_output = [0.0f32; LEN];
         let mut h_mean = [0.0f32; N];
         let mut h_rstd = [0.0f32; N];
-        let (cpu_out, cpu_mean, cpu_rstd) =
-            layernorm_forward_cpu(&h_input, &h_weight, &h_bias, N, C);
+        let (cpu_out, cpu_mean, cpu_rstd) = layernorm_forward_cpu(h_input, h_weight, h_bias, N, C);
         let gsize: u32 = N as u32 * 32 / 512;
         let config = gpu_host::gpu_config!(gsize, 1, 1, @const 512, 1, 1, 0);
         let out = ctx.new_gmem_with_len(h_output.len(), &h_output).unwrap();
         let mean = ctx.new_gmem_with_len(h_mean.len(), &h_mean).unwrap();
         let rstd = ctx.new_gmem_with_len(h_rstd.len(), &h_rstd).unwrap();
-        let inp = ctx.new_gmem_with_len(h_input.len(), &h_input).unwrap();
-        let weight = ctx.new_gmem_with_len(h_weight.len(), &h_weight).unwrap();
-        let bias = ctx.new_gmem_with_len(h_bias.len(), &h_bias).unwrap();
+        let inp = ctx.new_gmem_with_len(h_input.len(), h_input).unwrap();
+        let weight = ctx.new_gmem_with_len(h_weight.len(), h_weight).unwrap();
+        let bias = ctx.new_gmem_with_len(h_bias.len(), h_bias).unwrap();
         llm_rs_gpu::layernorm_forward_kernel3::launch(
             config, ctx, m, out, mean, rstd, inp, weight, bias, N as _, C as _,
         )

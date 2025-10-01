@@ -132,7 +132,7 @@ fn test_basic_unpermute() {
     const D: i32 = 16;
     const LEN: usize = (B * N * NH * D) as usize;
 
-    let mut h_dinp = random_f32_vec(LEN);
+    let h_dinp = random_f32_vec(LEN);
     let h_doutp = random_f32_vec(LEN);
     test_unpermute_kernel(&h_dinp, &h_doutp, B, N, NH, D);
 }

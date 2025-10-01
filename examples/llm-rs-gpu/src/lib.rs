@@ -116,13 +116,13 @@ pub fn layernorm_forward_kernel3(
         return;
     }
     // the row of input that this group of threads is responsible for
-    let idx_C = idx * C as usize;
-    let x = &inp[idx_C..idx_C + C as usize];
+    let idx_C = idx * C;
+    let x = &inp[idx_C..idx_C + C];
 
     // mean
     let mut local_sum = 0.0f32;
     for i in (lane_id..C).step_by(warp.size()) {
-        local_sum += x[i as usize];
+        local_sum += x[i];
     }
     let sum: f32 = warp.redux(ReduxAdd, local_sum);
     let m = sum / C as f32;
@@ -133,7 +133,7 @@ pub fn layernorm_forward_kernel3(
     // rstd
     let mut local_sum = 0.0f32;
     for i in (lane_id..C).step_by(warp.size()) {
-        let diff = x[i as usize] - m;
+        let diff = x[i] - m;
         local_sum += diff * diff;
     }
     let sum = warp.redux(ReduxAdd, local_sum);
@@ -146,7 +146,6 @@ pub fn layernorm_forward_kernel3(
         // load and store using the .cs "streaming" hint to the compiler,
         // indicating that this data will not be reused soon, and can be streamed through the caches
         // this allows the threads to get more cache-hits for the (shared) weight and bias parameters
-        let c = c as usize;
         let n = s * (x[c].ldcs() - m);
         let o = n * weight[c] + bias[c];
         chunked_out[i].stcs(o);

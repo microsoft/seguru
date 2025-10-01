@@ -21,6 +21,7 @@ pub fn f32_eq(a: &[f32], b: &[f32], eps: f32) -> bool {
     true
 }
 
+#[allow(dead_code)]
 /// Returns a Vec of `n` random f32 numbers in [0.0, 1.0)
 pub fn random_f32_vec(n: usize) -> Vec<f32> {
     let mut rng = rand::rng();

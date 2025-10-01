@@ -2,6 +2,7 @@ mod abi;
 mod asm;
 mod coverage;
 mod debug;
+mod dim;
 mod intrinsic;
 mod print;
 
@@ -1417,7 +1418,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             llbb.parent_operation().unwrap().attribute("sym_name").unwrap(),
         )
         .unwrap();
-        Self {
+        let mut builder = Self {
             cx,
             name: sym.value().to_string(),
             cur_block: llbb,
@@ -1429,7 +1430,9 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             san_dummy: None,
             #[cfg(feature = "inplace_bound_check")]
             valid_mem_access: None,
-        }
+        };
+        builder.add_dim_assumptions();
+        builder
     }
 
     fn build_with_san_dummy(
@@ -2637,7 +2640,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         let fn_sym_ptr = llfn.to_func_sym().unwrap();
         let sym = fn_sym_ptr.value();
         debug!("fn_sym_ptr = {}", fn_sym_ptr);
-        let ftype = Some(self.fn_db.read().unwrap()[sym].get_func_type().unwrap());
+        let ftype = Some(self.fn_db.read().unwrap()[sym].op.get_func_type().unwrap());
         let span = self.cur_span;
         let op = self.call_op(llfn, instance, args, ftype, span).unwrap();
         let loc = self.cur_loc().to_string();

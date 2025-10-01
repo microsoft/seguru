@@ -3,12 +3,30 @@ use melior::ir::operation::OperationBuilder;
 use melior::ir::r#type::IntegerType;
 use melior::ir::{Attribute, Identifier, Location, Operation, Type, Value, ValueLike};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DimFn {
     GlobalThreadId,
     ThreadId,
     BlockId,
     BlockDim,
     GridDim,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DimType {
+    X,
+    Y,
+    Z,
+}
+
+impl DimType {
+    pub fn to_str(self) -> &'static str {
+        match self {
+            DimType::X => "x",
+            DimType::Y => "y",
+            DimType::Z => "z",
+        }
+    }
 }
 
 pub enum NonDimFn {

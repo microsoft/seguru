@@ -24,6 +24,12 @@ use crate::mlir::BlockRefWithTime;
 
 type CodegenGPUError = String;
 
+pub struct FnInfo<'tcx, 'ml, 'a> {
+    pub op: mlir_ir::operation::OperationRef<'ml, 'a>,
+    pub instance: rustc_middle::ty::Instance<'tcx>,
+    pub ptr: Option<mlir_ir::Value<'ml, 'a>>,
+}
+
 pub(crate) struct GPUCodegenContext<'tcx, 'ml, 'a> {
     pub cgu_name: String,
     pub cgu: &'tcx rustc_middle::mir::mono::CodegenUnit<'tcx>,
@@ -31,9 +37,7 @@ pub(crate) struct GPUCodegenContext<'tcx, 'ml, 'a> {
     pub mlir_module: &'ml melior::ir::Module<'ml>,
     pub mlir_body: HashMap<String, melior::ir::BlockRef<'ml, 'ml>>,
     pub dummy: PhantomData<&'a mlir_ir::operation::Operation<'ml>>,
-    pub fn_db: RwLock<HashMap<String, mlir_ir::operation::OperationRef<'ml, 'a>>>,
-    pub fn_ptr_db:
-        RwLock<HashMap<String, (rustc_middle::ty::Instance<'tcx>, mlir_ir::Value<'ml, 'a>)>>,
+    pub fn_db: RwLock<HashMap<String, FnInfo<'tcx, 'ml, 'a>>>,
     pub indirect_entry:
         std::sync::Mutex<Option<crate::context::to_mir_func::IndirectEntry<'tcx, 'ml>>>,
     pub const_alloc: RwLock<HashMap<rustc_const_eval::interpret::AllocId, mlir_ir::Value<'ml, 'a>>>,
@@ -80,7 +84,6 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             mlir_body,
             dummy: PhantomData,
             fn_db: RwLock::new(HashMap::new()),
-            fn_ptr_db: RwLock::new(HashMap::new()),
             indirect_entry: std::sync::Mutex::new(None),
             const_alloc: RwLock::new(HashMap::new()),
             const_name_to_allocid: RwLock::new(HashMap::new()),

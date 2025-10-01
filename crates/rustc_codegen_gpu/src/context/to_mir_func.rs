@@ -16,7 +16,7 @@ use tracing::debug;
 use super::GPUCodegenContext;
 use crate::attr::GpuAttributes;
 use crate::builder::GpuBuilder;
-use crate::context::CodegenGPUError;
+use crate::context::{CodegenGPUError, FnInfo};
 use crate::mlir::{MLIRMutOpHelpers, MLIROpHelpers, MLIRVisibility};
 
 const INDIRECT: &str = "__indirect_";
@@ -97,8 +97,10 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let def_id: rustc_hir::def_id::DefId = instance.def_id();
 
         let instance_sym = self.sanitized_symbol_name(instance);
-        if self.fn_ptr_db.read().unwrap().contains_key(&instance_sym) {
-            return self.fn_ptr_db.read().unwrap()[&instance_sym].1;
+        if self.fn_db.read().unwrap().contains_key(&instance_sym) {
+            if let Some(ptr) = self.fn_db.read().unwrap()[&instance_sym].ptr {
+                return ptr;
+            }
         }
         let gpu_attrs = self.gpu_attrs(&instance);
         let op = self.get_fn(instance);
@@ -117,7 +119,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             self.mlir_body(is_gpu).append_operation(const_op)
         };
         let val = op.result(0).unwrap().into();
-        self.fn_ptr_db.write().unwrap().insert(instance_sym, (instance, val));
+        self.fn_db.write().unwrap().get_mut(&instance_sym).unwrap().ptr = Some(val);
         val
     }
 
@@ -402,7 +404,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         {
             let fn_db = self.fn_db.read().unwrap();
             if fn_db.contains_key(&sym) {
-                return fn_db[&sym];
+                return fn_db[&sym].op;
             }
         }
         let mut gpu_attrs = self.gpu_attrs(&instance);
@@ -434,7 +436,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             });
             let fn_db = self.fn_db.read().unwrap();
             if fn_db.contains_key(&dev_sym) {
-                return fn_db[&dev_sym];
+                return fn_db[&dev_sym].op;
             }
             dev_sym
         } else {
@@ -503,8 +505,8 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let body = self.mlir_body(in_gpu_mod);
         debug!("append operation to block {} {:?}", operation, fn_sym);
         let op = body.append_operation(operation);
-        self.fn_db.write().unwrap().insert(sym, op);
-        self.fn_db.write().unwrap().insert(fn_sym.clone(), op);
+        self.fn_db.write().unwrap().insert(sym, FnInfo { op, instance, ptr: None });
+        self.fn_db.write().unwrap().insert(fn_sym.clone(), FnInfo { op, instance, ptr: None });
         self.fn_shared_memory_size.write().unwrap().insert(fn_sym.clone(), 0);
         op
     }

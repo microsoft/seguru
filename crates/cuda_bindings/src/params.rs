@@ -112,13 +112,22 @@ pub const CU_DEV_PROP: CUdevprop = CUdevprop {
 /// ```
 ///
 /// Refer to `gpu_config!` macro documentation for details.
+#[rustc_diagnostic_item = "gpu::Config"]
 pub trait GPUConfig: 'static {
+    #[rustc_diagnostic_item = "gpu::Config::BDIM_X"]
     const BLOCK_DIM_X: u32 = 1;
+    #[rustc_diagnostic_item = "gpu::Config::BDIM_Y"]
     const BLOCK_DIM_Y: u32 = 1;
+
+    #[rustc_diagnostic_item = "gpu::Config::BDIM_Z"]
     const BLOCK_DIM_Z: u32 = 1;
+    #[rustc_diagnostic_item = "gpu::Config::GDIM_X"]
     const GRID_DIM_X: u32 = 1;
+    #[rustc_diagnostic_item = "gpu::Config::GDIM_Y"]
     const GRID_DIM_Y: u32 = 1;
+    #[rustc_diagnostic_item = "gpu::Config::GDIM_Z"]
     const GRID_DIM_Z: u32 = 1;
+    #[rustc_diagnostic_item = "gpu::Config::SMEM_SIZE"]
     const SHARED_SIZE: Option<u32> = Some(0);
 
     fn dynamic_grid_dim_x(&self) -> u32 {

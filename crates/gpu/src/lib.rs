@@ -30,8 +30,6 @@ pub use chunk_impl::{Map2D, MapLinear, MapLinearWithDim};
 #[cfg(not(feature = "codegen_tests"))]
 pub use cuda_bindings::SafeGpuConfig;
 pub use device_intrinsic::GPUDeviceFloatIntrinsics;
-#[cfg(not(feature = "codegen_tests"))]
-pub use dim::assume_dim_with_config;
 pub use dim::{
     DimType, DimX, DimY, DimZ, block_dim, block_id, dim, global_id, grid_dim, thread_id,
 };

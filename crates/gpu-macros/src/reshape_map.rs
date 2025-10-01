@@ -260,6 +260,7 @@ pub(crate) fn map_reshape_params(tokens: TokenStream) -> TokenStream {
             (#valid, #global_idx)
         }
     }
+    #[allow(clippy::identity_op)]
     PrivateMapReshapeShuffle {
         old_sizes: [#(#old_sizes,)*],
         new_sizes:  [#(#new_sizes,)*],

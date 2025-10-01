@@ -1,4 +1,4 @@
-use gpu_host::{cuda_ctx, SafeGpuConfig};
+use gpu_host::cuda_ctx;
 use syntax_host::run_host_arith;
 
 #[test]

@@ -134,6 +134,12 @@ impl<'a, T: ?Sized + AsSharedSlice, CS: ChunkScope, Map: ScopeUniqueMap<CS>>
             dummy: PhantomData,
         }
     }
+
+    #[gpu_codegen::device]
+    #[inline]
+    pub fn local2global(&self, idx: <Map as ScopeUniqueMap<CS>>::IndexType) -> usize {
+        self.map_params.local_to_global_index(idx).1
+    }
 }
 
 trait PrivateTraitGuard {}

@@ -69,12 +69,11 @@ fn test_gelu_backward() {
     let mut h_dinp = [0.0f32; N];
     const BLOCK_SIZE: u32 = 128;
     cuda_ctx(0, |ctx, m| {
-        let inp = ctx.new_tensor_view(h_inp.as_slice()).unwrap();
         let dout = ctx.new_tensor_view(h_dout.as_slice()).unwrap();
-        let mut dinp = ctx.new_tensor_view(h_dinp.as_slice()).unwrap();
+        let mut dinp = ctx.new_tensor_view(h_inp.as_slice()).unwrap();
         let grid_size = N.div_ceil(BLOCK_SIZE as usize);
         let config = gpu_host::gpu_config!(grid_size as u32, 1, 1, @const BLOCK_SIZE, 1, 1, 0);
-        llm_rs_gpu::gelu_backward_kernel::launch(config, ctx, m, &mut dinp, &inp, &dout, N as i32)
+        llm_rs_gpu::gelu_backward_kernel::launch(config, ctx, m, &mut dinp, &dout, N as i32)
             .expect("launch failed");
         dinp.copy_to_host(&mut h_dinp).expect("copy to host failed");
     });

@@ -9,6 +9,8 @@
 /// Instead, use the safe wrappers in `gpu_host` crate.
 /// and use `gpu_macros::host` to generate host code.
 use alloc::boxed::Box;
+use alloc::collections::btree_map::BTreeMap;
+use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::marker::PhantomData;
@@ -289,6 +291,7 @@ impl<'ctx, 'a, N: GpuCtxSpace> Drop for GpuCtxGuard<'ctx, 'a, N> {
 #[derive(Debug)]
 pub struct GpuModule<N: GpuCtxSpace> {
     module: CUmodule,
+    cached_functions: BTreeMap<String, (CUfunction, i32)>,
     _marker: PhantomData<N>,
 }
 
@@ -337,6 +340,10 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
         m: &GpuModule<N>,
         func_name: &str,
     ) -> Result<GpuFunction<'ctx, N>, CudaError> {
+        if let Some(&(func, max_dyn_shared_size)) = m.cached_functions.get(func_name) {
+            return Ok(GpuFunction { func, max_dyn_shared_size, _marker: PhantomData });
+        }
+
         let func_name_cstr = alloc::ffi::CString::new(func_name).expect("Failed to create CString");
         let ret;
         let mut func_uninit = MaybeUninit::<CUfunction>::uninit();
@@ -511,7 +518,51 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
             }
             module_uninit.assume_init()
         };
-        let m = GpuModule { module, _marker: PhantomData };
+        // This is safe since module is valid.
+        let num_functions = unsafe {
+            let mut count = 0;
+            let ret = cuModuleGetFunctionCount(&mut count, module);
+            assert!(ret == CUDA_SUCCESS, "Failed to get function count");
+            count
+        };
+
+        let mut functions = vec![core::ptr::null_mut() as CUfunction; num_functions as usize];
+        // This is safe since it will fill in kernel function pointers once no errors.
+        unsafe {
+            let ret = cuModuleEnumerateFunctions(functions.as_mut_ptr(), num_functions, module);
+            if ret != CUDA_SUCCESS {
+                return Err(CudaError::Err(ret));
+            }
+        }
+
+        let mut cached_functions = BTreeMap::new();
+        for f in functions {
+            let mut name_ptr = MaybeUninit::<*const ::core::ffi::c_char>::uninit();
+            // This is safe since f is valid.
+            let name = unsafe {
+                let ret = cuFuncGetName(name_ptr.as_mut_ptr(), f);
+                assert!(ret == CUDA_SUCCESS, "Failed to get function name");
+                let c_str = core::ffi::CStr::from_ptr(name_ptr.assume_init());
+                c_str.to_str().unwrap().to_string()
+            };
+            unsafe {
+                let ret = cuFuncLoad(f);
+                assert!(ret == CUDA_SUCCESS, "Failed to load function");
+            }
+            // Safety: it is safe since func is valid and error is checked before using result.
+            let mut max_dyn_shared_size_uninit = MaybeUninit::uninit();
+            let max_dyn_shared_size = unsafe {
+                let ret = cuFuncGetAttribute(
+                    max_dyn_shared_size_uninit.as_mut_ptr(),
+                    CUfunction_attribute::CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+                    f,
+                );
+                assert!(ret == CUDA_SUCCESS, "Failed to get function attribute");
+                max_dyn_shared_size_uninit.assume_init()
+            };
+            cached_functions.insert(name, (f, max_dyn_shared_size));
+        }
+        let m = GpuModule { module, cached_functions, _marker: PhantomData };
         Ok(self.ctx.alloc_typed(m))
     }
 }

@@ -159,6 +159,26 @@ impl<'a, T: ?Sized> TensorView<'a, T> {
     }
 }
 
+impl<'a, T: Default + Clone + core::fmt::Debug + 'static> core::fmt::Display
+    for TensorView<'a, [T]>
+{
+    fn fmt(&self, f: &mut alloc::fmt::Formatter<'_>) -> alloc::fmt::Result {
+        let max_print_len = core::cmp::min(100, self.len());
+        let mut host_data = alloc::vec![T::default(); max_print_len];
+        self.index(..max_print_len).copy_to_host(&mut host_data).expect("copy to host failed");
+        write!(f, "TensorView {{ devptr: {:?} }}: {:?}", self.as_devptr(), host_data)?;
+        Ok(())
+    }
+}
+
+impl<'a, T: Default + Clone + core::fmt::Debug + 'static> core::fmt::Display
+    for TensorViewMut<'a, [T]>
+{
+    fn fmt(&self, f: &mut alloc::fmt::Formatter<'_>) -> alloc::fmt::Result {
+        (self as &TensorView<'a, [T]>).fmt(f)
+    }
+}
+
 #[expect(private_bounds)]
 impl<'a, T: ?Sized + SizedOrSlice> TensorView<'a, T> {
     pub fn index<'b, I>(&'b self, index: I) -> TensorView<'b, <T as core::ops::Index<I>>::Output>

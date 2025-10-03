@@ -593,7 +593,7 @@ __device__ inline float lerp(float start, float end, float weight) {
 */
 #[gpu_macros::device]
 #[inline(always)]
-pub fn lerp(start: f32, end: f32, weight: f32) -> f32 {
+fn lerp(start: f32, end: f32, weight: f32) -> f32 {
     weight.fma(end, (-weight).fma(start, start))
 }
 
@@ -1029,6 +1029,25 @@ pub fn softmax_autoregressive_backward_kernel(
     }
 }
 
+/*
+__global__ void adamw_kernel2(float* params_memory, float* grads_memory, float* m_memory, float* v_memory, long num_parameters,
+                              float learning_rate, float beta1, float beta2, float beta1_correction, float beta2_correction, float eps, float weight_decay) {
+   int i = blockIdx.x * blockDim.x + threadIdx.x;
+   if (i >= num_parameters) return;  // guard
+   float grad = grads_memory[i];
+   float m = m_memory[i];
+   float v = v_memory[i];
+   // update the first moment (momentum)
+   m = lerp(grad, m, beta1);
+   m_memory[i] = m;
+   // update the second moment (RMSprop)
+   v = lerp(grad * grad, v, beta2);
+   v_memory[i] = v;
+   m /= beta1_correction;  // m_hat
+   v /= beta2_correction;  // v_hat
+   params_memory[i] -= learning_rate * (m / (sqrtf(v) + eps) + weight_decay * params_memory[i]);
+}
+*/
 /// TODO: add tests
 #[gpu_macros::cuda_kernel]
 pub fn adamw_kernel2(
@@ -1048,8 +1067,7 @@ pub fn adamw_kernel2(
     let mut params_memory = chunk_mut(params_memory, gpu::MapLinear::new(1));
     let mut m_memory = chunk_mut(m_memory, gpu::MapLinear::new(1));
     let mut v_memory = chunk_mut(v_memory, gpu::MapLinear::new(1));
-    let idx = (gpu::block_dim::<gpu::DimX>() * gpu::block_id::<gpu::DimX>()
-        + gpu::thread_id::<gpu::DimX>()) as i32;
+    let idx = (block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>()) as i32;
     if idx >= num_parameters {
         return;
     }
@@ -1058,7 +1076,7 @@ pub fn adamw_kernel2(
     let v = v_memory[0];
     // update the first moment (momentum)
     let m = lerp(grad, m, beta1);
-    m_memory[0] = lerp(grad, m, beta1);
+    m_memory[0] = m;
     // update the second moment (RMSprop)
     let v = lerp(grad * grad, v, beta2);
     v_memory[0] = v;

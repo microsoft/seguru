@@ -188,7 +188,7 @@ pub(crate) fn module_codegen<'tcx>(
                 rustc_middle::mir::mono::MonoItem::Fn(instance) => {
                     let attr = cx.gpu_attrs(instance);
                     if !attr.is_builtin() {
-                        crate::mir_analysis::analyze_gpu_code(tcx, instance.def_id(), attr.kernel)
+                        crate::mir_analysis::analyze_gpu_code(tcx, instance, attr.kernel)
                             .unwrap_or_else(|err| {
                                 err.fatal(tcx);
                             });

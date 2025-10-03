@@ -68,7 +68,7 @@ impl<'tcx> Analysis<'tcx> for MutArgAnalysis {
 /// MutArgDataFlowVistors detects invalid mutable argument used in non-chunking/atomic ops.
 pub(crate) struct MutArgDataFlowVistors<'tcx> {
     tcx: rustc_middle::ty::TyCtxt<'tcx>,
-    local_decls: &'tcx rustc_index::IndexVec<Local, rustc_middle::mir::LocalDecl<'tcx>>,
+    local_decls: rustc_index::IndexVec<Local, rustc_middle::mir::LocalDecl<'tcx>>,
     // This is mostly not needed after represent &mut as GlobalMem, but keep it for now as a defense in depth.
     // Only used for global memory since shared memory is always protected by SharedMem type.
     invalid_write: Vec<(Place<'tcx>, Location)>,
@@ -77,7 +77,7 @@ pub(crate) struct MutArgDataFlowVistors<'tcx> {
 impl<'tcx> MutArgDataFlowVistors<'tcx> {
     pub fn new(
         tcx: rustc_middle::ty::TyCtxt<'tcx>,
-        local_decls: &'tcx rustc_index::IndexVec<Local, rustc_middle::mir::LocalDecl<'tcx>>,
+        local_decls: rustc_index::IndexVec<Local, rustc_middle::mir::LocalDecl<'tcx>>,
     ) -> Self {
         Self { tcx, invalid_write: Vec::new(), local_decls }
     }
@@ -90,7 +90,6 @@ impl<'tcx> MutArgDataFlowVistors<'tcx> {
 struct MutArgMirVisitor<'a, 'tcx> {
     tcx: rustc_middle::ty::TyCtxt<'tcx>,
     state: &'a Domain,
-    local_decls: &'tcx rustc_index::IndexVec<Local, rustc_middle::mir::LocalDecl<'tcx>>,
     inside_fcall: bool,
     flow_visitor_res: &'a mut MutArgDataFlowVistors<'tcx>,
 }
@@ -217,14 +216,8 @@ impl<'mir, 'tcx> ResultsVisitor<'mir, 'tcx, MutArgAnalysis> for MutArgDataFlowVi
         stmt: &'mir Statement<'tcx>,
         location: Location,
     ) {
-        MutArgMirVisitor {
-            tcx: self.tcx,
-            local_decls: self.local_decls,
-            state,
-            flow_visitor_res: self,
-            inside_fcall: false,
-        }
-        .visit_statement(stmt, location);
+        MutArgMirVisitor { tcx: self.tcx, state, flow_visitor_res: self, inside_fcall: false }
+            .visit_statement(stmt, location);
     }
 
     fn visit_after_primary_terminator_effect(
@@ -234,13 +227,8 @@ impl<'mir, 'tcx> ResultsVisitor<'mir, 'tcx, MutArgAnalysis> for MutArgDataFlowVi
         terminator: &'mir Terminator<'tcx>,
         location: Location,
     ) {
-        let mut visitor = MutArgMirVisitor {
-            tcx: self.tcx,
-            local_decls: self.local_decls,
-            state,
-            flow_visitor_res: self,
-            inside_fcall: false,
-        };
+        let mut visitor =
+            MutArgMirVisitor { tcx: self.tcx, state, flow_visitor_res: self, inside_fcall: false };
         visitor.visit_terminator(terminator, location);
     }
 }
@@ -248,11 +236,11 @@ impl<'mir, 'tcx> ResultsVisitor<'mir, 'tcx, MutArgAnalysis> for MutArgDataFlowVi
 /// Analyze the MIR body to check the mutable arguments.
 pub(crate) fn analyze_mut_args<'tcx>(
     tcx: rustc_middle::ty::TyCtxt<'tcx>,
-    body: &'tcx Body<'tcx>,
+    body: &Body<'tcx>,
 ) -> GpuCodegenResult<()> {
     let analysis = MutArgAnalysis;
     let mut results = analysis.iterate_to_fixpoint(tcx, body, None);
-    let mut result_visitor = MutArgDataFlowVistors::new(tcx, &body.local_decls);
+    let mut result_visitor = MutArgDataFlowVistors::new(tcx, body.local_decls.clone());
     results.visit_with(body, body.basic_blocks.iter_nodes(), &mut result_visitor);
     for (place, location) in result_visitor.invalid_write.iter() {
         let span = body.source_info(*location).span;

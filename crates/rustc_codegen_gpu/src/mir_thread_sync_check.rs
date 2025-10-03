@@ -137,7 +137,7 @@ struct ThreadSyncDomain {
     local_origin: FxHashMap<Local, DenseBitSet<Local>>, // Map from memory local to its original local
 }
 
-impl<'a> DebugWithContext<ThreadSyncAnalysis<'a>> for ThreadSyncDomain {}
+impl<'a> DebugWithContext<ThreadSyncAnalysis<'a, '_>> for ThreadSyncDomain {}
 
 impl ThreadSyncDomain {
     fn empty(len: usize) -> Self {
@@ -178,12 +178,12 @@ impl rustc_mir_dataflow::JoinSemiLattice for ThreadSyncDomain {
 /// The idea is to support multi-scope sync and track the sync scope bits.
 /// Currently, we only support Block scope sync.
 /// See sync_missing_xxx.rs tests
-struct ThreadSyncAnalysis<'tcx> {
+struct ThreadSyncAnalysis<'tcx, 'mir> {
     tcx: rustc_middle::ty::TyCtxt<'tcx>,
-    body: &'tcx Body<'tcx>,
+    body: &'mir Body<'tcx>,
 }
 
-impl<'tcx> Analysis<'tcx> for ThreadSyncAnalysis<'tcx> {
+impl<'tcx> Analysis<'tcx> for ThreadSyncAnalysis<'tcx, '_> {
     // Track the mutable argument locals and their aliases.
     type Domain = ThreadSyncDomain;
     type Direction = rustc_mir_dataflow::Forward;
@@ -256,14 +256,14 @@ fn ty_mem_type_shared_or_global<'tcx>(
     None
 }
 
-struct ThreadSyncMirVisitor<'a, 'tcx> {
+struct ThreadSyncMirVisitor<'a, 'tcx, 'mir> {
     tcx: rustc_middle::ty::TyCtxt<'tcx>,
-    body: &'tcx Body<'tcx>,
+    body: &'mir Body<'tcx>,
     called_sync_threads: Option<SyncScope>,
     state: &'a mut ThreadSyncDomain,
 }
 
-impl<'a, 'tcx> std::ops::Deref for ThreadSyncMirVisitor<'a, 'tcx> {
+impl<'a, 'tcx, 'mir> std::ops::Deref for ThreadSyncMirVisitor<'a, 'tcx, 'mir> {
     type Target = ThreadSyncDomain;
 
     fn deref(&self) -> &Self::Target {
@@ -271,7 +271,7 @@ impl<'a, 'tcx> std::ops::Deref for ThreadSyncMirVisitor<'a, 'tcx> {
     }
 }
 
-impl<'a, 'tcx> std::ops::DerefMut for ThreadSyncMirVisitor<'a, 'tcx> {
+impl<'a, 'tcx, 'mir> std::ops::DerefMut for ThreadSyncMirVisitor<'a, 'tcx, 'mir> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.state
     }
@@ -291,7 +291,7 @@ impl<'a, 'tcx> std::ops::DerefMut for ThreadSyncMirVisitor<'a, 'tcx> {
 /// Conflicts happens when
 /// - a local is written and then read/written without sync in between
 /// - a local is read and then written without sync in between
-impl<'tcx> Visitor<'tcx> for ThreadSyncMirVisitor<'_, 'tcx> {
+impl<'tcx> Visitor<'tcx> for ThreadSyncMirVisitor<'_, 'tcx, '_> {
     fn visit_place(&mut self, place: &Place<'tcx>, ctx: PlaceContext, loc: Location) {
         let mutating_use = ctx.is_mutating_use();
         let local = place.local;
@@ -375,10 +375,12 @@ impl ThreadSyncResultsVisitor {
     }
 }
 
-impl<'mir, 'tcx> ResultsVisitor<'mir, 'tcx, ThreadSyncAnalysis<'tcx>> for ThreadSyncResultsVisitor {
+impl<'mir, 'tcx> ResultsVisitor<'mir, 'tcx, ThreadSyncAnalysis<'tcx, 'mir>>
+    for ThreadSyncResultsVisitor
+{
     fn visit_after_primary_statement_effect(
         &mut self,
-        _results: &mut Results<'tcx, ThreadSyncAnalysis<'tcx>>,
+        _results: &mut Results<'tcx, ThreadSyncAnalysis<'tcx, 'mir>>,
         state: &Domain,
         stmt: &'mir Statement<'tcx>,
         location: Location,
@@ -403,7 +405,7 @@ impl<'mir, 'tcx> ResultsVisitor<'mir, 'tcx, ThreadSyncAnalysis<'tcx>> for Thread
 /// Analyze the body to check the mutable argument locals and their uses.
 pub(crate) fn analyze_shared_access<'tcx>(
     tcx: rustc_middle::ty::TyCtxt<'tcx>,
-    body: &'tcx Body<'tcx>,
+    body: &Body<'tcx>,
     is_kernel_entry: bool,
 ) -> GpuCodegenResult<()> {
     let analysis = ThreadSyncAnalysis { tcx, body };

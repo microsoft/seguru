@@ -104,12 +104,12 @@ impl<'tcx> Visitor<'tcx> for TaintSourceDetector<'tcx> {
 }
 
 /// Tracking the diversed var that might has different values across threads.
-struct TaintTracking<'tcx> {
+struct TaintTracking<'tcx, 'a> {
     kernel_entry: bool,
     init: DenseBitSet<Local>,
     implicit: DenseBitSet<rustc_middle::mir::BasicBlock>,
     tcx: TyCtxt<'tcx>,
-    body: &'tcx Body<'tcx>,
+    body: &'a Body<'tcx>,
 }
 
 fn operand_local<'tcx>(op: &Operand<'tcx>) -> Option<Local> {
@@ -119,12 +119,12 @@ fn operand_local<'tcx>(op: &Operand<'tcx>) -> Option<Local> {
     }
 }
 
-impl<'tcx> TaintTracking<'tcx> {
+impl<'tcx, 'a> TaintTracking<'tcx, 'a> {
     pub fn new(
         kernel_entry: bool,
         tainted: DenseBitSet<Local>,
         tcx: TyCtxt<'tcx>,
-        body: &'tcx Body<'tcx>,
+        body: &'a Body<'tcx>,
     ) -> Self {
         Self {
             kernel_entry,
@@ -194,7 +194,7 @@ impl<'tcx> TaintTracking<'tcx> {
     }
 }
 
-impl<'tcx> Analysis<'tcx> for TaintTracking<'tcx> {
+impl<'tcx> Analysis<'tcx> for TaintTracking<'tcx, '_> {
     type Domain = DenseBitSet<Local>;
     type Direction = rustc_mir_dataflow::Forward;
     const NAME: &'static str = "TaintTracking";
@@ -427,12 +427,12 @@ fn reachable_bb<'tcx>(body: &Body<'tcx>, start: BasicBlock) -> DenseBitSet<Basic
 
 struct TaintResultVisitor<'tcx> {
     tcx: TyCtxt<'tcx>,
-    body: &'tcx Body<'tcx>,
+    body: Body<'tcx>,
     invalid_diversed: Vec<rustc_span::Span>,
 }
 
 impl<'tcx> TaintResultVisitor<'tcx> {
-    pub fn new(tcx: TyCtxt<'tcx>, body: &'tcx Body<'tcx>) -> Self {
+    pub fn new(tcx: TyCtxt<'tcx>, body: Body<'tcx>) -> Self {
         Self { tcx, body, invalid_diversed: Vec::new() }
     }
 }
@@ -461,12 +461,14 @@ fn location_span<'tcx>(body: &Body<'tcx>, location: Location) -> rustc_span::Spa
     span
 }
 
-impl<'mir, 'tcx> ResultsVisitor<'mir, 'tcx, TaintTracking<'tcx>> for TaintResultVisitor<'tcx> {
+impl<'mir, 'tcx, 'a> ResultsVisitor<'mir, 'tcx, TaintTracking<'tcx, 'a>>
+    for TaintResultVisitor<'tcx>
+{
     /// We only visit early terminator since the data that is impacted by
     /// the current and future  statement/terminator does not matter.
     fn visit_after_early_terminator_effect(
         &mut self,
-        results: &mut Results<'tcx, TaintTracking<'tcx>>,
+        results: &mut Results<'tcx, TaintTracking<'tcx, 'a>>,
         state: &DenseBitSet<Local>,
         terminator: &Terminator<'tcx>,
         location: Location,
@@ -475,12 +477,12 @@ impl<'mir, 'tcx> ResultsVisitor<'mir, 'tcx, TaintTracking<'tcx>> for TaintResult
         if let TerminatorKind::Call { func, destination, ref args, fn_span, .. } = &terminator.kind
         {
             let mut sync_data = None;
-            let (inline, real) = check_terminator_call(self.tcx, self.body, terminator);
+            let (inline, real) = check_terminator_call(self.tcx, &self.body, terminator);
             if let Some(real_attr) = real {
                 sync_data = real_attr.sync_data;
             }
 
-            let span = location_span(self.body, location);
+            let span = location_span(&self.body, location);
 
             if let Some(sync_data) = sync_data {
                 // Check the arguments that require to be used in a non-diversed
@@ -518,7 +520,7 @@ impl<'mir, 'tcx> ResultsVisitor<'mir, 'tcx, TaintTracking<'tcx>> for TaintResult
 fn analyze_diversed_data<'tcx>(
     tcx: rustc_middle::ty::TyCtxt<'tcx>,
     def_id: rustc_span::def_id::DefId,
-    body: &'tcx Body<'tcx>,
+    body: &Body<'tcx>,
     kernel_entry: bool,
 ) -> GpuCodegenResult<()> {
     let analysis = TaintTracking::new(
@@ -528,7 +530,7 @@ fn analyze_diversed_data<'tcx>(
         body,
     );
     let mut results = analysis.iterate_to_fixpoint(tcx, body, None);
-    let mut result_visitor = TaintResultVisitor::new(tcx, body);
+    let mut result_visitor = TaintResultVisitor::new(tcx, body.clone());
     results.visit_with(body, body.basic_blocks.iter_nodes(), &mut result_visitor);
     for span in &result_visitor.invalid_diversed {
         tcx.sess
@@ -614,14 +616,24 @@ fn is_fn_unsafe(tcx: rustc_middle::ty::TyCtxt<'_>, def_id: rustc_span::def_id::D
     poly_sig.skip_binder().safety == rustc_hir::Safety::Unsafe
 }
 
-pub(crate) fn analyze_gpu_code(
-    tcx: rustc_middle::ty::TyCtxt<'_>,
-    def_id: rustc_span::def_id::DefId,
+pub(crate) fn analyze_gpu_code<'tcx>(
+    tcx: rustc_middle::ty::TyCtxt<'tcx>,
+    instance: &Instance<'tcx>,
     is_kernel_entry: bool,
 ) -> GpuCodegenResult<()> {
     // Analyze the kernel to extract information like grid size, block size, etc.
     // This is a placeholder for actual analysis logic.
-    let mir = tcx.optimized_mir(def_id);
+    let def_id = instance.def_id();
+    assert!(tcx.is_mir_available(def_id), "Missing MIR for {}", instance);
+    let generic_body = tcx.instance_mir(instance.def).clone();
+    // Instantiate/monomorphize the generic MIR body for this instance.
+    // Applies the instance's type substitutions and normalizes/erases region (lifetime)
+    // information so the resulting MIR body is specialized and ready for analysis.
+    let mir = instance.instantiate_mir_and_normalize_erasing_regions(
+        tcx,
+        generic_body.typing_env(tcx),
+        rustc_middle::ty::EarlyBinder::bind(generic_body),
+    );
     let mut out = Vec::new();
     write_mir_pretty(tcx, Some(def_id), &mut out).unwrap();
     debug!("MIR for {:?}:\n{}", def_id, String::from_utf8_lossy(&out));
@@ -632,15 +644,15 @@ pub(crate) fn analyze_gpu_code(
         skip_check = true; // Skip checks for the gpu crate
     }
     if !skip_check && is_kernel_entry {
-        crate::mir_mut_arg_check::analyze_mut_args(tcx, mir)?;
+        crate::mir_mut_arg_check::analyze_mut_args(tcx, &mir)?;
     }
     if !skip_check {
         debug!("analyze_diversed_data {:?}", def_id);
         let gpu_attr = crate::attr::GpuAttributes::build(&tcx, def_id);
         if !gpu_attr.disable_diverse_checker {
-            analyze_diversed_data(tcx, def_id, mir, is_kernel_entry)?;
+            analyze_diversed_data(tcx, def_id, &mir, is_kernel_entry)?;
         }
-        crate::mir_thread_sync_check::analyze_shared_access(tcx, mir, is_kernel_entry)?;
+        crate::mir_thread_sync_check::analyze_shared_access(tcx, &mir, is_kernel_entry)?;
     }
     analyze_loop(tcx, def_id)
 }

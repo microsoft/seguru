@@ -71,10 +71,16 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                                         .try_to_scalar_int()
                                         .unwrap()
                                         .to_u32();
+                                    let dim_val = self.dim_fn_res(dim, dim_type);
+                                    let tid_val = self.dim_fn_res(tid, dim_type);
+                                    let cond_dynamic = self.icmp(
+                                        rustc_codegen_ssa_gpu::common::IntPredicate::IntULT,
+                                        tid_val,
+                                        dim_val,
+                                    );
+                                    self.assume(cond_dynamic);
                                     if val != 0 {
                                         let val = self.const_value(val, self.type_i32());
-                                        let dim_val = self.dim_fn_res(dim, dim_type);
-                                        let tid_val = self.dim_fn_res(tid, dim_type);
                                         let cond_dim = self.icmp(
                                             rustc_codegen_ssa_gpu::common::IntPredicate::IntEQ,
                                             dim_val,

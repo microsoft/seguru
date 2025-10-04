@@ -45,18 +45,18 @@ fn test_gelu() {
 }
 
 pub fn gelu_backward_cpu(inp: &[f32], dout: &[f32]) -> Vec<f32> {
-    let gelu_scaling_factor: f32 = (2.0f32 / core::f32::consts::PI).sqrt();
+    let gelu_scaling_factor: f32 = (2.0f32 / core::f32::consts::PI).sqrt(); // sqrtf(2.0f / M_PI)
     let mut dinp = vec![0.0f32; inp.len()];
     assert_eq!(dinp.len(), inp.len());
-    assert_eq!(dinp.len(), dout.len());
-    for ((dx, &x), &dy) in dinp.iter_mut().zip(inp.iter()).zip(dout.iter()) {
+    for ((dinp_i, &x), &out) in dinp.iter_mut().zip(inp.iter()).zip(dout.iter()) {
         let cube = 0.044715f32 * x * x * x;
         let tanh_arg = gelu_scaling_factor * (x + cube);
         let tanh_out = tanh_arg.tanh();
-        let sech_out = 1.0f32 / (tanh_arg.cosh() * tanh_arg.cosh());
+        let cosh_out = tanh_arg.cosh();
+        let sech_out = 1.0f32 / (cosh_out * cosh_out);
         let local_grad = 0.5 * (1.0 + tanh_out)
             + 0.5 * x * sech_out * gelu_scaling_factor * (1.0 + 3.0 * 0.044715 * x * x);
-        *dx = local_grad * dy;
+        *dinp_i = local_grad * out;
     }
     dinp
 }
@@ -64,20 +64,22 @@ pub fn gelu_backward_cpu(inp: &[f32], dout: &[f32]) -> Vec<f32> {
 #[test]
 fn test_gelu_backward() {
     const N: usize = 512;
-    let h_inp = random_f32_vec(N);
-    let h_dout = random_f32_vec(N);
-    let mut h_dinp = [0.0f32; N];
+    let mut h_inp = random_f32_vec(N);
+    let mut h_dinp = random_f32_vec(N);
+    h_dinp[0] = -0.000001009;
+    h_inp[0] = -0.176_395_06;
     const BLOCK_SIZE: u32 = 128;
+    let expected = gelu_backward_cpu(&h_inp, &h_dinp);
     cuda_ctx(0, |ctx, m| {
-        let dout = ctx.new_tensor_view(h_dout.as_slice()).unwrap();
-        let mut dinp = ctx.new_tensor_view(h_inp.as_slice()).unwrap();
+        let inp = ctx.new_tensor_view(h_inp.as_slice()).unwrap();
+        let mut dinp = ctx.new_tensor_view(h_dinp.as_slice()).unwrap();
         let grid_size = N.div_ceil(BLOCK_SIZE as usize);
         let config = gpu_host::gpu_config!(grid_size as u32, 1, 1, @const BLOCK_SIZE, 1, 1, 0);
-        llm_rs_gpu::gelu_backward_kernel::launch(config, ctx, m, &mut dinp, &dout, N as i32)
+        llm_rs_gpu::gelu_backward_kernel::launch(config, ctx, m, &mut dinp, &inp, N as i32)
             .expect("launch failed");
         dinp.copy_to_host(&mut h_dinp).expect("copy to host failed");
     });
-    let expected = gelu_backward_cpu(&h_inp, &h_dout);
+    assert!(common::f32_eq(&[h_dinp[0]], &[-0.000000364], 1e-7));
     assert!(
         common::f32_eq(&h_dinp, &expected, 1e-5),
         "h_dinp={:?}\nexpected={:?}",

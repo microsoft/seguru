@@ -121,12 +121,14 @@ impl CompileConfig {
         let mlir_opt_args = format!(
             "--pass-pipeline=\
             'builtin.module(\
+            convert-linalg-to-loops,\
             convert-nvgpu-to-nvvm,\
             gpu-kernel-outlining,\
-            convert-vector-to-scf,\
             convert-scf-to-cf,\
             convert-nvvm-to-llvm,\
+            convert-vector-to-llvm,\
             convert-func-to-llvm,\
+            memref-expand,\
             expand-strided-metadata,\
             mem2reg,\
             nvvm-attach-target{{triple=nvptx64-nvidia-gpulibs {} {} chip={} features={} O={}}},\

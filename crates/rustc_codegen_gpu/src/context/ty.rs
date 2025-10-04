@@ -11,8 +11,8 @@ use rustc_middle::ty::layout::{HasTypingEnv, LayoutOf};
 use tracing::debug;
 
 use super::GPUCodegenContext;
-use crate::mlir::float_width;
 use crate::mlir::memref::MemorySpace;
+use crate::mlir::{VectorType, float_width};
 
 pub type MLIRType<'ctx> = mlir_ir::Type<'ctx>;
 
@@ -42,6 +42,8 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     pub(crate) fn mlir_element_type<'b>(&self, ty: MLIRType<'b>) -> MLIRType<'b> {
         if ty.is_ranked_tensor() {
             mlir_type::RankedTensorType::try_from(ty).unwrap().element()
+        } else if ty.is_vector() {
+            VectorType::try_from(ty).unwrap().element()
         } else if ty.is_mem_ref() {
             mlir_type::MemRefType::try_from(ty).unwrap().element()
         } else {
@@ -134,6 +136,10 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         memory_space: Option<Attribute<'ml>>,
     ) -> MLIRType<'ml> {
         self.type_memref(eletype, &[1], None, memory_space)
+    }
+
+    pub(crate) fn type_vector(&self, dimensions: &[u64], elem: MLIRType<'ml>) -> MLIRType<'ml> {
+        VectorType::new(dimensions, elem).into()
     }
 
     pub(crate) fn type_index(&self) -> MLIRType<'ml> {

@@ -1,5 +1,6 @@
 pub(crate) mod attr;
 pub(crate) mod gpu;
+pub(crate) mod linalg;
 pub(crate) mod memref;
 pub(crate) mod poison;
 pub(crate) mod visit;
@@ -15,6 +16,42 @@ use melior::ir::r#type::{FunctionType, IntegerType, MemRefType, RankedTensorType
 use melior::ir::*;
 use melior::utility::register_all_dialects;
 use rustc_span::Loc;
+
+pub struct VectorType<'c> {
+    base: Type<'c>,
+}
+
+impl<'ml> VectorType<'ml> {
+    pub fn new(dims: &[u64], elem: Type<'ml>) -> Self {
+        Self { base: Type::vector(dims, elem) }
+    }
+}
+
+impl TypeLike<'_> for VectorType<'_> {
+    fn to_raw(&self) -> mlir_sys::MlirType {
+        self.base.to_raw()
+    }
+}
+
+impl<'ml> TryFrom<Type<'ml>> for VectorType<'ml> {
+    type Error = melior::Error;
+
+    fn try_from(ty: Type<'ml>) -> Result<Self, Self::Error> {
+        if ty.is_vector() {
+            Ok(Self { base: ty })
+        } else {
+            Err(melior::Error::TypeExpected("VectorType", "try_from".into()))
+        }
+    }
+}
+
+impl<'ml> From<VectorType<'ml>> for Type<'ml> {
+    fn from(v: VectorType<'ml>) -> Self {
+        v.base
+    }
+}
+
+impl ShapedTypeLike<'_> for VectorType<'_> {}
 
 pub(crate) fn create_mlir_ctx() -> &'static melior::Context {
     let ctx = Box::leak(Box::new(melior::Context::new()));
@@ -331,6 +368,35 @@ pub(crate) fn int_width(ty: melior::ir::r#type::Type<'_>) -> Option<u32> {
     }
 }
 
+macro_rules! const_op {
+    ($op: tt, $name: ident) => {
+        pub(crate) fn $name<'ml, 'a>(left: melior::ir::Value<'ml, 'a>, right: melior::ir::Value<'ml, 'a>, signed: bool) -> Option<u128> {
+            let bits = int_width(left.r#type())?;
+            let (Some(left), Some(right)) = (crate::mlir::mlir_val_to_const_int(left), crate::mlir::mlir_val_to_const_int(right)) else {
+              return None
+            };
+            let ret = match (bits, signed) {
+                (8, true) => (left as i8 $op right as i8) as u128,
+                (8, false) => (left as u8 $op right as u8) as u128,
+                (16, true) => (left as i16 $op right as i16) as u128,
+                (16, false) => (left as u16 $op right as u16) as u128,
+                (32, true) => (left as i32 $op right as i32) as u128,
+                (32, false) => (left as u32 $op right as u32) as u128,
+                (64, true) => (left as i64 $op right as i64) as u128,
+                (64, false) => (left as u64 $op right as u64) as u128,
+                (128, true) => (left as i128 $op right as i128) as u128,
+                (128, false) => left $op right,
+                _ => panic!("Unsupported integer size: {}", bits),
+            };
+            Some(ret)
+        }
+    };
+}
+
+const_op!(*, const_mul);
+const_op!(+, const_add);
+const_op!(-, const_sub);
+
 pub(crate) fn static_size_of(ty: Type<'_>) -> usize {
     if ty.is_integer() {
         let int_ty = IntegerType::try_from(ty).unwrap();
@@ -353,6 +419,15 @@ pub(crate) fn static_size_of(ty: Type<'_>) -> usize {
         let mut len = 1;
         for i in 0..ranked_ty.rank() {
             len *= ranked_ty.dim_size(i).unwrap();
+        }
+        base_size * len
+    } else if ty.is_vector() {
+        let vector_ty = VectorType::try_from(ty).unwrap();
+        let ty = vector_ty.element();
+        let base_size = static_size_of(ty);
+        let mut len = 1;
+        for i in 0..vector_ty.rank() {
+            len *= vector_ty.dim_size(i).unwrap();
         }
         base_size * len
     } else {

@@ -5,6 +5,7 @@ mod debug;
 mod dim;
 mod intrinsic;
 mod print;
+mod vector;
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -12,7 +13,7 @@ use std::ops::Deref;
 
 use melior::dialect::memref as mlir_memref;
 use melior::helpers::BuiltinBlockExt;
-use melior::ir::attribute::{IntegerAttribute, StringAttribute};
+use melior::ir::attribute::{DenseI64ArrayAttribute, IntegerAttribute, StringAttribute};
 use melior::ir::operation::{OperationLike, OperationMutLike};
 use melior::ir::r#type::{self as mlir_type, FunctionType, MemRefType};
 use melior::ir::{
@@ -379,6 +380,26 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 assert!(self.extra_state.attrs.len() == 1);
                 let dimention = self.extra_state.attrs.pop().unwrap();
                 Ok(Some(self.append_op(DimFn::GridDim.build(self.mlir_ctx, dimention, loc))))
+            }
+            GpuItem::Float32NAdd => {
+                if args.len() == 3 {
+                    let ty = args[0].r#type();
+                }
+                let len = get_generic_const()[0].try_to_target_usize(self.tcx).unwrap();
+                assert!(return_types.is_empty());
+                let vec_ty = self.type_vector(&[len], self.type_f32());
+                let left = self.use_memref_as_vector_memref(args[1], vec_ty);
+                let right = self.use_memref_as_vector_memref(args[2], vec_ty);
+                let out = self.use_memref_as_vector_memref(args[0], vec_ty);
+                let op = self.append_op(crate::mlir::linalg::linalg_add_op(
+                    self.mlir_ctx,
+                    left,
+                    right,
+                    out,
+                    vec_ty,
+                    self.cur_loc(),
+                ));
+                Ok(Some(op))
             }
             GpuItem::PrintArgs => {
                 // printf function should starts with a format passed by add_mlir_string_attr
@@ -1092,6 +1113,9 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         signed: bool,
     ) -> (mlir_ir::Value<'ml, 'a>, mlir_ir::Value<'ml, 'a>) {
         let (lhs, rhs) = self.int_val_pair_cast(lhs, rhs);
+        if let Some(res) = crate::mlir::const_add(lhs, rhs, signed) {
+            return (self.const_value(res, lhs.r#type()), self.const_value(0, self.type_i1()));
+        }
         let op = melior::dialect::arith::addi(lhs, rhs, self.cur_loc());
         let ret = self.append_op_res(op);
         if self.tcx.sess.opts.cg.overflow_checks != Some(true) {
@@ -1118,6 +1142,9 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         signed: bool,
     ) -> (mlir_ir::Value<'ml, 'a>, mlir_ir::Value<'ml, 'a>) {
         let (lhs, rhs) = self.int_val_pair_cast(lhs, rhs);
+        if let Some(res) = crate::mlir::const_sub(lhs, rhs, signed) {
+            return (self.const_value(res, lhs.r#type()), self.const_value(0, self.type_i1()));
+        }
         let op = melior::dialect::arith::subi(lhs, rhs, self.cur_loc());
         let ret = self.append_op_res(op);
         if self.tcx.sess.opts.cg.overflow_checks != Some(true) {
@@ -1147,6 +1174,10 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         signed: bool,
     ) -> (mlir_ir::Value<'ml, 'a>, mlir_ir::Value<'ml, 'a>) {
         let (lhs, rhs) = self.int_val_pair_cast(lhs, rhs);
+        if let Some(res) = crate::mlir::const_mul(lhs, rhs, signed) {
+            return (self.const_value(res, lhs.r#type()), self.const_value(0, self.type_i1()));
+        }
+
         let op = melior::dialect::arith::muli(lhs, rhs, self.cur_loc());
         let ret = self.append_op_res(op);
         if self.tcx.sess.opts.cg.overflow_checks != Some(true) {
@@ -1328,6 +1359,8 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
 
     fn assert(&mut self, cond: mlir_ir::Value<'ml, 'a>, msg: &str) {
         if !self.tcx.sess.opts.debug_assertions {
+            use rustc_codegen_ssa_gpu::traits::IntrinsicCallBuilderMethods;
+            self.assume(cond);
             return;
         }
         // trap-based bound check is handled by assert op.
@@ -2426,19 +2459,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         size: Self::Value,
         flags: rustc_codegen_ssa_gpu::MemFlags,
     ) {
-        let dst_ty = MemRefType::try_from(dst.r#type()).unwrap();
-        let src_ty = MemRefType::try_from(src.r#type()).unwrap();
-        let dst_ty = self.type_memref(
-            dst_ty.element(),
-            &[crate::mlir::memref::dynamic_size()],
-            None,
-            src_ty.memory_space(),
-        );
-        let src = self.mlir_memref_view(src, dst_ty, None, Some(size));
-        let dst = self.mlir_memref_view(dst, dst_ty, None, Some(size));
-        self.append_op(
-            melior::dialect::ods::memref::copy(self.mlir_ctx, src, dst, self.cur_loc()).into(),
-        );
+        self.vector_memcpy(dst, dst_align, src, src_align, size, flags);
     }
 
     fn memmove(
@@ -2517,6 +2538,15 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
                 self.element_type(agg_val.r#type()),
                 agg_val,
                 &[self.const_value(0, self.type_index())],
+                self.cur_loc(),
+            );
+            self.append_op_res(op.into())
+        } else if agg_val.r#type().is_vector() {
+            let op = melior::dialect::ods::vector::extract(
+                self.mlir_ctx,
+                agg_val,
+                &[],
+                DenseI64ArrayAttribute::new(self.mlir_ctx, &[idx as i64]).into(),
                 self.cur_loc(),
             );
             self.append_op_res(op.into())

@@ -5,27 +5,17 @@ use llm_rs_gpu::encoder_backward_kernel;
 mod common;
 use crate::common::{random_f32_vec, random_i32_vec};
 use common::f32_eq;
-use gpu::float4;
+use gpu::Float4;
 use llm_rs_gpu::encoder_forward_kernel3;
-
-#[inline(always)]
-pub fn add_float4(a: &float4, b: &float4) -> float4 {
-    float4 {
-        x: a.x + b.x,
-        y: a.y + b.y,
-        z: a.z + b.z,
-        w: a.w + b.w,
-    }
-}
 
 pub fn encoder_forward_kernel3_cpu(
     inp: &[i32],
-    wte: &[float4],
-    wpe: &[float4],
+    wte: &[Float4],
+    wpe: &[Float4],
     B: i32,
     T: i32,
     C: i32,
-) -> Vec<float4> {
+) -> Vec<Float4> {
     let C4 = C / 4;
     let N = B * T * C4;
     let mut out = Vec::with_capacity(N as usize);
@@ -37,10 +27,7 @@ pub fn encoder_forward_kernel3_cpu(
         let c4 = idx % C4;
         let ix = inp[(b * T + t) as usize] as usize;
 
-        let val = add_float4(
-            &wte[ix * C4 as usize + c4 as usize],
-            &wpe[t as usize * C4 as usize + c4 as usize],
-        );
+        let val = wte[ix * C4 as usize + c4 as usize] + wpe[t as usize * C4 as usize + c4 as usize];
         out.push(val);
     }
 
@@ -88,24 +75,14 @@ fn test_encoder_forward() {
         .collect::<Vec<_>>();
     let wte_f32 = random_f32_vec(channel * P as usize * 4);
     let wpe_f32 = random_f32_vec(seq_len * channel * 4);
-    let mut out = vec![float4::default(); n / 4];
+    let mut out = vec![Float4::default(); n / 4];
     let wte = wte_f32
         .chunks(4)
-        .map(|x| float4 {
-            x: x[0],
-            y: x[1],
-            z: x[2],
-            w: x[3],
-        })
+        .map(|x| Float4::new([x[0], x[1], x[2], x[3]]))
         .collect::<Vec<_>>();
     let wpe = wpe_f32
         .chunks(4)
-        .map(|x| float4 {
-            x: x[0],
-            y: x[1],
-            z: x[2],
-            w: x[3],
-        })
+        .map(|x| Float4::new([x[0], x[1], x[2], x[3]]))
         .collect::<Vec<_>>();
     let out_cpu = encoder_forward_kernel3_cpu(
         &inp,
@@ -139,14 +116,9 @@ fn test_encoder_forward() {
         d_out.copy_to_host(&mut out).expect("copy to host failed");
     });
 
-    out.iter().zip(out_cpu.iter()).for_each(|(a, b)| {
-        assert!(
-            f32_eq(&[a.x, a.y, a.z, a.w], &[b.x, b.y, b.z, b.w], 1e-6),
-            "out {:?} vs {:?}",
-            a,
-            b
-        )
-    });
+    out.iter()
+        .zip(out_cpu.iter())
+        .for_each(|(a, b)| assert!(f32_eq(&a.data, &b.data, 1e-6), "out {:?} vs {:?}", a, b));
 }
 
 #[test]

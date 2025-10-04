@@ -17,6 +17,7 @@ mod chunk_impl;
 pub mod chunk_scope;
 mod device_intrinsic;
 mod dim;
+pub mod floatn;
 pub(crate) mod global;
 mod host_dev;
 pub mod iter;
@@ -33,6 +34,7 @@ pub use device_intrinsic::GPUDeviceFloatIntrinsics;
 pub use dim::{
     DimType, DimX, DimY, DimZ, block_dim, block_id, dim, global_id, grid_dim, thread_id,
 };
+pub use floatn::{Float4, Float32N};
 pub use global::GpuGlobal;
 pub use host_dev::HostToDev;
 pub use ldst::CacheStreamLoadStore;
@@ -57,13 +59,4 @@ pub(crate) fn assert_ptr<T>(_cond: bool, _ptr: T) -> T {
 #[inline(never)]
 pub const fn add_mlir_string_attr(_: &'static str) -> usize {
     unimplemented!()
-}
-
-#[derive(Clone, Copy, Default, Debug)]
-#[repr(C)]
-pub struct float4 {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-    pub w: f32,
 }

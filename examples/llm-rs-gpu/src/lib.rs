@@ -4,29 +4,19 @@
 
 use core::f32;
 
+use core::ops::Add;
 use gpu::cg::{CGOperations, ReduxAdd, ReduxMax, ThreadWarpTile, WarpReduceOp};
 use gpu::chunk_scope::{build_chunk_scope, Block, Grid, Grid2BlockScope, Thread};
 use gpu::sync::{Atomic, SharedAtomic};
 use gpu::{
-    block_dim, block_id, chunk_mut, dim, float4, grid_dim, reshape_map, sync_threads, thread_id,
-    CacheStreamLoadStore, DimX, DimY, GPUDeviceFloatIntrinsics, GlobalGroupChunk, GpuShared,
-    MapLinear,
+    block_dim, block_id, chunk_mut, dim, grid_dim, reshape_map, sync_threads, thread_id,
+    CacheStreamLoadStore, DimX, DimY, Float4, GPUDeviceFloatIntrinsics, GlobalGroupChunk,
+    GpuShared, MapLinear,
 };
 
-#[gpu_macros::device]
-#[inline(always)]
-pub fn add_float4(a: &float4, b: &float4) -> float4 {
-    float4 {
-        x: a.x + b.x,
-        y: a.y + b.y,
-        z: a.z + b.z,
-        w: a.w + b.w,
-    }
-}
-
 /*
-__global__ void encoder_forward_kernel3(float4* out,
-                               const int* inp, const float4* wte, const float4* wpe,
+__global__ void encoder_forward_kernel3(Float4* out,
+                               const int* inp, const Float4* wte, const Float4* wpe,
                                int B, int T, int C) {
     int C4 = C / 4;
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -37,17 +27,17 @@ __global__ void encoder_forward_kernel3(float4* out,
         int t = bt % T;
         int c4 = idx % C4;
         int ix = inp[b * T + t];
-        out[b * T * C4 + t * C4 + c4] = add_float4(wte[ix * C4 + c4], wpe[t * C4 + c4]);
+        out[b * T * C4 + t * C4 + c4] = add_Float4(wte[ix * C4 + c4], wpe[t * C4 + c4]);
     }
 }
 */
 
 #[gpu_macros::cuda_kernel]
 pub fn encoder_forward_kernel3(
-    out: &mut [float4],
+    out: &mut [Float4],
     inp: &[i32],
-    wte: &[float4],
-    wpe: &[float4],
+    wte: &[Float4],
+    wpe: &[Float4],
     B: i32,
     T: i32,
     C: i32,
@@ -67,7 +57,7 @@ pub fn encoder_forward_kernel3(
         // bt = b * T + t, bt * C4 + c4 = idx
         // b * T * C4 + t * C4 + c4 = idx
         // out is local so we are at 0
-        out[0] = add_float4(&wte[(ix * C4 + c4) as usize], &wpe[(t * C4 + c4) as usize]);
+        out[0] = wte[(ix * C4 + c4) as usize].add(wpe[(t * C4 + c4) as usize]);
     }
 }
 
@@ -384,9 +374,9 @@ __global__ void softmax_forward_kernel5(float* out, float inv_temperature, const
     float maxval = -FLT_MAX;
     float sumval = 0.0f;
 
-    const float4* x_vec = reinterpret_cast<const float4*>(x);
+    const Float4* x_vec = reinterpret_cast<const Float4*>(x);
     for (int i = warp.thread_rank(); i < pos_by_4; i += warp.size()) {
-        float4 v = x_vec[i];
+        Float4 v = x_vec[i];
         float old_maxval = maxval;
         for(int k = 0; k < 4; ++k) {
             maxval = fmaxf(maxval, vec_at(v, k));
@@ -1090,9 +1080,9 @@ pub fn adamw_kernel2(
 }
 
 /*
-__device__ SoftmaxParams prepare_softmax_blockwide_nofloat4(cg::thread_block_tile<32>& warp,
+__device__ SoftmaxParams prepare_softmax_blockwide_noFloat4(cg::thread_block_tile<32>& warp,
                                                    int idx, const float* inp, int V, int P) {
-    // same but not float4
+    // same but not Float4
     // one row of inp, i.e. inp[idx, :] of shape (V,)
 
     const float* x = inp + idx * P;
@@ -1150,7 +1140,7 @@ struct SoftmaxParams {
 #[inline(always)]
 #[gpu_macros::device]
 #[gpu_macros::attr(skip_divergence_check)]
-fn prepare_softmax_blockwide_nofloat4(
+fn prepare_softmax_blockwide_noFloat4(
     inp: &GlobalGroupChunk<'_, f32, Grid2BlockScope, MapLinear>,
     V: usize,
 ) -> SoftmaxParams {
@@ -1229,7 +1219,7 @@ fn prepare_softmax_blockwide_nofloat4(
     }
 }
 
-/*// same as 2 but not using float4 (see dev/cuda/classifier_fused.cu)
+/*// same as 2 but not using Float4 (see dev/cuda/classifier_fused.cu)
 // will _update_ logits to logit gradients
 __global__ void fused_classifier_kernel3(float* logits, float* losses, float* probs,
                                          const float* dlosses, const int* targets,
@@ -1241,7 +1231,7 @@ __global__ void fused_classifier_kernel3(float* logits, float* losses, float* pr
     int ix = targets[idx];
 
     // softmax (reading B * T * V, same logits read again below, hopefully still in cache)
-    SoftmaxParams sp = prepare_softmax_blockwide_nofloat4(warp, idx, logits, V, P);
+    SoftmaxParams sp = prepare_softmax_blockwide_noFloat4(warp, idx, logits, V, P);
 
     // calculate the probability needed for the loss and update (single-threaded)
     if(threadIdx.x == 0) {
@@ -1300,7 +1290,7 @@ pub fn fused_classifier_kernel3(
     let ix = targets[idx] as usize;
     // softmax (reading B * T * V, same logits read again below, hopefully still in cache)
     // assert!(P >= V);
-    let sp = prepare_softmax_blockwide_nofloat4(&logits_block, V);
+    let sp = prepare_softmax_blockwide_noFloat4(&logits_block, V);
     // calculate the probability needed for the loss and update (single-threaded)
     if gpu::thread_id::<gpu::DimX>() == 0 {
         let prob = ((logits_block[ix] - sp.offset).exp()) * sp.scale;
@@ -1316,7 +1306,7 @@ pub fn fused_classifier_kernel3(
     // calculate the gradients directly, saves bandwidth from probs during training
     // but also supports writing probs for inference-only and debugging
     // sync safety: logits_block is only used in this thread block.
-    // prepare_softmax_blockwide_nofloat4 has sync_threads internally.
+    // prepare_softmax_blockwide_noFloat4 has sync_threads internally.
     let mut logits_chunk = logits_block.chunk_to_scope(block2thread, MapLinear::new(1));
     let prob_is_empty = probs.is_empty();
     let mut probs_chunk = probs
@@ -1361,7 +1351,7 @@ __global__ void __launch_bounds__(16*16, 2) matmul_forward_kernel4(float* out,
     if(bias != NULL) {
         for (int i = 0; i < 8; i++) {
             for (int j = 0; j < 8; j += 4) {
-                float4 b = ld_vec(bias + oc + j);
+                Float4 b = ld_vec(bias + oc + j);
                 vals[i][j+0] = b.x;
                 vals[i][j+1] = b.y;
                 vals[i][j+2] = b.z;
@@ -1384,13 +1374,13 @@ __global__ void __launch_bounds__(16*16, 2) matmul_forward_kernel4(float* out,
         __syncthreads();
 
         for (int si = si_start; si < si_start + 32; si += 4) {
-            float4 rhs[8];
+            Float4 rhs[8];
             for (int u = 0; u < 8; ++u) {
                 rhs[u] = ld_vec(&rhs_s[u + 8 * threadIdx.y][si % 32]);
             }
 
             for (int ii = 0; ii < 8; ++ii) {
-                float4 lhs = ld_vec(&lhs_s[ii + 8 * threadIdx.x][si % 32]);
+                Float4 lhs = ld_vec(&lhs_s[ii + 8 * threadIdx.x][si % 32]);
                 for (int ji = 0; ji < 8; ++ji) {
                     vals[ii][ji] += lhs.x * rhs[ji].x;
                     vals[ii][ji] += lhs.y * rhs[ji].y;
@@ -1403,7 +1393,7 @@ __global__ void __launch_bounds__(16*16, 2) matmul_forward_kernel4(float* out,
 
     for (int i = 0; i < 8; ++i) {
         for (int j = 0; j < 8; j += 4) {
-            float4 result;
+            Float4 result;
             result.x = vals[i][j + 0];
             result.y = vals[i][j + 1];
             result.z = vals[i][j + 2];

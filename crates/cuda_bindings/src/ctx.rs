@@ -30,11 +30,19 @@ macro_rules! eprintln {
 /// CtxSpace is a trait to ensure that we can create a GPU context per context space N.
 /// This is used to ensure that only one context is created per context space N.
 /// After a context with space N is created, we can only create a context with space `Succ<N>`.
-pub trait GpuCtxSpace: 'static {}
+pub trait GpuCtxSpace: 'static {
+    fn is_primary() -> bool {
+        false
+    }
+}
 pub struct CtxSpaceZero;
 pub struct Succ<N: GpuCtxSpace>(core::marker::PhantomData<N>);
 
-impl GpuCtxSpace for CtxSpaceZero {}
+impl GpuCtxSpace for CtxSpaceZero {
+    fn is_primary() -> bool {
+        true
+    }
+}
 impl<N: GpuCtxSpace> GpuCtxSpace for Succ<N> {}
 
 // GPU instance token guarantees that the GPU is initialized and can be used.
@@ -196,11 +204,10 @@ impl<'ctx, N: GpuCtxSpace> GpuCtxHandle<N> {
             );
             dev_uninit.assume_init()
         };
-
-        let mut ctx_uninit = MaybeUninit::<CUcontext>::uninit();
+        let mut current_ctx_uninit = MaybeUninit::<CUcontext>::uninit();
         // Safety: It is safe since we provide valid CUcontext pointer and dev is valid.
-        let ctx = unsafe {
-            err = cuCtxCreate_v2(ctx_uninit.as_mut_ptr(), flags as _, dev);
+        let current_ctx = unsafe {
+            err = cuCtxGetCurrent(current_ctx_uninit.as_mut_ptr());
             assert!(
                 err == CUDA_SUCCESS,
                 "Failed to create context ({}, {:?}): error {}",
@@ -208,7 +215,24 @@ impl<'ctx, N: GpuCtxSpace> GpuCtxHandle<N> {
                 flags,
                 CudaError::Err(err)
             );
-            ctx_uninit.assume_init()
+            current_ctx_uninit.assume_init()
+        };
+        let ctx = if !current_ctx.is_null() && N::is_primary() {
+            current_ctx
+        } else {
+            let mut ctx_uninit = MaybeUninit::<CUcontext>::uninit();
+            // Safety: It is safe since we provide valid CUcontext pointer and dev is valid.
+            unsafe {
+                err = cuCtxCreate_v2(ctx_uninit.as_mut_ptr(), flags as _, dev);
+                assert!(
+                    err == CUDA_SUCCESS,
+                    "Failed to create context ({}, {:?}): error {}",
+                    dev_id,
+                    flags,
+                    CudaError::Err(err)
+                );
+                ctx_uninit.assume_init()
+            }
         };
 
         let mut dev_prop_uninit = MaybeUninit::<CUdevprop>::uninit();

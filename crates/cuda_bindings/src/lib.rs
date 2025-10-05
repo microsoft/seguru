@@ -13,6 +13,7 @@
 extern crate alloc;
 use alloc::string::{String, ToString};
 mod ctx;
+mod host_mem;
 mod mem;
 pub mod params;
 mod sized_or_slice;
@@ -30,6 +31,7 @@ pub use ctx::{
     CtxSpaceZero, GpuActiveToken, GpuCtxCreateAndUseToken, GpuCtxGuard, GpuCtxHandle, GpuCtxSpace,
     GpuCtxToken, GpuCtxZeroGuard, GpuFunction, GpuModule, GpuToken,
 };
+pub use host_mem::PinnedHostBox;
 pub use mem::{TensorMut, TensorRef, TensorView, TensorViewMut};
 pub use params::{AsHostKernelParams, GPUConfig, GPUDynamicConfig, GPUStaticConfig, SafeGpuConfig};
 pub use unsafe_bindings::{CUctx_flags, CUdevprop};

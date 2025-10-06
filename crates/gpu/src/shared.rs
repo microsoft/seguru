@@ -85,8 +85,8 @@ impl<Config: SafeGpuConfig> DynamicSharedAllocBuilder for Config {
 
 #[cfg(not(feature = "codegen_tests"))]
 unsafe impl cuda_bindings::AsHostKernelParams for DynamicSharedAlloc {
-    fn as_kernel_param_data(&self) -> alloc::vec::Vec<alloc::boxed::Box<dyn core::any::Any>> {
-        alloc::vec![alloc::boxed::Box::new(self.size)]
+    fn as_kernel_param_data(&self, args: &mut alloc::vec::Vec<*mut ::core::ffi::c_void>) {
+        args.push(self as *const _ as _);
     }
 }
 

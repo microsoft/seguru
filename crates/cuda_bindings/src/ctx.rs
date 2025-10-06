@@ -445,16 +445,8 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
         is_async: bool,
     ) -> Result<(), CudaError> {
         config.runtime_check(self.dev_prop, f.max_dyn_shared_size);
-        let mut kernel_data = vec![];
-
-        host_args.iter().for_each(|arg| {
-            kernel_data.extend(arg.as_kernel_param_data());
-        });
-
-        let mut kernel_args = kernel_data
-            .into_iter()
-            .map(|data| Box::into_raw(data) as *mut core::ffi::c_void)
-            .collect::<Vec<_>>();
+        let mut kernel_args: Vec<*mut core::ffi::c_void> = Vec::with_capacity(host_args.len());
+        host_args.iter().for_each(|arg| arg.as_kernel_param_data(&mut kernel_args));
         if config.shared_size() != 0 {
             kernel_args
                 .push(Box::into_raw(Box::new(config.shared_size())) as *mut core::ffi::c_void);
@@ -497,17 +489,8 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
         is_async: bool,
     ) -> Result<(), CudaError> {
         config.runtime_check(self.dev_prop, f.max_dyn_shared_size);
-        let mut kernel_data = vec![];
-
-        host_args.iter().for_each(|arg| {
-            kernel_data.extend(arg.as_kernel_param_data());
-        });
-
-        let mut kernel_args = kernel_data
-            .into_iter()
-            .map(|data| Box::into_raw(data) as *mut core::ffi::c_void)
-            .collect::<Vec<_>>();
-
+        let mut kernel_args: Vec<*mut core::ffi::c_void> = Vec::with_capacity(host_args.len());
+        host_args.iter().for_each(|arg| arg.as_kernel_param_data(&mut kernel_args));
         let res = unsafe {
             cuLaunchKernel(
                 f.func,

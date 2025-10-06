@@ -1,5 +1,4 @@
 /// GPU execution configuration and safe interfaces for param passing.
-use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -443,18 +442,20 @@ impl GPUConfig for GPUDynamicConfig {
 #[doc(hidden)]
 #[allow(private_bounds)]
 pub unsafe trait AsHostKernelParams {
-    fn as_kernel_param_data(&self) -> Vec<Box<dyn core::any::Any>>;
+    fn as_kernel_param_data(&self, args: &mut Vec<*mut ::core::ffi::c_void>);
 }
 
 /// We only allow the CudaMemBox to store a type T that is allowed as GpuDataMarker.
 unsafe impl<'a, 'b, T: ?Sized + SizedOrSlice + GpuDataMarker> AsHostKernelParams
     for &'a TensorView<'b, T>
 {
-    fn as_kernel_param_data(&self) -> Vec<Box<dyn core::any::Any>> {
-        if let Some(len) = self.try_get_slice_len() {
-            vec![Box::new(self.as_devptr()), Box::new(len)]
+    fn as_kernel_param_data(&self, args: &mut Vec<*mut ::core::ffi::c_void>) {
+        let ptr = *self as *const _ as *mut _;
+        if self.try_get_slice_len().is_some() {
+            args.push(ptr);
+            args.push(ptr.wrapping_add(8));
         } else {
-            vec![Box::new(self.as_devptr())]
+            args.push(ptr);
         }
     }
 }
@@ -463,11 +464,12 @@ unsafe impl<'a, 'b, T: ?Sized + SizedOrSlice + GpuDataMarker> AsHostKernelParams
 unsafe impl<'a, 'b, T: ?Sized + SizedOrSlice + GpuDataMarker> AsHostKernelParams
     for &'a mut TensorViewMut<'b, T>
 {
-    fn as_kernel_param_data(&self) -> Vec<Box<dyn core::any::Any>> {
-        if let Some(len) = self.try_get_slice_len() {
-            vec![Box::new(self.as_devptr()), Box::new(len)]
+    fn as_kernel_param_data(&self, args: &mut Vec<*mut ::core::ffi::c_void>) {
+        let ptr = *self as *const _ as *mut ::core::ffi::c_void;
+        if self.try_get_slice_len().is_some() {
+            args.extend(vec![ptr, ptr.wrapping_add(8)]);
         } else {
-            vec![Box::new(self.as_devptr())]
+            args.push(ptr);
         }
     }
 }
@@ -475,8 +477,8 @@ unsafe impl<'a, 'b, T: ?Sized + SizedOrSlice + GpuDataMarker> AsHostKernelParams
 macro_rules! impl_as_kernel_params {
     ($u:ty) => {
         unsafe impl AsHostKernelParams for $u {
-            fn as_kernel_param_data(&self) -> Vec<Box<dyn core::any::Any>> {
-                vec![Box::new(*self)]
+            fn as_kernel_param_data(&self, args: &mut Vec<*mut ::core::ffi::c_void>) {
+                args.push(self as *const _ as _);
             }
         }
     };

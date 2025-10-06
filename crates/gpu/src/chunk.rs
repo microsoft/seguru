@@ -1,5 +1,3 @@
-use alloc::boxed::Box;
-use alloc::vec;
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 use core::ops::{Index, IndexMut};
@@ -140,13 +138,12 @@ where
     // Ensure Map is small enough to be passed by value.
     [(); 16 - core::mem::size_of::<Map>()]:,
 {
-    fn as_kernel_param_data(&self) -> Vec<alloc::boxed::Box<dyn core::any::Any>> {
+    fn as_kernel_param_data(&self, args: &mut Vec<*mut ::core::ffi::c_void>) {
         assert!(core::mem::size_of::<Map>() <= 16);
-        vec![
-            Box::new((self.data as *const [T] as *const T) as usize),
-            Box::new(self.data.len()),
-            Box::new(self.map_params.clone()),
-        ]
+        let ptr = self as *const Self as _;
+        args.push(ptr);
+        args.push(ptr.wrapping_add(8));
+        args.push(ptr.wrapping_add(16));
     }
 }
 

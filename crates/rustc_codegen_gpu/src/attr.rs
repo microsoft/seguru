@@ -81,6 +81,17 @@ fn lang_item_from_str(name: &str) -> Option<LangItem> {
     LangItem::from_name(Symbol::intern(name))
 }
 
+pub const PANIC_FUNCTIONS: [&str; 8] = [
+    "core::slice::index::slice_index_order_fail",
+    "core::slice::index::slice_start_index_len_fail",
+    "core::slice::index::slice_end_index_len_fail",
+    "core::option::unwrap_failed",
+    "std::slice::index::slice_index_order_fail",
+    "std::slice::index::slice_start_index_len_fail",
+    "std::slice::index::slice_end_index_len_fail",
+    "std::option::unwrap_failed",
+];
+
 impl TryFrom<&str> for GpuItem {
     type Error = ();
 
@@ -131,15 +142,7 @@ impl TryFrom<&str> for GpuItem {
             "std::sys::cmath::sinhf" => {
                 GpuItem::DeviceIntrinsic("gpu::device_intrinsics::sinh".into())
             }
-            s if [
-                "core::slice::index::slice_index_order_fail",
-                "core::slice::index::slice_start_index_len_fail",
-                "core::slice::index::slice_end_index_len_fail",
-            ]
-            .contains(&s) =>
-            {
-                GpuItem::CoreFn(s.to_string())
-            }
+            s if PANIC_FUNCTIONS.contains(&s) => GpuItem::CoreFn(s.to_string()),
             s if s.starts_with("core") || s.starts_with("std") => {
                 if let Some(i) = lang_item_from_str(s) {
                     GpuItem::Core(i)
@@ -313,16 +316,7 @@ impl GpuAttributes {
             Some(GpuItem::Core(lang_item)) if lang_item.name().to_string().starts_with("panic") => {
                 true
             }
-            Some(GpuItem::CoreFn(path))
-                if [
-                    "core::slice::index::slice_index_order_fail",
-                    "core::slice::index::slice_start_index_len_fail",
-                    "core::slice::index::slice_end_index_len_fail",
-                ]
-                .contains(&path.as_str()) =>
-            {
-                true
-            }
+            Some(GpuItem::CoreFn(path)) if PANIC_FUNCTIONS.contains(&path.as_str()) => true,
             Some(GpuItem::DiagnoseOnly(_)) => false,
             Some(_) => true,
             _ => false,

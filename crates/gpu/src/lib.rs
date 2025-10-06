@@ -11,6 +11,7 @@
 
 extern crate alloc;
 
+mod array;
 pub mod cg;
 pub mod chunk;
 mod chunk_impl;
@@ -26,6 +27,7 @@ mod print;
 mod shared;
 pub mod sync;
 
+pub use array::ArrayReshape;
 pub use chunk::{GlobalGroupChunk, GlobalThreadChunk, chunk_mut};
 pub use chunk_impl::{Map2D, MapLinear, MapLinearWithDim};
 #[cfg(not(feature = "codegen_tests"))]

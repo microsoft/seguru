@@ -624,6 +624,10 @@ pub(crate) fn analyze_gpu_code<'tcx>(
     // Analyze the kernel to extract information like grid size, block size, etc.
     // This is a placeholder for actual analysis logic.
     let def_id = instance.def_id();
+    // Do not analyze non-local instances (e.g., from other crates)
+    if !def_id.is_local() {
+        return Ok(());
+    }
     assert!(tcx.is_mir_available(def_id), "Missing MIR for {}", instance);
     let generic_body = tcx.instance_mir(instance.def).clone();
     // Instantiate/monomorphize the generic MIR body for this instance.

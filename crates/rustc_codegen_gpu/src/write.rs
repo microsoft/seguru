@@ -1,4 +1,6 @@
-use melior::ir::operation::{OperationLike, OperationMutLike, OperationRefMut};
+use melior::ir::operation::{
+    OperationLike, OperationMutLike, OperationPrintingFlags, OperationRefMut,
+};
 use mlir_compile::CompileConfig;
 use rustc_codegen_ssa_gpu::back::write::{CodegenContext, ModuleConfig};
 use rustc_codegen_ssa_gpu::{CompiledModule, ModuleCodegen};
@@ -43,7 +45,8 @@ pub(crate) fn codegen(
                 op.remove_from_parent();
             }
         });
-        let content = op.to_string();
+        let flags = OperationPrintingFlags::new().enable_debug_info(true, false);
+        let content = op.to_string_with_flags(flags).unwrap();
         if !m.module.as_operation().verify() {
             trace!("MLIR module verify failed.");
             std::fs::write(&out, &content).unwrap();

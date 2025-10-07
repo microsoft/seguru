@@ -130,11 +130,11 @@ impl CompileConfig {
             convert-func-to-llvm,\
             memref-expand,\
             expand-strided-metadata,\
-            mem2reg,\
             nvvm-attach-target{{triple=nvptx64-nvidia-gpulibs {} {} chip={} features={} O={}}},\
             lower-affine,\
             convert-arith-to-llvm,\
             convert-index-to-llvm{{index-bitwidth=64}},\
+            mem2reg{{region-simplify=true}},\
             canonicalize,\
             cse,\
             reconcile-unrealized-casts,\
@@ -196,6 +196,8 @@ impl CompileConfig {
             format!("-mcpu={}", self.cubin_chip),
             format!("-mattr={}", self.cubin_features),
             self.opt_flag(),
+            "--nvptx-sched4reg".into(),
+            "--polly-register-tiling".into(),
             inpath.to_str().unwrap().into(),
             "-o".into(),
             outpath.to_str().unwrap().into(),
@@ -218,6 +220,8 @@ impl CompileConfig {
         info!("[ptxas] outputs {}", outpath.display());
         let args = [
             &self.opt_flag(),
+            "--warn-on-spills",
+            "--return-at-end",
             "--gpu-name",
             &self.cubin_chip,
             "-o",

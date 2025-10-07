@@ -7,6 +7,7 @@ edition = "2021"
 gpu = {workspace = true}
 gpu_macros = {workspace = true}
 gpu_host = {workspace = true}
+crunchy = "0.2"
 
 [dev-dependencies]
 rand = "0.9"

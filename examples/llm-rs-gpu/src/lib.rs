@@ -5,6 +5,7 @@
 use core::f32;
 
 use core::ops::Add;
+use crunchy::unroll;
 use gpu::cg::{CGOperations, ReduxAdd, ReduxMax, ThreadWarpTile, WarpReduceOp};
 use gpu::chunk_scope::{build_chunk_scope, Block, Grid, Grid2BlockScope, Thread};
 use gpu::sync::{Atomic, SharedAtomic};
@@ -1406,6 +1407,12 @@ __global__ void __launch_bounds__(16*16, 2) matmul_forward_kernel4(float* out,
 }
 */
 
+#[inline(always)]
+#[gpu_macros::device]
+fn dot4(a: [f32; 4], b: [f32; 4]) -> f32 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]
+}
+
 #[gpu_macros::cuda_kernel]
 #[gpu_macros::attr(skip_divergence_check)]
 #[allow(clippy::needless_range_loop)]
@@ -1462,7 +1469,7 @@ pub fn matmul_forward_kernel4(
     if !bias.is_empty() {
         for i in 0..8 {
             for j in 0..2 {
-                vals[i][j] = bias[oc/4 + j];
+                vals[i][j] = bias[oc / 4 + j];
             }
         }
     }
@@ -1491,10 +1498,10 @@ pub fn matmul_forward_kernel4(
             let y = (2 * thread_id::<DimY>() + xby8) + k * 32;
             // st_vec(&lhs_s[y][xo], ld_vec(inp + y * C + so + xo));
             let inp_index = y * C as usize + so + xo;
-            let lhs_vec: [f32; 4] = inp[inp_index/4];
+            let lhs_vec: [f32; 4] = inp[inp_index / 4];
             lhs_s_chunk[k] = lhs_vec;
             // st_vec(&rhs_s[y][xo], ld_vec(weight + y * C + so + xo));
-            let rhs_vec: [f32; 4] = weight[inp_index/4];
+            let rhs_vec: [f32; 4] = weight[inp_index / 4];
             rhs_s_chunk[k] = rhs_vec;
         }
         gpu::sync::sync_threads();
@@ -1502,27 +1509,23 @@ pub fn matmul_forward_kernel4(
             let si = si_start + i * 4;
             let mut rhs = [[0.0f32; 4]; 8];
             for u in 0..8 {
-                let rhs_idx = ((u + 8 * thread_id::<DimY>()) * 32 + si % 32) / 4;
+                let rhs_idx = (u + 8 * thread_id::<DimY>()) * 8 + (si % 32) / 4;
                 rhs[u] = rhs_s[rhs_idx];
             }
-            for ii in 0..8 {
-                let lhs_index = ((ii + 8 * thread_id::<DimX>()) * 32 + (si % 32)) / 4;
+            unroll! {for ii in 0..8 {
+                let lhs_index = (ii + 8 * thread_id::<DimX>()) * 8 + (si % 32) / 4;
+                let lhs = lhs_s[lhs_index];
                 for j in 0..2 {
-                    for i in 0..4 {
+                    for k in 0..4 {
                         // Use v4 load
-                        let lhs = lhs_s[lhs_index];
-                        let rhs = rhs[j * 4 + i];
-                        for k in 0..4 {
-                            vals[ii][j][i] += lhs[k] * rhs[k];
-                        }
+                        vals[ii][j][k] += dot4(lhs, rhs[j * 4 + k]);
                     }
                 }
-            }
+            }}
         }
     }
     for i in 0..8 {
-        for j in 0..2 {
-            out_thread[i * 2 + j] = vals[i][j];
-        }
+        out_thread[i * 2] = vals[i][0];
+        out_thread[i * 2 + 1] = vals[i][1];
     }
 }

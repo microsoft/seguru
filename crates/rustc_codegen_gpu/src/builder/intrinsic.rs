@@ -32,7 +32,7 @@ macro_rules! device_intrinsic_match {
                     $builder.append_op(op.into())
                 }
             )*
-            _ => panic!("GPU intrinsic `{}` not supported.", $name),
+            _ => panic!("GPU intrinsic `{}` at {:?} not supported.", $name, $builder.cur_span),
         }
     };
 }
@@ -52,7 +52,7 @@ macro_rules! intrinsic_match {
                     $builder.store(ret, $llresult, rustc_abi::Align::ONE);
                 }
             )*
-            _ => panic!("GPU intrinsic `{}` not supported.", $name),
+            _ => panic!("GPU intrinsic `{}` not supported at {:?}.", $name, $builder.cur_span),
         }
     };
 }
@@ -143,6 +143,7 @@ impl<'tcx, 'ml, 'a> IntrinsicCallBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 
                 sym::log2f32 => melior_math::log_2, 1,
                 sym::log2f64 => melior_math::log_2, 1,
                 sym::maxnumf32 => melior_arith::maxnumf, 2,
+                sym::ctpop => melior_math::ctpop, 1,
             }
         }
         Ok(())

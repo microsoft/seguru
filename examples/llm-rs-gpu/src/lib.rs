@@ -1438,12 +1438,21 @@ pub fn matmul_forward_kernel4(
     // inp is (B,T,C), weight is (OC, C), bias is (OC)
     // each thread handles 8x8 elements; each block 128 by 128 elements.
 
-    let oc = 8 * (block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>());
+    let bid_x = block_id::<DimX>() as i32;
+    let bid_y = block_id::<DimY>() as i32;
+    let bdim_x = block_dim::<DimX>() as i32;
+    let bdim_y = block_dim::<DimY>() as i32;
+    let gdim_x = grid_dim::<DimX>() as i32;
+    let gdim_y = grid_dim::<DimY>() as i32;
+    let tid_x = thread_id::<DimX>() as i32;
+    let tid_y = thread_id::<DimY>() as i32;
+
+    let oc = 8 * (bid_y * bdim_y + tid_y);
 
     //  128 * blockIdx.y + 128 * blockIdx.x * OC + i * OC + (8*threadIdx.y) + (8*threadIdx.x) * OC + j)
     // do not swap 2 and 3 in permutation, otherwise we will have out of bound access.
     let map = gpu::reshape_map!(
-        [2, 8] | [16, grid_dim::<DimX>(), 16, (grid_dim::<DimY>(), (OC as usize) / 128)]  =>
+        [2, 8] | [16, gdim_x as usize, 16, (gdim_y as usize, (OC / 128) as usize)]  =>
         layout: [i0, t2, t3, i1, t0, t1]
     );
 
@@ -1455,66 +1464,65 @@ pub fn matmul_forward_kernel4(
     let mut rhs_s = GpuShared::<[[f32; 4]; 8 * 128]>::zero();
 
     // adjust our immutable for the current block
-    let C_usize = C as usize;
-    let inp_offset = 128 * block_id::<DimX>() * C_usize;
-    let weight_offset = 128 * block_id::<DimY>() * C_usize;
+    let inp_offset = 128 * bid_x * C;
+    let weight_offset = 128 * bid_y * C;
     let inp: &[[f32; 4]] = inp.reshape();
     let weight: &[[f32; 4]] = weight.reshape();
     let bias: &[[f32; 4]] = bias.reshape();
 
-    let inp = &inp[inp_offset / 4..];
-    let weight = &weight[weight_offset / 4..];
+    let inp = &inp[(inp_offset / 4) as usize..];
+    let weight = &weight[(weight_offset / 4) as usize..];
 
     let mut vals = [[[0.0f32; 4]; 2]; 8];
     if !bias.is_empty() {
         for i in 0..8 {
             for j in 0..2 {
-                vals[i][j] = bias[oc / 4 + j];
+                vals[i][j] = bias[(oc / 4 + j as i32) as usize];
             }
         }
     }
 
-    let si_start = 4 * (16 * thread_id::<DimY>() + thread_id::<DimX>());
+    let si_start = 4 * (16 * tid_y + tid_x);
 
     // (k * 32 * 32 + tid_y * 2 * 32 + xby8 * 32 + xmod8 * 4 + i)
     let map = gpu::reshape_map!(
-        [1, 4] | [8, (block_dim::<DimX>().div_ceil(8), 2), (block_dim::<DimY>(), 16)] =>
+        [1, 4] | [8, ((bdim_x as u32).div_ceil(8) as usize, 2), (bdim_y as usize, 16)] =>
         layout: [i0, t0, t1, t2, i1]
     );
-    for so in (0..C as usize).step_by(32) {
+    for so in (0..C).step_by(32) {
         gpu::sync::sync_threads();
         // Each thread handle [f32; 32].
 
         let mut lhs_s_chunk = lhs_s.chunk_mut(map);
         let mut rhs_s_chunk = rhs_s.chunk_mut(map);
-        let xmod8 = thread_id::<DimX>() % 8;
-        let xby8 = thread_id::<DimX>() / 8;
+        let xmod8 = tid_x % 8;
+        let xby8 = tid_x / 8;
         let xo = 4 * xmod8;
         // 2 * threadIdx.y + xby8; y < 128; y += 32
         // for (k, y) in ((2 * thread_id::<DimY>() + xby8)..128)
         //    .step_by(32)
         //    .enumerate()
         for k in 0..4 {
-            let y = (2 * thread_id::<DimY>() + xby8) + k * 32;
+            let y = (2 * tid_y + xby8) + k * 32;
             // st_vec(&lhs_s[y][xo], ld_vec(inp + y * C + so + xo));
-            let inp_index = y * C as usize + so + xo;
-            let lhs_vec: [f32; 4] = inp[inp_index / 4];
-            lhs_s_chunk[k] = lhs_vec;
+            let inp_index = y * C + so + xo;
+            let lhs_vec: [f32; 4] = inp[(inp_index / 4) as usize];
+            lhs_s_chunk[k as _] = lhs_vec;
             // st_vec(&rhs_s[y][xo], ld_vec(weight + y * C + so + xo));
-            let rhs_vec: [f32; 4] = weight[inp_index / 4];
-            rhs_s_chunk[k] = rhs_vec;
+            let rhs_vec: [f32; 4] = weight[(inp_index / 4) as usize];
+            rhs_s_chunk[k as _] = rhs_vec;
         }
         gpu::sync::sync_threads();
         for i in 0..8 {
             let si = si_start + i * 4;
             let mut rhs = [[0.0f32; 4]; 8];
             for u in 0..8 {
-                let rhs_idx = (u + 8 * thread_id::<DimY>()) * 8 + (si % 32) / 4;
-                rhs[u] = rhs_s[rhs_idx];
+                let rhs_idx = (u + 8 * tid_y) * 8 + (si % 32) / 4;
+                rhs[u as usize] = rhs_s[rhs_idx as usize];
             }
             unroll! {for ii in 0..8 {
-                let lhs_index = (ii + 8 * thread_id::<DimX>()) * 8 + (si % 32) / 4;
-                let lhs = lhs_s[lhs_index];
+                let lhs_index = (ii as i32 + 8 * tid_x) * 8 + (si % 32) / 4;
+                let lhs = lhs_s[lhs_index as usize];
                 for j in 0..2 {
                     for k in 0..4 {
                         // Use v4 load

@@ -14,6 +14,8 @@ use crate::common::random_f32_vec;
 )
 */
 
+const SQRT_BDIM: u32 = 16;
+
 fn cpu_matmul(inp: &[f32], weight: &[f32], bias: &[f32], c_size: i32, oc_size: i32) -> Vec<f32> {
     let mut out = vec![0.0; inp.len() / c_size as usize * oc_size as usize];
     let m_size = out.len() as i32 / oc_size;
@@ -41,10 +43,10 @@ fn matmul_forward(
     inp: &[f32],
     weight: &[f32],
     bias: &[f32],
-    batch: usize,
-    t_size: usize,
-    c_size: usize,
-    oc_size: usize,
+    batch: u32,
+    t_size: u32,
+    c_size: u32,
+    oc_size: u32,
 ) {
     /*
      int sqrt_block_size = 16;
@@ -55,10 +57,10 @@ fn matmul_forward(
     cudaCheck(cudaGetLastError());
     */
 
-    let gdim_x = (batch * t_size).div_ceil(8 * SQRT_BDIM) as u32;
-    let gdim_y = (oc_size).div_ceil(8 * SQRT_BDIM) as u32;
-    let out_len = batch * t_size * oc_size;
-    let in_len = batch * t_size * c_size;
+    let gdim_x = (batch * t_size).div_ceil(8 * SQRT_BDIM);
+    let gdim_y = (oc_size).div_ceil(8 * SQRT_BDIM);
+    let out_len = (batch * t_size * oc_size) as usize;
+    let in_len = (batch * t_size * c_size) as usize;
     // out is (B,T,OC). OC is short for "output channels", e.g. OC = 4 * C
     // inp is (B,T,C), weight is (OC, C), bias is (OC)
     assert!(out.len() == out_len);
@@ -73,7 +75,8 @@ fn matmul_forward(
         let mut d_outp = ctx.new_tensor_view(out).unwrap();
         let d_weight = ctx.new_tensor_view(weight).unwrap();
         let d_bias = ctx.new_tensor_view(bias).unwrap();
-        let config = gpu_host::gpu_config!(gdim_x, gdim_y, 1, @const (SQRT_BDIM as u32), @const (SQRT_BDIM as u32), 1, 0);
+        let config =
+            gpu_host::gpu_config!(gdim_x, gdim_y, 1, @const SQRT_BDIM, @const SQRT_BDIM, 1, 0);
         llm_rs_gpu::matmul_forward_kernel4::launch(
             config,
             ctx,
@@ -82,25 +85,24 @@ fn matmul_forward(
             &d_inp,
             &d_weight,
             &d_bias,
-            c_size as i32,
-            oc_size as i32,
+            c_size,
+            oc_size,
         )
         .expect("launch failed");
         d_outp.copy_to_host(out).unwrap();
     });
 }
 
-const SQRT_BDIM: usize = 16;
 #[test]
 fn test_matmul() {
-    const B: usize = 1;
-    const T: usize = 128;
-    const C: usize = 32;
-    const OC: usize = 4 * C;
-    let h_dinp = random_f32_vec(B * T * C);
-    let h_weight = random_f32_vec(OC * C);
-    let h_bias = random_f32_vec(OC);
-    let mut h_doutp = random_f32_vec(B * T * OC);
+    const B: u32 = 1;
+    const T: u32 = 128;
+    const C: u32 = 32;
+    const OC: u32 = 4 * C;
+    let h_dinp = random_f32_vec((B * T * C) as usize);
+    let h_weight = random_f32_vec((OC * C) as usize);
+    let h_bias = random_f32_vec((OC) as usize);
+    let mut h_doutp = random_f32_vec((B * T * OC) as usize);
     matmul_forward(&mut h_doutp, &h_dinp, &h_weight, &h_bias, B, T, C, OC);
     let expected = cpu_matmul(&h_dinp, &h_weight, &h_bias, C as i32, OC as i32);
 
@@ -115,14 +117,14 @@ fn test_matmul() {
 
 #[test]
 fn test_matmul2() {
-    const B: usize = 12;
-    const T: usize = 1024;
-    const C: usize = 32;
-    const OC: usize = 4 * C;
-    let h_dinp = random_f32_vec(B * T * C);
-    let h_weight = random_f32_vec(OC * C);
-    let h_bias = random_f32_vec(OC);
-    let mut h_doutp = random_f32_vec(B * T * OC);
+    const B: u32 = 12;
+    const T: u32 = 1024;
+    const C: u32 = 32;
+    const OC: u32 = 4 * C;
+    let h_dinp = random_f32_vec((B * T * C) as usize);
+    let h_weight = random_f32_vec((OC * C) as usize);
+    let h_bias = random_f32_vec((OC) as usize);
+    let mut h_doutp = random_f32_vec((B * T * OC) as usize);
     matmul_forward(&mut h_doutp, &h_dinp, &h_weight, &h_bias, B, T, C, OC);
     let expected = cpu_matmul(&h_dinp, &h_weight, &h_bias, C as i32, OC as i32);
 
@@ -137,10 +139,13 @@ fn test_matmul2() {
 
 fn matmul_backward_bias_cpu(
     dout: &[f32], // length B * T * OC
-    b: usize,
-    t: usize,
-    oc: usize,
+    b: u32,
+    t: u32,
+    oc: u32,
 ) -> Vec<f32> {
+    let b = b as usize;
+    let t = t as usize;
+    let oc = oc as usize;
     let mut dbias = vec![0.0; oc];
     assert_eq!(dout.len(), b * t * oc);
 
@@ -157,17 +162,17 @@ fn matmul_backward_bias_cpu(
 fn matmul_backward_bias(
     dout: &[f32], // length B * T * OC
     dbias: &mut [f32],
-    b: usize,
-    t: usize,
-    oc: usize,
+    b: u32,
+    t: u32,
+    oc: u32,
     epsilon: f32,
 ) {
     const BSIZE: u32 = 256;
     const SHARED_SIZE: u32 = BSIZE * size_of::<f32>() as u32;
-    let gdim_x = (oc as u32).div_ceil(32);
-    let out_len = b * t * oc;
+    let gdim_x = oc.div_ceil(32);
+    let out_len = (b * t * oc) as usize;
     assert!(dout.len() == out_len);
-    assert!(dbias.len() == oc);
+    assert!(dbias.len() == oc as usize);
     let expected = matmul_backward_bias_cpu(dout, b, t, oc);
     cuda_ctx(0, |ctx, m| {
         let d_dout = ctx.new_tensor_view(dout).unwrap();
@@ -180,9 +185,9 @@ fn matmul_backward_bias(
             m,
             &mut d_dbias,
             &d_dout,
-            b as i32,
-            t as i32,
-            oc as i32,
+            b,
+            t,
+            oc,
         )
         .expect("launch failed");
         d_dbias.copy_to_host(dbias).unwrap();
@@ -190,27 +195,27 @@ fn matmul_backward_bias(
     assert!(
         f32_eq(dbias, &expected, epsilon),
         "dbias not match:\n\n{:?}\n\n{:?}",
-        &dbias[0..32.min(oc)],
-        &expected[0..32.min(oc)]
+        &dbias[0..32.min(oc as usize)],
+        &expected[0..32.min(oc as usize)]
     );
 }
 
 #[test]
 fn test_matmul_backward_bias() {
-    const B: usize = 2;
-    const T: usize = 8;
-    const OC: usize = 32;
-    let h_dout = random_f32_vec(B * T * OC);
-    let mut h_dbias = vec![0.0; OC];
+    const B: u32 = 2;
+    const T: u32 = 8;
+    const OC: u32 = 32;
+    let h_dout = random_f32_vec((B * T * OC) as usize);
+    let mut h_dbias = vec![0.0; OC as usize];
     matmul_backward_bias(&h_dout, &mut h_dbias, B, T, OC, 1e-5);
 }
 
 #[test]
 fn test_matmul_backward_bias_large() {
-    const B: usize = 4;
-    const T: usize = 1024;
-    const OC: usize = 256;
-    let h_dout = random_f32_vec(B * T * OC);
-    let mut h_dbias = vec![0.0; OC];
+    const B: u32 = 4;
+    const T: u32 = 1024;
+    const OC: u32 = 256;
+    let h_dout = random_f32_vec((B * T * OC) as usize);
+    let mut h_dbias = vec![0.0; OC as usize];
     matmul_backward_bias(&h_dout, &mut h_dbias, B, T, OC, 1e-2); // float precision issue
 }

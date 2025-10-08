@@ -28,8 +28,8 @@ pub struct C2<'a> {
 #[no_mangle]
 #[gpu_codegen::kernel]
 pub unsafe fn assign_struct(a: A, b: C<'_>, c: C2<'_>) { //~ ERROR Kernel entry does not support fn abi indirect
-    let thread_id = gpu::thread_id::<gpu::DimY>();
-    b.slice[gpu::thread_id::<gpu::DimX>()] = c.slice[gpu::thread_id::<gpu::DimX>()];
+    let thread_id = gpu::thread_id::<gpu::DimX>() as usize;
+    b.slice[thread_id] = c.slice[thread_id];
 }
 
 // CHECK: @gpu_bin_cst = internal constant

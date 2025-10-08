@@ -186,26 +186,23 @@ pub(crate) fn map_reshape_params(tokens: TokenStream) -> TokenStream {
     let tid = Ident::new("tid", span);
     let global_idx = Ident::new("global_idx", span);
     let valid = Ident::new("valid", span);
-    let remain_id = Ident::new("remain_id", span);
+    let remain_lid = Ident::new("remain_id", span);
+    let remain_tid = Ident::new("remain_tid", span);
     let old_s = Ident::new("old_s", span);
     let new_s = Ident::new("new_s", span);
     let weights = Ident::new("weights", span);
     let mut gen_global_id = quote_spanned! {span =>
         let mut #global_idx = self.offset;
         let mut #valid = true;
-        let mut #remain_id = #lid;
+        let #remain_lid = #lid;
+        let #remain_tid = #tid;
     };
 
     for (i, &is_reversed) in reversed.iter().enumerate() {
         let span = all_sizes.elems[i].span();
         let old_s_i = Ident::new(&format!("old_s_{}", i), span);
         let new_s_i = Ident::new(&format!("new_s_{}", i), span);
-        if i == local_id_len {
-            gen_global_id = quote_spanned! { span =>
-                #gen_global_id
-                #remain_id = #tid;
-            };
-        }
+        let remain_id = if i < local_id_len { remain_lid.clone() } else { remain_tid.clone() };
 
         let id_i = if is_reversed {
             Expr::Verbatim(quote_spanned! { span =>
@@ -216,25 +213,35 @@ pub(crate) fn map_reshape_params(tokens: TokenStream) -> TokenStream {
                 (#remain_id % #old_s_i)
             })
         };
-        gen_global_id = quote_spanned! { span =>
-            #gen_global_id
-            let #new_s_i = #new_s[#i];
-            let #old_s_i = #old_s[#i];
-            #global_idx += #id_i * #weights[#i];
-            #valid &= #id_i < #new_s_i;
+        gen_global_id = if i < local_id_len {
+            quote_spanned! { span =>
+                #gen_global_id
+                let #new_s_i = #new_s[#i];
+                let #old_s_i = #old_s[#i];
+                #global_idx += #id_i * #weights[#i];
+                #valid &= #id_i < #new_s_i;
+            }
+        } else {
+            quote_spanned! { span =>
+                #gen_global_id
+                let #new_s_i = #new_s[#i] as u32;
+                let #old_s_i = #old_s[#i] as u32;
+                #global_idx += #id_i as usize * #weights[#i];
+                #valid &= #id_i < #new_s_i;
+            }
         };
         // avoid warning: value assigned to `remain_id` is never read
         if i != local_id_len - 1 {
             gen_global_id = quote_spanned! { span =>
                 #gen_global_id
-                #remain_id /= #old_s_i;
+                let #remain_id = #remain_id / #old_s_i;
             };
         }
     }
     // ensure all tid are consumed
     gen_global_id = quote_spanned! { span =>
         #gen_global_id
-        #valid &= #remain_id == 0;
+        #valid &= #remain_tid == 0;
     };
     let gpu_crate = args.gpu_crate;
     quote_spanned! { span => {
@@ -249,7 +256,7 @@ pub(crate) fn map_reshape_params(tokens: TokenStream) -> TokenStream {
         {
             type IndexType = usize;
 
-            fn map(&self, #lid: usize, thread_ids: [usize; #gpu_crate::chunk_scope::TID_MAX_LEN]) -> (bool, usize) {
+            fn map(&self, #lid: usize, thread_ids: [u32; #gpu_crate::chunk_scope::TID_MAX_LEN]) -> (bool, usize) {
                  let #tid = CS::global_id_x(thread_ids)
             + CS::global_dim_x()
                 * (CS::global_id_y(thread_ids) + CS::global_dim_y() * CS::global_id_z(thread_ids));

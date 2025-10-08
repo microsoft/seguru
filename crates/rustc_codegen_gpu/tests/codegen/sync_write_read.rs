@@ -11,7 +11,7 @@ pub fn test_shared(a: &[u8], b: &mut [u8]) {
     let mut chunk_shared = shared.chunk_mut(gpu::MapLinear::new(1));
 
     // Below if the Write-Read test
-    chunk_shared[0] = a[gpu::thread_id::<gpu::DimX>()];
+    chunk_shared[0] = a[gpu::thread_id::<gpu::DimX>() as usize];
     let mut chunked_b = gpu::chunk_mut(b, gpu::MapLinear::new(1));
     let val = chunk_shared[0];
     chunked_b[0] = val;

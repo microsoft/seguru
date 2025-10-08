@@ -19,10 +19,10 @@ pub fn kernel_arith<const N: u32>(
     h: &mut f32, // sum of g
 ) {
     let thread_id = gpu::thread_id::<gpu::DimY>();
-    let a_local = a[thread_id];
+    let a_local = a[thread_id as usize];
     let mut b = b;
     let b_local = &mut b[(0, 0)];
-    *b_local = a_local + c[thread_id];
+    *b_local = a_local + c[thread_id as usize];
     *b_local += 1;
 
     let mut out: u32;
@@ -38,7 +38,7 @@ pub fn kernel_arith<const N: u32>(
 
     let f_chunk_param: gpu::MapLinearWithDim = gpu::MapLinearWithDim::new(f_width);
     let mut f = gpu::chunk_mut(f, f_chunk_param);
-    let g_local = g[thread_id].ldcs();
+    let g_local = g[thread_id as usize].ldcs();
     f[0] = g_local.sin();
 
     let mut shared = gpu::GpuShared::<[f32; 32]>::zero();
@@ -57,7 +57,7 @@ pub fn kernel_arith<const N: u32>(
 
     // Use atomic to update h
     let atomic_h = gpu::sync::Atomic::new(h);
-    atomic_h.atomic_addf(g[thread_id]);
+    atomic_h.atomic_addf(g[thread_id as usize]);
     /*let warp = gpu::cg::ThreadWarpTile::<32, 1>();
     warp.run_on_lane_0::<f32>(f, |v| {
         *v += 1.5;

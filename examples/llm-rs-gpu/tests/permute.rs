@@ -85,16 +85,16 @@ pub fn unpermute_cpu(inp: &[f32], b_len: usize, n_len: usize, nh: usize, d: usiz
 }
 
 #[allow(clippy::too_many_arguments)]
-fn test_permute_kernel(h_dinp: &[f32], b_len: i32, n_len: i32, nh_len: i32, d_len: i32) {
+fn test_permute_kernel(h_dinp: &[f32], b_len: u32, n_len: u32, nh_len: u32, d_len: u32) {
     let len = (b_len * nh_len * n_len * d_len) as usize;
     let mut h_dq: Vec<f32> = random_f32_vec(len);
     let mut h_dk: Vec<f32> = random_f32_vec(len);
     let mut h_dv: Vec<f32> = random_f32_vec(len);
-    assert_eq!(h_dinp.len() as i32, b_len * nh_len * n_len * d_len * 3);
+    assert_eq!(h_dinp.len() as u32, b_len * nh_len * n_len * d_len * 3);
     cuda_ctx(0, |ctx, m| {
         const BLOCK_SIZE: u32 = 256;
         let total_threads = b_len * nh_len * n_len * d_len;
-        let num_blocks = (total_threads as u32).div_ceil(BLOCK_SIZE);
+        let num_blocks = total_threads.div_ceil(BLOCK_SIZE);
         let config = gpu_host::gpu_config!(num_blocks, 1, 1, @const BLOCK_SIZE, 1, 1, 0);
         // define GPU mem
         let mut inp = ctx.new_tensor_view(h_dinp).unwrap();
@@ -152,10 +152,10 @@ fn test_permute_kernel(h_dinp: &[f32], b_len: i32, n_len: i32, nh_len: i32, d_le
 
 #[test]
 fn test_basic() {
-    const B: i32 = 2;
-    const N: i32 = 4;
-    const NH: i32 = 2;
-    const D: i32 = 8;
+    const B: u32 = 2;
+    const N: u32 = 4;
+    const NH: u32 = 2;
+    const D: u32 = 8;
     const LEN: usize = (B * N * NH * D) as usize;
 
     let mut h_dinp = [0.0f32; LEN * 3];
@@ -167,10 +167,10 @@ fn test_basic() {
 
 #[test]
 fn test_basic_random() {
-    const B: i32 = 2;
-    const N: i32 = 4;
-    const NH: i32 = 2;
-    const D: i32 = 8;
+    const B: u32 = 2;
+    const N: u32 = 4;
+    const NH: u32 = 2;
+    const D: u32 = 8;
     const LEN: usize = (B * N * NH * D) as usize;
 
     let h_dinp = random_f32_vec(LEN * 3);
@@ -178,14 +178,14 @@ fn test_basic_random() {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn test_unpermute_kernel(h_dinp: &[f32], b_len: i32, n_len: i32, nh_len: i32, d_len: i32) {
+fn test_unpermute_kernel(h_dinp: &[f32], b_len: u32, n_len: u32, nh_len: u32, d_len: u32) {
     let len = (b_len * n_len * nh_len * d_len) as usize;
     assert_eq!(h_dinp.len(), len);
     let mut h_doutp = vec![0.0f32; len];
     cuda_ctx(0, |ctx, m| {
         const BLOCK_SIZE: u32 = 256;
         let total_threads = b_len * nh_len * n_len * d_len;
-        let num_blocks = (total_threads as u32).div_ceil(BLOCK_SIZE);
+        let num_blocks = total_threads.div_ceil(BLOCK_SIZE);
         let config = gpu_host::gpu_config!(num_blocks, 1, 1, @const BLOCK_SIZE, 1, 1, 0);
         // define GPU mem
         let mut inp = ctx.new_tensor_view(h_dinp).unwrap();
@@ -227,10 +227,10 @@ fn test_unpermute_kernel(h_dinp: &[f32], b_len: i32, n_len: i32, nh_len: i32, d_
 
 #[test]
 fn test_basic_unpermute() {
-    const B: i32 = 4;
-    const N: i32 = 8;
-    const NH: i32 = 2;
-    const D: i32 = 16;
+    const B: u32 = 4;
+    const N: u32 = 8;
+    const NH: u32 = 2;
+    const D: u32 = 16;
     const LEN: usize = (B * N * NH * D) as usize;
 
     let h_inp = random_f32_vec(LEN);

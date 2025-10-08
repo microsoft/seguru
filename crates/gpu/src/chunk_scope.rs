@@ -205,45 +205,45 @@ pub trait ChunkScope: PrivateTraitGuard + Clone {
     type FromScope: SyncScope;
     type ToScope: SyncScope;
 
-    fn thread_ids() -> [usize; TID_MAX_LEN];
+    fn thread_ids() -> [u32; TID_MAX_LEN];
 
-    fn global_dim<D: DimType>() -> usize;
-    fn global_id<D: DimType>(thread_ids: [usize; TID_MAX_LEN]) -> usize;
+    fn global_dim<D: DimType>() -> u32;
+    fn global_id<D: DimType>(thread_ids: [u32; TID_MAX_LEN]) -> u32;
 
     /// Provided methods.
     #[inline]
     #[gpu_codegen::device]
-    fn global_id_x(thread_ids: [usize; TID_MAX_LEN]) -> usize {
+    fn global_id_x(thread_ids: [u32; TID_MAX_LEN]) -> u32 {
         Self::global_id::<DimX>(thread_ids)
     }
 
     #[inline]
     #[gpu_codegen::device]
-    fn global_id_y(thread_ids: [usize; TID_MAX_LEN]) -> usize {
+    fn global_id_y(thread_ids: [u32; TID_MAX_LEN]) -> u32 {
         Self::global_id::<DimY>(thread_ids)
     }
 
     #[inline]
     #[gpu_codegen::device]
-    fn global_id_z(thread_ids: [usize; TID_MAX_LEN]) -> usize {
+    fn global_id_z(thread_ids: [u32; TID_MAX_LEN]) -> u32 {
         Self::global_id::<DimZ>(thread_ids)
     }
 
     #[inline]
     #[gpu_codegen::device]
-    fn global_dim_x() -> usize {
+    fn global_dim_x() -> u32 {
         Self::global_dim::<DimX>()
     }
 
     #[inline]
     #[gpu_codegen::device]
-    fn global_dim_y() -> usize {
+    fn global_dim_y() -> u32 {
         Self::global_dim::<DimY>()
     }
 
     #[inline]
     #[gpu_codegen::device]
-    fn global_dim_z() -> usize {
+    fn global_dim_z() -> u32 {
         Self::global_dim::<DimZ>()
     }
 }
@@ -257,7 +257,7 @@ impl ChunkScope for Grid2ThreadScope {
 
     #[inline]
     #[gpu_codegen::device]
-    fn thread_ids() -> [usize; TID_MAX_LEN] {
+    fn thread_ids() -> [u32; TID_MAX_LEN] {
         // global memory is accessible across blocks,
         // so we need block_id as well as thread_id.
         [
@@ -272,13 +272,14 @@ impl ChunkScope for Grid2ThreadScope {
 
     #[inline]
     #[gpu_codegen::device]
-    fn global_id<D: DimType>(thread_ids: [usize; TID_MAX_LEN]) -> usize {
-        thread_ids[D::DIM_ID + DimTypeID::Max as usize] * block_dim::<D>() + thread_ids[D::DIM_ID]
+    fn global_id<D: DimType>(thread_ids: [u32; TID_MAX_LEN]) -> u32 {
+        thread_ids[(D::DIM_ID + DimTypeID::Max as u8) as usize] * block_dim::<D>()
+            + thread_ids[D::DIM_ID as usize]
     }
 
     #[inline]
     #[gpu_codegen::device]
-    fn global_dim<D: DimType>() -> usize {
+    fn global_dim<D: DimType>() -> u32 {
         dim::<D>()
     }
 }
@@ -292,21 +293,21 @@ impl ChunkScope for Block2ThreadScope {
 
     #[inline]
     #[gpu_codegen::device]
-    fn thread_ids() -> [usize; TID_MAX_LEN] {
+    fn thread_ids() -> [u32; TID_MAX_LEN] {
         // shared memory is shared within a block and so no block_id.
         [thread_id::<DimX>(), thread_id::<DimY>(), thread_id::<DimZ>(), 0, 0, 0]
     }
 
     #[inline]
     #[gpu_codegen::device]
-    fn global_dim<D: DimType>() -> usize {
+    fn global_dim<D: DimType>() -> u32 {
         block_dim::<D>()
     }
 
     #[inline]
     #[gpu_codegen::device]
-    fn global_id<D: DimType>(thread_ids: [usize; TID_MAX_LEN]) -> usize {
-        thread_ids[D::DIM_ID]
+    fn global_id<D: DimType>(thread_ids: [u32; TID_MAX_LEN]) -> u32 {
+        thread_ids[D::DIM_ID as usize]
     }
 }
 
@@ -319,19 +320,19 @@ impl ChunkScope for Grid2BlockScope {
 
     #[inline]
     #[gpu_codegen::device]
-    fn thread_ids() -> [usize; TID_MAX_LEN] {
+    fn thread_ids() -> [u32; TID_MAX_LEN] {
         [0, 0, 0, block_id::<DimX>(), block_id::<DimY>(), block_id::<DimZ>()]
     }
 
     #[inline]
     #[gpu_codegen::device]
-    fn global_id<D: DimType>(thread_ids: [usize; TID_MAX_LEN]) -> usize {
-        thread_ids[D::DIM_ID + DimTypeID::Max as usize]
+    fn global_id<D: DimType>(thread_ids: [u32; TID_MAX_LEN]) -> u32 {
+        thread_ids[(D::DIM_ID + DimTypeID::Max as u8) as usize]
     }
 
     #[inline]
     #[gpu_codegen::device]
-    fn global_dim<D: DimType>() -> usize {
+    fn global_dim<D: DimType>() -> u32 {
         grid_dim::<D>()
     }
 }
@@ -347,7 +348,7 @@ impl<const SIZE: usize> ChunkScope for Grid2WarpScope<SIZE> {
 
     #[inline]
     #[gpu_codegen::device]
-    fn thread_ids() -> [usize; TID_MAX_LEN] {
+    fn thread_ids() -> [u32; TID_MAX_LEN] {
         // warp memory is shared within a warp and so only each warp has a
         // unique warp id and block id and we use warp id (`subgroup_id`,
         // `block_id_{x,y,z}` to index the group.
@@ -363,13 +364,13 @@ impl<const SIZE: usize> ChunkScope for Grid2WarpScope<SIZE> {
 
     #[inline]
     #[gpu_codegen::device]
-    fn global_dim<D: DimType>() -> usize {
-        if D::DIM_ID == 0 { block_size() * num_blocks() / SIZE } else { 1 }
+    fn global_dim<D: DimType>() -> u32 {
+        if D::DIM_ID == 0 { (block_size() * num_blocks()) / SIZE as u32 } else { 1 }
     }
 
     #[inline]
     #[gpu_codegen::device]
-    fn global_id<D: DimType>(thread_ids: [usize; TID_MAX_LEN]) -> usize {
+    fn global_id<D: DimType>(thread_ids: [u32; TID_MAX_LEN]) -> u32 {
         if D::DIM_ID == 0 {
             Grid2BlockScope::global_id::<D>(thread_ids) * Self::ToScope::_meta_group_size()
                 + thread_ids[2]
@@ -390,20 +391,20 @@ impl<const SIZE: usize> ChunkScope for Block2WarpScope<SIZE> {
 
     #[inline]
     #[gpu_codegen::device]
-    fn thread_ids() -> [usize; TID_MAX_LEN] {
+    fn thread_ids() -> [u32; TID_MAX_LEN] {
         // warp memory is shared within a warp and so only warp_id.
         [0, 0, Self::ToScope::_subgroup_id(), 0, 0, 0]
     }
 
     #[inline]
     #[gpu_codegen::device]
-    fn global_dim<D: DimType>() -> usize {
+    fn global_dim<D: DimType>() -> u32 {
         if D::DIM_ID == 0 { Self::ToScope::_meta_group_size() } else { 1 }
     }
 
     #[inline]
     #[gpu_codegen::device]
-    fn global_id<D: DimType>(thread_ids: [usize; TID_MAX_LEN]) -> usize {
+    fn global_id<D: DimType>(thread_ids: [u32; TID_MAX_LEN]) -> u32 {
         if D::DIM_ID == 0 { thread_ids[2] } else { 0 }
     }
 }
@@ -419,20 +420,20 @@ impl<const SIZE: usize> ChunkScope for Warp2ThreadScope<SIZE> {
 
     #[inline]
     #[gpu_codegen::device]
-    fn thread_ids() -> [usize; TID_MAX_LEN] {
+    fn thread_ids() -> [u32; TID_MAX_LEN] {
         // warp memory is shared within a warp and so only lane_id.
-        [0, Self::FromScope::_thread_rank() as usize, 0, 0, 0, 0]
+        [0, Self::FromScope::_thread_rank(), 0, 0, 0, 0]
     }
 
     #[inline]
     #[gpu_codegen::device]
-    fn global_dim<D: DimType>() -> usize {
+    fn global_dim<D: DimType>() -> u32 {
         if D::DIM_ID == 0 { SIZE as _ } else { 1 }
     }
 
     #[inline]
     #[gpu_codegen::device]
-    fn global_id<D: DimType>(thread_ids: [usize; TID_MAX_LEN]) -> usize {
+    fn global_id<D: DimType>(thread_ids: [u32; TID_MAX_LEN]) -> u32 {
         if D::DIM_ID == 0 { thread_ids[1] } else { 0 }
     }
 }
@@ -458,7 +459,7 @@ where
 
     type ToScope = CS2::ToScope;
 
-    fn thread_ids() -> [usize; TID_MAX_LEN] {
+    fn thread_ids() -> [u32; TID_MAX_LEN] {
         let mut ids = CS1::thread_ids();
         let ids2 = CS2::thread_ids();
         for i in 0..TID_MAX_LEN {
@@ -467,11 +468,11 @@ where
         ids
     }
 
-    fn global_dim<D: DimType>() -> usize {
+    fn global_dim<D: DimType>() -> u32 {
         CS1::global_dim::<D>() * CS2::global_dim::<D>()
     }
 
-    fn global_id<D: DimType>(thread_ids: [usize; TID_MAX_LEN]) -> usize {
+    fn global_id<D: DimType>(thread_ids: [u32; TID_MAX_LEN]) -> u32 {
         CS1::global_id::<D>(thread_ids) * CS2::global_dim::<D>() + CS2::global_id::<D>(thread_ids)
     }
 }
@@ -525,7 +526,7 @@ where
 {
     type IndexType = Map2::IndexType;
 
-    fn map(&self, idx: Self::IndexType, thread_ids: [usize; TID_MAX_LEN]) -> (bool, usize) {
+    fn map(&self, idx: Self::IndexType, thread_ids: [u32; TID_MAX_LEN]) -> (bool, usize) {
         let (valid2, idx2) = self.map2.map(idx, thread_ids);
         let (valid1, idx1) = self.map1.map(idx2, thread_ids);
         (valid1 & valid2, idx1)
@@ -546,33 +547,33 @@ pub mod test {
     {
         type FromScope = Block;
         type ToScope = ThreadWarpTile<SIZE>;
-        fn thread_ids() -> [usize; TID_MAX_LEN] {
-            [0, 0, WARP_ID, 0, 0, 0]
+        fn thread_ids() -> [u32; TID_MAX_LEN] {
+            [0, 0, WARP_ID as u32, 0, 0, 0]
         }
-        fn global_dim<D: DimType>() -> usize {
-            if D::DIM_ID == 0 { BLOCK_SIZE / SIZE } else { 1 }
+        fn global_dim<D: DimType>() -> u32 {
+            if D::DIM_ID == 0 { (BLOCK_SIZE / SIZE) as u32 } else { 1 }
         }
-        fn global_id<D: DimType>(ids: [usize; TID_MAX_LEN]) -> usize {
+        fn global_id<D: DimType>(ids: [u32; TID_MAX_LEN]) -> u32 {
             if D::DIM_ID == 0 { ids[2] } else { 0 }
         }
     }
 
     #[derive(Clone)]
-    pub struct MockWarp2ThreadScope<const SIZE: usize, const LANE_ID: usize>;
-    impl<const SIZE: usize, const LANE_ID: usize> PrivateTraitGuard
+    pub struct MockWarp2ThreadScope<const SIZE: usize, const LANE_ID: u32>;
+    impl<const SIZE: usize, const LANE_ID: u32> PrivateTraitGuard
         for MockWarp2ThreadScope<SIZE, LANE_ID>
     {
     }
-    impl<const SIZE: usize, const LANE_ID: usize> ChunkScope for MockWarp2ThreadScope<SIZE, LANE_ID> {
+    impl<const SIZE: usize, const LANE_ID: u32> ChunkScope for MockWarp2ThreadScope<SIZE, LANE_ID> {
         type FromScope = ThreadWarpTile<SIZE>;
         type ToScope = Thread;
-        fn thread_ids() -> [usize; TID_MAX_LEN] {
+        fn thread_ids() -> [u32; TID_MAX_LEN] {
             [0, LANE_ID, 0, 0, 0, 0]
         }
-        fn global_dim<D: DimType>() -> usize {
+        fn global_dim<D: DimType>() -> u32 {
             if D::DIM_ID == 0 { SIZE as _ } else { 1 }
         }
-        fn global_id<D: DimType>(ids: [usize; TID_MAX_LEN]) -> usize {
+        fn global_id<D: DimType>(ids: [u32; TID_MAX_LEN]) -> u32 {
             if D::DIM_ID == 0 { ids[1] } else { 0 }
         }
     }
@@ -581,7 +582,7 @@ pub mod test {
         ($cs:ty, $m:expr, $idx:expr, $thread_ids:expr, $expected:expr) => {
             let (valid, mapped_idx) = ScopeUniqueMap::<$cs>::map(&$m, $idx, $thread_ids);
             assert!(
-                valid == $expected.0 && (mapped_idx == $expected.1 || !valid),
+                valid == $expected.0 && (mapped_idx == $expected.1 as usize || !valid),
                 "idx = {}, mapped_idx = {}, valid = {} expected = {:?}",
                 $idx,
                 mapped_idx,

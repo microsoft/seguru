@@ -8,7 +8,7 @@
 #[no_mangle]
 #[gpu_codegen::kernel]
 pub unsafe fn test(a: &[i16], b: &mut [i16]) {
-    let id = gpu::thread_id::<gpu::DimX>();
+    let id = gpu::thread_id::<gpu::DimX>() as usize;
     let c = #[gpu_codegen::device]|v| {
         v + a[id]
     };

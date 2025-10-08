@@ -70,7 +70,7 @@ pub trait WarpReduceOp<T, Op: ReduxKind> {
 }
 
 pub trait CGOperations {
-    fn thread_rank(&self) -> usize;
+    fn thread_rank(&self) -> u32;
 }
 
 ///
@@ -106,35 +106,35 @@ impl<const SIZE: usize> ThreadWarpTile<SIZE, 1> {
 
     #[gpu_codegen::device]
     #[inline(always)]
-    pub const fn size(&self) -> usize {
+    pub const fn size(&self) -> u32 {
         Self::CHECKED_SIZE as _
     }
 
-    pub fn meta_group_size(&self) -> usize {
+    pub fn meta_group_size(&self) -> u32 {
         Self::_meta_group_size()
     }
 
-    pub(crate) fn _meta_group_size() -> usize {
-        crate::dim::block_size() / Self::CHECKED_SIZE as usize
+    pub(crate) fn _meta_group_size() -> u32 {
+        crate::dim::block_size() / Self::CHECKED_SIZE
     }
 
     #[gpu_codegen::device]
     #[inline(always)]
-    pub fn subgroup_id(&self) -> usize {
+    pub fn subgroup_id(&self) -> u32 {
         Self::_subgroup_id()
     }
 
     #[gpu_codegen::device]
     #[inline(always)]
-    pub(crate) fn _subgroup_id() -> usize {
-        ((Block.thread_rank() >> 5) << Self::SHIFT_COUNT as usize)
-            + ((lane_id() & !(Self::LANE_MASK as usize)) >> Self::SHIFT_COUNT as usize)
+    pub(crate) fn _subgroup_id() -> u32 {
+        ((Block.thread_rank() >> 5) << Self::SHIFT_COUNT)
+            + ((lane_id() & !{ Self::LANE_MASK }) >> Self::SHIFT_COUNT)
     }
 
     #[gpu_codegen::device]
     #[inline(always)]
     pub(crate) fn _thread_rank() -> u32 {
-        lane_id() as u32 & Self::LANE_MASK
+        lane_id() & Self::LANE_MASK
     }
 
     /// E.g., when SIZE = 8,
@@ -144,7 +144,7 @@ impl<const SIZE: usize> ThreadWarpTile<SIZE, 1> {
     /// 8 -> 0xff00
     /// 9 -> 0xff00
     pub fn thread_mask(&self) -> u32 {
-        Self::BASE_THREAD_MASK << (lane_id() as u32 & !Self::LANE_MASK)
+        Self::BASE_THREAD_MASK << (lane_id() & !Self::LANE_MASK)
     }
 
     #[gpu_codegen::device]
@@ -305,7 +305,7 @@ macro_rules! shuffle {
 impl<const SIZE: usize> CGOperations for ThreadWarpTile<SIZE> {
     #[gpu_codegen::device]
     #[inline(always)]
-    fn thread_rank(&self) -> usize {
+    fn thread_rank(&self) -> u32 {
         Self::_thread_rank() as _
     }
 }
@@ -313,7 +313,7 @@ impl<const SIZE: usize> CGOperations for ThreadWarpTile<SIZE> {
 impl Block {
     #[gpu_codegen::device]
     #[inline(always)]
-    pub fn thread_rank(&self) -> usize {
+    pub fn thread_rank(&self) -> u32 {
         crate::dim::thread_id::<crate::dim::DimX>()
             + crate::dim::block_dim::<crate::dim::DimX>()
                 * (crate::dim::thread_id::<crate::dim::DimY>()

@@ -3,7 +3,7 @@ pub struct DimY;
 pub struct DimZ;
 
 pub trait DimType {
-    const DIM_ID: usize;
+    const DIM_ID: u8;
     const MLIR_DIM: &str;
 }
 
@@ -15,17 +15,17 @@ pub(crate) enum DimTypeID {
 }
 
 impl DimType for DimX {
-    const DIM_ID: usize = DimTypeID::X as usize;
+    const DIM_ID: u8 = DimTypeID::X as u8;
     const MLIR_DIM: &'static str = "#gpu<dim x>";
 }
 
 impl DimType for DimY {
-    const DIM_ID: usize = DimTypeID::Y as usize;
+    const DIM_ID: u8 = DimTypeID::Y as u8;
     const MLIR_DIM: &'static str = "#gpu<dim y>";
 }
 
 impl DimType for DimZ {
-    const DIM_ID: usize = DimTypeID::Z as usize;
+    const DIM_ID: u8 = DimTypeID::Z as u8;
     const MLIR_DIM: &'static str = "#gpu<dim z>";
 }
 
@@ -42,9 +42,9 @@ macro_rules! def_dim_fn {
         $(#[$meta])*
         #[gpu_codegen::device]
         #[inline(always)]
-        pub const fn $pub_name<D: DimType>() -> usize {
+        pub const fn $pub_name<D: DimType>() -> u32 {
             crate::add_mlir_string_attr(D::MLIR_DIM);
-            $priv_name()
+            $priv_name() as u32
         }
     };
 }
@@ -62,36 +62,36 @@ def_dim_fn!(grid_dim, _grid_dim, grid_dim, #[gpu_codegen::ret_sync_data(1000)]);
 #[gpu_codegen::device]
 #[inline(always)]
 #[allow(dead_code)]
-pub fn sm_warp_id() -> usize {
+pub fn sm_warp_id() -> u32 {
     let mut ret: u32;
     unsafe {
         core::arch::asm!("mov.u32 {0:e}, %warpid;", out(reg) ret);
     }
-    ret as usize
+    ret
 }
 
 #[gpu_codegen::device]
 #[inline(always)]
 #[allow(dead_code)]
-pub fn lane_id() -> usize {
+pub fn lane_id() -> u32 {
     let mut laneid: u32;
     unsafe {
         core::arch::asm!("mov.u32 {0:e}, %laneid;", out(reg) laneid);
     }
-    laneid as usize
+    laneid
 }
 
 #[gpu_codegen::device]
 #[gpu_codegen::ret_sync_data(1000)]
 #[inline(always)]
-pub const fn dim<D: DimType>() -> usize {
+pub const fn dim<D: DimType>() -> u32 {
     block_dim::<D>() * grid_dim::<D>()
 }
 
 #[gpu_codegen::device]
 #[gpu_codegen::ret_sync_data(1000)]
 #[inline(always)]
-pub fn block_size() -> usize {
+pub fn block_size() -> u32 {
     block_dim::<DimX>() * block_dim::<DimY>() * block_dim::<DimZ>()
 }
 
@@ -99,6 +99,6 @@ pub fn block_size() -> usize {
 #[gpu_codegen::ret_sync_data(1000)]
 #[inline(always)]
 #[allow(dead_code)]
-pub fn num_blocks() -> usize {
+pub fn num_blocks() -> u32 {
     grid_dim::<DimX>() * grid_dim::<DimY>() * grid_dim::<DimZ>()
 }

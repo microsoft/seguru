@@ -47,7 +47,7 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for MapLinearWithDim<1> {
 
     #[inline]
     #[gpu_codegen::device]
-    fn map(&self, idx: Self::IndexType, thread_ids: [usize; TID_MAX_LEN]) -> (bool, usize) {
+    fn map(&self, idx: Self::IndexType, thread_ids: [u32; TID_MAX_LEN]) -> (bool, usize) {
         ScopeUniqueMap::<CS>::map(&MapLinearWithDim::<3>::new(self.width), idx, thread_ids)
     }
 }
@@ -63,7 +63,7 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for MapLinearWithDim<2> {
 
     #[inline]
     #[gpu_codegen::device]
-    fn map(&self, idx: Self::IndexType, thread_ids: [usize; TID_MAX_LEN]) -> (bool, usize) {
+    fn map(&self, idx: Self::IndexType, thread_ids: [u32; TID_MAX_LEN]) -> (bool, usize) {
         ScopeUniqueMap::<CS>::map(&MapLinearWithDim::<3>::new(self.width), idx, thread_ids)
     }
 }
@@ -73,14 +73,19 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for MapLinearWithDim<3> {
 
     #[inline]
     #[gpu_codegen::device]
-    fn map(&self, idx: usize, thread_ids: [usize; TID_MAX_LEN]) -> (bool, usize) {
+    fn map(&self, idx: usize, thread_ids: [u32; TID_MAX_LEN]) -> (bool, usize) {
         let x_id = CS::global_id_x(thread_ids);
         let y_id = CS::global_id_y(thread_ids);
         let z_id = CS::global_id_z(thread_ids);
         let global_thread_id = x_id + (z_id * CS::global_dim_y() + y_id) * CS::global_dim_x();
         let stride = self.width;
         let total_dim = CS::global_dim_x() * CS::global_dim_y() * CS::global_dim_z();
-        (true, idx % stride + (idx / stride) * stride * total_dim + global_thread_id * stride)
+        (
+            true,
+            idx % stride
+                + (idx / stride) * stride * total_dim as usize
+                + global_thread_id as usize * stride,
+        )
     }
 }
 
@@ -134,12 +139,12 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for Map2D {
 
     #[inline]
     #[gpu_codegen::device]
-    fn map(&self, idx: Self::IndexType, thread_ids: [usize; TID_MAX_LEN]) -> (bool, usize) {
+    fn map(&self, idx: Self::IndexType, thread_ids: [u32; TID_MAX_LEN]) -> (bool, usize) {
         let shape_x = self.x_size;
         let inner_x = idx.0;
         let inner_y = idx.1;
-        let x = inner_x * CS::global_dim_x() + CS::global_id_x(thread_ids);
-        let y = inner_y * CS::global_dim_y() + CS::global_id_y(thread_ids);
+        let x = inner_x * CS::global_dim_x() as usize + CS::global_id_x(thread_ids) as usize;
+        let y = inner_y * CS::global_dim_y() as usize + CS::global_id_y(thread_ids) as usize;
         (x < shape_x, shape_x * y + x)
     }
 }
@@ -341,7 +346,7 @@ mod test {
         assert!(NTHREADS <= 32);
         for t in 0..NTHREADS {
             for i in 0..n {
-                let tids = [0, t, 0, 0, 0, 0];
+                let tids = [0, t as u32, 0, 0, 0, 0];
                 let (valid, mapped_idx) = ScopeUniqueMap::<CS>::map(map, i, tids);
                 if valid && mapped_idx < n {
                     access_map[mapped_idx] = t as _;

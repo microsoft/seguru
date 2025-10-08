@@ -11,7 +11,7 @@ pub fn test_shared_write_read(a: &[u8], b: &mut [u8]) {
     let mut chunk_shared = shared.chunk_mut(gpu::MapLinear::new(1));//~ ERROR The write needs a `sync_threads` called before other read/write
     //~| ERROR The write needs a `sync_threads` called before other read/write
     //~| ERROR The write needs a `sync_threads` called before other read/write
-    chunk_shared[0] = a[gpu::thread_id::<gpu::DimX>()]; 
+    chunk_shared[0] = a[gpu::thread_id::<gpu::DimX>() as usize]; 
     let mut chunked_b = gpu::chunk_mut(b, gpu::MapLinear::new(1));
     let val = chunk_shared[0]; // This is safe, as no read/write to other chunk of the shared mem.
     chunked_b[0] = val;

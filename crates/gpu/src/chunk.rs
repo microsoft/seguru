@@ -34,7 +34,7 @@ pub unsafe trait ScopeUniqueMap<CS: ChunkScope>: Clone {
     /// index. Without providing extra precondition, index will always check the
     /// OOB error with global idx.
     #[gpu_codegen::device]
-    fn map(&self, idx: Self::IndexType, thread_ids: [usize; TID_MAX_LEN]) -> (bool, usize);
+    fn map(&self, idx: Self::IndexType, thread_ids: [u32; TID_MAX_LEN]) -> (bool, usize);
 }
 
 /// Provide local_to_global_index for chunking.

@@ -6,7 +6,7 @@ use gpu::SafeGpuConfig;
 pub fn kernel(input: &[f32; Config::BDIM_X as _]) {
     gpu::println!(
         "Hello world... input = {}",
-        input[gpu::thread_id::<gpu::DimX>()]
+        input[gpu::thread_id::<gpu::DimX>() as usize]
     );
 }
 

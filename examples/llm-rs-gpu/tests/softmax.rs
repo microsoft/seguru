@@ -5,7 +5,9 @@ use llm_rs_gpu::softmax_forward_kernel5;
 mod common;
 use common::{f32_eq, random_f32_vec};
 
-fn softmax_cpu(inp: &[f32], n_len: usize, t_len: usize, inv_temperature: f32) -> Vec<f32> {
+fn softmax_cpu(inp: &[f32], n_len: u32, t_len: u32, inv_temperature: f32) -> Vec<f32> {
+    let n_len = n_len as usize;
+    let t_len = t_len as usize;
     let mut out = vec![0f32; inp.len()];
     for n in 0..n_len {
         for t in 0..t_len {
@@ -30,11 +32,15 @@ fn softmax_cpu(inp: &[f32], n_len: usize, t_len: usize, inv_temperature: f32) ->
 pub fn softmax_autoregressive_backward_kernel_cpu(
     datt: &[f32],
     att: &[f32],
-    B: usize,
-    T: usize,
-    NH: usize,
+    B: u32,
+    T: u32,
+    NH: u32,
     scale: f32,
 ) -> Vec<f32> {
+    let B = B as usize;
+    let T = T as usize;
+    let NH = NH as usize;
+
     let mut dpreatt = vec![0f32; NH * B * T * T];
     assert_eq!(dpreatt.len(), NH * B * T * T);
     assert_eq!(datt.len(), NH * B * T * T);
@@ -94,8 +100,8 @@ fn test_softmax_forward_kernel5_large() {
     test_softmax_forward_kernel5(64, 1024);
 }
 
-fn test_softmax_forward_kernel5(N: usize, T: usize) {
-    let LEN: usize = N * T * T;
+fn test_softmax_forward_kernel5(N: u32, T: u32) {
+    let LEN: usize = (N * T * T) as usize;
     let inv_temperature = random_f32_vec(1)[0];
     // input: (N, T, T) flattened
     let inp = random_f32_vec(LEN);
@@ -105,23 +111,14 @@ fn test_softmax_forward_kernel5(N: usize, T: usize) {
     // Reference CPU softmax
     let expected = softmax_cpu(&inp, N, T, inv_temperature);
     const BLOCK_SIZE: u32 = 256;
-    let grid_size = (N * T * 32).div_ceil(BLOCK_SIZE as usize) as u32;
+    let grid_size = (N * T * 32).div_ceil(BLOCK_SIZE);
 
     cuda_ctx(0, |ctx, m| {
         let d_inp = ctx.new_tensor_view::<[f32]>(&inp).expect("alloc failed");
         let mut d_out = ctx.new_tensor_view::<[f32]>(&out).expect("alloc failed");
         let config = gpu_host::gpu_config!(grid_size, 1, 1, @const BLOCK_SIZE, 1, 1, 0);
-        softmax_forward_kernel5::launch(
-            config,
-            ctx,
-            m,
-            &mut d_out,
-            inv_temperature,
-            &d_inp,
-            N as i32,
-            T as i32,
-        )
-        .expect("Failed to run softmax_forward_kernel5");
+        softmax_forward_kernel5::launch(config, ctx, m, &mut d_out, inv_temperature, &d_inp, N, T)
+            .expect("Failed to run softmax_forward_kernel5");
         d_out.copy_to_host(&mut out).expect("copy to host failed");
     });
     assert!(
@@ -132,18 +129,18 @@ fn test_softmax_forward_kernel5(N: usize, T: usize) {
     );
 }
 
-fn test_softmax_autoregressive_backward_kernel(B: usize, T: usize, C: usize, NH: usize) {
+fn test_softmax_autoregressive_backward_kernel(B: u32, T: u32, C: u32, NH: u32) {
     let scale = 0.4;
 
-    let len: usize = B * NH * T * T;
+    let len = (B * NH * T * T) as usize;
     // Example att and datt tensors (B, T, T) flattened
     let att = random_f32_vec(len);
     let datt = random_f32_vec(len);
     let mut dpreatt = vec![0f32; len];
     const BLOCK_SIZE: u32 = 256;
-    const T_PER_BLOCK: usize = 4;
-    let gdim_x = (T / T_PER_BLOCK) as u32;
-    let gdim_y = (B * NH) as u32;
+    const T_PER_BLOCK: u32 = 4;
+    let gdim_x = T / T_PER_BLOCK;
+    let gdim_y = B * NH;
     let expected = softmax_autoregressive_backward_kernel_cpu(&datt, &att, B, T, NH, scale);
     cuda_ctx(0, |ctx, m| {
         let d_att = ctx.new_tensor_view::<[f32]>(&att).expect("alloc failed");

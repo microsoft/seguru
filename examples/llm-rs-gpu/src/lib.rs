@@ -39,21 +39,23 @@ pub fn encoder_forward_kernel3(
     inp: &[i32],
     wte: &[Float4],
     wpe: &[Float4],
-    B: i32,
-    T: i32,
-    C: i32,
+    B: u32,
+    T: u32,
+    C: u32,
 ) {
     let mut out = chunk_mut(out, MapLinear::new(1));
     let C4 = C / 4;
-    let idx =
-        (block_dim::<gpu::DimX>() * block_id::<gpu::DimX>() + thread_id::<gpu::DimX>()) as i32;
+    let bid_x = block_id::<DimX>();
+    let bdim_x = block_dim::<DimX>();
+    let tid_x = thread_id::<DimX>();
+    let idx = bdim_x * bid_x + tid_x;
     let N = B * T * C4;
     if idx < N {
         let bt = idx / C4;
         let b = bt / T;
         let t = bt % T;
         let c4 = idx % C4;
-        let ix = inp[(b * T + t) as usize];
+        let ix = inp[(b * T + t) as usize] as u32;
 
         // bt = b * T + t, bt * C4 + c4 = idx
         // b * T * C4 + t * C4 + c4 = idx
@@ -97,7 +99,10 @@ pub fn encoder_backward_kernel(
     T: i32,
     C: i32,
 ) {
-    let idx = (block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>()) as i32;
+    let bdim_x = block_dim::<DimX>() as i32;
+    let bid_x = block_id::<DimX>() as i32;
+    let tid_x = thread_id::<DimX>() as i32;
+    let idx = bdim_x * bid_x + tid_x;
     let N = B * T * C;
     let dwte = gpu::sync::Atomic::new(dwte);
     let dwpe = gpu::sync::Atomic::new(dwpe);
@@ -124,11 +129,9 @@ pub fn layernorm_forward_kernel3(
     inp: &[f32],
     weight: &[f32],
     bias: &[f32],
-    N: i32,
-    C: i32,
+    N: u32,
+    C: u32,
 ) {
-    let C = C as usize;
-    let N = N as u32;
     let warp = ThreadWarpTile::<32>;
     let grid2warp = build_chunk_scope(Grid, warp);
     let warp2thread = build_chunk_scope(warp, Thread);
@@ -149,19 +152,21 @@ pub fn layernorm_forward_kernel3(
         .chunk_to_scope(grid2warp, MapLinear::new(C as _))
         .chunk_to_scope(warp2thread, MapLinear::new(1));
 
-    let idx = block_id::<gpu::DimX>() * warp.meta_group_size() + warp.subgroup_id();
+    let bid_x = block_id::<DimX>();
+
+    let idx = bid_x * warp.meta_group_size() + warp.subgroup_id();
     let lane_id = warp.thread_rank();
-    if idx >= N as usize {
+    if idx >= N {
         return;
     }
     // the row of input that this group of threads is responsible for
     let idx_C = idx * C;
-    let x = &inp[idx_C..idx_C + C];
+    let x = &inp[idx_C as usize..(idx_C + C) as usize];
 
     // mean
     let mut local_sum = 0.0f32;
-    for i in (lane_id..C).step_by(warp.size()) {
-        local_sum += x[i];
+    for i in (lane_id..C).step_by(warp.size() as usize) {
+        local_sum += x[i as usize];
     }
     let sum: f32 = warp.redux(ReduxAdd, local_sum);
     let m = sum / C as f32;
@@ -171,8 +176,8 @@ pub fn layernorm_forward_kernel3(
 
     // rstd
     let mut local_sum = 0.0f32;
-    for i in (lane_id..C).step_by(warp.size()) {
-        let diff = x[i] - m;
+    for i in (lane_id..C).step_by(warp.size() as usize) {
+        let diff = x[i as usize] - m;
         local_sum += diff * diff;
     }
     let sum = warp.redux(ReduxAdd, local_sum);
@@ -181,12 +186,12 @@ pub fn layernorm_forward_kernel3(
         chunked_rstd[0].stcs(s);
     }
     // final normalization and scaling by weight/bias
-    for (i, c) in (lane_id..C).step_by(warp.size()).enumerate() {
+    for (i, c) in (lane_id..C).step_by(warp.size() as usize).enumerate() {
         // load and store using the .cs "streaming" hint to the compiler,
         // indicating that this data will not be reused soon, and can be streamed through the caches
         // this allows the threads to get more cache-hits for the (shared) weight and bias parameters
-        let n = s * (x[c].ldcs() - m);
-        let o = n * weight[c] + bias[c];
+        let n = s * (x[c as usize].ldcs() - m);
+        let o = n * weight[c as usize] + bias[c as usize];
         chunked_out[i].stcs(o);
     }
 }
@@ -198,16 +203,15 @@ pub fn permute_kernel(
     k: &mut [f32],
     v: &mut [f32],
     inp: &[f32],
-    B: i32,
-    N: i32,
-    NH: i32,
-    d: i32,
+    B: u32,
+    N: u32,
+    NH: u32,
+    d: u32,
 ) {
     let mut q = chunk_mut(q, MapLinear::new(1));
     let mut k = chunk_mut(k, MapLinear::new(1));
     let mut v = chunk_mut(v, MapLinear::new(1));
-    let idx = (gpu::block_dim::<gpu::DimX>() * gpu::block_id::<gpu::DimX>()
-        + gpu::thread_id::<gpu::DimX>()) as i32;
+    let idx = block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>();
 
     if idx < B * NH * N * d {
         let b = idx / (NH * N * d);
@@ -252,10 +256,10 @@ pub fn permute_kernel_backward(
     dq: &[f32],
     dk: &[f32],
     dv: &[f32],
-    B: i32,
-    N: i32,
-    NH: i32,
-    D: i32,
+    B: u32,
+    N: u32,
+    NH: u32,
+    D: u32,
 ) {
     // shape (B, NH, N, D) to (B, N, 3, NH, D)
     // Q[b][nh_][n][d_][0] = inp[b][n][0][nh_][d_]
@@ -267,7 +271,8 @@ pub fn permute_kernel_backward(
     let mut dinp = chunk_mut(dinp, map);
     let idx = gpu::block_dim::<gpu::DimX>() * gpu::block_id::<gpu::DimX>()
         + gpu::thread_id::<gpu::DimX>();
-    if idx < (B * NH * N * D) as usize {
+    if idx < (B * NH * N * D) {
+        let idx = idx as usize;
         dinp[0] = dq[idx];
         dinp[1] = dk[idx];
         dinp[2] = dv[idx];
@@ -293,7 +298,7 @@ __global__ void unpermute_kernel(float* inp, float *out, int B, int N, int NH, i
 */
 
 #[gpu_macros::cuda_kernel]
-pub fn unpermute_kernel(inp: &[f32], out: &mut [f32], B: i32, N: i32, NH: i32, D: i32) {
+pub fn unpermute_kernel(inp: &[f32], out: &mut [f32], B: u32, N: u32, NH: u32, D: u32) {
     // shape (B, NH, N, D) to (B, N, NH, D)
     // inp shape: (B, NH, N, D) out shape (B, N, NH, D)
     // out[b][n][nh_][d_] <- inp[b][nh_][n][d_]
@@ -304,8 +309,8 @@ pub fn unpermute_kernel(inp: &[f32], out: &mut [f32], B: i32, N: i32, NH: i32, D
     let mut out = chunk_mut(out, map);
     let idx = gpu::block_dim::<gpu::DimX>() * gpu::block_id::<gpu::DimX>()
         + gpu::thread_id::<gpu::DimX>();
-    if idx < (B * NH * N * D) as usize {
-        out[0] = inp[idx].ldcs();
+    if idx < B * NH * N * D {
+        out[0] = inp[idx as usize].ldcs();
     }
 }
 
@@ -326,15 +331,15 @@ __global__ void unpermute_kernel_backward(float* dinp, const float *dout, int B,
 */
 
 #[gpu_macros::cuda_kernel]
-pub fn unpermute_kernel_backward(dinp: &mut [f32], dout: &[f32], B: i32, N: i32, NH: i32, D: i32) {
+pub fn unpermute_kernel_backward(dinp: &mut [f32], dout: &[f32], B: u32, N: u32, NH: u32, D: u32) {
     // shape (B, N, NH, D) to (B, NH, N, D)
     // inp shape: (B, NH, N, D) out shape (B, N, NH, D)
     // out[b][n][nh_][d_] <- inp[b][nh_][n][d_]
     // swap tid1 and tid2
     let map = gpu::MapLinear::new(1);
     let mut dinp = chunk_mut(dinp, map);
-    let idx = (gpu::block_dim::<gpu::DimX>() * gpu::block_id::<gpu::DimX>()
-        + gpu::thread_id::<gpu::DimX>()) as i32;
+    let idx = gpu::block_dim::<gpu::DimX>() * gpu::block_id::<gpu::DimX>()
+        + gpu::thread_id::<gpu::DimX>();
     if idx < (NH * N * B * D) {
         let b = idx / (NH * N * D);
         let mut rest = idx % (NH * N * D);
@@ -412,7 +417,7 @@ __global__ void softmax_forward_kernel5(float* out, float inv_temperature, const
 
 #[gpu_macros::cuda_kernel]
 #[allow(clippy::needless_range_loop)]
-pub fn softmax_forward_kernel5(out: &mut [f32], inv_temperature: f32, inp: &[f32], N: i32, T: i32) {
+pub fn softmax_forward_kernel5(out: &mut [f32], inv_temperature: f32, inp: &[f32], N: u32, T: u32) {
     assert!(T % 4 == 0);
     let warp = ThreadWarpTile::<32>;
     let grid2warp = build_chunk_scope(Grid, warp);
@@ -423,7 +428,7 @@ pub fn softmax_forward_kernel5(out: &mut [f32], inv_temperature: f32, inp: &[f32
         .chunk_to_scope(
             grid2warp,
             reshape_map!(
-                [T as usize] | [warp.meta_group_size(), grid_dim::<DimX>()] => layout: [i0, t0, -t1]
+                [T as usize] | [warp.meta_group_size() as usize, grid_dim::<DimX>() as usize] => layout: [i0, t0, -t1]
             ),
         )
         .chunk_to_scope(warp2thread, gpu::MapLinear::new(1));
@@ -434,18 +439,17 @@ pub fn softmax_forward_kernel5(out: &mut [f32], inv_temperature: f32, inp: &[f32
     // int idx = blockIdx.x * warp.meta_group_size() + warp.meta_group_rank(); // forward order
     let global_warp_id_reversed =
         (grid_dim::<DimX>() - block_id::<DimX>() - 1) * warp.meta_group_size() + warp.subgroup_id(); // backward order
-    let global_warp_id_reversed = global_warp_id_reversed as i32;
     if global_warp_id_reversed >= N * T {
         return;
     }
-    let own_pos = (global_warp_id_reversed % T) as usize;
+    let own_pos = global_warp_id_reversed % T;
     let pos_by_4 = own_pos / 4;
     let x = &inp[(global_warp_id_reversed * T) as usize..];
     let mut maxval = f32::MIN;
     let mut sumval = 0.0f32;
     let x_vec: &[[f32; 4]] = x.reshape();
-    for i in (warp.thread_rank()..pos_by_4).step_by(warp.size()) {
-        let v4: [f32; 4] = x_vec[i];
+    for i in (warp.thread_rank()..pos_by_4).step_by(warp.size() as usize) {
+        let v4: [f32; 4] = x_vec[i as usize];
         let old_maxval = maxval;
         for i in 0..4 {
             maxval = maxval.max(v4[i]);
@@ -455,12 +459,12 @@ pub fn softmax_forward_kernel5(out: &mut [f32], inv_temperature: f32, inp: &[f32
             sumval += (inv_temperature * (v4[i] - maxval)).exp();
         }
     }
-
-    if 4 * pos_by_4 + warp.thread_rank() <= own_pos {
+    let pos = 4 * pos_by_4 + warp.thread_rank();
+    if pos <= own_pos {
         let old_maxval = maxval;
-        maxval = maxval.max(x[4 * pos_by_4 + warp.thread_rank()]);
+        maxval = maxval.max(x[pos as usize]);
         sumval *= (inv_temperature * (old_maxval - maxval)).exp();
-        sumval += (inv_temperature * (x[4 * pos_by_4 + warp.thread_rank()] - maxval)).exp();
+        sumval += (inv_temperature * (x[pos as usize] - maxval)).exp();
     }
 
     let global_maxval = warp.redux(ReduxMax, maxval);
@@ -473,11 +477,11 @@ pub fn softmax_forward_kernel5(out: &mut [f32], inv_temperature: f32, inp: &[f32
     // ...
     // If global_warp_id_reversed = T-1, if T > 32, all threads write to out[idx]
     for (idx, i) in (warp.thread_rank()..=own_pos)
-        .step_by(warp.size())
+        .step_by(warp.size() as usize)
         .enumerate()
     {
         // recalculation is faster than doing the round-trip through memory.
-        let ev = (inv_temperature * (x[i].ldcs() - global_maxval)).exp();
+        let ev = (inv_temperature * (x[i as usize].ldcs() - global_maxval)).exp();
         //__stcs(out + idx * T + i, ev * norm);
         out[idx].stcs(ev * norm);
     }
@@ -492,10 +496,9 @@ __global__ void residual_forward_kernel(float* out, float* inp1, float* inp2, in
 */
 
 #[gpu_macros::cuda_kernel]
-pub fn residual_forward_kernel(out: &mut [f32], inp1: &[f32], inp2: &[f32], N: i32) {
+pub fn residual_forward_kernel(out: &mut [f32], inp1: &[f32], inp2: &[f32], N: u32) {
     let mut out = chunk_mut(out, gpu::MapLinear::new(1));
-    let idx = (gpu::block_dim::<gpu::DimX>() * gpu::block_id::<gpu::DimX>()
-        + gpu::thread_id::<gpu::DimX>()) as i32;
+    let idx = block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>();
     if idx < N {
         out[0] = inp1[idx as usize].ldcs() + inp2[idx as usize].ldcs();
     }
@@ -514,11 +517,11 @@ __global__ void gelu_forward_kernel(float* out, const float* inp, int N) {
 */
 
 #[gpu_macros::cuda_kernel]
-pub fn gelu_forward_kernel(out: &mut [f32], inp: &[f32], N: i32) {
+pub fn gelu_forward_kernel(out: &mut [f32], inp: &[f32], N: u32) {
     let GELU_SCALING_FACTOR: f32 = (2.0f32 / core::f32::consts::PI).sqrt();
 
     let mut out = chunk_mut(out, MapLinear::new(1));
-    let idx = (block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>()) as i32;
+    let idx = block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>();
     if idx < N {
         let xi = inp[idx as usize].ldcs();
         let cube = 0.044715 * xi * xi * xi;
@@ -543,11 +546,12 @@ __global__ void gelu_backward_kernel(float* dinp, const float* inp, const float*
 */
 
 #[gpu_macros::cuda_kernel]
-pub fn gelu_backward_kernel_llm(dinp: &mut [f32], inp: &[f32], dout: &[f32], N: i32) {
+pub fn gelu_backward_kernel_llm(dinp: &mut [f32], inp: &[f32], dout: &[f32], N: u32) {
     let gelu_scaling_factor: f32 = (2.0f32 / core::f32::consts::PI).sqrt();
     let mut dinp = chunk_mut(dinp, MapLinear::new(1));
     let idx = block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>();
-    if idx < N as usize {
+    if idx < N {
+        let idx = idx as usize;
         let x = inp[idx].ldcs();
         let cube = 0.044715 * x * x * x;
         let tanh_arg = gelu_scaling_factor * (x + cube);
@@ -562,7 +566,7 @@ pub fn gelu_backward_kernel_llm(dinp: &mut [f32], inp: &[f32], dout: &[f32], N: 
 
 // When dinp == dout
 #[gpu_macros::cuda_kernel]
-pub fn gelu_backward_kernel(dinp: &mut [f32], inp: &[f32], N: i32) {
+pub fn gelu_backward_kernel(dinp: &mut [f32], inp: &[f32], N: u32) {
     let gelu_scaling_factor: f32 = (2.0f32 / core::f32::consts::PI).sqrt();
 
     let mut dinp_local = chunk_mut(dinp, gpu::MapLinear::new(1));
@@ -638,7 +642,7 @@ __global__ void matmul_backward_bias_kernel4(float* dbias, const float* dout, in
 // This constructs matmul_backward with cublasSgemm
 #[gpu_macros::attr(skip_divergence_check)]
 #[gpu_macros::cuda_kernel(dynamic_shared)]
-pub fn matmul_backward_bias_kernel4(dbias: &mut [f32], dout: &[f32], B: i32, T: i32, OC: i32) {
+pub fn matmul_backward_bias_kernel4(dbias: &mut [f32], dout: &[f32], B: u32, T: u32, OC: u32) {
     // this kernel is launched with 1D grid_dim of OC/32
     // for example let's say block_size is 128
     let block_size = block_dim::<DimX>();
@@ -647,15 +651,15 @@ pub fn matmul_backward_bias_kernel4(dbias: &mut [f32], dout: &[f32], B: i32, T: 
     let mut dbias_chunk = chunk_mut(
         dbias,
         reshape_map!(
-            [1] | [warp.size(), (warp.meta_group_size(), 1), grid_dim::<DimX>()] => layout: [i0, t0, t1, t2]
+            [1] | [warp.size() as usize, (warp.meta_group_size() as usize, 1), grid_dim::<DimX>() as usize] => layout: [i0, t0, t1, t2]
         ),
     );
-    let smem = smem_alloc.alloc::<f32>(block_size);
+    let smem = smem_alloc.alloc::<f32>(block_size as usize);
     let mut smem_chunk = smem.chunk_mut(MapLinear::new(1));
 
-    let warp_id = (thread_id::<DimX>() / warp.size()) as i32; // warp index in the block, 0,1,2,3
-    let lane_id = (thread_id::<DimX>() % warp.size()) as i32; // thread index in the warp, 0,1,2,...,31
-    let tl = (block_id::<DimX>() * warp.size()) as i32; // pointer to the start column for this block
+    let warp_id = thread_id::<DimX>() / warp.size(); // warp index in the block, 0,1,2,3
+    let lane_id = thread_id::<DimX>() % warp.size(); // thread index in the warp, 0,1,2,...,31
+    let tl = block_id::<DimX>() * warp.size(); // pointer to the start column for this block
     let vstep = block_size / warp.size(); // number of warps in a block, e.g. 4
 
     // pointer to the start of the column for one lane of threads
@@ -668,8 +672,8 @@ pub fn matmul_backward_bias_kernel4(dbias: &mut [f32], dout: &[f32], B: i32, T: 
     // importantly, consecutive threads (in threadId) are processing adjacent columns,
     // leading to a coalesced memory access pattern
     let mut dout_sum = 0.0f32;
-    for row in (warp_id..(B * T)).step_by(vstep) {
-        if row * OC > dout_col.len() as i32 {
+    for row in (warp_id..(B * T)).step_by(vstep as usize) {
+        if (row * OC) as usize > dout_col.len() {
             gpu::println!(
                 "Error: row * OC = {} exceeds dout_col length {}",
                 row * OC,
@@ -686,7 +690,7 @@ pub fn matmul_backward_bias_kernel4(dbias: &mut [f32], dout: &[f32], B: i32, T: 
     dout_sum = 0.0f32;
     if warp_id == 0 {
         for j in 0..vstep {
-            dout_sum += *smem[lane_id as usize + (j * warp.size())];
+            dout_sum += *smem[(lane_id + (j * warp.size())) as usize];
         }
         dbias_chunk[0] += dout_sum;
     }
@@ -777,9 +781,9 @@ pub fn layernorm_backward_kernel2(
     weight: &[f32],
     mean: &[f32],
     rstd: &[f32],
-    B: usize,
-    T: usize,
-    C: usize,
+    B: u32,
+    T: u32,
+    C: u32,
 ) {
     // dinp, dout, inp shape: (B, T, C)
     // weight, dbias shape: (C,)
@@ -787,10 +791,13 @@ pub fn layernorm_backward_kernel2(
     let warp = ThreadWarpTile::<32>;
     let grid2warp = build_chunk_scope(Grid, warp);
     let warp2thread = build_chunk_scope(warp, Thread);
-
-    let global_warp_id = gpu::block_id::<gpu::DimX>() * warp.meta_group_size() + warp.subgroup_id();
+    let bid_x = block_id::<DimX>();
+    let bdim_x = block_dim::<DimX>();
+    let tid = thread_id::<DimX>();
     let lane_id = warp.thread_rank();
-    let tid = thread_id::<gpu::DimX>();
+
+    let global_warp_id = bid_x * (warp.meta_group_size()) + (warp.subgroup_id());
+
     let N = B * T;
     if global_warp_id >= N {
         return;
@@ -804,21 +811,21 @@ pub fn layernorm_backward_kernel2(
         .chunk_to_scope(
             grid2warp,
             //gpu::reshape_map!([B, T] | [C] => layout: [0, 1, 2]),
-            gpu::reshape_map!( [C] | [B, T] => layout: [i0, t0, t1]),
+            gpu::reshape_map!( [C as usize] | [B as usize, T as usize] => layout: [i0, t0, t1]),
         )
         .chunk_to_scope(warp2thread, gpu::MapLinear::new(1));
 
-    let dout_bt = &dout[warp_offset * C..];
-    let inp_bt = &inp[warp_offset * C..];
-    let mean_bt = mean[warp_offset];
-    let rstd_bt = rstd[warp_offset];
+    let dout_bt = &dout[(warp_offset * C) as usize..];
+    let inp_bt = &inp[(warp_offset * C) as usize..];
+    let mean_bt = mean[warp_offset as usize];
+    let rstd_bt = rstd[warp_offset as usize];
     // the first half of shared memory is bias, second is weight
-    let dbias_shared = smem_alloc.alloc::<f32>(C);
+    let dbias_shared = smem_alloc.alloc::<f32>(C as usize);
     let mut dbias_shared_chunk = dbias_shared.chunk_mut(gpu::MapLinear::new(1));
-    let dweight_shared = smem_alloc.alloc::<f32>(C);
+    let dweight_shared = smem_alloc.alloc::<f32>(C as usize);
     let mut dweight_shared_chunk = dweight_shared.chunk_mut(gpu::MapLinear::new(1));
     // init shared memory to zero
-    for (i, _) in (tid..C).step_by(gpu::block_dim::<gpu::DimX>()).enumerate() {
+    for (i, _) in (tid..C).step_by(block_dim::<DimX>() as usize).enumerate() {
         dbias_shared_chunk[i] = 0.0;
         dweight_shared_chunk[i] = 0.0;
     }
@@ -827,9 +834,9 @@ pub fn layernorm_backward_kernel2(
     // first: two reduce operations
     let mut dnorm_mean_local = 0.0f32;
     let mut dnorm_norm_mean_local = 0.0f32;
-    for i in (lane_id..C).step_by(warp.size()) {
-        let norm_bti = (inp_bt[i] - mean_bt) * rstd_bt;
-        let dnorm_i = weight[i] * dout_bt[i];
+    for i in (lane_id..C).step_by(warp.size() as usize) {
+        let norm_bti = (inp_bt[i as usize] - mean_bt) * rstd_bt;
+        let dnorm_i = weight[i as usize] * dout_bt[i as usize];
         dnorm_mean_local += dnorm_i;
         dnorm_norm_mean_local += dnorm_i * norm_bti;
     }
@@ -842,14 +849,16 @@ pub fn layernorm_backward_kernel2(
     // now iterate again and accumulate all the gradients
     let dbias_shared_atom = SharedAtomic::new(dbias_shared);
     let dweight_shared_atom = SharedAtomic::new(dweight_shared);
-    for (k, i) in (lane_id..C).step_by(warp.size()).enumerate() {
-        let norm_bti = (inp_bt[i] - mean_bt) * rstd_bt;
-        let dnorm_i = weight[i] * dout_bt[i];
+    for (k, i) in (lane_id..C).step_by(warp.size() as usize).enumerate() {
+        let norm_bti = (inp_bt[i as usize] - mean_bt) * rstd_bt;
+        let dnorm_i = weight[i as usize] * dout_bt[i as usize];
         // gradient contribution to bias
-        dbias_shared_atom.index(i).atomic_addf(dout_bt[i]);
+        dbias_shared_atom
+            .index(i as usize)
+            .atomic_addf(dout_bt[i as usize]);
         // gradient contribution to weight
-        let w = norm_bti * dout_bt[i];
-        dweight_shared_atom.index(i).atomic_addf(w);
+        let w = norm_bti * dout_bt[i as usize];
+        dweight_shared_atom.index(i as usize).atomic_addf(w);
         // gradient contribution to input
         let mut dval = 0.0f32;
         dval += dnorm_i; // term 1
@@ -863,9 +872,13 @@ pub fn layernorm_backward_kernel2(
     // write to global memory
     let dbias = Atomic::new(dbias);
     let dweight = Atomic::new(dweight);
-    for i in (tid..C).step_by(gpu::block_dim::<gpu::DimX>()) {
-        dbias.index(i).atomic_addf(*dbias_shared[i]);
-        dweight.index(i).atomic_addf(*dweight_shared[i]);
+    for i in (tid..C).step_by(bdim_x as usize) {
+        dbias
+            .index(i as usize)
+            .atomic_addf(*dbias_shared[i as usize]);
+        dweight
+            .index(i as usize)
+            .atomic_addf(*dweight_shared[i as usize]);
     }
 }
 
@@ -927,16 +940,16 @@ pub fn softmax_autoregressive_backward_kernel(
     dpreatt: &mut [f32],
     datt: &[f32],
     att: &[f32],
-    _B: usize,
-    T: usize,
-    _C: usize,
+    _B: u32,
+    T: u32,
+    _C: u32,
     scale: f32,
 ) {
     // dpreatt, datt, att shape: (B * NH, T, T)
     assert!(Config::BDIM_Z == 1);
     assert!(Config::BDIM_X * Config::BDIM_Y == 256);
-    const BLOCK_SIZE: usize = 256;
-    const T_PER_BLOCK: usize = 4;
+    const BLOCK_SIZE: u32 = 256;
+    const T_PER_BLOCK: u32 = 4;
     // T / 4, B * NH
     let block = Block;
     let warp = ThreadWarpTile::<32>;
@@ -952,11 +965,11 @@ pub fn softmax_autoregressive_backward_kernel(
     let arr_t0_size = if BLOCK_SIZE < T { BLOCK_SIZE } else { T };
     let arr_t1_size = T.div_ceil(T_PER_BLOCK);
     let dpreatt_map = gpu::reshape_map!(
-        [arr_i0_size, T_PER_BLOCK] |
+        [arr_i0_size as usize, T_PER_BLOCK as usize] |
         [
-            (BLOCK_SIZE, arr_t0_size),
-            (grid_dim::<DimX>(), arr_t1_size), //reversed
-            grid_dim::<DimY>(),
+            (BLOCK_SIZE as usize, arr_t0_size as usize),
+            (grid_dim::<DimX>() as usize, arr_t1_size as usize), //reversed
+            grid_dim::<DimY>() as usize,
         ] =>
         layout: [t0, i0, -i1, -t1, t2]
     );
@@ -966,10 +979,10 @@ pub fn softmax_autoregressive_backward_kernel(
     let block2warp = build_chunk_scope(block, warp);
     let warp2thread = build_chunk_scope(warp, Thread);
 
-    let idx = gpu::block_id::<gpu::DimY>();
+    let idx = block_id::<DimY>();
 
     // go through blocks in reverse order, so the slowest block starts first
-    let t0 = (T - 1) as isize - (T_PER_BLOCK * gpu::block_id::<gpu::DimX>()) as isize;
+    let t0 = (T - 1) as i32 - (T_PER_BLOCK * block_id::<DimX>()) as i32;
 
     // Assign 32 elements to each warp
     // and then assign 1 element to each thread in the warp
@@ -982,18 +995,18 @@ pub fn softmax_autoregressive_backward_kernel(
     }
 
     let lane_id = warp.thread_rank();
-    for to in 0..T_PER_BLOCK as isize {
-        let t = t0 - to;
+    for to in 0..T_PER_BLOCK {
+        let t = t0 - to as i32;
         if t < 0 {
             return;
         }
-        let t = t as usize;
+        let t = t as u32;
         let bth = idx * T * T + t * T;
-        let att_bth = &att[bth..];
-        let datt_bth = &datt[bth..];
+        let att_bth = &att[bth as usize..];
+        let datt_bth = &datt[bth as usize..];
         let mut local_sum = 0.0f32;
-        for t2 in (block.thread_rank()..=t).step_by(BLOCK_SIZE) {
-            local_sum += att_bth[t2].ldcs() * datt_bth[t2].ldcs();
+        for t2 in (block.thread_rank()..=t).step_by(BLOCK_SIZE as usize) {
+            local_sum += att_bth[t2 as usize].ldcs() * datt_bth[t2 as usize].ldcs();
         }
         // warp-level reduction
         let acc = warp.redux(ReduxAdd, local_sum);
@@ -1014,12 +1027,15 @@ pub fn softmax_autoregressive_backward_kernel(
         sync_threads();
 
         // block-level reduction
-        local_sum = warp.redux(ReduxAdd, block_acc[lane_id]);
+        local_sum = warp.redux(ReduxAdd, block_acc[lane_id as usize]);
 
-        for (i, t3) in (block.thread_rank()..=t).step_by(BLOCK_SIZE).enumerate() {
-            let acc = att_bth[t3].ldcs() * (datt_bth[t3].ldcs() - local_sum);
+        for (i, t3) in (block.thread_rank()..=t)
+            .step_by(BLOCK_SIZE as usize)
+            .enumerate()
+        {
+            let acc = att_bth[t3 as usize].ldcs() * (datt_bth[t3 as usize].ldcs() - local_sum);
             let val = scale * acc;
-            dpreatt_bth[i + to as usize * arr_i0_size].stcs(val);
+            dpreatt_bth[i + (to * arr_i0_size) as usize].stcs(val);
         }
     }
 }
@@ -1145,7 +1161,7 @@ struct SoftmaxParams {
 #[gpu_macros::attr(skip_divergence_check)]
 fn prepare_softmax_blockwide_noFloat4(
     inp: &GlobalGroupChunk<'_, f32, Grid2BlockScope, MapLinear>,
-    V: usize,
+    V: u32,
 ) -> SoftmaxParams {
     // two reductions of up to 1024 threads:
     // 1) inside warp (shuffle), 2) cross-warp (shared memory), 3) inside warp (shuffle)
@@ -1172,8 +1188,8 @@ fn prepare_softmax_blockwide_noFloat4(
     // so even small L2s get some hits on the 2nd read of the
     let tid = thread_id::<gpu::DimX>();
     let block_size = block_dim::<DimX>();
-    for i in (0..=V + tid - block_size).rev().step_by(block_size) {
-        let v = inp[i];
+    for i in (0..=V + tid - block_size).rev().step_by(block_size as _) {
+        let v = inp[i as usize];
         let old_maxval = thread_maxval;
         thread_maxval = thread_maxval.max(v);
         thread_sumval *= (old_maxval - thread_maxval).exp();
@@ -1192,7 +1208,7 @@ fn prepare_softmax_blockwide_noFloat4(
     // if the thread is "out of range" of data, use -FLT_MAX as
     let warp_maxval = if lane_id < num_warps {
         // ensure shared_maxval[lane_id] is initialized
-        shared_maxval[lane_id]
+        shared_maxval[lane_id as usize]
     } else {
         f32::MIN
     };
@@ -1210,7 +1226,7 @@ fn prepare_softmax_blockwide_noFloat4(
     // same strategy, now reduce sumval across warps
     let warp_sumval = if lane_id < num_warps {
         // ensure shared_sumval[lane_id] is initialized
-        shared_sumval[lane_id]
+        shared_sumval[lane_id as usize]
     } else {
         0.0
     };
@@ -1270,17 +1286,17 @@ pub fn fused_classifier_kernel3(
     probs: &mut [f32],
     dlosses: &[f32],
     targets: &[i32],
-    B: usize,
-    T: usize,
-    V: usize, // vocab_size
-    P: usize, // padded_vocab_size P >= V
+    B: u32,
+    T: u32,
+    V: u32, // vocab_size
+    P: u32, // padded_vocab_size P >= V
 ) {
     let block = Block;
     let grid2block = build_chunk_scope(Grid, block);
     let block2thread = build_chunk_scope(block, Thread);
 
     // chunk logits to (B*T, P)
-    let logits_block = logits.chunk_to_scope(grid2block, MapLinear::new(P)); // blockid * P + tid
+    let logits_block = logits.chunk_to_scope(grid2block, MapLinear::new(P as usize)); // blockid * P + tid
 
     let mut losses_chunk = losses
         .chunk_to_scope(grid2block, MapLinear::new(1))
@@ -1290,18 +1306,18 @@ pub fn fused_classifier_kernel3(
     if idx >= B * T {
         return;
     }
-    let ix = targets[idx] as usize;
+    let ix = targets[idx as usize];
     // softmax (reading B * T * V, same logits read again below, hopefully still in cache)
     // assert!(P >= V);
     let sp = prepare_softmax_blockwide_noFloat4(&logits_block, V);
     // calculate the probability needed for the loss and update (single-threaded)
     if gpu::thread_id::<gpu::DimX>() == 0 {
-        let prob = ((logits_block[ix] - sp.offset).exp()) * sp.scale;
+        let prob = ((logits_block[ix as usize] - sp.offset).exp()) * sp.scale;
         losses_chunk[0] = -prob.ln();
     }
     // very sensible default for dlosses is 1/(B*T), which is the uniform loss
     let dloss = if !dlosses.is_empty() {
-        dlosses[idx]
+        dlosses[idx as usize]
     } else {
         1.0 / (B * T) as f32
     };
@@ -1313,11 +1329,11 @@ pub fn fused_classifier_kernel3(
     let mut logits_chunk = logits_block.chunk_to_scope(block2thread, MapLinear::new(1));
     let prob_is_empty = probs.is_empty();
     let mut probs_chunk = probs
-        .chunk_to_scope(grid2block, MapLinear::new(V))
+        .chunk_to_scope(grid2block, MapLinear::new(V as usize))
         .chunk_to_scope(block2thread, MapLinear::new(1));
 
     for (k, i) in (gpu::thread_id::<gpu::DimX>()..V)
-        .step_by(gpu::block_dim::<gpu::DimX>())
+        .step_by(gpu::block_dim::<gpu::DimX>() as _)
         .enumerate()
     {
         // this is the 2nd read of logits after the one in prepare_softmax2
@@ -1327,7 +1343,7 @@ pub fn fused_classifier_kernel3(
         if !prob_is_empty {
             probs_chunk[k] = prob;
         }
-        let indicator = if i == ix { 1.0 } else { 0.0 };
+        let indicator = if i as i32 == ix { 1.0 } else { 0.0 };
         logits_chunk[k] = (prob - indicator) * dloss;
     }
 }
@@ -1421,8 +1437,8 @@ pub fn matmul_forward_kernel4(
     inp: &[f32],
     weight: &[f32],
     bias: &[f32],
-    C: i32,
-    OC: i32,
+    C: u32,
+    OC: u32,
 ) {
     // precondition:
     // 1. gdim_y = OC / (8*bdim_y) => gdim_y <= OC, bdim_y * 8 <= OC, dim_y * 8 <= OC,
@@ -1433,19 +1449,19 @@ pub fn matmul_forward_kernel4(
     assert!(Config::BDIM_Y >= 2);
     assert!(OC % 128 == 0);
     assert!(C % 32 == 0);
-    assert!(OC as usize == 8 * dim::<DimY>());
+    assert!(OC == 8 * dim::<DimY>());
     // out is (B,T,OC). OC is short for "output channels", e.g. OC = 4 * C
     // inp is (B,T,C), weight is (OC, C), bias is (OC)
     // each thread handles 8x8 elements; each block 128 by 128 elements.
 
-    let bid_x = block_id::<DimX>() as i32;
-    let bid_y = block_id::<DimY>() as i32;
-    let bdim_x = block_dim::<DimX>() as i32;
-    let bdim_y = block_dim::<DimY>() as i32;
-    let gdim_x = grid_dim::<DimX>() as i32;
-    let gdim_y = grid_dim::<DimY>() as i32;
-    let tid_x = thread_id::<DimX>() as i32;
-    let tid_y = thread_id::<DimY>() as i32;
+    let bid_x = block_id::<DimX>();
+    let bid_y = block_id::<DimY>();
+    let bdim_x = block_dim::<DimX>();
+    let bdim_y = block_dim::<DimY>();
+    let gdim_x = grid_dim::<DimX>();
+    let gdim_y = grid_dim::<DimY>();
+    let tid_x = thread_id::<DimX>();
+    let tid_y = thread_id::<DimY>();
 
     let oc = 8 * (bid_y * bdim_y + tid_y);
 
@@ -1477,7 +1493,7 @@ pub fn matmul_forward_kernel4(
     if !bias.is_empty() {
         for i in 0..8 {
             for j in 0..2 {
-                vals[i][j] = bias[(oc / 4 + j as i32) as usize];
+                vals[i][j as usize] = bias[(oc / 4 + j) as usize];
             }
         }
     }
@@ -1486,7 +1502,7 @@ pub fn matmul_forward_kernel4(
 
     // (k * 32 * 32 + tid_y * 2 * 32 + xby8 * 32 + xmod8 * 4 + i)
     let map = gpu::reshape_map!(
-        [1, 4] | [8, ((bdim_x as u32).div_ceil(8) as usize, 2), (bdim_y as usize, 16)] =>
+        [1, 4] | [8, (bdim_x.div_ceil(8) as usize, 2), (bdim_y as usize, 16)] =>
         layout: [i0, t0, t1, t2, i1]
     );
     for so in (0..C).step_by(32) {
@@ -1521,7 +1537,7 @@ pub fn matmul_forward_kernel4(
                 rhs[u as usize] = rhs_s[rhs_idx as usize];
             }
             unroll! {for ii in 0..8 {
-                let lhs_index = (ii as i32 + 8 * tid_x) * 8 + (si % 32) / 4;
+                let lhs_index = (ii as u32 + 8 * tid_x) * 8 + (si % 32) / 4;
                 let lhs = lhs_s[lhs_index as usize];
                 for j in 0..2 {
                     for k in 0..4 {

@@ -48,6 +48,7 @@ pub(crate) struct GPUCodegenContext<'tcx, 'ml, 'a> {
     pub static_shared_count: AtomicUsize,
     pub tcx: rustc_middle::ty::TyCtxt<'tcx>,
     pub gpu_attrs: HashMap<rustc_middle::ty::Instance<'tcx>, crate::attr::GpuAttributes>,
+    pub disable_bound_check: bool,
 }
 
 impl<'tcx, 'ml, 'a> std::fmt::Debug for GPUCodegenContext<'tcx, 'ml, 'a> {
@@ -92,6 +93,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             fn_shared_memory_size: RwLock::new(HashMap::new()),
             static_shared_count: AtomicUsize::new(0),
             gpu_attrs: HashMap::new(),
+            disable_bound_check: tcx.env_var("DISABLE_GPU_BOUND_CHECK") == Ok("true"),
         }
     }
 

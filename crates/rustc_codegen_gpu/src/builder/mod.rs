@@ -774,7 +774,11 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         let op = self.inbounds_gep_op(ty, ptr, indices);
         let ptr = self.append_op_res(op);
         #[cfg(feature = "inplace_bound_check")]
-        let ptr = if check { self.select_ptr(ptr, Some(indices[0])) } else { ptr };
+        let ptr = if check && !self.disable_bound_check {
+            self.select_ptr(ptr, Some(indices[0]))
+        } else {
+            ptr
+        };
         ptr
     }
     /*fn size_of(&self, ty: mlir_ir::Type<'_>) -> melior::ir::Value<'ml, 'a> {
@@ -1221,7 +1225,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         };
 
         #[cfg(feature = "inplace_bound_check")]
-        let ptr = if check { self.select_ptr(ptr, None) } else { ptr };
+        let ptr = if check && !self.disable_bound_check { self.select_ptr(ptr, None) } else { ptr };
         let mut loaded =
             self.mlir_load(load_ty, ptr, &[self.const_value(0, self.type_index())], align);
         // If the type is memref, we need to cast the address to the correct type.
@@ -1263,7 +1267,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         };
 
         #[cfg(feature = "inplace_bound_check")]
-        let ptr = if check { self.select_ptr(ptr, None) } else { ptr };
+        let ptr = if check && !self.disable_bound_check { self.select_ptr(ptr, None) } else { ptr };
         self.append_op(mlir_memref::store(val, ptr, &[const_idx], self.cur_loc()));
         val
     }
@@ -2082,11 +2086,17 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     #[cfg(feature = "trap_bound_check")]
     fn emit_bound_check(&mut self, idx: Self::Value, len: Self::Value, ptr: Self::Value) -> bool {
         // trap-based bound check is handled by assert op.
+        if self.disable_bound_check {
+            return true;
+        }
         false
     }
 
     #[cfg(not(feature = "trap_bound_check"))]
     fn emit_bound_check(&mut self, idx: Self::Value, len: Self::Value, ptr: Self::Value) -> bool {
+        if self.disable_bound_check {
+            return true;
+        }
         // Constant index can be evaluated at compile time
         let debug = self.tcx.sess.opts.debug_assertions;
         if debug {

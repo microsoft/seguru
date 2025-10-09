@@ -902,6 +902,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         byte_offset: Option<Value<'ml, 'a>>,
         dy_size: Option<Value<'ml, 'a>>,
     ) -> Value<'ml, 'a> {
+        let mut val = val;
         let ty = val.r#type();
         assert!(ty.is_mem_ref());
         assert!(dst_ty.is_mem_ref());
@@ -911,11 +912,22 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         }
         let dst_memref_ty: MemRefType<'ml> = dst_ty.try_into().expect("expected memref type");
         let memref_ty: MemRefType<'ml> = ty.try_into().expect("expected memref type");
-        let dst_memref_ty = if memref_ty.memory_space() != dst_memref_ty.memory_space() {
-            self.memref_set_memory_space(dst_memref_ty, memref_ty.memory_space())
-        } else {
-            dst_memref_ty
-        };
+        if memref_ty.memory_space() != dst_memref_ty.memory_space() {
+            let memref_ty = self.memref_set_memory_space(memref_ty, dst_memref_ty.memory_space());
+            val = self.append_op_res(
+                melior::dialect::ods::memref::memory_space_cast(
+                    self.mlir_ctx,
+                    memref_ty.into(),
+                    val,
+                    self.cur_loc(),
+                )
+                .into(),
+            );
+            if val.r#type() == dst_ty {
+                return val;
+            }
+            //self.memref_set_memory_space(dst_memref_ty, memref_ty.memory_space())
+        }
         let layout = crate::mlir::attr::StridedLayoutAttribute::try_from(memref_ty.layout());
         let base_memref = val;
         let (base_memref, base_byte_offset) = match layout {
@@ -1923,7 +1935,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             self.type_i8()
         };
         // The alloca function is used to allocate memory on the stack and thus must be default memory space.
-        let mem_ref_ty = self.type_memref(ty, &[count], None, None).try_into().unwrap();
+        let mem_space = self.local_mem_space();
+        let mem_ref_ty = self.type_memref(ty, &[count], None, Some(mem_space)).try_into().unwrap();
         let op = melior::dialect::memref::alloca(
             self.mlir_ctx,
             mem_ref_ty,
@@ -2255,9 +2268,19 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
                 dest_ty
             );
         }
+        let base_memref_ty = MemRefType::try_from(base_memref.r#type()).unwrap();
         let casted_base_memref = self.mlir_memref_view(
             base_memref,
-            unsafe { self._type_memref(dest_ty, &[1], None, None).into() },
+            // dest_ty is memref type but it is safe to do so here.
+            unsafe {
+                self._type_memref(
+                    dest_ty,
+                    &[1],
+                    Some(base_memref_ty.layout()),
+                    base_memref_ty.memory_space(),
+                )
+                .into()
+            },
             None,
             None,
         );

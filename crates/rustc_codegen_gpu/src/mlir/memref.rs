@@ -12,6 +12,7 @@ use crate::mlir::mlir_val_to_const_int;
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum MemorySpace {
     Global = 0,
+    Local = 1,
     Shared = 3,
     DynamicShared,
 }

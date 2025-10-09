@@ -34,6 +34,10 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         int_ty.width() as usize
     }
 
+    pub(crate) fn local_mem_space(&self) -> Attribute<'ml> {
+        MemorySpace::Local.to_attr(self.mlir_ctx)
+    }
+
     pub(crate) fn mlir_float_width(&self, ty: MLIRType<'_>) -> usize {
         assert!(ty.is_float());
         float_width(ty).unwrap()

@@ -43,6 +43,47 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         self.append_op(op.into())
     }
 
+    fn scalar_memcpy(
+        &mut self,
+        dst: mlir_ir::Value<'ml, 'a>,
+        dst_align: rustc_abi::Align,
+        src: mlir_ir::Value<'ml, 'a>,
+        src_align: rustc_abi::Align,
+        size: mlir_ir::Value<'ml, 'a>,
+        flags: rustc_codegen_ssa_gpu::MemFlags,
+    ) {
+        let dst_ty = MemRefType::try_from(dst.r#type()).unwrap();
+        let src_ty = MemRefType::try_from(src.r#type()).unwrap();
+        let const_size = crate::mlir::mlir_val_to_const_int(size);
+        let (dst_ty, dynamic_size) =
+            if let Some(const_size) = crate::mlir::mlir_val_to_const_int(size) {
+                (
+                    self.type_memref(
+                        dst_ty.element(),
+                        &[const_size as i64 / self.static_size_of(dst_ty.element()) as i64],
+                        None,
+                        dst_ty.memory_space(),
+                    ),
+                    None,
+                )
+            } else {
+                (
+                    self.type_memref(
+                        dst_ty.element(),
+                        &[crate::mlir::memref::dynamic_size()],
+                        None,
+                        dst_ty.memory_space(),
+                    ),
+                    Some(size),
+                )
+            };
+        let src = self.mlir_memref_view(src, dst_ty, None, dynamic_size);
+        let dst = self.mlir_memref_view(dst, dst_ty, None, dynamic_size);
+        self.append_op(
+            melior::dialect::ods::memref::copy(self.mlir_ctx, src, dst, self.cur_loc()).into(),
+        );
+    }
+
     pub(crate) fn vector_memcpy(
         &mut self,
         dst: mlir_ir::Value<'ml, 'a>,
@@ -54,6 +95,13 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
     ) {
         let dst_ty = MemRefType::try_from(dst.r#type()).unwrap();
         let src_ty = MemRefType::try_from(src.r#type()).unwrap();
+        // If both src and dst are in local memory, we do scalar copy
+        if dst_ty.memory_space() == Some(self.local_mem_space())
+            && src_ty.memory_space() == Some(self.local_mem_space())
+        {
+            self.scalar_memcpy(dst, dst_align, src, src_align, size, flags);
+            return;
+        }
         let const_size = crate::mlir::mlir_val_to_const_int(size);
         if let Some(const_size) = crate::mlir::mlir_val_to_const_int(size) {
             let const_size = const_size as u64;

@@ -1,3 +1,5 @@
+use core::ptr::slice_from_raw_parts_mut;
+
 #[cfg(not(feature = "codegen_tests"))]
 use cuda_bindings::TensorViewMut;
 
@@ -40,6 +42,22 @@ impl<'a, T> GpuGlobal<'a, [T]> {
         CS: ChunkScope<FromScope = Grid>,
     {
         GlobalGroupChunk::new(self, m)
+    }
+
+    /// Useful to optimize code with vector load/store.
+    /// If length of the slice is not a multiple of N,
+    /// the remaining elements will be ignored.
+    /// For now, we only use reshape for global memory.
+    /// For shared memory, user can use GpuShared<[[T; N]]> directly.
+    #[gpu_codegen::device]
+    #[inline(always)]
+    pub fn reshape<const N: usize>(self) -> GpuGlobal<'a, [[T; N]]> {
+        // SAFETY: the returned slice will be at same size or shorter, so it is safe.
+        unsafe {
+            GpuGlobal {
+                data: &mut *slice_from_raw_parts_mut(self.data.as_mut_ptr() as _, self.len() / N),
+            }
+        }
     }
 
     #[inline(always)]

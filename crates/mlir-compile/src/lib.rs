@@ -130,11 +130,11 @@ impl CompileConfig {
             convert-func-to-llvm,\
             memref-expand,\
             expand-strided-metadata,\
-            mem2reg,\
             nvvm-attach-target{{triple=nvptx64-nvidia-gpulibs {} {} chip={} features={} O={}}},\
             lower-affine,\
             convert-arith-to-llvm,\
             convert-index-to-llvm{{index-bitwidth=64}},\
+            mem2reg{{region-simplify=true}},\
             canonicalize,\
             cse,\
             reconcile-unrealized-casts,\
@@ -191,15 +191,27 @@ impl CompileConfig {
 
     fn llc_ptx(&self, inpath: &Path, outpath: &Path) -> std::io::Result<()> {
         info!("[llc] {:?} outputs {:?}", inpath, outpath);
+        // Seems not that useful.
+        /* let poly_opt = [
+            "--polly",
+            "--polly-vectorizer=stripmine",
+            "--polly-register-tiling",
+            "--polly-tiling",
+            "--polly-matmul-opt",
+            "--polly-tc-opt",
+        ];*/
         let mut args = vec![
             "-march=nvptx64".into(),
             format!("-mcpu={}", self.cubin_chip),
             format!("-mattr={}", self.cubin_features),
             self.opt_flag(),
+            // This breaks softmax_autoregressive_backward_kernel
+            //"--nvptx-sched4reg".into(),
             inpath.to_str().unwrap().into(),
             "-o".into(),
             outpath.to_str().unwrap().into(),
         ];
+        //args.extend(poly_opt.iter().map(|s| s.to_string()));
         if self.use_fast {
             args.push("--fp-contract=fast".into());
             args.push("--nvptx-prec-divf32=0".into());
@@ -218,6 +230,8 @@ impl CompileConfig {
         info!("[ptxas] outputs {}", outpath.display());
         let args = [
             &self.opt_flag(),
+            "--warn-on-spills",
+            "--return-at-end",
             "--gpu-name",
             &self.cubin_chip,
             "-o",

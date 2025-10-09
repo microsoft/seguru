@@ -673,13 +673,6 @@ pub fn matmul_backward_bias_kernel4(dbias: &mut [f32], dout: &[f32], B: u32, T: 
     // leading to a coalesced memory access pattern
     let mut dout_sum = 0.0f32;
     for row in (warp_id..(B * T)).step_by(vstep as usize) {
-        if (row * OC) as usize > dout_col.len() {
-            gpu::println!(
-                "Error: row * OC = {} exceeds dout_col length {}",
-                row * OC,
-                dout_col.len()
-            );
-        }
         dout_sum += dout_col[(row * OC) as usize].ldcs();
     }
     //lane_id + warp_id * warpSize

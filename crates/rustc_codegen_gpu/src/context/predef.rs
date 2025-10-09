@@ -3,16 +3,28 @@ use rustc_middle::ty::Instance;
 use tracing::trace;
 
 use super::GPUCodegenContext;
-use crate::mlir::MLIRVisibility;
 use crate::rustc_middle::ty::layout::{HasTypingEnv, LayoutOf};
 
-fn to_mlir_visibility(visibility: rustc_middle::mir::mono::Visibility) -> MLIRVisibility {
-    match visibility {
-        rustc_middle::mir::mono::Visibility::Default => MLIRVisibility::Private,
-        rustc_middle::mir::mono::Visibility::Protected => MLIRVisibility::Public,
-        rustc_middle::mir::mono::Visibility::Hidden => MLIRVisibility::Private,
+impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
+    pub(crate) fn to_mlir_linkage(
+        &self,
+        linkage: rustc_middle::mir::mono::Linkage,
+    ) -> melior::ir::Attribute<'ml> {
+        let link = match linkage {
+            rustc_middle::mir::mono::Linkage::External => "external",
+            rustc_middle::mir::mono::Linkage::AvailableExternally => "available_externally",
+            rustc_middle::mir::mono::Linkage::LinkOnceAny => "linkonce",
+            rustc_middle::mir::mono::Linkage::LinkOnceODR => "linkonce_odr",
+            rustc_middle::mir::mono::Linkage::WeakAny => "weak",
+            rustc_middle::mir::mono::Linkage::WeakODR => "weak_odr",
+            rustc_middle::mir::mono::Linkage::Internal => "internal",
+            rustc_middle::mir::mono::Linkage::ExternalWeak => "extern_weak",
+            rustc_middle::mir::mono::Linkage::Common => "common",
+        };
+        melior::ir::Attribute::parse(self.mlir_ctx, &format!("#llvm.linkage<{link}>")).unwrap()
     }
 }
+
 impl<'tcx, 'ml, 'a> PreDefineCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, 'a> {
     fn predefine_static(
         &self,
@@ -64,7 +76,6 @@ impl<'tcx, 'ml, 'a> PreDefineCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'm
             self.tcx.codegen_fn_attrs(instance.def_id()),
             visibility
         );
-        let visibility = to_mlir_visibility(visibility);
-        let decl = self.to_mir_func_decl(instance, visibility);
+        let decl = self.to_mir_func_decl(instance, self.to_mlir_linkage(linkage));
     }
 }

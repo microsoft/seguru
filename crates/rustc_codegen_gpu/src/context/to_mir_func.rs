@@ -395,7 +395,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     pub fn to_mir_func_decl(
         &self,
         instance: Instance<'tcx>,
-        visibility: MLIRVisibility,
+        linkage: melior::ir::Attribute<'ml>,
     ) -> melior::ir::OperationRef<'ml, 'a> {
         let tcx = self.tcx();
         let mlir_ctx = self.mlir_ctx;
@@ -495,13 +495,20 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         if let Some(extra_attr) = gpu_attrs.to_mlir_attribute(self.mlir_ctx) {
             operation.set_attribute(crate::mlir::BUILTIN_SYM, extra_attr);
         }
-        let visibility = if !gpu_attrs.host || !gpu_attrs.kernel {
+        let visibility = if !gpu_attrs.host && !gpu_attrs.kernel {
             MLIRVisibility::Private
         } else {
             MLIRVisibility::Public
         };
+        // Expose kernel functions to external linkage.
+        let linkage = if gpu_attrs.kernel {
+            self.to_mlir_linkage(rustc_middle::mir::mono::Linkage::External)
+        } else {
+            linkage
+        };
         let in_gpu_mod = gpu_attrs.kernel || gpu_attrs.device;
         operation.set_op_visible(self.mlir_ctx, visibility);
+        operation.set_attribute("linkage", linkage);
         let body = self.mlir_body(in_gpu_mod);
         debug!("append operation to block {} {:?}", operation, fn_sym);
         let op = body.append_operation(operation);

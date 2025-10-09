@@ -35,7 +35,10 @@ impl<'tcx, 'ml> MiscCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, '_> {
         let fn_abi = self.fn_abi_of_instance(instance, rustc_middle::ty::List::empty());
         let gpu_attrs = self.gpu_attrs(&instance);
         (
-            self.to_mir_func_decl(instance, crate::mlir::MLIRVisibility::Private),
+            self.to_mir_func_decl(
+                instance,
+                self.to_mlir_linkage(rustc_middle::mir::mono::Linkage::ExternalWeak),
+            ),
             gpu_attrs.kernel || gpu_attrs.device,
         )
     }

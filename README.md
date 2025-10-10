@@ -12,7 +12,7 @@ This is the source code repository for Safe GPU programming in Rust, a toolchain
 1. Add dependencies (cuda, llvm)
 
 ```bash
-source ../scripts/deps.sh
+source ./scripts/deps.sh
 ```
 
 2. Build the tool

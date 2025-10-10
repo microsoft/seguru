@@ -221,16 +221,36 @@ impl<'ctx, N: GpuCtxSpace> GpuCtxHandle<N> {
             current_ctx
         } else {
             let mut ctx_uninit = MaybeUninit::<CUcontext>::uninit();
-            // Safety: It is safe since we provide valid CUcontext pointer and dev is valid.
+            #[cfg(cuda_has_ctx_create_v4)]
+            let mut create_params = CUctxCreateParams_st {
+                numExecAffinityParams: 0,
+                execAffinityParams: core::ptr::null_mut(),
+                cigParams: core::ptr::null_mut(),
+            };
+            // Safety: It is safe since we provide valid CUctxCreateParams and CUcontext pointers and dev is valid.
             unsafe {
-                err = cuCtxCreate_v2(ctx_uninit.as_mut_ptr(), flags as _, dev);
-                assert!(
-                    err == CUDA_SUCCESS,
-                    "Failed to create context ({}, {:?}): error {}",
-                    dev_id,
-                    flags,
-                    CudaError::Err(err)
-                );
+                #[cfg(cuda_has_ctx_create_v4)]
+                {
+                    err = cuCtxCreate_v4(
+                        ctx_uninit.as_mut_ptr(),
+                        &mut create_params as *mut _,
+                        flags as _,
+                        dev,
+                    );
+                }
+                #[cfg(not(cuda_has_ctx_create_v4))]
+                {
+                    err = cuCtxCreate_v2(ctx_uninit.as_mut_ptr(), flags as _, dev);
+                }
+
+                if err != CUDA_SUCCESS {
+                    panic!(
+                        "Failed to create context ({}, {:?}): error {}",
+                        dev_id,
+                        flags,
+                        CudaError::Err(err)
+                    );
+                }
                 ctx_uninit.assume_init()
             }
         };

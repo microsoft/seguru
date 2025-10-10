@@ -1,5 +1,5 @@
 if ! command -v ptxas &> /dev/null; then
-    echo "CUDA not found! Please install the CUDA Toolkit."
+    echo "CUDA not found! Please install the CUDA Toolkit (with, e.g., sudo apt install nvidia-cuda-toolkit)."
     exit 1
 fi
 

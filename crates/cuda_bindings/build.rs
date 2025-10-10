@@ -58,4 +58,9 @@ fn main() {
     if (major == 12 && minor >= 6) || major >= 13 {
         println!("cargo:rustc-cfg=cuda_has_ctx_create_v4");
     }
+
+    println!("cargo::rustc-check-cfg=cfg(cuda_has_mod_func_num)");
+    if (major, minor) >= (12, 4) {
+        println!("cargo:rustc-cfg=cuda_has_mod_func_num");
+    }
 }

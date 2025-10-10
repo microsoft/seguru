@@ -13,6 +13,7 @@ use alloc::collections::btree_map::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
+use core::cell::RefCell;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 
@@ -335,7 +336,7 @@ impl<'ctx, 'a, N: GpuCtxSpace> Drop for GpuCtxGuard<'ctx, 'a, N> {
 #[derive(Debug)]
 pub struct GpuModule<N: GpuCtxSpace> {
     module: CUmodule,
-    cached_functions: BTreeMap<String, (CUfunction, i32)>,
+    cached_functions: RefCell<BTreeMap<String, (CUfunction, i32)>>,
     _marker: PhantomData<N>,
 }
 
@@ -384,10 +385,9 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
         m: &GpuModule<N>,
         func_name: &str,
     ) -> Result<GpuFunction<'ctx, N>, CudaError> {
-        if let Some(&(func, max_dyn_shared_size)) = m.cached_functions.get(func_name) {
+        if let Some(&(func, max_dyn_shared_size)) = m.cached_functions.borrow().get(func_name) {
             return Ok(GpuFunction { func, max_dyn_shared_size, _marker: PhantomData });
         }
-
         let func_name_cstr = alloc::ffi::CString::new(func_name).expect("Failed to create CString");
         let ret;
         let mut func_uninit = MaybeUninit::<CUfunction>::uninit();
@@ -415,6 +415,7 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
             }
             max_dyn_shared_size_uninit.assume_init()
         };
+        m.cached_functions.borrow_mut().insert(func_name.to_string(), (func, max_dyn_shared_size));
         Ok(GpuFunction { func, max_dyn_shared_size, _marker: PhantomData })
     }
 
@@ -536,15 +537,21 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
         Ok(())
     }
 
-    pub fn new_module(&self, bin: *const u8) -> Result<&mut GpuModule<N>, CudaError> {
-        let mut module_uninit = MaybeUninit::<CUmodule>::uninit();
-        let module = unsafe {
-            let ret = cuModuleLoadData(module_uninit.as_mut_ptr(), bin as _);
-            if ret != CUDA_SUCCESS {
-                return Err(CudaError::Err(ret));
-            }
-            module_uninit.assume_init()
-        };
+    #[cfg(not(cuda_has_mod_func_num))]
+    fn cache_functions(
+        &self,
+        _module: CUmodule,
+    ) -> Result<BTreeMap<String, (CUfunction, i32)>, CudaError> {
+        Ok(BTreeMap::new())
+    }
+
+    #[cfg(cuda_has_mod_func_num)]
+    fn cache_functions(
+        &self,
+        module: CUmodule,
+    ) -> Result<BTreeMap<String, (CUfunction, i32)>, CudaError> {
+        let mut cached_functions = BTreeMap::new();
+
         // This is safe since module is valid.
         let num_functions = unsafe {
             let mut count = 0;
@@ -561,8 +568,6 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
                 return Err(CudaError::Err(ret));
             }
         }
-
-        let mut cached_functions = BTreeMap::new();
         for f in functions {
             let mut name_ptr = MaybeUninit::<*const ::core::ffi::c_char>::uninit();
             // This is safe since f is valid.
@@ -589,6 +594,19 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
             };
             cached_functions.insert(name, (f, max_dyn_shared_size));
         }
+        Ok(cached_functions)
+    }
+
+    pub fn new_module(&self, bin: *const u8) -> Result<&mut GpuModule<N>, CudaError> {
+        let mut module_uninit = MaybeUninit::<CUmodule>::uninit();
+        let module = unsafe {
+            let ret = cuModuleLoadData(module_uninit.as_mut_ptr(), bin as _);
+            if ret != CUDA_SUCCESS {
+                return Err(CudaError::Err(ret));
+            }
+            module_uninit.assume_init()
+        };
+        let cached_functions = RefCell::new(self.cache_functions(module)?);
         let m = GpuModule { module, cached_functions, _marker: PhantomData };
         Ok(self.ctx.alloc_typed(m))
     }

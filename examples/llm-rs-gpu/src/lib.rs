@@ -1423,6 +1423,7 @@ fn dot4(a: [f32; 4], b: [f32; 4]) -> f32 {
 }
 
 #[gpu_macros::cuda_kernel]
+#[gpu_macros::attr(nvvm_launch_bound(256, 1, 1, 2))]
 #[gpu_macros::attr(skip_divergence_check)]
 #[allow(clippy::needless_range_loop)]
 pub fn matmul_forward_kernel4(

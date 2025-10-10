@@ -58,10 +58,13 @@ pub fn device(attr: TokenStream, item: TokenStream) -> TokenStream {
     gpu_syntax::rewrite_gpu_code(attr, item, false, target())
 }
 
+/// Add gpu attributes to the kernel function
+/// e.g.
+/// #[gpu_macros::attr(nvvm_launch_bound(256, 1, 1, 2))]
 #[proc_macro_attribute]
 pub fn attr(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut kfun = syn::parse_macro_input!(item as syn::ItemFn);
-    let attr = syn::parse_macro_input!(attr as syn::Ident);
+    let attr: proc_macro2::TokenStream = attr.into();
     if target().need_register_tool() {
         kfun.attrs.push(syn::parse_quote!(#[gpu_codegen::#attr]));
     }

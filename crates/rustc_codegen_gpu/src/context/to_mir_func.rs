@@ -27,6 +27,7 @@ pub struct IndirectEntry<'tcx, 'ml> {
     indirect_args: HashMap<usize, TyAndLayout<'tcx>>,
     dev_fn_type: FunctionType<'ml>,
     dev_instance: Instance<'tcx>,
+    extra_attributes: Vec<(&'static str, melior::ir::Attribute<'ml>)>,
     location: Location<'ml>,
 }
 
@@ -110,8 +111,8 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let is_gpu = op.is_gpu_func();
         let mut const_op =
             melior::dialect::func::constant(self.mlir_ctx, function, ftyp, self.unknown_loc());
-        if let Some(extra_attr) = gpu_attrs.to_mlir_attribute(self.mlir_ctx) {
-            const_op.set_attribute(crate::mlir::BUILTIN_SYM, extra_attr);
+        for (name, attr) in gpu_attrs.to_mlir_attributes(self.mlir_ctx) {
+            const_op.set_attribute(name, attr);
         }
         let op = if let Some(b) = block {
             b.append_operation(const_op)
@@ -299,6 +300,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             indirect_args,
             dev_fn_type,
             dev_instance,
+            extra_attributes,
             location,
         } = entry;
         use rustc_codegen_ssa_gpu::traits::{AbiBuilderMethods, BuilderMethods};
@@ -317,6 +319,10 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         gpu_op.set_attribute("kernel", melior::ir::Attribute::unit(self.mlir_ctx));
         gpu_op.set_op_visible(self.mlir_ctx, MLIRVisibility::Public);
         gpu_op.set_attribute(crate::mlir::SYM_NAME_SYM, fn_sym.into());
+        for (name, attr) in extra_attributes {
+            assert!(name != crate::mlir::BUILTIN_SYM);
+            gpu_op.set_attribute(name, attr);
+        }
         let op: melior::ir::OperationRef<'_, '_> = body.append_operation(gpu_op);
 
         let bb = GpuBuilder::append_block(self, op, entry_sym.as_str());
@@ -432,6 +438,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 indirect_args,
                 dev_fn_type: ftype,
                 dev_instance: instance,
+                extra_attributes: gpu_attrs.to_mlir_attributes(self.mlir_ctx),
                 location,
             });
             let fn_db = self.fn_db.read().unwrap();
@@ -489,11 +496,10 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             let mut op: Operation<'ml> = gpu_op.into();
             op.set_attribute("kernel", melior::ir::Attribute::unit(self.mlir_ctx));
             op.set_attribute(crate::mlir::SYM_NAME_SYM, fn_sym_attr.into());
-
             op
         };
-        if let Some(extra_attr) = gpu_attrs.to_mlir_attribute(self.mlir_ctx) {
-            operation.set_attribute(crate::mlir::BUILTIN_SYM, extra_attr);
+        for (name, attr) in gpu_attrs.to_mlir_attributes(self.mlir_ctx) {
+            operation.set_attribute(name, attr);
         }
         let visibility = if !gpu_attrs.host && !gpu_attrs.kernel {
             MLIRVisibility::Private

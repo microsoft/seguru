@@ -2,6 +2,8 @@ use rustc_hir::def_id::DefId;
 use rustc_hir::{Attribute, LangItem};
 use rustc_span::Symbol;
 
+use crate::mlir::gpu::NvmmLaunchBound;
+
 // inspired by rust-gpu's attribute handling
 #[derive(Default, Clone, PartialEq)]
 pub(crate) struct GpuAttributes {
@@ -33,6 +35,8 @@ pub(crate) struct GpuAttributes {
     // Due to the limitation of our current diverse checker,
     // some functions need to disable the diverse checker.
     pub disable_diverse_checker: bool,
+
+    pub launch_bound: Option<NvmmLaunchBound>,
 }
 
 impl GpuAttributes {
@@ -252,6 +256,10 @@ fn ret_sync_data() -> Symbol {
     Symbol::intern("ret_sync_data")
 }
 
+pub fn nvvm_launch_bound() -> Symbol {
+    Symbol::intern("nvvm_launch_bound")
+}
+
 impl GpuAttributes {
     pub fn callee_device() -> Self {
         GpuAttributes { device: true, ..GpuAttributes::default() }
@@ -287,17 +295,27 @@ impl GpuAttributes {
         gpu_attr
     }
 
-    pub fn to_mlir_attribute<'ml>(
+    pub fn to_mlir_attributes<'ml>(
         &self,
         ctx: &'ml melior::Context,
-    ) -> Option<melior::ir::Attribute<'ml>> {
+    ) -> Vec<(&'static str, melior::ir::Attribute<'ml>)> {
+        let mut ret = vec![];
         if self.is_builtin() {
-            self.gpu_item.clone().map(|gpu_item| {
-                melior::ir::attribute::StringAttribute::new(ctx, &String::from(gpu_item)).into()
-            })
-        } else {
-            None
+            ret.push((
+                crate::mlir::BUILTIN_SYM,
+                self.gpu_item
+                    .clone()
+                    .map(|gpu_item| {
+                        melior::ir::attribute::StringAttribute::new(ctx, &String::from(gpu_item))
+                            .into()
+                    })
+                    .unwrap(),
+            ));
         }
+        if let Some(bound) = &self.launch_bound {
+            ret.extend(bound.to_attrs(ctx));
+        }
+        ret
     }
 
     pub fn is_gpu_related(&self) -> bool {
@@ -348,33 +366,60 @@ impl GpuAttributes {
         for attr in attrs {
             if attr.path_matches(&[gpu_symbol(), kernel_symbol()]) {
                 gpu_attrs.kernel = true;
-            }
-            if attr.path_matches(&[gpu_symbol(), host_symbol()]) {
+            } else if attr.path_matches(&[gpu_symbol(), host_symbol()]) {
                 gpu_attrs.host = true;
-            }
-            if attr.path_matches(&[gpu_symbol(), device_symbol()]) {
+            } else if attr.path_matches(&[gpu_symbol(), device_symbol()]) {
                 gpu_attrs.device = true;
-            }
-            if attr.path_matches(&[gpu_symbol(), gpu_shared_size_symbol()]) {
+            } else if attr.path_matches(&[gpu_symbol(), gpu_shared_size_symbol()]) {
                 gpu_attrs.shared_size = true;
-            }
-            if attr.path_matches(&[gpu_symbol(), memspace_shared()]) {
+            } else if attr.path_matches(&[gpu_symbol(), memspace_shared()]) {
                 let shared_data = get_meta_usize_list(attr);
                 gpu_attrs.shared_data = shared_data;
-            }
-
-            if attr.path_matches(&[gpu_symbol(), sync_data()]) {
+            } else if attr.path_matches(&[gpu_symbol(), sync_data()]) {
                 let sync_data = get_meta_usize_list(attr);
                 gpu_attrs.sync_data = Some(sync_data);
-            }
-
-            if attr.path_matches(&[gpu_symbol(), ret_sync_data()]) {
+            } else if attr.path_matches(&[gpu_symbol(), ret_sync_data()]) {
                 let ret_sync_data = get_meta_usize_list(attr);
                 gpu_attrs.ret_sync_data = ret_sync_data;
-            }
-
-            if attr.path_matches(&[gpu_symbol(), Symbol::intern("skip_divergence_check")]) {
+            } else if attr.path_matches(&[gpu_symbol(), Symbol::intern("skip_divergence_check")]) {
                 gpu_attrs.disable_diverse_checker = true;
+            } else if attr.path_matches(&[gpu_symbol(), nvvm_launch_bound()]) {
+                let args = attr
+                    .meta_item_list()
+                    .unwrap()
+                    .iter()
+                    .map(|l| {
+                        if let Some(lit) = l.lit() {
+                            if let rustc_ast::LitKind::Int(value, int_ty) = lit.kind {
+                                Some(value.get() as u32)
+                            } else {
+                                panic!("Expected an integer, found {:?} at {:?}", lit, attr.span());
+                            }
+                        } else if let Some(l) = l.value_str() {
+                            if l.as_str() == "_" {
+                                None
+                            } else {
+                                panic!(
+                                    "Expected an integer or '_', found {:?} at {:?}",
+                                    l,
+                                    attr.span()
+                                );
+                            }
+                        } else {
+                            unreachable!()
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                gpu_attrs.launch_bound = Some(NvmmLaunchBound {
+                    max_thread_per_block: [
+                        args[0].unwrap_or(1024) as i32,
+                        args.get(1).unwrap_or(&None).unwrap_or(1024) as i32,
+                        args.get(2).unwrap_or(&None).unwrap_or(1024) as i32,
+                    ],
+                    min_block_per_sm: *args.get(3).unwrap_or(&None),
+                });
+            } else if attr.path_matches(&[gpu_symbol()]) {
+                panic!("Unknown gpu attribute: {:?}", attr);
             }
         }
         gpu_attrs

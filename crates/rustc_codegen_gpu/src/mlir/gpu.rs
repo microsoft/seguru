@@ -1,4 +1,4 @@
-use melior::ir::attribute::{BoolAttribute, IntegerAttribute};
+use melior::ir::attribute::{BoolAttribute, DenseI32ArrayAttribute, IntegerAttribute};
 use melior::ir::operation::OperationBuilder;
 use melior::ir::r#type::IntegerType;
 use melior::ir::{Attribute, Identifier, Location, Operation, Type, Value, ValueLike};
@@ -157,4 +157,34 @@ pub(crate) fn shuffle<'ml, 'a>(
         .valid(Type::from(IntegerType::new(ctx, 1)))
         .build()
         .into()
+}
+
+#[derive(Default, Clone, PartialEq)]
+pub(crate) struct NvmmLaunchBound {
+    pub max_thread_per_block: [i32; 3],
+    pub min_block_per_sm: Option<u32>,
+}
+
+impl NvmmLaunchBound {
+    pub(crate) fn to_attrs<'ml>(
+        &self,
+        mlir_ctx: &'ml melior::Context,
+    ) -> Vec<(&'static str, melior::ir::attribute::Attribute<'ml>)> {
+        let mut attrs = vec![];
+        attrs.push((
+            "nvvm.maxntid",
+            DenseI32ArrayAttribute::new(mlir_ctx, &self.max_thread_per_block).into(),
+        ));
+        if let Some(min_block_per_sm) = self.min_block_per_sm {
+            attrs.push((
+                "nvvm.minctasm",
+                IntegerAttribute::new(
+                    melior::ir::r#type::IntegerType::new(mlir_ctx, 32).into(),
+                    min_block_per_sm as i64,
+                )
+                .into(),
+            ));
+        }
+        attrs
+    }
 }

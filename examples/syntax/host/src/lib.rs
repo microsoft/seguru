@@ -24,7 +24,7 @@ pub fn run_host_arith<'ctx>(
     let d_c = ctx.new_tensor_view::<[u32]>(&h_c)?;
     let mut d_f = ctx.new_tensor_view::<[f32]>(&h_f)?;
     let d_g = ctx.new_tensor_view::<[f32]>(&h_g)?;
-    let d_b_c = gpu::GlobalThreadChunk::new_from_host(&mut d_b, gpu::Map2D::new(w));
+    let d_b_c = gpu::GlobalThreadChunk::new_from_host(&mut d_b, gpu::Map2D::new(w as u32));
     let mut d_h = ctx.new_tensor_view(&h_h)?;
 
     // Now do the kernel

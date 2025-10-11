@@ -13,8 +13,38 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         let attr = Attribute::parse(self.mlir_ctx, &format!("#gpu<dim {}>", ty.to_str())).unwrap();
         self.append_op_res(f.build(self.mlir_ctx, attr, self.cur_loc()))
     }
+    pub(crate) fn add_dev_dim_assumptions(&mut self) {
+        const DIM_TUPLES: [(DimFn, DimFn, DimType); 6] = [
+            (DimFn::BlockDim, DimFn::ThreadId, DimType::X),
+            (DimFn::BlockDim, DimFn::ThreadId, DimType::Y),
+            (DimFn::BlockDim, DimFn::ThreadId, DimType::Z),
+            (DimFn::GridDim, DimFn::BlockId, DimType::X),
+            (DimFn::GridDim, DimFn::BlockId, DimType::Y),
+            (DimFn::GridDim, DimFn::BlockId, DimType::Z),
+        ];
+        let mut dims = vec![];
+        for (dim, tid, dim_type) in DIM_TUPLES.iter() {
+            let dim_val = self.dim_fn_res(*dim, *dim_type);
+            let tid_val = self.dim_fn_res(*tid, *dim_type);
+            dims.push(dim_val);
+            let cond =
+                self.icmp(rustc_codegen_ssa_gpu::common::IntPredicate::IntULT, tid_val, dim_val);
+            self.assume(cond);
+        }
+        let mut total_dim = dims[0];
+        for dim in dims.iter().skip(1) {
+            total_dim = self.mul(total_dim, *dim);
+        }
+        let cond = self.icmp(
+            rustc_codegen_ssa_gpu::common::IntPredicate::IntULE,
+            total_dim,
+            self.const_value(i32::MAX, self.type_i32()),
+        );
+        self.assume(cond);
+    }
 
     pub(crate) fn add_dim_assumptions(&mut self) {
+        self.add_dev_dim_assumptions();
         if !self.inside_kernel_func() {
             return;
         }
@@ -73,12 +103,6 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                                         .to_u32();
                                     let dim_val = self.dim_fn_res(dim, dim_type);
                                     let tid_val = self.dim_fn_res(tid, dim_type);
-                                    let cond_dynamic = self.icmp(
-                                        rustc_codegen_ssa_gpu::common::IntPredicate::IntULT,
-                                        tid_val,
-                                        dim_val,
-                                    );
-                                    self.assume(cond_dynamic);
                                     if val != 0 {
                                         let val = self.const_value(val, self.type_i32());
                                         let cond_dim = self.icmp(

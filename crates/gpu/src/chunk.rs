@@ -24,6 +24,7 @@ use crate::{GpuGlobal, assert_ptr};
 /// ```
 pub unsafe trait ScopeUniqueMap<CS: ChunkScope>: Clone {
     type IndexType;
+    type GlobalIndexType: Into<u64>;
     #[inline]
     #[gpu_codegen::device]
     fn precondition(&self) -> bool {
@@ -34,7 +35,11 @@ pub unsafe trait ScopeUniqueMap<CS: ChunkScope>: Clone {
     /// index. Without providing extra precondition, index will always check the
     /// OOB error with global idx.
     #[gpu_codegen::device]
-    fn map(&self, idx: Self::IndexType, thread_ids: [u32; TID_MAX_LEN]) -> (bool, usize);
+    fn map(
+        &self,
+        idx: Self::IndexType,
+        thread_ids: [u32; TID_MAX_LEN],
+    ) -> (bool, Self::GlobalIndexType);
 }
 
 /// Provide local_to_global_index for chunking.
@@ -42,7 +47,7 @@ pub unsafe trait ScopeUniqueMap<CS: ChunkScope>: Clone {
 pub(crate) trait ScopeUniqueMapProvidedMethods<CS: ChunkScope>: ScopeUniqueMap<CS> {
     #[inline]
     #[gpu_codegen::device]
-    fn local_to_global_index(&self, idx: Self::IndexType) -> (bool, usize) {
+    fn local_to_global_index(&self, idx: Self::IndexType) -> (bool, Self::GlobalIndexType) {
         self.map(idx, CS::thread_ids())
     }
 }
@@ -114,7 +119,7 @@ impl<'a, T, CS: ChunkScope, Map: ScopeUniqueMap<CS>> GlobalGroupChunk<'a, T, CS,
         map: Map2,
     ) -> GlobalGroupChunk<'a, T, ChainedScope<CS, CS2>, ChainedMap<CS, CS2, Map, Map2>>
     where
-        Map: ScopeUniqueMap<CS, IndexType = usize>,
+        Map: ScopeUniqueMap<CS, IndexType = Map2::GlobalIndexType>,
         CS: ChunkScope<ToScope = CS2::FromScope>,
     {
         GlobalGroupChunk {
@@ -126,7 +131,10 @@ impl<'a, T, CS: ChunkScope, Map: ScopeUniqueMap<CS>> GlobalGroupChunk<'a, T, CS,
 
     #[gpu_codegen::device]
     #[inline]
-    pub fn local2global(&self, idx: <Map as ScopeUniqueMap<CS>>::IndexType) -> usize {
+    pub fn local2global(
+        &self,
+        idx: <Map as ScopeUniqueMap<CS>>::IndexType,
+    ) -> Map::GlobalIndexType {
         self.map_params.local_to_global_index(idx).1
     }
 }
@@ -159,6 +167,7 @@ where
     #[gpu_codegen::device]
     fn index(&self, idx: Map::IndexType) -> &T {
         let (idx_precondition, idx) = self.map_params.local_to_global_index(idx);
+        let idx = idx.into() as usize;
         assert_ptr(self.map_params.precondition() & idx_precondition, &self.data[idx])
     }
 }
@@ -175,6 +184,7 @@ where
     #[gpu_codegen::device]
     fn index_mut(&mut self, idx: Map::IndexType) -> &mut T {
         let (idx_precondition, idx) = self.map_params.local_to_global_index(idx);
+        let idx = idx.into() as usize;
         assert_ptr(self.map_params.precondition() & idx_precondition, &mut self.data[idx])
     }
 }

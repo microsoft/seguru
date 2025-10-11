@@ -34,7 +34,7 @@ where
 
 #[gpu_macros::kernel]
 #[no_mangle]
-pub fn kernel_arith(a: &[u8], b: &mut [u8], window: usize) {
+pub fn kernel_arith(a: &[u8], b: &mut [u8], window: u32) {
     let mut b = gpu::GlobalThreadChunk::new(b, gpu::MapLinear::new(window));
     let c = &mut b[0];
     let val = scope(|s| {

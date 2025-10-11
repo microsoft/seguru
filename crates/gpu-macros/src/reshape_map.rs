@@ -213,22 +213,20 @@ pub(crate) fn map_reshape_params(tokens: TokenStream) -> TokenStream {
                 (#remain_id % #old_s_i)
             })
         };
-        gen_global_id = if i < local_id_len {
-            quote_spanned! { span =>
-                #gen_global_id
-                let #new_s_i = #new_s[#i];
-                let #old_s_i = #old_s[#i];
-                #global_idx += #id_i * #weights[#i];
-                #valid &= #id_i < #new_s_i;
-            }
-        } else {
-            quote_spanned! { span =>
-                #gen_global_id
-                let #new_s_i = #new_s[#i] as u32;
-                let #old_s_i = #old_s[#i] as u32;
-                #global_idx += #id_i as usize * #weights[#i];
-                #valid &= #id_i < #new_s_i;
-            }
+        gen_global_id = quote_spanned! { span =>
+            #gen_global_id
+            let #new_s_i = #new_s[#i];
+        };
+
+        gen_global_id = quote_spanned! { span =>
+            #gen_global_id
+            let #old_s_i = #old_s[#i];
+        };
+
+        gen_global_id = quote_spanned! { span =>
+            #gen_global_id
+            #global_idx += #id_i * #weights[#i];
+            #valid &= #id_i < #new_s_i;
         };
         // avoid warning: value assigned to `remain_id` is never read
         if i != local_id_len - 1 {
@@ -247,16 +245,17 @@ pub(crate) fn map_reshape_params(tokens: TokenStream) -> TokenStream {
     quote_spanned! { span => {
         #[derive(Clone, Copy)]
         struct PrivateMapReshapeShuffle{
-            old_sizes: [usize; #len],
-            new_sizes: [usize; #len],
-            offset: usize,
-            cached_weights: [usize; #len],
+            old_sizes: [u32; #len],
+            new_sizes: [u32; #len],
+            offset: u32,
+            cached_weights: [u32; #len],
         }
         unsafe impl<CS: #gpu_crate::chunk_scope::ChunkScope> #gpu_crate::chunk::ScopeUniqueMap<CS> for PrivateMapReshapeShuffle
         {
-            type IndexType = usize;
+            type IndexType = u32;
+            type GlobalIndexType = u32;
 
-            fn map(&self, #lid: usize, thread_ids: [u32; #gpu_crate::chunk_scope::TID_MAX_LEN]) -> (bool, usize) {
+            fn map(&self, #lid: Self::IndexType, thread_ids: [u32; #gpu_crate::chunk_scope::TID_MAX_LEN]) -> (bool, Self::GlobalIndexType) {
                  let #tid = CS::global_id_x(thread_ids)
             + CS::global_dim_x()
                 * (CS::global_id_y(thread_ids) + CS::global_dim_y() * CS::global_id_z(thread_ids));

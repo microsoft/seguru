@@ -186,15 +186,12 @@ pub(crate) fn map_reshape_params(tokens: TokenStream) -> TokenStream {
     let tid = Ident::new("tid", span);
     let global_idx = Ident::new("global_idx", span);
     let valid = Ident::new("valid", span);
-    let remain_lid = Ident::new("remain_id", span);
     let remain_tid = Ident::new("remain_tid", span);
-    let old_s = Ident::new("old_s", span);
-    let new_s = Ident::new("new_s", span);
     let weights = Ident::new("weights", span);
+    let self_ident = Ident::new("self", span);
     let mut gen_global_id = quote_spanned! {span =>
-        let mut #global_idx = self.offset;
+        let mut #global_idx = #self_ident.offset;
         let mut #valid = true;
-        let #remain_lid = #lid;
         let #remain_tid = #tid;
     };
 
@@ -202,37 +199,74 @@ pub(crate) fn map_reshape_params(tokens: TokenStream) -> TokenStream {
         let span = all_sizes.elems[i].span();
         let old_s_i = Ident::new(&format!("old_s_{}", i), span);
         let new_s_i = Ident::new(&format!("new_s_{}", i), span);
-        let remain_id = if i < local_id_len { remain_lid.clone() } else { remain_tid.clone() };
-
+        let current_lid = if local_id_len == 1 {
+            quote_spanned! { span => #lid }
+        } else {
+            let i = syn::Member::from(i);
+            quote_spanned! { span => #lid.#i }
+        };
+        let current_id = if i < local_id_len {
+            quote_spanned! { span => #current_lid % #old_s_i  }
+        } else {
+            quote_spanned! { span => (#remain_tid % #old_s_i) }
+        };
         let id_i = if is_reversed {
             Expr::Verbatim(quote_spanned! { span =>
-                (#new_s_i - 1 - (#remain_id % #old_s_i))
+                (#new_s_i - 1 - #current_id)
             })
         } else {
             Expr::Verbatim(quote_spanned! { span =>
-                (#remain_id % #old_s_i)
+                #current_id
             })
         };
-        gen_global_id = quote_spanned! { span =>
-            #gen_global_id
-            let #new_s_i = #new_s[#i];
+
+        // If the size is an expression that is not dynamic to the function,
+        // we can directly use it instead of loading from an array.
+        let get_non_dynamic_expr = |e: &Expr| match e {
+            Expr::Lit(_) | Expr::Group(ExprGroup { expr: box Expr::Lit(_), .. }) => Some(e.clone()),
+            Expr::Call(call_expr) if call_expr.args.is_empty() => Some(e.clone()),
+            Expr::Const(_) => Some(e.clone()),
+            _ => None,
         };
 
-        gen_global_id = quote_spanned! { span =>
-            #gen_global_id
-            let #old_s_i = #old_s[#i];
-        };
+        let old_size = get_non_dynamic_expr(&old_sizes[i]);
+        let new_size = get_non_dynamic_expr(&new_sizes[i]);
+        gen_global_id = new_size.map_or(
+            quote_spanned! { span =>
+                #gen_global_id
+                let #new_s_i = #self_ident.new_sizes[#i];
+            },
+            |new_size| {
+                quote_spanned! { span =>
+                    #gen_global_id
+                    let #new_s_i = #new_size;
+                }
+            },
+        );
+
+        gen_global_id = old_size.map_or(
+            quote_spanned! { span =>
+                #gen_global_id
+                let #old_s_i = #self_ident.old_sizes[#i];
+            },
+            |old_size| {
+                quote_spanned! { span =>
+                    #gen_global_id
+                    let #old_s_i = #old_size;
+                }
+            },
+        );
 
         gen_global_id = quote_spanned! { span =>
             #gen_global_id
             #global_idx += #id_i * #weights[#i];
-            #valid &= #id_i < #new_s_i;
+            #valid &= (#id_i < #new_s_i) && (#id_i < #old_s_i);
         };
         // avoid warning: value assigned to `remain_id` is never read
-        if i != local_id_len - 1 {
+        if i >= local_id_len {
             gen_global_id = quote_spanned! { span =>
                 #gen_global_id
-                let #remain_id = #remain_id / #old_s_i;
+                let #remain_tid = #remain_tid / #old_s_i;
             };
         }
     }
@@ -242,8 +276,16 @@ pub(crate) fn map_reshape_params(tokens: TokenStream) -> TokenStream {
         #valid &= #remain_tid == 0;
     };
     let gpu_crate = args.gpu_crate;
+    let unit_index_ty = quote_spanned! { span => u32 };
+    let index_type = if local_id_len == 1 {
+        unit_index_ty
+    } else {
+        let tys = vec![quote_spanned! { span => u32 }; local_id_len];
+        quote_spanned! { span => (#(#tys),*) }
+    };
     quote_spanned! { span => {
         #[derive(Clone, Copy)]
+        #[allow(dead_code)]
         struct PrivateMapReshapeShuffle{
             old_sizes: [u32; #len],
             new_sizes: [u32; #len],
@@ -252,16 +294,18 @@ pub(crate) fn map_reshape_params(tokens: TokenStream) -> TokenStream {
         }
         unsafe impl<CS: #gpu_crate::chunk_scope::ChunkScope> #gpu_crate::chunk::ScopeUniqueMap<CS> for PrivateMapReshapeShuffle
         {
-            type IndexType = u32;
+            type IndexType = #index_type;
             type GlobalIndexType = u32;
 
-            fn map(&self, #lid: Self::IndexType, thread_ids: [u32; #gpu_crate::chunk_scope::TID_MAX_LEN]) -> (bool, Self::GlobalIndexType) {
+            fn map(&#self_ident, #lid: Self::IndexType, thread_ids: [u32; #gpu_crate::chunk_scope::TID_MAX_LEN]) -> (bool, Self::GlobalIndexType) {
                  let #tid = CS::global_id_x(thread_ids)
             + CS::global_dim_x()
                 * (CS::global_id_y(thread_ids) + CS::global_dim_y() * CS::global_id_z(thread_ids));
-            let #old_s = self.old_sizes;
-            let #new_s = self.new_sizes;
-            let #weights = self.cached_weights;
+                assert!(#tid %  CS::global_dim_x() == CS::global_id_x(thread_ids));
+                assert!(#tid /  CS::global_dim_x() == CS::global_id_y(thread_ids) + CS::global_dim_y() * CS::global_id_z(thread_ids));
+                assert!((#tid /  CS::global_dim_x()) % CS::global_dim_y() == CS::global_id_y(thread_ids));
+                assert!((#tid /  CS::global_dim_x()) / CS::global_dim_y() == CS::global_id_z(thread_ids));
+            let #weights = #self_ident.cached_weights;
             #gen_global_id
             (#valid, #global_idx)
         }

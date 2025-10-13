@@ -1028,7 +1028,7 @@ pub fn softmax_autoregressive_backward_kernel(
         {
             let acc = att_bth[t3 as usize].ldcs() * (datt_bth[t3 as usize].ldcs() - local_sum);
             let val = scale * acc;
-            dpreatt_bth[i as u32 + (to * arr_i0_size)].stcs(val);
+            dpreatt_bth[(i as u32, to)].stcs(val);
         }
     }
 }
@@ -1450,10 +1450,7 @@ pub fn matmul_forward_kernel4(
 
     let bid_x = block_id::<DimX>();
     let bid_y = block_id::<DimY>();
-    let bdim_x = block_dim::<DimX>();
     let bdim_y = block_dim::<DimY>();
-    let gdim_x = grid_dim::<DimX>();
-    let gdim_y = grid_dim::<DimY>();
     let tid_x = thread_id::<DimX>();
     let tid_y = thread_id::<DimY>();
 
@@ -1462,7 +1459,7 @@ pub fn matmul_forward_kernel4(
     //  128 * blockIdx.y + 128 * blockIdx.x * OC + i * OC + (8*threadIdx.y) + (8*threadIdx.x) * OC + j)
     // do not swap 2 and 3 in permutation, otherwise we will have out of bound access.
     let map = gpu::reshape_map!(
-        [2, 8] | [16, gdim_x, 16, (gdim_y, (OC / 128))]  =>
+        [2, 8] | [16, grid_dim::<DimX>(), 16, (grid_dim::<DimY>(), (OC / 128))]  =>
         layout: [i0, t2, t3, i1, t0, t1]
     );
 
@@ -1495,8 +1492,8 @@ pub fn matmul_forward_kernel4(
     let si_start = 4 * (16 * tid_y + tid_x);
 
     // (k * 32 * 32 + tid_y * 2 * 32 + xby8 * 32 + xmod8 * 4 + i)
-    let map = gpu::reshape_map!(
-        [1, 4] | [8, (bdim_x.div_ceil(8), 2), (bdim_y, 16)] =>
+    let map = reshape_map!(
+        [1, 4] | [8, (block_dim::<DimX>().div_ceil(8), 2), (block_dim::<DimY>(), 16)] =>
         layout: [i0, t0, t1, t2, i1]
     );
     for so in (0..C).step_by(32) {
@@ -1517,10 +1514,10 @@ pub fn matmul_forward_kernel4(
             // st_vec(&lhs_s[y][xo], ld_vec(inp + y * C + so + xo));
             let inp_index = y * C + so + xo;
             let lhs_vec: [f32; 4] = inp[(inp_index / 4) as usize];
-            lhs_s_chunk[k as _] = lhs_vec;
+            lhs_s_chunk[(0, k as _)] = lhs_vec;
             // st_vec(&rhs_s[y][xo], ld_vec(weight + y * C + so + xo));
             let rhs_vec: [f32; 4] = weight[(inp_index / 4) as usize];
-            rhs_s_chunk[k as _] = rhs_vec;
+            rhs_s_chunk[(0, k as _)] = rhs_vec;
         }
         gpu::sync::sync_threads();
         for i in 0..8 {
@@ -1543,7 +1540,7 @@ pub fn matmul_forward_kernel4(
         }
     }
     for i in 0..8 {
-        out_thread[i * 2] = vals[i as usize][0];
-        out_thread[i * 2 + 1] = vals[i as usize][1];
+        out_thread[(0, i)] = vals[i as usize][0];
+        out_thread[(1, i)] = vals[i as usize][1];
     }
 }

@@ -11,10 +11,10 @@ use crate::mlir::mlir_val_to_const_int;
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum MemorySpace {
-    Global = 0,
-    Local = 1,
+    Global = 1,
     Shared = 3,
     DynamicShared,
+    Local, // 0 is the default address space for private memory in MLIR
 }
 
 impl MemorySpace {
@@ -23,6 +23,7 @@ impl MemorySpace {
             MemorySpace::DynamicShared => {
                 Attribute::parse(ctx, "#gpu.address_space<workgroup>").unwrap()
             }
+            MemorySpace::Local => Attribute::parse(ctx, "#gpu.address_space<private>").unwrap(),
             _ => IntegerAttribute::new(Type::from(IntegerType::new(ctx, 64)), self as i64).into(),
         }
     }

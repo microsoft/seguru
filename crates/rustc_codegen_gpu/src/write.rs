@@ -54,6 +54,7 @@ pub(crate) fn codegen(
         }
         let content = content.replace("attributes {kernel, ", "kernel attributes {");
         let content = content.replace("uniform", "uniform {}");
+        let content = content.replace("#gpu.address_space<private>", "0");
 
         std::fs::write(&out, &content).unwrap();
         debug!("[Done]write MLIR module to {:?}", out);

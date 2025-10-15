@@ -2288,10 +2288,11 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn bitcast(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
+        let val = self.use_value(val);
         if val.r#type() == dest_ty {
             val
         } else {
-            todo!("bitcast: {:?} {} -> {}", self.cur_span, val.r#type(), dest_ty);
+            self.append_op_res(melior::dialect::arith::bitcast(val, dest_ty, self.cur_loc()))
         }
     }
 

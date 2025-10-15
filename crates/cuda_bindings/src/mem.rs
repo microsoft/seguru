@@ -121,25 +121,25 @@ impl<'ctx, T: ?Sized, N: GpuCtxSpace> CudaMemBox<T, N> {
 pub(crate) trait GpuDataMarker: 'static {}
 
 /// This is to ensure that the data can be safely transferred to the GPU device.
-/// This helps to prevent accidental transfer of non-Send types (e.g., *const T)
+/// This helps to prevent accidental transfer of non-Sync types (e.g., *const T)
 /// or non-'static types (e.g., &'a T) to the GPU device. But user still need to
 /// ensure that the data is valid for GPU usage. For example, a struct with
-/// &'static T or &'static mut T is still Send when T is Send, but it may not
+/// &'static T or &'static mut T is still Sync when T is Sync, but it may not
 /// valid for GPU usage if we do not enable HMM. Thus, we statically ruled out
 /// most risky types; If somehow the user accidentally passed &'static T to
 /// CudaMemBox, the GPU should return CUDA_ERROR_ILLEGAL_ADDRESS error when
 /// accessing the pointer.
-impl<T: Send + 'static> GpuDataMarker for T {}
+impl<T: Sync + 'static> GpuDataMarker for T {}
 
-impl<T: Send + 'static> GpuDataMarker for [T] {}
+impl<T: Sync + 'static> GpuDataMarker for [T] {}
 
 /// If the data is a CudaMemBox, it is safe to transfer to the GPU device.
 /// Thus, we can store a CudaMemBox inside another CudaMemBox.
-impl<T: ?Sized + Send + 'static, N: GpuCtxSpace> GpuDataMarker for CudaMemBox<T, N> {}
+impl<T: ?Sized + Sync + 'static, N: GpuCtxSpace> GpuDataMarker for CudaMemBox<T, N> {}
 
 /// Prevent CudaMemBox from being sent to other threads, as the underlying
 /// CUDA memory is tied to a specific GPU context which is not thread-safe.
-impl<T: ?Sized, N: GpuCtxSpace + 'static> !Send for CudaMemBox<T, N> {}
+impl<T: ?Sized, N: GpuCtxSpace + 'static> !Sync for CudaMemBox<T, N> {}
 
 impl<T: ?Sized + 'static, N: GpuCtxSpace + 'static> GpuCtxArenaTrait for CudaMemBox<T, N> {
     fn as_any(&mut self) -> &mut (dyn core::any::Any) {

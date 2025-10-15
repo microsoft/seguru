@@ -2,6 +2,7 @@
 #![feature(file_lock)]
 
 extern crate rustc_ast;
+extern crate rustc_attr_data_structures;
 extern crate rustc_codegen_llvm;
 extern crate rustc_const_eval;
 extern crate rustc_driver;

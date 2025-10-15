@@ -130,6 +130,67 @@ fn gpu_register_tool<'tcx>(tcx: TyCtxt<'tcx>, id: ()) -> registered_tools::Provi
     registered_tools
 }
 
+#[allow(clippy::type_complexity)]
+static CODEGEN_FN_ATTRS: Mutex<
+    Option<
+        for<'tcx> fn(
+            TyCtxt<'tcx>,
+            rustc_middle::query::queries::codegen_fn_attrs::LocalKey,
+        )
+            -> rustc_middle::query::queries::codegen_fn_attrs::ProvidedValue<'tcx>,
+    >,
+> = Mutex::new(None);
+
+fn gpu_codegen_fn_attrs<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    def_id: rustc_middle::query::queries::codegen_fn_attrs::LocalKey,
+) -> rustc_middle::query::queries::codegen_fn_attrs::ProvidedValue<'tcx> {
+    // First, call the default provider if you want its behavior
+    let mut fnattrs = CODEGEN_FN_ATTRS.lock().unwrap().unwrap()(tcx, def_id);
+    // Make them inline to allow translating them to GPU code
+    // TODO: mark them as device function and link to GPU code
+    fnattrs.inline = rustc_attr_data_structures::InlineAttr::Always;
+    fnattrs
+}
+
+fn gpu_eval_to_const_value_raw<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    id: rustc_middle::query::queries::eval_to_const_value_raw::LocalKey<'tcx>,
+) -> rustc_middle::query::queries::eval_to_const_value_raw::ProvidedValue<'tcx> {
+    use rustc_middle::mir::ConstValue;
+    use rustc_middle::mir::interpret::Scalar;
+    use rustc_middle::ty::ScalarInt;
+
+    const GPU_PARAM_SYM: &str = "gpu_params::";
+    let mut ret = rustc_const_eval::const_eval::eval_to_const_value_raw_provider(tcx, id);
+    let def_id = id.value.instance.def_id();
+
+    if let Some(sym) = tcx.all_diagnostic_items(()).id_to_name.get(&def_id) {
+        let sym_name = sym.to_string();
+        if sym_name.starts_with(GPU_PARAM_SYM) {
+            let env_var_name = tcx.arena.alloc_str(sym_name.strip_prefix(GPU_PARAM_SYM).unwrap());
+            let Ok(ConstValue::Scalar(Scalar::Int(scalar_int))) = &mut ret else {
+                panic!("only support scalar(int) const for now");
+            };
+            if let Ok(valstr) = tcx.env_var(env_var_name) {
+                tcx.sess.dcx().span_note(
+                    tcx.def_span(def_id),
+                    format!("Overriding const {sym_name} with env var {env_var_name} to {valstr}"),
+                );
+                valstr
+                    .parse::<u128>()
+                    .map(|v| {
+                        *scalar_int = ScalarInt::try_from_uint(v, scalar_int.size())
+                            .expect("Provided value too large");
+                    })
+                    .expect("failed to parse env var to integer");
+            }
+        }
+    }
+
+    ret
+}
+
 fn config_link_gpu_code(config: &mut Config) {
     // Link to gpu code
     let mut need_link_gpu = config.opts.test;
@@ -185,6 +246,25 @@ fn config_link_gpu_code(config: &mut Config) {
     }
 }
 
+fn is_gpu_crate(tcx: TyCtxt<'_>) -> bool {
+    let cstore = tcx.cstore_untracked();
+    for cnum in tcx.crates(()) {
+        let name = cstore.crate_name(*cnum);
+        if name.as_str() == GPU_MACROS_CRATE {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_external_gpu_crates(name: &str) -> bool {
+    std::env::var("GPU_EXTERNAL_CRATES")
+        .unwrap_or_default()
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .any(|s| s == name)
+}
 impl Callbacks for GpuOrCpuRustCallback {
     fn config(&mut self, config: &mut Config) {
         match self.stage {
@@ -242,44 +322,31 @@ impl Callbacks for GpuOrCpuRustCallback {
         config.opts.unstable_opts.inline_mir_threshold = Some(0);
 
         // Enable tool features
-        config.override_queries = Some(|_sess, providers| {
-            // Save old provider if you want to call it
-            REGISTERED_TOOLS.lock().unwrap().replace(providers.registered_tools);
-
-            providers.queries.registered_tools = gpu_register_tool;
-            providers.queries.eval_to_const_value_raw = |tcx, id| {
-                use rustc_middle::mir::ConstValue;
-                use rustc_middle::mir::interpret::Scalar;
-                use rustc_middle::ty::ScalarInt;
-                const GPU_PARAM_SYM: &str = "gpu_params::";
-                let mut ret =
-                    rustc_const_eval::const_eval::eval_to_const_value_raw_provider(tcx, id);
-                let def_id = id.value.instance.def_id();
-                if let Some(sym) = tcx.all_diagnostic_items(()).id_to_name.get(&def_id) {
-                    let sym_name = sym.to_string();
-                    if sym_name.starts_with(GPU_PARAM_SYM) {
-                        let env_var_name =
-                            tcx.arena.alloc_str(sym_name.strip_prefix(GPU_PARAM_SYM).unwrap());
-                        let Ok(ConstValue::Scalar(Scalar::Int(scalar_int))) = &mut ret else {
-                            panic!("only support scalar(int) const for now");
-                        };
-                        if let Ok(valstr) = tcx.env_var(env_var_name) {
-                            // Warn user that we are overriding the some gpu_params.
-                            tcx.sess.dcx().span_note(tcx.def_span(def_id), format!("Overriding const {sym_name} with env var {env_var_name} to {valstr}"));
-                            valstr
-                                .parse::<u128>()
-                                .map(|v| {
-                                    *scalar_int = ScalarInt::try_from_uint(v, scalar_int.size())
-                                        .expect("Provided value too large");
-                                })
-                                .expect("failed to parse env var to integer");
-                        }
-                    }
+        let crate_name = config.opts.crate_name.as_ref().unwrap().clone();
+        config.override_queries = if is_external_gpu_crates(crate_name.as_str()) {
+            Some(|_sess, providers| {
+                // Save old provider if you want to call it
+                if REGISTERED_TOOLS.lock().unwrap().is_none() {
+                    REGISTERED_TOOLS.lock().unwrap().replace(providers.registered_tools);
                 }
+                providers.queries.registered_tools = gpu_register_tool;
 
-                ret
-            };
-        });
+                if CODEGEN_FN_ATTRS.lock().unwrap().is_none() {
+                    CODEGEN_FN_ATTRS.lock().unwrap().replace(providers.codegen_fn_attrs);
+                }
+                providers.codegen_fn_attrs = gpu_codegen_fn_attrs;
+                providers.queries.eval_to_const_value_raw = gpu_eval_to_const_value_raw;
+            })
+        } else {
+            Some(|_sess, providers| {
+                // Save old provider if you want to call it
+                if REGISTERED_TOOLS.lock().unwrap().is_none() {
+                    REGISTERED_TOOLS.lock().unwrap().replace(providers.registered_tools);
+                }
+                providers.queries.registered_tools = gpu_register_tool;
+                providers.queries.eval_to_const_value_raw = gpu_eval_to_const_value_raw;
+            })
+        };
 
         config.opts.cg.extra_filename = format!("{}{GPU_SUFFIX}", config.opts.cg.extra_filename);
         config.opts.cg.metadata.iter_mut().for_each(|m| *m = format!("{m}{GPU_SUFFIX}"));
@@ -346,16 +413,29 @@ impl Callbacks for GpuOrCpuRustCallback {
     }
 
     fn after_expansion<'tcx>(&mut self, _compiler: &Compiler, tcx: TyCtxt<'tcx>) -> Compilation {
+        let name = tcx.crate_name(rustc_span::def_id::CrateNum::from_u32(0));
         match &self.stage {
             CompilerStage::CpuOrCheckGPU => {
-                let cstore = tcx.cstore_untracked();
-                for cnum in tcx.crates(()) {
-                    let name = cstore.crate_name(*cnum);
-                    if name.as_str() == GPU_MACROS_CRATE {
-                        self.next_stage = Some(CompilerStage::GpuForGpu);
-                        return Compilation::Stop;
-                    }
+                if is_gpu_crate(tcx) {
+                    tcx.sess.dcx().span_note(
+                        rustc_span::DUMMY_SP,
+                        format!("{} is compiled with gpu_codegen", name),
+                    );
+                    self.next_stage = Some(CompilerStage::GpuForGpu);
+                    return Compilation::Stop;
                 }
+                if is_external_gpu_crates(name.as_str()) {
+                    tcx.sess.dcx().span_warn(
+                        rustc_span::DUMMY_SP,
+                        format!(
+                            "Functions in {} are compiled as inline for GPU codes. The translation may fail since not all CPU code can be translated to GPU code. Make sure you know what you are doing.",
+                            name
+                        ),
+                    );
+                    self.next_stage = Some(CompilerStage::GpuForGpu);
+                    return Compilation::Stop;
+                }
+
                 Compilation::Continue
             }
             CompilerStage::GpuForGpu => {

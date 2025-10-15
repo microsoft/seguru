@@ -1305,8 +1305,16 @@ pub fn fused_classifier_kernel3(
     let sp = prepare_softmax_blockwide_noFloat4(&logits_block, V);
     // calculate the probability needed for the loss and update (single-threaded)
     if gpu::thread_id::<gpu::DimX>() == 0 {
+        /*
         let prob = ((logits_block[ix as u32] - sp.offset).exp()) * sp.scale;
         losses_chunk[0] = -prob.ln();
+        */
+        // The above is the llm.c implementation, but it is not stable enough in LLVM.
+        // When enabling -ffast-math, the assembly uses exp2 and log2 which are less accurate.
+        // If logits_block[ix as u32] - sp.offset ~= -80 - -100, exp2f will underflow to 0,
+        // and log2f(0) = -inf, resulting in -inf loss.
+        // Below is equivalent, but more numerically stable
+        losses_chunk[0] = -(logits_block[ix as u32] - sp.offset) - sp.scale.ln()
     }
     // very sensible default for dlosses is 1/(B*T), which is the uniform loss
     let dloss = if !dlosses.is_empty() {

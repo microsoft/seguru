@@ -330,7 +330,7 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for Map2D {
 #[macro_export]
 macro_rules! reshape_map {
     ($($any: tt)*) => {
-        gpu_macros::reshape_map!($crate, $($any)*)
+        $crate::prelude::reshape_map_macro!($crate, $($any)*)
     };
 }
 

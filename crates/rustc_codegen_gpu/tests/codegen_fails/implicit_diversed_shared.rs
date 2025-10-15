@@ -5,7 +5,7 @@
 #![no_std]
 
 
-#[gpu_macros::kernel]
+#[gpu::kernel]
 #[no_mangle]
 pub fn alloc_shared(a: &[u8], _a_window: usize, b: &mut [u8], b_window: u32, f: &mut [f32], salloc: gpu::DynamicSharedAlloc) {
     let mut salloc = salloc;

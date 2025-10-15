@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 gpu = {workspace = true}
-gpu_macros = {workspace = true}
 gpu_host = {workspace = true}
 crunchy = "0.2"
 

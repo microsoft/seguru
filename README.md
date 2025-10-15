@@ -49,7 +49,6 @@ Add `gpu_macro` and `gpu` crates in Cargo.toml.
 
 ```TOML
 [dependencies]
-gpu_macros = {...}
 gpu = {...}
 gpu_host = {...}
 ```
@@ -59,7 +58,7 @@ Define GPU and Host functions.
 ```rust
 use gpu::SafeGpuConfig;
 
-#[gpu_macros::cuda_kernel]
+#[gpu::cuda_kernel]
 pub fn kernel(input: &[f32; Config::BDIM_X as _]) {
     gpu::println!(
         "Hello world... input = {}",

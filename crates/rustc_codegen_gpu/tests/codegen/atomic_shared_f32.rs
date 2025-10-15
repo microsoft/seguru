@@ -5,7 +5,7 @@
 #![feature(stmt_expr_attributes)]
 #![no_std]
 
-#[gpu_macros::kernel(dynamic_shared)]
+#[gpu::kernel(dynamic_shared)]
 #[no_mangle]
 pub fn test_atomic_shared(f: f32, b: &mut f32) {
     let mut smem = smem_alloc.alloc::<f32>(1);

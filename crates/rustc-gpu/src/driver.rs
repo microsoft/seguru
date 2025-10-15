@@ -227,7 +227,7 @@ impl Callbacks for GpuOrCpuRustCallback {
             kernel_call::<1024>();
         }
         // crate B:
-        #[gpu_macros::kernel]
+        #[gpu::kernel]
         fn kernel_call<const N: usize>() {
             gpu::printf("this is from gpu call with %d", N);
         }

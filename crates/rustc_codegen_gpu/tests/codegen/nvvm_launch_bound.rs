@@ -5,8 +5,8 @@
 #![no_std]
 
 #[no_mangle]
-#[gpu_macros::kernel]
-#[gpu_macros::attr(nvvm_launch_bound(16, 16, 1, 2))]
+#[gpu::kernel]
+#[gpu::attr(nvvm_launch_bound(16, 16, 1, 2))]
 pub fn bounded_kernel(a: i32, b: &mut i32) {
     gpu::println!("Hello from GPU!{}", a);
 }

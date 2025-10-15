@@ -5,7 +5,7 @@ use gpu::*;
 
 type ThreadChunkMatrix2D<'a> = GlobalThreadChunk<'a, f32, Map2D>;
 
-#[gpu_macros::cuda_kernel]
+#[gpu::cuda_kernel]
 pub fn inner_product_kernel2(a: &[f32], b: &[f32], c: ThreadChunkMatrix2D<'_>, n: usize) {
     let bid_x = block_id::<gpu::DimX>();
     let bid_y = block_id::<gpu::DimY>();
@@ -38,7 +38,7 @@ pub fn inner_product_kernel2(a: &[f32], b: &[f32], c: ThreadChunkMatrix2D<'_>, n
 }
 
 #[cfg(feature = "v1")]
-#[gpu_macros::cuda_kernel]
+#[gpu::cuda_kernel]
 pub fn inner_product_kernel(a: &[f32], b: &[f32], c: &mut [f32], n: usize) {
     let mut c = chunk_mut(c, Map2D::new(n as u32));
     let bid_x = block_id::<gpu::DimX>();
@@ -73,7 +73,7 @@ pub fn inner_product_kernel(a: &[f32], b: &[f32], c: &mut [f32], n: usize) {
 /// # Safety
 /// This kernel might be unsafe because it uses Chunkable::new that is not defined as trusted chunking func.
 #[cfg(feature = "v3")]
-#[gpu_macros::cuda_kernel]
+#[gpu::cuda_kernel]
 pub fn inner_product_kernel(a: &[f32], b: &[f32], c: ThreadChunkMatrix2D<'_>, n: usize) {
     let mut row = gpu::block_id::<gpu::DimY>() as usize * gpu::block_dim::<gpu::DimY>() as usize
         + gpu::thread_id::<gpu::DimY>() as usize;

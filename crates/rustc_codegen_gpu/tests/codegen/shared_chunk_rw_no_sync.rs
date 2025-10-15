@@ -4,7 +4,7 @@
 #![register_tool(gpu_codegen)]
 #![no_std]
 
-#[gpu_macros::kernel]
+#[gpu::kernel]
 #[no_mangle]
 pub fn shared_chunk_read_after_write_no_sync_needed(a: &[u8], _a_window: usize, b: &mut [u8], b_window: usize, f: &mut [f32], salloc: gpu::DynamicSharedAlloc) {
     let mut shared = gpu::GpuShared::<[u8; 10]>::zero();

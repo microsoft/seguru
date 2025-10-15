@@ -5,7 +5,7 @@
 #![feature(stmt_expr_attributes)]
 #![no_std]
 
-#[gpu_macros::device]
+#[gpu::device]
 #[inline(never)]
 pub fn f(x: &mut u8) {
     *x = 10;

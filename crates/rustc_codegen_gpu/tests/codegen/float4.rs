@@ -8,7 +8,7 @@
 extern crate gpu;
 use gpu::Float4;
 
-#[gpu_macros::kernel]
+#[gpu::kernel]
 #[no_mangle]
 pub fn test_float4(out: &mut [Float4], in2: &Float4) {
     let in1 = Float4::new([1.234, 5.678, 9.1011, 12.1314]);

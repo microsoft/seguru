@@ -5,5 +5,4 @@ edition = "2024"
 
 [dependencies]
 gpu_host = {workspace = true}
-gpu_macros = {workspace = true}
 gpu = {workspace = true}

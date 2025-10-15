@@ -67,6 +67,11 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         self.tcx.sess.dcx().span_fatal(span, msg)
     }
 
+    #[inline(always)]
+    pub fn emit_warning(&self, msg: String, span: impl Into<rustc_errors::MultiSpan>) {
+        self.tcx.sess.dcx().span_warn(span, msg)
+    }
+
     pub fn new(
         cgu_name: String,
         cgu: &'tcx rustc_middle::mir::mono::CodegenUnit<'tcx>,
@@ -76,7 +81,8 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         mlir_body: HashMap<String, melior::ir::BlockRef<'ml, 'ml>>,
     ) -> Self {
         let location = melior::ir::Location::unknown(mlir_ctx);
-        Self {
+        let disable_bound_check = tcx.env_var("DISABLE_GPU_BOUND_CHECK") == Ok("true");
+        let ret = Self {
             cgu_name,
             cgu,
             mlir_ctx,
@@ -93,8 +99,15 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             fn_shared_memory_size: RwLock::new(HashMap::new()),
             static_shared_count: AtomicUsize::new(0),
             gpu_attrs: HashMap::new(),
-            disable_bound_check: tcx.env_var("DISABLE_GPU_BOUND_CHECK") == Ok("true"),
+            disable_bound_check,
+        };
+        if disable_bound_check {
+            ret.emit_warning(
+                "Warning: DISABLE_GPU_BOUND_CHECK is set, bound check is disabled".into(),
+                rustc_span::DUMMY_SP,
+            );
         }
+        ret
     }
 
     pub fn mlir_body(&self, gpu: bool) -> &'a melior::ir::Block<'ml> {

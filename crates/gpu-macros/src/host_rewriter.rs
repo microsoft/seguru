@@ -103,7 +103,18 @@ fn host_rewrite(
         ));
         args.push(syn::parse_quote!(#smem_ident));
     }
-
+    let mut to_kernel_generic_params = host_func
+        .sig
+        .generics
+        .params
+        .iter()
+        .map(|p| match p {
+            syn::GenericParam::Type(ty) => ty.ident.clone(),
+            syn::GenericParam::Lifetime(lt) => lt.lifetime.ident.clone(),
+            syn::GenericParam::Const(c) => c.ident.clone(),
+        })
+        .collect::<Vec<_>>();
+    to_kernel_generic_params.insert(0, config_type_arg.clone());
     // Add generic param for context namespace.
     host_func.sig.generics.params.push(generic_config_bound(config_type_arg.clone(), false, span));
     host_func.sig.generics.params.push(generic_ctxspace_bound(ctx_type_arg.clone(), false, span));
@@ -160,10 +171,13 @@ fn host_rewrite(
 
     let last_segment = kernel_fn_path.segments.last_mut().unwrap();
     if let syn::PathArguments::AngleBracketed(bracketed_args) = &mut last_segment.arguments {
-        bracketed_args.args.insert(0, syn::parse_quote! { #config_type_arg });
+        for arg in to_kernel_generic_params.iter().rev() {
+            bracketed_args.args.insert(0, syn::GenericArgument::Type(syn::parse_quote! { #arg }));
+        }
     } else {
-        last_segment.arguments =
-            syn::PathArguments::AngleBracketed(syn::parse_quote! { ::<#config_type_arg> });
+        last_segment.arguments = syn::PathArguments::AngleBracketed(
+            syn::parse_quote! { ::<#(#to_kernel_generic_params,)*> },
+        );
     }
 
     if target.is_gpu_only() {

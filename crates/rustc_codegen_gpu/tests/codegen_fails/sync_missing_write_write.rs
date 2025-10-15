@@ -4,7 +4,7 @@
 #![register_tool(gpu_codegen)]
 #![no_std]
 
-#[gpu_macros::kernel]
+#[gpu::kernel]
 #[no_mangle]
 pub fn test_shared_write_write(a: &[u8], b: &mut [u8]) {
     let mut shared = gpu::GpuShared::<[u8; 10]>::zero();

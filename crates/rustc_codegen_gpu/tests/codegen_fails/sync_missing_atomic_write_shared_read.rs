@@ -5,7 +5,7 @@
 #![feature(stmt_expr_attributes)]
 #![no_std]
 
-#[gpu_macros::kernel]
+#[gpu::kernel]
 #[no_mangle]
 pub fn test_atomic_shared_failed(b: &mut f32) {
     let mut smem = gpu::GpuShared::<f32>::zero();

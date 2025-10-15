@@ -9,7 +9,7 @@ extern crate gpu;
 
 use gpu::GPUDeviceFloatIntrinsics;
 
-#[gpu_macros::kernel]
+#[gpu::kernel]
 #[no_mangle]
 pub fn test_call_devicelib_func(out: &mut [f32], in1: f32, in2: f32) {
     let mut out = gpu::chunk_mut(out, gpu::MapLinear::new(1));

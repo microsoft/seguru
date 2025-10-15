@@ -33,7 +33,7 @@ __global__ void encoder_forward_kernel3(Float4* out,
 }
 */
 
-#[gpu_macros::cuda_kernel]
+#[gpu::cuda_kernel]
 pub fn encoder_forward_kernel3(
     out: &mut [Float4],
     inp: &[i32],
@@ -89,7 +89,7 @@ __global__ void encoder_backward_kernel(float* dwte, float* dwpe,
 }
 */
 /// really bad naive kernel with atomicAdd
-#[gpu_macros::cuda_kernel]
+#[gpu::cuda_kernel]
 pub fn encoder_backward_kernel(
     dwte: &mut [f32],
     dwpe: &mut [f32],
@@ -121,7 +121,7 @@ pub fn encoder_backward_kernel(
     }
 }
 
-#[gpu_macros::cuda_kernel]
+#[gpu::cuda_kernel]
 pub fn layernorm_forward_kernel3(
     out: &mut [f32],
     mean: &mut [f32],
@@ -197,7 +197,7 @@ pub fn layernorm_forward_kernel3(
 }
 
 #[allow(clippy::erasing_op)]
-#[gpu_macros::cuda_kernel]
+#[gpu::cuda_kernel]
 pub fn permute_kernel(
     q: &mut [f32],
     k: &mut [f32],
@@ -250,7 +250,7 @@ __global__ void permute_kernel_backward(float* dinp,
 }
 */
 
-#[gpu_macros::cuda_kernel]
+#[gpu::cuda_kernel]
 pub fn permute_kernel_backward(
     dinp: &mut [f32],
     dq: &[f32],
@@ -297,7 +297,7 @@ __global__ void unpermute_kernel(float* inp, float *out, int B, int N, int NH, i
 }
 */
 
-#[gpu_macros::cuda_kernel]
+#[gpu::cuda_kernel]
 pub fn unpermute_kernel(inp: &[f32], out: &mut [f32], B: u32, N: u32, NH: u32, D: u32) {
     // shape (B, NH, N, D) to (B, N, NH, D)
     // inp shape: (B, NH, N, D) out shape (B, N, NH, D)
@@ -330,7 +330,7 @@ __global__ void unpermute_kernel_backward(float* dinp, const float *dout, int B,
 }
 */
 
-#[gpu_macros::cuda_kernel]
+#[gpu::cuda_kernel]
 pub fn unpermute_kernel_backward(dinp: &mut [f32], dout: &[f32], B: u32, N: u32, NH: u32, D: u32) {
     // shape (B, N, NH, D) to (B, NH, N, D)
     // inp shape: (B, NH, N, D) out shape (B, N, NH, D)
@@ -415,7 +415,7 @@ __global__ void softmax_forward_kernel5(float* out, float inv_temperature, const
 }
 */
 
-#[gpu_macros::cuda_kernel]
+#[gpu::cuda_kernel]
 #[allow(clippy::needless_range_loop)]
 pub fn softmax_forward_kernel5(out: &mut [f32], inv_temperature: f32, inp: &[f32], N: u32, T: u32) {
     assert!(T % 4 == 0);
@@ -495,7 +495,7 @@ __global__ void residual_forward_kernel(float* out, float* inp1, float* inp2, in
 }
 */
 
-#[gpu_macros::cuda_kernel]
+#[gpu::cuda_kernel]
 pub fn residual_forward_kernel(out: &mut [f32], inp1: &[f32], inp2: &[f32], N: u32) {
     let mut out = chunk_mut(out, gpu::MapLinear::new(1));
     let idx = block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>();
@@ -516,7 +516,7 @@ __global__ void gelu_forward_kernel(float* out, const float* inp, int N) {
 }
 */
 
-#[gpu_macros::cuda_kernel]
+#[gpu::cuda_kernel]
 pub fn gelu_forward_kernel(out: &mut [f32], inp: &[f32], N: u32) {
     let GELU_SCALING_FACTOR: f32 = (2.0f32 / core::f32::consts::PI).sqrt();
 
@@ -545,7 +545,7 @@ __global__ void gelu_backward_kernel(float* dinp, const float* inp, const float*
 }
 */
 
-#[gpu_macros::cuda_kernel]
+#[gpu::cuda_kernel]
 pub fn gelu_backward_kernel_llm(dinp: &mut [f32], inp: &[f32], dout: &[f32], N: u32) {
     let gelu_scaling_factor: f32 = (2.0f32 / core::f32::consts::PI).sqrt();
     let mut dinp = chunk_mut(dinp, MapLinear::new(1));
@@ -565,7 +565,7 @@ pub fn gelu_backward_kernel_llm(dinp: &mut [f32], inp: &[f32], dout: &[f32], N: 
 }
 
 // When dinp == dout
-#[gpu_macros::cuda_kernel]
+#[gpu::cuda_kernel]
 pub fn gelu_backward_kernel(dinp: &mut [f32], inp: &[f32], N: u32) {
     let gelu_scaling_factor: f32 = (2.0f32 / core::f32::consts::PI).sqrt();
 
@@ -590,7 +590,7 @@ __device__ inline float lerp(float start, float end, float weight) {
     return fma(weight, end, fma(-weight, start, start));
 }
 */
-#[gpu_macros::device]
+#[gpu::device]
 #[inline(always)]
 fn lerp(start: f32, end: f32, weight: f32) -> f32 {
     weight.fma(end, (-weight).fma(start, start))
@@ -640,8 +640,8 @@ __global__ void matmul_backward_bias_kernel4(float* dbias, const float* dout, in
 
 // TODO: Add tests
 // This constructs matmul_backward with cublasSgemm
-#[gpu_macros::attr(skip_divergence_check)]
-#[gpu_macros::cuda_kernel(dynamic_shared)]
+#[gpu::attr(skip_divergence_check)]
+#[gpu::cuda_kernel(dynamic_shared)]
 pub fn matmul_backward_bias_kernel4(dbias: &mut [f32], dout: &[f32], B: u32, T: u32, OC: u32) {
     // this kernel is launched with 1D grid_dim of OC/32
     // for example let's say block_size is 128
@@ -763,8 +763,8 @@ __global__ void layernorm_backward_kernel2(float* dinp, float* dweight, float* d
 }
 */
 
-#[gpu_macros::attr(skip_divergence_check)]
-#[gpu_macros::cuda_kernel(dynamic_shared)]
+#[gpu::attr(skip_divergence_check)]
+#[gpu::cuda_kernel(dynamic_shared)]
 pub fn layernorm_backward_kernel2(
     dinp: &mut [f32],
     dweight: &mut [f32],
@@ -927,8 +927,8 @@ __global__ void softmax_autoregressive_backward_kernel(float* dpreatt, const flo
 }
 */
 
-#[gpu_macros::attr(skip_divergence_check)]
-#[gpu_macros::cuda_kernel]
+#[gpu::attr(skip_divergence_check)]
+#[gpu::cuda_kernel]
 pub fn softmax_autoregressive_backward_kernel(
     dpreatt: &mut [f32],
     datt: &[f32],
@@ -1053,7 +1053,7 @@ __global__ void adamw_kernel2(float* params_memory, float* grads_memory, float* 
 }
 */
 /// TODO: add tests
-#[gpu_macros::cuda_kernel]
+#[gpu::cuda_kernel]
 pub fn adamw_kernel2(
     params_memory: &mut [f32],
     grads_memory: &[f32],
@@ -1150,8 +1150,8 @@ struct SoftmaxParams {
 
 // inp: Shape(V,)
 #[inline(always)]
-#[gpu_macros::device]
-#[gpu_macros::attr(skip_divergence_check)]
+#[gpu::device]
+#[gpu::attr(skip_divergence_check)]
 fn prepare_softmax_blockwide_noFloat4(
     inp: &GlobalGroupChunk<'_, f32, Grid2BlockScope, MapLinear>,
     V: u32,
@@ -1271,8 +1271,8 @@ __global__ void fused_classifier_kernel3(float* logits, float* losses, float* pr
 */
 
 // assert!(P >= V);
-#[gpu_macros::attr(skip_divergence_check)]
-#[gpu_macros::cuda_kernel]
+#[gpu::attr(skip_divergence_check)]
+#[gpu::cuda_kernel]
 pub fn fused_classifier_kernel3(
     logits: &mut [f32],
     losses: &mut [f32],
@@ -1425,14 +1425,14 @@ __global__ void __launch_bounds__(16*16, 2) matmul_forward_kernel4(float* out,
 */
 
 #[inline(always)]
-#[gpu_macros::device]
+#[gpu::device]
 fn dot4(a: [f32; 4], b: [f32; 4]) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]
 }
 
-#[gpu_macros::cuda_kernel]
-#[gpu_macros::attr(nvvm_launch_bound(256, 1, 1, 2))]
-#[gpu_macros::attr(skip_divergence_check)]
+#[gpu::cuda_kernel]
+#[gpu::attr(nvvm_launch_bound(256, 1, 1, 2))]
+#[gpu::attr(skip_divergence_check)]
 #[allow(clippy::needless_range_loop)]
 pub fn matmul_forward_kernel4(
     out: &mut [f32],

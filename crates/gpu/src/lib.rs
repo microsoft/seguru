@@ -11,6 +11,9 @@
 
 extern crate alloc;
 
+#[cfg(feature = "codegen_tests")]
+extern crate gpu_macros;
+
 mod array;
 pub mod cg;
 pub mod chunk;
@@ -23,26 +26,12 @@ pub(crate) mod global;
 mod host_dev;
 pub mod iter;
 mod ldst;
+pub mod prelude;
 mod print;
 mod shared;
 pub mod sync;
 
-pub use array::ArrayReshape;
-pub use chunk::{GlobalGroupChunk, GlobalThreadChunk, chunk_mut};
-pub use chunk_impl::{Map2D, MapLinear, MapLinearWithDim};
-#[cfg(not(feature = "codegen_tests"))]
-pub use cuda_bindings::SafeGpuConfig;
-pub use device_intrinsic::GPUDeviceFloatIntrinsics;
-pub use dim::{
-    DimType, DimX, DimY, DimZ, block_dim, block_id, dim, global_id, grid_dim, thread_id,
-};
-pub use floatn::{Float4, Float32N};
-pub use global::GpuGlobal;
-pub use host_dev::HostToDev;
-pub use ldst::CacheStreamLoadStore;
-pub use print::{PushPrintfArg, printf};
-pub use shared::{DynamicSharedAlloc, DynamicSharedAllocBuilder, GpuShared};
-pub use sync::sync_threads;
+pub use prelude::*;
 
 /// Add an extra assertion before indexing operation.
 /// This is used to ensure that some indexing operation is safe,

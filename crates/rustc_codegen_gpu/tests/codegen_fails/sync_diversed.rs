@@ -5,7 +5,7 @@
 #![no_std]
 
 
-#[gpu_macros::kernel]
+#[gpu::kernel]
 #[no_mangle]
 pub fn test_diversed_sync_threads(mut a: &mut [f32]) {
     if gpu::thread_id::<gpu::DimX>() == 0 {

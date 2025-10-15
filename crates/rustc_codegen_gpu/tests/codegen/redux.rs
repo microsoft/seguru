@@ -7,7 +7,7 @@
 
 extern crate gpu;
 
-#[gpu_macros::kernel]
+#[gpu::kernel]
 #[no_mangle]
 pub fn redux_max(a: &[u32], _a_window: usize, b: &mut [u32], _b_window: usize) {
     use gpu::cg::WarpReduceOp;

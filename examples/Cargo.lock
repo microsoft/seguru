@@ -153,7 +153,6 @@ version = "0.1.0"
 dependencies = [
  "gpu",
  "gpu_host",
- "gpu_macros",
 ]
 
 [[package]]
@@ -194,7 +193,6 @@ dependencies = [
  "crunchy",
  "gpu",
  "gpu_host",
- "gpu_macros",
  "rand",
 ]
 
@@ -210,7 +208,6 @@ version = "0.1.0"
 dependencies = [
  "gpu",
  "gpu_host",
- "gpu_macros",
 ]
 
 [[package]]
@@ -219,7 +216,6 @@ version = "0.1.0"
 dependencies = [
  "gpu",
  "gpu_host",
- "gpu_macros",
  "matmul-gpu",
 ]
 
@@ -384,7 +380,6 @@ name = "syntax_gpu"
 version = "0.1.0"
 dependencies = [
  "gpu",
- "gpu_macros",
 ]
 
 [[package]]
@@ -393,7 +388,6 @@ version = "0.1.0"
 dependencies = [
  "gpu",
  "gpu_host",
- "gpu_macros",
  "syntax_gpu",
 ]
 

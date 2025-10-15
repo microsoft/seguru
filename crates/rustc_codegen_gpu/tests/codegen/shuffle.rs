@@ -7,7 +7,7 @@
 
 extern crate gpu;
 
-#[gpu_macros::kernel]
+#[gpu::kernel]
 #[no_mangle]
 pub fn shuffle_redux(a: &[f32], _a_window: usize, b: &mut [f32], _b_window: usize) {
     use gpu::cg::WarpReduceOp;
@@ -17,7 +17,7 @@ pub fn shuffle_redux(a: &[f32], _a_window: usize, b: &mut [f32], _b_window: usiz
     chunked_b[0] = warp.redux(gpu::cg::ReduxAdd, val);
 }
 
-#[gpu_macros::kernel]
+#[gpu::kernel]
 #[no_mangle]
 pub fn shuffle_redux_max(a: &[f32], _a_window: usize, b: &mut [f32], _b_window: usize) {
     use gpu::cg::WarpReduceOp;

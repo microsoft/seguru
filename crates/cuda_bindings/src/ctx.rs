@@ -7,7 +7,7 @@
 ///
 /// Those functions should not be used directly.
 /// Instead, use the safe wrappers in `gpu_host` crate.
-/// and use `gpu_macros::host` to generate host code.
+/// and use `gpu::host` to generate host code.
 use alloc::boxed::Box;
 use alloc::collections::btree_map::BTreeMap;
 use alloc::string::{String, ToString};
@@ -420,7 +420,7 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
 
     /// # Safety
     /// This is safe if the argument types match the kernel's expected types.
-    /// To make it safe, use the gpu_macros::host to generate dummy api checking code.
+    /// To make it safe, use the gpu::host to generate dummy api checking code.
     #[allow(clippy::too_many_arguments)]
     pub unsafe fn launch_coop_kernel<C: SafeGpuConfig>(
         &self,
@@ -438,7 +438,7 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
     /// The host must use arguments that implement `AsHostKernelParams`.
     /// # Safety
     /// This is safe if the argument types match the kernel's expected types.
-    /// To make it safe, use the gpu_macros::host to generate dummy api checking code.
+    /// To make it safe, use the gpu::host to generate dummy api checking code.
     #[allow(clippy::too_many_arguments)]
     pub unsafe fn launch_kernel<C: SafeGpuConfig>(
         &self,
@@ -455,7 +455,7 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
 
     /// # Safety
     /// This is safe if the argument types match the kernel's expected types.
-    /// To make it safe, use the gpu_macros::host to generate dummy api checking code.
+    /// To make it safe, use the gpu::host to generate dummy api checking code.
     unsafe fn launch_coop_fn<C: SafeGpuConfig>(
         &self,
         f: &GpuFunction<'ctx, N>,
@@ -499,7 +499,7 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
     /// The host must use arguments that implement `AsHostKernelParams`.
     /// # Safety
     /// This is safe if the argument types match the kernel's expected types.
-    /// To make it safe, use the gpu_macros::host to generate dummy api checking code.
+    /// To make it safe, use the gpu::host to generate dummy api checking code.
     unsafe fn launch_fn<C: SafeGpuConfig>(
         &self,
         f: &GpuFunction<'ctx, N>,

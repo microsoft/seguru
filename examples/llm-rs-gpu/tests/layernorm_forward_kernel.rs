@@ -188,8 +188,8 @@ pub fn layernorm_backward_cpu(
 }
 
 /*
-#[gpu_macros::attr(skip_divergence_check)]
-#[gpu_macros::cuda_kernel(dynamic_shared)]
+#[gpu::attr(skip_divergence_check)]
+#[gpu::cuda_kernel(dynamic_shared)]
 pub fn layernorm_backward_kernel2(
     dinp: &mut [f32],
     dweight: &mut [f32],

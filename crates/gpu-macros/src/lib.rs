@@ -60,7 +60,7 @@ pub fn device(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 /// Add gpu attributes to the kernel function
 /// e.g.
-/// #[gpu_macros::attr(nvvm_launch_bound(256, 1, 1, 2))]
+/// #[gpu::attr(nvvm_launch_bound(256, 1, 1, 2))]
 #[proc_macro_attribute]
 pub fn attr(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut kfun = syn::parse_macro_input!(item as syn::ItemFn);
@@ -72,6 +72,6 @@ pub fn attr(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 #[proc_macro]
-pub fn reshape_map(input: TokenStream) -> TokenStream {
+pub fn reshape_map_macro(input: TokenStream) -> TokenStream {
     reshape_map::map_reshape_params(input)
 }

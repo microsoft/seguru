@@ -2,7 +2,7 @@
 #![feature(generic_const_exprs)]
 use gpu::SafeGpuConfig;
 
-#[gpu_macros::cuda_kernel]
+#[gpu::cuda_kernel]
 pub fn kernel(input: &[f32; Config::BDIM_X as _]) {
     gpu::println!(
         "Hello world... input = {}",

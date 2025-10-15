@@ -6,5 +6,4 @@ edition = "2021"
 [dependencies]
 gpu_host = {workspace = true}
 matmul-gpu = {path = "../matmul-gpu"}
-gpu_macros = {workspace = true}
 gpu = {workspace = true}

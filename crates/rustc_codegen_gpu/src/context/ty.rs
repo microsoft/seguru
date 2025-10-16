@@ -18,6 +18,19 @@ pub type MLIRType<'ctx> = mlir_ir::Type<'ctx>;
 
 impl<'tcx, 'ml, 'a> TypeMembershipCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, 'a> {}
 
+fn flat_tuple<'tcx>(t: &rustc_middle::ty::Ty<'tcx>) -> Vec<rustc_middle::ty::Ty<'tcx>> {
+    let mut type_list = Vec::new();
+    let rustc_middle::ty::TyKind::Tuple(t) = t.kind() else { unreachable!() };
+    for ty in t.as_slice() {
+        if matches!(ty.kind(), rustc_middle::ty::TyKind::Tuple(t2)) {
+            type_list.extend(flat_tuple(ty));
+        } else {
+            type_list.push(*ty);
+        }
+    }
+    type_list
+}
+
 impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     pub(crate) fn align_to_attr(
         &self,
@@ -305,13 +318,12 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 }
             }
             rustc_middle::ty::TyKind::Tuple(list) => {
-                let type_list = list.as_slice();
-                if type_list.len() > 2 {
-                    panic!("Only tuples with length > 2 is supported. {:?}", ty);
-                }
+                let type_list = flat_tuple(ty);
                 if let Some(idx) = pair_idx {
+                    assert!(type_list.len() > idx);
                     self.pointer_to_mlir_type(&type_list[idx], None, _immediate, memory_space)
                 } else {
+                    assert!(!type_list.is_empty());
                     self.pointer_to_mlir_type(&type_list[0], None, _immediate, memory_space)
                 }
             }
@@ -379,6 +391,15 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 }
             }
         }
+    }
+
+    pub(crate) fn type_to_mlir_type(
+        &self,
+        ty: &rustc_middle::ty::Ty<'tcx>,
+        immediate: bool,
+    ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type {
+        let layout = self.layout_of(*ty);
+        self.mlir_type(layout, immediate)
     }
 
     pub(crate) fn mlir_type(

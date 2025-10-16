@@ -8,7 +8,7 @@ use rustc_codegen_ssa_gpu::traits::{
     BackendTypes, BaseTypeCodegenMethods, ConstCodegenMethods, StaticCodegenMethods,
 };
 use rustc_const_eval::interpret::{GlobalAlloc, PointerArithmetic, alloc_range};
-use tracing::{debug, trace};
+use tracing::trace;
 
 use super::GPUCodegenContext;
 
@@ -98,19 +98,11 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let pointer_size = dl.pointer_size();
         let mem_len = pointer_size.bytes() as usize;
         let ty = self.type_array(self.type_i8(), mem_len as _);
-        let ref_ty = mlir_type::MemRefType::new(self.type_i8(), &[mem_len as _], None, None);
         let value = if alloc.inner().size().bytes() == 0 {
             None
         } else {
             let bytes =
                 alloc.inner().get_bytes_unchecked(alloc_range(Size::ZERO, alloc.inner().size()));
-            debug!(
-                "const_data_memref_from_alloc: {} {} {:?} {}",
-                alloc.inner().len(),
-                alloc.inner().size().bytes(),
-                bytes,
-                ty
-            );
             let value = mlir_ir::attribute::DenseElementsAttribute::new(
                 ty,
                 &bytes
@@ -180,7 +172,14 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 ));
                 self.const_data_memref_from_alloc_id(alloc_id)
             }
-            _ => todo!(),
+            GlobalAlloc::Static(def_id) => {
+                //let instance = Instance::mono(self.tcx, def_id);
+                //use crate::rustc_middle::ty::layout::HasTypingEnv;
+                //let ty = instance.ty(self.tcx, self.typing_env());
+                //let llty = self.mlir_type(self.layout_of(ty), false);
+                self.static_data_memref(None, &format!("static_{}", self.tcx.def_path_str(def_id)))
+            }
+            _ => todo!("{:?}", alloc),
         };
         self.const_alloc.write().unwrap().insert(alloc_id, v);
         trace!("const_data_memref_from_alloc_id: {:?}", v);

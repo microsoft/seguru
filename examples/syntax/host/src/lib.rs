@@ -1,3 +1,6 @@
+#![allow(internal_features)]
+#![feature(core_intrinsics)]
+
 mod host;
 
 use gpu_host::cuda_ctx;
@@ -125,5 +128,23 @@ pub fn test_raw_eq_zero(a: u32, b: f32, c: f32, expected: u8) {
         let mut h_out = 0;
         out.copy_to_host(&mut h_out).unwrap();
         assert_eq!(h_out, expected);
+    });
+}
+
+#[gpu::cuda_kernel]
+pub fn use_volatile_load(a: u32, ret: &mut u32) {
+    let val = unsafe { core::intrinsics::volatile_load(&a as *const u32) };
+    let ret = gpu::sync::Atomic::new(ret);
+    ret.atomic_addi(val);
+}
+
+pub fn test_use_volatile_load(a: u32) {
+    cuda_ctx(0, |ctx, m| {
+        let config = gpu_host::gpu_config!(1, 1, 1, 1, 1, 1, 0);
+        let mut out = ctx.new_tensor_view::<u32>(&0).unwrap();
+        use_volatile_load::launch(config, ctx, m, a, &mut out).expect("Kernel execution failed");
+        let mut h_out = 0;
+        out.copy_to_host(&mut h_out).unwrap();
+        assert!(h_out == a, "{} != {}", h_out, a);
     });
 }

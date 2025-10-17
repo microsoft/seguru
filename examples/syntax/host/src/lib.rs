@@ -96,3 +96,34 @@ pub fn test_oob_no_fails() {
     })
     .expect("Kernel execution failed");
 }
+
+#[derive(Clone, Copy, PartialEq)]
+struct X {
+    a: u32,
+    b: f32,
+    c: f32,
+}
+
+const X0: X = X {
+    a: 0,
+    b: 0.0,
+    c: 0.0,
+};
+
+#[gpu::cuda_kernel]
+pub fn check_eq_x0(a: u32, b: f32, c: f32, ret: &mut u8) {
+    let x = X { a, b, c };
+    let ret = gpu::sync::Atomic::new(ret);
+    ret.atomic_addi(if x == X0 { 1 } else { 0 });
+}
+
+pub fn test_raw_eq_zero(a: u32, b: f32, c: f32, expected: u8) {
+    cuda_ctx(0, |ctx, m| {
+        let config = gpu_host::gpu_config!(1, 1, 1, 1, 1, 1, 0);
+        let mut out = ctx.new_tensor_view::<u8>(&0).unwrap();
+        check_eq_x0::launch(config, ctx, m, a, b, c, &mut out).expect("Kernel execution failed");
+        let mut h_out = 0;
+        out.copy_to_host(&mut h_out).unwrap();
+        assert_eq!(h_out, expected);
+    });
+}

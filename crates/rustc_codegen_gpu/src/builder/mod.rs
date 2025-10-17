@@ -706,6 +706,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         ptr: melior::ir::Value<'ml, 'a>,
         indices: &[melior::ir::Value<'ml, 'a>],
     ) -> mlir_ir::Operation<'ml> {
+        let ptr = self.use_value(ptr);
         if indices.len() != 1 {
             panic!("only supports single index");
         }
@@ -1958,7 +1959,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn volatile_load(&mut self, ty: Self::Type, ptr: Self::Value) -> Self::Value {
-        todo!()
+        self.load_with_check(ty, ptr, rustc_abi::Align::ONE, false)
     }
 
     fn atomic_load(
@@ -2312,13 +2313,17 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         if let Some(const_val) = crate::mlir::mlir_val_to_const_int(val) {
             return self.const_value(const_val & ((1 << int_width(dest_ty).unwrap()) - 1), dest_ty);
         }
+        if dest_ty.is_mem_ref() {
+            return self.inttoptr(val, dest_ty);
+        };
         let op = if src_ty.is_index() || dest_ty.is_index() {
             // If either is index, we need to use index_cast
             melior::dialect::arith::index_cast(val, dest_ty, self.cur_loc())
-        } else {
+        } else if src_ty.is_integer() || dest_ty.is_integer() {
             // Integer. Are we doing an extension or trucation?
             let src_int_ty = melior::ir::r#type::IntegerType::try_from(src_ty).unwrap();
-            let dst_int_ty = melior::ir::r#type::IntegerType::try_from(dest_ty).unwrap();
+            let dst_int_ty = melior::ir::r#type::IntegerType::try_from(dest_ty)
+                .unwrap_or_else(|_| panic!("expected integer type {} {}", val, dest_ty));
             if src_int_ty.width() > dst_int_ty.width() {
                 melior::dialect::arith::trunci(val, dest_ty, self.cur_loc())
             } else if !is_signed {
@@ -2326,6 +2331,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             } else {
                 melior::dialect::arith::extsi(val, dest_ty, self.cur_loc())
             }
+        } else {
+            panic!("Unsupported intcast: {} to {}", src_ty, dest_ty);
         };
 
         self.append_op_res(op)

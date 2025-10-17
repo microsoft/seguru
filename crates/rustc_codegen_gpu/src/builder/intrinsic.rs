@@ -92,6 +92,39 @@ pub(crate) fn device_intrinsic<'tcx, 'ml, 'a>(
     }
 }
 
+impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
+    fn memref_raw_eq(
+        &mut self,
+        a: Value<'ml, 'a>,
+        b: Value<'ml, 'a>,
+        loc: melior::ir::Location<'ml>,
+    ) -> melior::ir::Value<'ml, 'a> {
+        use melior::ir::r#type::MemRefType;
+        use melior::ir::{ShapedTypeLike, TypeLike, ValueLike};
+        let type_a = a.r#type();
+        let type_b = b.r#type();
+        assert!(type_a.is_mem_ref());
+        assert!(type_b.is_mem_ref());
+        let type_memref = MemRefType::try_from(type_a).unwrap();
+        let elem_ty = type_memref.element();
+        assert!(type_memref.rank() == 1);
+        let len = type_memref.dim_size(0).unwrap();
+        let mut check = None;
+        for i in 0..len {
+            assert!(elem_ty.is_integer(), "only integer memref is supported {} {}", a, b);
+            let index = self.const_value(i as i64, self.type_index());
+            let a_i = self.inbounds_gep(elem_ty, a, &[index]);
+            let b_i = self.inbounds_gep(elem_ty, b, &[index]);
+            let val = self.load(elem_ty, a_i, rustc_abi::Align::ONE);
+            let val2 = self.load(elem_ty, b_i, rustc_abi::Align::ONE);
+            assert!(val.r#type().is_integer(), "only integer memref is supported {} {}", a, b);
+            assert!(val2.r#type().is_integer(), "only integer memref is supported {} {}", a, b);
+            let check_i = self.icmp(rustc_codegen_ssa_gpu::common::IntPredicate::IntEQ, val, val2);
+            check = if let Some(c) = check { Some(self.and(c, check_i)) } else { Some(check_i) };
+        }
+        check.unwrap()
+    }
+}
 impl<'tcx, 'ml, 'a> IntrinsicCallBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
     fn codegen_intrinsic_call(
         &mut self,
@@ -121,6 +154,21 @@ impl<'tcx, 'ml, 'a> IntrinsicCallBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 
             let ret = self.select(args_imm[0], args_imm[1], args_imm[2]);
             self.store(ret, llresult, rustc_abi::Align::ONE);
             return Ok(());
+        }
+        match name {
+            sym::raw_eq => {
+                let ret = self.memref_raw_eq(args_imm[0], args_imm[1], loc);
+                self.store(ret, llresult, rustc_abi::Align::ONE);
+                return Ok(());
+            }
+            sym::volatile_load => {
+                let ty = arg_tys[0];
+                eprintln!("volatile_load of type {}", ty);
+                let load = self.volatile_load(self.type_to_mlir_type(&ty, false), args_imm[0]);
+                self.store(load, llresult, rustc_abi::Align::ONE);
+                return Ok(());
+            }
+            _ => {}
         }
         intrinsic_match! {name, llresult, args_imm, self, ctx, loc,
             {

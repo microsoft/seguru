@@ -1,5 +1,7 @@
 use melior::ir::r#type::MemRefType;
 use melior::ir::{self as mlir_ir, ShapedTypeLike, ValueLike};
+use melior::ir::Operation;
+use melior::ir::operation::OperationMutLike;
 use rustc_codegen_ssa_gpu::traits::{BaseTypeCodegenMethods, BuilderMethods};
 
 use crate::builder::GpuBuilder;
@@ -22,12 +24,14 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         memref: mlir_ir::Value<'ml, 'a>,
         index: mlir_ir::Value<'ml, 'a>,
         vector_ty: mlir_ir::r#type::Type<'ml>,
+        align: rustc_abi::Align,
     ) -> mlir_ir::Value<'ml, 'a> {
         let loc = self.cur_loc();
         let memref = self.use_memref_as_vector_memref(memref, vector_ty);
-        let op =
-            melior::dialect::ods::vector::load(self.mlir_ctx, vector_ty, memref, &[index], loc);
-        self.append_op_res(op.into())
+        let mut op: Operation<'ml> =
+            melior::dialect::ods::vector::load(self.mlir_ctx, vector_ty, memref, &[index], loc).into();
+        op.set_attribute("alignment", self.align_to_attr(align).into());
+        self.append_op_res(op)
     }
 
     pub(crate) fn store_vector(
@@ -35,12 +39,14 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         memref: mlir_ir::Value<'ml, 'a>,
         index: mlir_ir::Value<'ml, 'a>,
         invec: mlir_ir::Value<'ml, 'a>,
+        align: rustc_abi::Align,
     ) -> mlir_ir::OperationRef<'ml, 'a> {
         let loc = self.cur_loc();
         let vector_ty = invec.r#type();
         let memref = self.use_memref_as_vector_memref(memref, vector_ty);
-        let op = melior::dialect::ods::vector::store(self.mlir_ctx, invec, memref, &[index], loc);
-        self.append_op(op.into())
+        let mut op: Operation<'ml> = melior::dialect::ods::vector::store(self.mlir_ctx, invec, memref, &[index], loc).into();
+        op.set_attribute("alignment", self.align_to_attr(align).into());
+        self.append_op(op)
     }
 
     fn scalar_memcpy(
@@ -105,12 +111,13 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         let const_size = crate::mlir::mlir_val_to_const_int(size);
         if let Some(const_size) = crate::mlir::mlir_val_to_const_int(size) {
             let const_size = const_size as u64;
-            let vec_ty = if const_size % 4 == 0 {
-                self.type_vector(&[const_size / 4], self.type_i32())
-            } else if const_size % 2 == 0 {
-                self.type_vector(&[const_size / 2], self.type_i16())
+            let align = dst_align.bytes().min(src_align.bytes()).min(const_size);
+            let vec_ty = if align % 4 == 0 {
+                self.type_vector(&[align / 4], self.type_i32())
+            } else if align % 2 == 0 {
+                self.type_vector(&[align / 2], self.type_i16())
             } else {
-                self.type_vector(&[const_size], self.type_i8())
+                self.type_vector(&[align], self.type_i8())
             };
             let zero = self.const_value(0, self.type_index());
             let src = self.use_memref_as_vector_memref(src, vec_ty);
@@ -122,8 +129,8 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             );
             //let dst = self.use_value_as_ty(dst, dst_memref_ty);
             let dst = self.use_memref_as_vector_memref(dst, vec_ty);
-            let src_vec = self.load_vector(src, zero, vec_ty);
-            self.store_vector(dst, zero, src_vec);
+            let src_vec = self.load_vector(src, zero, vec_ty, src_align);
+            self.store_vector(dst, zero, src_vec, dst_align);
             return;
         }
         assert!(src_align.bytes() == dst_align.bytes());

@@ -11,7 +11,10 @@ use crate::chunk::{ScopeUniqueMap, ScopeUniqueMapProvidedMethods};
 use crate::chunk_scope::{Block2ThreadScope, ChainedMap, ChainedScope, ChunkScope, Thread};
 
 /// Static GPU shared memory.
+/// NVCC always aligns shared memory to 16 bytes,
+/// so we also align to 16 bytes here.
 #[rustc_diagnostic_item = "gpu::GpuShared"]
+#[repr(C, align(16))]
 pub struct GpuShared<T: ?Sized> {
     value: T,
 }

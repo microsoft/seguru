@@ -381,26 +381,6 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 let dimention = self.extra_state.attrs.pop().unwrap();
                 Ok(Some(self.append_op(DimFn::GridDim.build(self.mlir_ctx, dimention, loc))))
             }
-            GpuItem::Float32NAdd => {
-                if args.len() == 3 {
-                    let ty = args[0].r#type();
-                }
-                let len = get_generic_const()[0].try_to_target_usize(self.tcx).unwrap();
-                assert!(return_types.is_empty());
-                let vec_ty = self.type_vector(&[len], self.type_f32());
-                let left = self.use_memref_as_vector_memref(args[1], vec_ty);
-                let right = self.use_memref_as_vector_memref(args[2], vec_ty);
-                let out = self.use_memref_as_vector_memref(args[0], vec_ty);
-                let op = self.append_op(crate::mlir::linalg::linalg_add_op(
-                    self.mlir_ctx,
-                    left,
-                    right,
-                    out,
-                    vec_ty,
-                    self.cur_loc(),
-                ));
-                Ok(Some(op))
-            }
             GpuItem::PrintArgs => {
                 // printf function should starts with a format passed by add_mlir_string_attr
                 // args can be passed to printf as a list of values.

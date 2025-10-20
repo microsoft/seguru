@@ -3,9 +3,9 @@ use core::ptr::slice_from_raw_parts_mut;
 #[cfg(not(feature = "codegen_tests"))]
 use cuda_bindings::TensorViewMut;
 
-use crate::GlobalGroupChunk;
 use crate::chunk::ScopeUniqueMap;
 use crate::chunk_scope::{ChunkScope, Grid};
+use crate::{GlobalGroupChunk, VecFlatten};
 
 /// Used to distinguish different memory spaces in GPU programming.
 /// GpuGlobal represents global memory space.
@@ -43,19 +43,29 @@ impl<'a, T> GpuGlobal<'a, [T]> {
     {
         GlobalGroupChunk::new(self, m)
     }
+}
 
+impl<'a, T> GpuGlobal<'a, [T]> {
     /// Useful to optimize code with vector load/store.
     /// If length of the slice is not a multiple of N,
     /// the remaining elements will be ignored.
-    /// For now, we only use reshape for global memory.
+    /// For now, we only use flatten for global memory.
     /// For shared memory, user can use GpuShared<[[T; N]]> directly.
     #[gpu_codegen::device]
     #[inline(always)]
-    pub fn reshape<const N: usize>(self) -> GpuGlobal<'a, [[T; N]]> {
+    pub fn flatten<T2>(self) -> GpuGlobal<'a, [T2]>
+    where
+        &'a [T]: VecFlatten<T2>,
+    {
         // SAFETY: the returned slice will be at same size or shorter, so it is safe.
+        assert!(size_of::<T>() >= size_of::<T2>(), "T2 is larger than T");
+        assert!(align_of::<T>() >= align_of::<T2>(), "T2 has stricter alignment than T");
         unsafe {
             GpuGlobal {
-                data: &mut *slice_from_raw_parts_mut(self.data.as_mut_ptr() as _, self.len() / N),
+                data: &mut *slice_from_raw_parts_mut(
+                    self.data.as_mut_ptr() as _,
+                    self.len() * size_of::<T>() / size_of::<T2>(),
+                ),
             }
         }
     }

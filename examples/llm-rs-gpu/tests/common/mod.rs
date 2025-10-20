@@ -29,6 +29,22 @@ pub fn random_f32_vec(n: usize) -> Vec<f32> {
 }
 
 #[allow(dead_code)]
+/// Returns a Vec of `n` random f32 numbers in [0.0, 1.0)
+pub fn random_float4_vec(n: usize) -> Vec<gpu::Float4> {
+    let mut rng = rand::rng();
+    (0..n)
+        .map(|_| {
+            gpu::Float4::new([
+                rng.random::<f32>(),
+                rng.random::<f32>(),
+                rng.random::<f32>(),
+                rng.random::<f32>(),
+            ])
+        })
+        .collect()
+}
+
+#[allow(dead_code)]
 pub fn random_i32_vec(n: usize) -> Vec<i32> {
     let mut rng = rand::rng();
     (0..n).map(|_| rng.random::<i32>()).collect()

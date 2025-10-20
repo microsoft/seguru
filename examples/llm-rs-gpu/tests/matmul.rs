@@ -1,9 +1,10 @@
 mod common;
 
 use common::f32_eq;
+use gpu::prelude::*;
 use gpu_host::cuda_ctx;
 
-use crate::common::random_f32_vec;
+use crate::common::{random_f32_vec, random_float4_vec};
 /*pub fn matmul_forward_kernel4(
     out: &mut [f32],
     inp: &[f32],
@@ -39,10 +40,10 @@ void matmul_forward(float* out,
 
 #[allow(clippy::too_many_arguments)]
 fn matmul_forward(
-    out: &mut [f32],
-    inp: &[f32],
-    weight: &[f32],
-    bias: &[f32],
+    out: &mut [Float4],
+    inp: &[Float4],
+    weight: &[Float4],
+    bias: &[Float4],
     batch: u32,
     t_size: u32,
     c_size: u32,
@@ -63,8 +64,8 @@ fn matmul_forward(
     let in_len = (batch * t_size * c_size) as usize;
     // out is (B,T,OC). OC is short for "output channels", e.g. OC = 4 * C
     // inp is (B,T,C), weight is (OC, C), bias is (OC)
-    assert!(out.len() == out_len);
-    assert!(inp.len() == in_len);
+    assert!(out.len() * 4 == out_len);
+    assert!(inp.len() * 4 == in_len);
     println!(
         "gdim_x {}, gdim_y {}, B {}, T {}, C {}, OC {}",
         gdim_x, gdim_y, batch, t_size, c_size, oc_size
@@ -99,16 +100,22 @@ fn test_matmul() {
     const T: u32 = 128;
     const C: u32 = 32;
     const OC: u32 = 4 * C;
-    let h_dinp = random_f32_vec((B * T * C) as usize);
-    let h_weight = random_f32_vec((OC * C) as usize);
-    let h_bias = random_f32_vec((OC) as usize);
-    let mut h_doutp = random_f32_vec((B * T * OC) as usize);
+    let h_dinp = random_float4_vec((B * T * C / 4) as usize);
+    let h_weight = random_float4_vec((OC * C / 4) as usize);
+    let h_bias = random_float4_vec((OC / 4) as usize);
+    let mut h_doutp = random_float4_vec((B * T * OC / 4) as usize);
     matmul_forward(&mut h_doutp, &h_dinp, &h_weight, &h_bias, B, T, C, OC);
-    let expected = cpu_matmul(&h_dinp, &h_weight, &h_bias, C as i32, OC as i32);
+    let expected = cpu_matmul(
+        h_dinp.as_slice().flatten(),
+        h_weight.as_slice().flatten(),
+        h_bias.as_slice().flatten(),
+        C as i32,
+        OC as i32,
+    );
 
     // CPU and GPU result may differ a bit due to precision issue
     assert!(
-        f32_eq(&expected, &h_doutp, 1e-5),
+        f32_eq(&expected, h_doutp.as_slice().flatten(), 1e-5),
         "expected {:?} \n\n got {:?}",
         &expected[0..64],
         &h_doutp[0..64]
@@ -121,16 +128,22 @@ fn test_matmul2() {
     const T: u32 = 1024;
     const C: u32 = 32;
     const OC: u32 = 4 * C;
-    let h_dinp = random_f32_vec((B * T * C) as usize);
-    let h_weight = random_f32_vec((OC * C) as usize);
-    let h_bias = random_f32_vec((OC) as usize);
-    let mut h_doutp = random_f32_vec((B * T * OC) as usize);
+    let h_dinp = random_float4_vec((B * T * C / 4) as usize);
+    let h_weight = random_float4_vec((OC * C / 4) as usize);
+    let h_bias = random_float4_vec((OC / 4) as usize);
+    let mut h_doutp = random_float4_vec((B * T * OC / 4) as usize);
     matmul_forward(&mut h_doutp, &h_dinp, &h_weight, &h_bias, B, T, C, OC);
-    let expected = cpu_matmul(&h_dinp, &h_weight, &h_bias, C as i32, OC as i32);
+    let expected = cpu_matmul(
+        h_dinp.as_slice().flatten(),
+        h_weight.as_slice().flatten(),
+        h_bias.as_slice().flatten(),
+        C as i32,
+        OC as i32,
+    );
 
     // CPU and GPU result may differ a bit due to precision issue
     assert!(
-        f32_eq(&expected, &h_doutp, 1e-5),
+        f32_eq(&expected, h_doutp.as_slice().flatten(), 1e-5),
         "expected {:?} \n\n got {:?}",
         &expected[0..64],
         &h_doutp[0..64]

@@ -8,12 +8,8 @@ use core::ops::Add;
 use crunchy::unroll;
 use gpu::cg::{CGOperations, ReduxAdd, ReduxMax, ThreadWarpTile, WarpReduceOp};
 use gpu::chunk_scope::{build_chunk_scope, Block, Grid, Grid2BlockScope, Thread};
+use gpu::prelude::*;
 use gpu::sync::{Atomic, SharedAtomic};
-use gpu::{
-    block_dim, block_id, chunk_mut, dim, grid_dim, reshape_map, sync_threads, thread_id,
-    ArrayReshape, CacheStreamLoadStore, DimX, DimY, Float4, GPUDeviceFloatIntrinsics,
-    GlobalGroupChunk, GpuShared, MapLinear,
-};
 
 /*
 __global__ void encoder_forward_kernel3(Float4* out,
@@ -417,7 +413,13 @@ __global__ void softmax_forward_kernel5(float* out, float inv_temperature, const
 
 #[gpu::cuda_kernel]
 #[allow(clippy::needless_range_loop)]
-pub fn softmax_forward_kernel5(out: &mut [f32], inv_temperature: f32, inp: &[f32], N: u32, T: u32) {
+pub fn softmax_forward_kernel5(
+    out: &mut [f32],
+    inv_temperature: f32,
+    inp: &[Float4],
+    N: u32,
+    T: u32,
+) {
     assert!(T % 4 == 0);
     let warp = ThreadWarpTile::<32>;
     let grid2warp = build_chunk_scope(Grid, warp);
@@ -444,12 +446,12 @@ pub fn softmax_forward_kernel5(out: &mut [f32], inv_temperature: f32, inp: &[f32
     }
     let own_pos = global_warp_id_reversed % T;
     let pos_by_4 = own_pos / 4;
-    let x = &inp[(global_warp_id_reversed * T) as usize..];
+    let x_vec = &inp[(global_warp_id_reversed * T / 4) as usize..];
+    let x: &[f32] = x_vec.flatten();
     let mut maxval = f32::MIN;
     let mut sumval = 0.0f32;
-    let x_vec: &[[f32; 4]] = x.reshape();
     for i in (warp.thread_rank()..pos_by_4).step_by(warp.size() as usize) {
-        let v4: [f32; 4] = x_vec[i as usize];
+        let v4: Float4 = x_vec[i as usize];
         let old_maxval = maxval;
         for i in 0..4 {
             maxval = maxval.max(v4[i]);
@@ -1426,7 +1428,7 @@ __global__ void __launch_bounds__(16*16, 2) matmul_forward_kernel4(float* out,
 
 #[inline(always)]
 #[gpu::device]
-fn dot4(a: [f32; 4], b: [f32; 4]) -> f32 {
+fn dot4(a: Float4, b: Float4) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]
 }
 
@@ -1435,10 +1437,10 @@ fn dot4(a: [f32; 4], b: [f32; 4]) -> f32 {
 #[gpu::attr(skip_divergence_check)]
 #[allow(clippy::needless_range_loop)]
 pub fn matmul_forward_kernel4(
-    out: &mut [f32],
-    inp: &[f32],
-    weight: &[f32],
-    bias: &[f32],
+    out: &mut [Float4],
+    inp: &[Float4],
+    weight: &[Float4],
+    bias: &[Float4],
     C: u32,
     OC: u32,
 ) {
@@ -1471,24 +1473,21 @@ pub fn matmul_forward_kernel4(
         layout: [i0, t2, t3, i1, t0, t1]
     );
 
-    // reshape::<4>() to handle 4 f32 at a time
-    let mut out_thread = chunk_mut(out.reshape::<4>(), map);
+    // flatten::<4>() to handle 4 f32 at a time
+    let mut out_thread = chunk_mut(out, map);
 
     // buffers to cache chunks of the input matrices
-    let mut lhs_s = GpuShared::<[[f32; 4]; 8 * 128]>::zero();
-    let mut rhs_s = GpuShared::<[[f32; 4]; 8 * 128]>::zero();
+    let mut lhs_s = GpuShared::<[Float4; 8 * 128]>::zero();
+    let mut rhs_s = GpuShared::<[Float4; 8 * 128]>::zero();
 
     // adjust our immutable for the current block
     let inp_offset = 128 * bid_x * C;
     let weight_offset = 128 * bid_y * C;
-    let inp: &[[f32; 4]] = inp.reshape();
-    let weight: &[[f32; 4]] = weight.reshape();
-    let bias: &[[f32; 4]] = bias.reshape();
 
     let inp = &inp[(inp_offset / 4) as usize..];
     let weight = &weight[(weight_offset / 4) as usize..];
 
-    let mut vals = [[[0.0f32; 4]; 2]; 8];
+    let mut vals = [[Float4::default(); 2]; 8];
     if !bias.is_empty() {
         for i in 0..8 {
             for j in 0..2 {
@@ -1521,16 +1520,16 @@ pub fn matmul_forward_kernel4(
             let y = (2 * tid_y + xby8) + k * 32;
             // st_vec(&lhs_s[y][xo], ld_vec(inp + y * C + so + xo));
             let inp_index = y * C + so + xo;
-            let lhs_vec: [f32; 4] = inp[(inp_index / 4) as usize];
+            let lhs_vec: Float4 = inp[(inp_index / 4) as usize];
             lhs_s_chunk[(0, k as _)] = lhs_vec;
             // st_vec(&rhs_s[y][xo], ld_vec(weight + y * C + so + xo));
-            let rhs_vec: [f32; 4] = weight[(inp_index / 4) as usize];
+            let rhs_vec: Float4 = weight[(inp_index / 4) as usize];
             rhs_s_chunk[(0, k as _)] = rhs_vec;
         }
         gpu::sync::sync_threads();
         for i in 0..8 {
             let si = si_start + i * 4;
-            let mut rhs = [[0.0f32; 4]; 8];
+            let mut rhs = [Float4::default(); 8];
             for u in 0..8 {
                 let rhs_idx = (u + 8 * tid_y) * 8 + (si % 32) / 4;
                 rhs[u as usize] = rhs_s[rhs_idx as usize];

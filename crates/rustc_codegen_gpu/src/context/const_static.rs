@@ -124,6 +124,20 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             .into();
             Some(value)
         };
+        self.static_data_memref(value, name)
+    }
+
+    fn static_data_memref(
+        &self,
+        value: Option<mlir_ir::Attribute<'ml>>,
+        name: &str,
+    ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Value {
+        let dl = self.data_layout();
+        let pointer_size = dl.pointer_size();
+        let align = dl.pointer_align.pref;
+        let mem_len = pointer_size.bytes() as usize;
+        let ty = self.type_array(self.type_i8(), mem_len as _);
+        let ref_ty = mlir_type::MemRefType::new(self.type_i8(), &[mem_len as _], None, None);
         let op = mlir_memref::global(
             self.mlir_ctx,
             name,
@@ -131,7 +145,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             ref_ty,
             value,
             true,
-            None,
+            Some(self.align_to_attr(align)),
             self.unknown_loc(),
         );
         let op = self.mlir_body(true).append_operation(op);

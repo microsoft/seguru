@@ -16,4 +16,4 @@ pub use crate::print::{PushPrintfArg, printf};
 pub use crate::reshape_map;
 pub use crate::shared::{DynamicSharedAlloc, DynamicSharedAllocBuilder, GpuShared};
 pub use crate::sync::sync_threads;
-pub use crate::vector::{Float4, VecFlatten, VecTypeTrait};
+pub use crate::vector::{Float2, Float4, Float8, VecFlatten, VecTypeTrait};

@@ -6,7 +6,7 @@
 #![no_std]
 
 extern crate gpu;
-use gpu::Float4;
+use gpu::{Float2, Float4};
 
 #[gpu::kernel]
 #[no_mangle]
@@ -15,10 +15,20 @@ pub fn test_float4(out: &mut [Float4], in2: &Float4) {
     let mut out = gpu::chunk_mut(out, gpu::MapLinear::new(1));
     out[0] = in1 + *in2;
 }
+
+#[gpu::kernel]
+#[no_mangle]
+pub fn test_float2(out: &mut [[Float2; 2]], in2: &[Float2; 2]) {
+    let in2 = *in2;
+    let mut out = gpu::chunk_mut(out, gpu::MapLinear::new(2));
+    out[0] = in2;
+}
 // CHECK: @gpu_bin_cst = internal constant
 // PTX_CHECK: .visible .entry float4
 // PTX_CHECK: 0f3F9DF3B6
 // PTX_CHECK: ld.global.v4.f32
 // PTX_CHECK: st.global.v4.f32
+// PTX_CHECK: ld.global.v2
+// PTX_CHECK: st.global.v2
 // PTX_CHECK: add.rn.f32
 

@@ -1,6 +1,7 @@
 use melior::dialect::ods::{arith as melior_arith, math as melior_math};
-use melior::ir::Value;
 use melior::ir::attribute::DenseI32ArrayAttribute;
+use melior::ir::r#type::MemRefType;
+use melior::ir::{ShapedTypeLike, TypeLike, Value, ValueLike};
 use rustc_codegen_ssa_gpu::traits::{BuilderMethods, IntrinsicCallBuilderMethods};
 use rustc_middle::ty::layout::HasTypingEnv;
 
@@ -93,14 +94,34 @@ pub(crate) fn device_intrinsic<'tcx, 'ml, 'a>(
 }
 
 impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
+    fn intrinsic_volatile_load(
+        &mut self,
+        ty: rustc_middle::ty::Ty<'tcx>,
+        src: Value<'ml, 'a>,
+        dst: Value<'ml, 'a>,
+    ) {
+        let ty = self.type_to_mlir_type(&ty, false);
+        assert!(ty.is_mem_ref());
+        let mem_ref_ty = MemRefType::try_from(ty).unwrap();
+        let len = mem_ref_ty.dim_size(0).unwrap();
+        let dst = self.use_value_as_ty(dst, ty);
+        let src = self.use_value_as_ty(src, ty);
+        self.memcpy(
+            dst,
+            rustc_abi::Align::ONE,
+            src,
+            rustc_abi::Align::ONE,
+            self.const_value(len, self.type_index()),
+            rustc_codegen_ssa_gpu::MemFlags::VOLATILE,
+        );
+    }
+
     fn memref_raw_eq(
         &mut self,
         a: Value<'ml, 'a>,
         b: Value<'ml, 'a>,
         loc: melior::ir::Location<'ml>,
     ) -> melior::ir::Value<'ml, 'a> {
-        use melior::ir::r#type::MemRefType;
-        use melior::ir::{ShapedTypeLike, TypeLike, ValueLike};
         let type_a = a.r#type();
         let type_b = b.r#type();
         assert!(type_a.is_mem_ref());
@@ -162,10 +183,7 @@ impl<'tcx, 'ml, 'a> IntrinsicCallBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 
                 return Ok(());
             }
             sym::volatile_load => {
-                let ty = arg_tys[0];
-                eprintln!("volatile_load of type {}", ty);
-                let load = self.volatile_load(self.type_to_mlir_type(&ty, false), args_imm[0]);
-                self.store(load, llresult, rustc_abi::Align::ONE);
+                self.intrinsic_volatile_load(arg_tys[0], args_imm[0], llresult);
                 return Ok(());
             }
             _ => {}

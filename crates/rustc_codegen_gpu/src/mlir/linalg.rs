@@ -1,6 +1,8 @@
 use melior::ir::attribute::{ArrayAttribute, DenseI32ArrayAttribute, StringAttribute};
 use melior::ir::operation::{OperationBuilder, OperationMutLike};
-use melior::ir::{self as mlir_ir, Attribute, Block, BlockLike, Location, RegionLike, ValueLike};
+use melior::ir::{
+    self as mlir_ir, Attribute, Block, BlockLike, Location, RegionLike, ShapedTypeLike, ValueLike,
+};
 use mlir_sys::{MlirAffineExpr, mlirAffineDimExprGet, mlirAffineMapGet, mlirAffineSymbolExprGet};
 
 fn affine_dim(ctx: &melior::Context, pos: isize) -> MlirAffineExpr {
@@ -51,6 +53,7 @@ impl IterType {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn linalg_add_op<'ml, 'a>(
     ctx: &'ml melior::Context,
     left: mlir_ir::Value<'ml, 'a>,
@@ -75,7 +78,7 @@ pub(crate) fn linalg_add_op<'ml, 'a>(
             .build()
             .expect("valid operation"),
     );
-    linalg_generic_op(ctx, &[left, right], &[output], elem_ty, block, loc)
+    linalg_generic_op(ctx, "linalg.add", &[left, right], &[output], elem_ty, block, loc)
 }
 
 pub(crate) fn linalg_copy_op<'ml, 'a>(
@@ -87,17 +90,22 @@ pub(crate) fn linalg_copy_op<'ml, 'a>(
 ) -> mlir_ir::Operation<'ml> {
     let block = melior::ir::Block::new(&[(elem_ty, loc), (elem_ty, loc)]);
     let src_arg = block.argument(0).unwrap();
+    let src_ty = src.r#type();
+    let src_memref_ty = mlir_ir::r#type::MemRefType::try_from(src_ty).unwrap();
+    assert!(src_memref_ty.rank() == 1);
+    assert!(src_memref_ty.element() == elem_ty);
     block.append_operation(
         OperationBuilder::new("linalg.yield", loc)
             .add_operands(&[src_arg.into()])
             .build()
             .expect("valid operation"),
     );
-    linalg_generic_op(ctx, &[src], &[output], elem_ty, block, loc)
+    linalg_generic_op(ctx, "linalg.copy", &[src], &[output], elem_ty, block, loc)
 }
 
 pub(crate) fn linalg_generic_op<'ml, 'a>(
     ctx: &'ml melior::Context,
+    name: &str,
     ins: &[mlir_ir::Value<'ml, 'a>],
     outs: &[mlir_ir::Value<'ml, 'a>],
     elem_ty: mlir_ir::Type<'ml>,
@@ -123,12 +131,10 @@ pub(crate) fn linalg_generic_op<'ml, 'a>(
         .add_regions([region])
         .build()
         .expect("valid operation");
-    op.set_attribute("library_call", StringAttribute::new(ctx, "linalg.add").into());
+    op.set_attribute("library_call", StringAttribute::new(ctx, name).into());
     let identity_map = affine_identity_map(ctx, 1);
-    op.set_attribute(
-        "indexing_maps",
-        ArrayAttribute::new(ctx, &[identity_map, identity_map, identity_map]).into(),
-    );
+    let identity_maps = vec![identity_map; ins.len() + outs.len()];
+    op.set_attribute("indexing_maps", ArrayAttribute::new(ctx, &identity_maps).into());
     let iter_attr = IterType::Parallel.as_attr(ctx);
     op.set_attribute("iterator_types", ArrayAttribute::new(ctx, &[iter_attr]).into());
     op

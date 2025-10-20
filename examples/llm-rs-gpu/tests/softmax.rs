@@ -3,7 +3,8 @@
 use gpu_host::cuda_ctx;
 use llm_rs_gpu::softmax_forward_kernel5;
 mod common;
-use common::{f32_eq, random_f32_vec};
+use common::{f32_eq, random_f32_vec, random_float4_vec};
+use gpu::prelude::*;
 
 fn softmax_cpu(inp: &[f32], n_len: u32, t_len: u32, inv_temperature: f32) -> Vec<f32> {
     let n_len = n_len as usize;
@@ -104,17 +105,21 @@ fn test_softmax_forward_kernel5(N: u32, T: u32) {
     let LEN: usize = (N * T * T) as usize;
     let inv_temperature = random_f32_vec(1)[0];
     // input: (N, T, T) flattened
-    let inp = random_f32_vec(LEN);
+    let inp = random_float4_vec(LEN / 4);
+    let inp_ref = inp.as_slice();
+    let inp_f32 = inp_ref.flatten();
 
     let mut out = vec![0f32; LEN];
 
     // Reference CPU softmax
-    let expected = softmax_cpu(&inp, N, T, inv_temperature);
+    let expected = softmax_cpu(inp_f32, N, T, inv_temperature);
     const BLOCK_SIZE: u32 = 256;
     let grid_size = (N * T * 32).div_ceil(BLOCK_SIZE);
 
     cuda_ctx(0, |ctx, m| {
-        let d_inp = ctx.new_tensor_view::<[f32]>(&inp).expect("alloc failed");
+        let d_inp = ctx
+            .new_tensor_view::<[gpu::Float4]>(&inp)
+            .expect("alloc failed");
         let mut d_out = ctx.new_tensor_view::<[f32]>(&out).expect("alloc failed");
         let config = gpu_host::gpu_config!(grid_size, 1, 1, @const BLOCK_SIZE, 1, 1, 0);
         softmax_forward_kernel5::launch(config, ctx, m, &mut d_out, inv_temperature, &d_inp, N, T)

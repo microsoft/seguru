@@ -14,14 +14,12 @@ extern crate alloc;
 #[cfg(feature = "codegen_tests")]
 extern crate gpu_macros;
 
-mod array;
 pub mod cg;
 pub mod chunk;
 mod chunk_impl;
 pub mod chunk_scope;
 mod device_intrinsic;
 mod dim;
-pub mod floatn;
 pub(crate) mod global;
 mod host_dev;
 pub mod iter;
@@ -30,6 +28,7 @@ pub mod prelude;
 mod print;
 mod shared;
 pub mod sync;
+pub mod vector;
 
 pub use prelude::*;
 

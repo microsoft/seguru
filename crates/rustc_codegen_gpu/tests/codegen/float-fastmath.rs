@@ -13,14 +13,12 @@ use gpu::Float4;
 #[no_mangle]
 pub fn compute_on_float4(a: Float4, b: Float4) -> Float4 {
     let f: f32 = 1.234;
-    Float4 {
-        data: [
-            a.data[0] + b.data[0] + f,
-            a.data[1] + b.data[1],
-            a.data[2] + b.data[2],
-            a.data[3] / b.data[3],
-        ],
-    }
+    Float4::new([
+        a.data[0] + b.data[0] + f,
+        a.data[1] + b.data[1],
+        a.data[2] + b.data[2],
+        a.data[3] / b.data[3],
+    ])
 }
 
 #[gpu::kernel]

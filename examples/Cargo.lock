@@ -324,6 +324,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "reduce"
+version = "0.1.0"
+dependencies = [
+ "gpu",
+ "gpu_host",
+ "rand",
+]
+
+[[package]]
 name = "regex"
 version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

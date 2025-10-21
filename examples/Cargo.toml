@@ -4,6 +4,7 @@ members = [
     "llm-rs-gpu",
     "matrix/matmul-gpu",
     "matrix/matmul-host",
+    "reduce",
     "syntax/gpu",
     "syntax/host",
 ]

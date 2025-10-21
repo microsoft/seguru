@@ -3,11 +3,11 @@ use melior::helpers::ArithBlockExt;
 use melior::ir::attribute::StringAttribute;
 use melior::ir::operation::OperationMutLike;
 use melior::ir::{self as mlir_ir, BlockLike, Location, r#type as mlir_type};
-use rustc_abi::{HasDataLayout, Size};
+use rustc_abi::Size;
 use rustc_codegen_ssa_gpu::traits::{
     BackendTypes, BaseTypeCodegenMethods, ConstCodegenMethods, StaticCodegenMethods,
 };
-use rustc_const_eval::interpret::{GlobalAlloc, PointerArithmetic, alloc_range};
+use rustc_const_eval::interpret::{GlobalAlloc, alloc_range};
 use tracing::trace;
 
 use super::GPUCodegenContext;
@@ -94,40 +94,34 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         alloc: rustc_const_eval::interpret::ConstAllocation<'_>,
         name: &str,
     ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Value {
-        let dl = self.data_layout();
-        let pointer_size = dl.pointer_size();
-        let mem_len = pointer_size.bytes() as usize;
-        let ty = self.type_array(self.type_i8(), mem_len as _);
-        let value = if alloc.inner().size().bytes() == 0 {
+        let size = alloc.inner().size();
+        let align = alloc.inner().align;
+        let ty = self.type_tensor(self.type_i8(), size.bytes() as _);
+        let value = if size.bytes() == 0 {
             None
         } else {
             let bytes =
                 alloc.inner().get_bytes_unchecked(alloc_range(Size::ZERO, alloc.inner().size()));
-            let value = mlir_ir::attribute::DenseElementsAttribute::new(
-                ty,
-                &bytes
-                    .iter()
-                    .map(|v| {
-                        mlir_ir::attribute::IntegerAttribute::new(self.type_i8(), *v as i64).into()
-                    })
-                    .collect::<Vec<_>>(),
-            )
-            .unwrap()
-            .into();
+            let bvec = bytes
+                .iter()
+                .map(|v| {
+                    mlir_ir::attribute::IntegerAttribute::new(self.type_i8(), *v as i64).into()
+                })
+                .collect::<Vec<_>>();
+            let value = mlir_ir::attribute::DenseElementsAttribute::new(ty, &bvec).unwrap().into();
             Some(value)
         };
-        self.static_data_memref(value, name)
+        self.static_data_memref(value, size, align, name)
     }
 
     fn static_data_memref(
         &self,
         value: Option<mlir_ir::Attribute<'ml>>,
+        size: rustc_abi::Size,
+        align: rustc_abi::Align,
         name: &str,
     ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Value {
-        let dl = self.data_layout();
-        let pointer_size = dl.pointer_size();
-        let align = dl.pointer_align.pref;
-        let mem_len = pointer_size.bytes() as usize;
+        let mem_len = size.bytes();
         let ty = self.type_array(self.type_i8(), mem_len as _);
         let ref_ty = mlir_type::MemRefType::new(self.type_i8(), &[mem_len as _], None, None);
         let op = mlir_memref::global(
@@ -173,11 +167,18 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 self.const_data_memref_from_alloc_id(alloc_id)
             }
             GlobalAlloc::Static(def_id) => {
-                //let instance = Instance::mono(self.tcx, def_id);
-                //use crate::rustc_middle::ty::layout::HasTypingEnv;
-                //let ty = instance.ty(self.tcx, self.typing_env());
+                let instance = rustc_middle::ty::Instance::mono(self.tcx, def_id);
+                use crate::rustc_middle::ty::layout::HasTypingEnv;
+                let ty = instance.ty(self.tcx, self.typing_env());
+                use crate::rustc_middle::ty::layout::LayoutOf;
+                let layout = self.layout_of(ty);
                 //let llty = self.mlir_type(self.layout_of(ty), false);
-                self.static_data_memref(None, &format!("static_{}", self.tcx.def_path_str(def_id)))
+                self.static_data_memref(
+                    None,
+                    layout.size,
+                    layout.align.pref,
+                    &format!("static_{}", self.tcx.def_path_str(def_id)),
+                )
             }
             _ => todo!("{:?}", alloc),
         };

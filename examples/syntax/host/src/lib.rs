@@ -14,11 +14,12 @@ pub fn run_host_arith<'ctx>(
 ) -> Result<(), gpu_host::CudaError> {
     // Allocate the two host-side arrays
     // TODO: Make h_a non-mutable
-    let h_a = (1u32..(1 + len as u32)).collect::<Vec<u32>>();
-    let mut h_b = (5..(5 + len as u32)).collect::<Vec<u32>>();
-    assert!(h_b.len() == len);
-    let h_c = (10..(10 + len as u32)).collect::<Vec<u32>>();
-    let mut h_f = vec![0.0f32; len];
+    let len = u32::try_from(len).unwrap();
+    let h_a = (1u32..(1 + len)).collect::<Vec<u32>>();
+    let mut h_b = (5..(5 + len)).collect::<Vec<u32>>();
+    assert!(h_b.len() == len as usize);
+    let h_c = (10..(10 + len)).collect::<Vec<u32>>();
+    let mut h_f = vec![0.0f32; len as usize];
     let h_g = (1..(1 + len)).map(|x| x as f32 * 1.1).collect::<Vec<f32>>();
     let mut h_h = 0.0f32;
 
@@ -41,12 +42,12 @@ pub fn run_host_arith<'ctx>(
     d_f.copy_to_host(&mut h_f)?;
     d_h.copy_to_host(&mut h_h)?;
 
-    for (i, bi) in h_b.iter().enumerate().take(BDIM_Y as _) {
+    for (i, bi) in (0u32..).zip(h_b.into_iter().take(BDIM_Y as _)) {
         println!("b[{}] = {}", i, bi);
-        assert!(*bi == 42 + i as u32 * 2);
+        assert!(bi == 42 + i * 2);
     }
 
-    for (i, fi) in h_f.iter().enumerate().take(BDIM_Y as _) {
+    for (i, fi) in (0u32..).zip(h_f.iter()).take(BDIM_Y as _) {
         println!("f[{}] = {}", i, fi);
         match i {
             0 => assert!(*fi == 13.391208),

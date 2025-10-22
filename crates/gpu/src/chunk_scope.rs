@@ -344,6 +344,10 @@ pub struct Grid2WarpScope<const SIZE: usize>;
 
 impl<const SIZE: usize> PrivateTraitGuard for Grid2WarpScope<SIZE> {}
 
+impl<const SIZE: usize> Grid2WarpScope<SIZE> {
+    pub const CHECKED_SIZE: u32 = ThreadWarpTile::<SIZE>::CHECKED_SIZE;
+}
+
 impl<const SIZE: usize> ChunkScope for Grid2WarpScope<SIZE> {
     type FromScope = Grid;
     type ToScope = ThreadWarpTile<SIZE>;
@@ -367,7 +371,7 @@ impl<const SIZE: usize> ChunkScope for Grid2WarpScope<SIZE> {
     #[inline]
     #[gpu_codegen::device]
     fn global_dim<D: DimType>() -> u32 {
-        if D::DIM_ID == 0 { (block_size() * num_blocks()) / SIZE as u32 } else { 1 }
+        if D::DIM_ID == 0 { (block_size() * num_blocks()) / Self::CHECKED_SIZE } else { 1 }
     }
 
     #[inline]
@@ -416,6 +420,10 @@ pub struct Warp2ThreadScope<const SIZE: usize>;
 
 impl<const SIZE: usize> PrivateTraitGuard for Warp2ThreadScope<SIZE> {}
 
+impl<const SIZE: usize> Warp2ThreadScope<SIZE> {
+    pub const CHECKED_SIZE: u32 = ThreadWarpTile::<SIZE>::CHECKED_SIZE;
+}
+
 impl<const SIZE: usize> ChunkScope for Warp2ThreadScope<SIZE> {
     type FromScope = ThreadWarpTile<SIZE>;
     type ToScope = Thread;
@@ -430,7 +438,7 @@ impl<const SIZE: usize> ChunkScope for Warp2ThreadScope<SIZE> {
     #[inline]
     #[gpu_codegen::device]
     fn global_dim<D: DimType>() -> u32 {
-        if D::DIM_ID == 0 { SIZE as _ } else { 1 }
+        if D::DIM_ID == 0 { Self::CHECKED_SIZE } else { 1 }
     }
 
     #[inline]

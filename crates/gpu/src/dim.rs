@@ -42,6 +42,7 @@ macro_rules! def_dim_fn {
         $(#[$meta])*
         #[gpu_codegen::device]
         #[inline(always)]
+        #[expect(clippy::cast_possible_truncation)]
         pub const fn $pub_name<D: DimType>() -> u32 {
             crate::add_mlir_string_attr(D::MLIR_DIM);
             $priv_name() as u32

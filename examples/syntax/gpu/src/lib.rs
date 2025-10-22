@@ -1,5 +1,6 @@
 #![no_std]
 #![allow(clippy::too_many_arguments)]
+#![deny(clippy::cast_possible_truncation)]
 #![feature(stmt_expr_attributes)]
 
 use gpu::cg::CGOperations;
@@ -36,7 +37,7 @@ pub fn kernel_arith<const N: u32>(
     }
     *b_local = out;
 
-    let f_chunk_param: gpu::MapLinearWithDim = gpu::MapLinearWithDim::new(f_width as u32);
+    let f_chunk_param: gpu::MapLinearWithDim = gpu::MapLinearWithDim::new(f_width);
     let mut f = gpu::chunk_mut(f, f_chunk_param);
     let g_local = g[thread_id as usize].ldcs();
     f[0] = g_local.sin();
@@ -66,7 +67,7 @@ pub fn kernel_arith<const N: u32>(
 
 #[gpu::kernel]
 pub fn oob1(a: f32, b: &mut [f32], width: usize) {
-    let mut b = gpu::chunk_mut(b, gpu::MapLinear::new(width as u32));
+    let mut b = gpu::chunk_mut(b, gpu::MapLinear::new(width));
     if thread_id::<DimX>() == 0 {
         b[1] = a;
     }
@@ -89,7 +90,7 @@ pub fn oob_no_fails(a: f32, b: &mut [f32], _width: usize) {
 
 #[gpu::kernel]
 pub fn oob2(a: f32, b: &mut [f32], width: usize) {
-    let mut b = gpu::chunk_mut(b, gpu::Map2D::new(width as u32));
+    let mut b = gpu::chunk_mut(b, gpu::Map2D::new(width));
     if thread_id::<DimX>() == 0 {
         b[(4, 1)] = a;
     }
@@ -97,7 +98,7 @@ pub fn oob2(a: f32, b: &mut [f32], width: usize) {
 
 #[gpu::kernel]
 pub fn oob3(a: f32, b: &mut [f32], width: usize) {
-    let mut b = gpu::chunk_mut(b, gpu::MapLinear::new(width as u32));
+    let mut b = gpu::chunk_mut(b, gpu::MapLinear::new(width));
     if thread_id::<DimX>() == 1 {
         b[0] = a;
     }

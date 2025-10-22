@@ -85,7 +85,8 @@ pub trait CGOperations {
 /// let size = warp.size();
 /// ```
 impl<const SIZE: usize, const STRIDE: usize> ThreadWarpTile<SIZE, STRIDE> {
-    const CHECKED_SIZE: u32 = {
+    #[expect(clippy::cast_possible_truncation)]
+    pub const CHECKED_SIZE: u32 = {
         assert!(
             SIZE == 1 || SIZE == 2 || SIZE == 4 || SIZE == 8 || SIZE == 16 || SIZE == 32,
             "SIZE must be <= 32 and be a power of 2"
@@ -97,7 +98,7 @@ impl<const SIZE: usize, const STRIDE: usize> ThreadWarpTile<SIZE, STRIDE> {
 
 /// Implement simple flexible warp with STRIDE = 1.
 impl<const SIZE: usize> ThreadWarpTile<SIZE, 1> {
-    pub const BASE_THREAD_MASK: u32 = { ((1u64 << Self::CHECKED_SIZE) - 1) as u32 };
+    pub const BASE_THREAD_MASK: u32 = { (1u32 << Self::CHECKED_SIZE) - 1 };
     pub const LANE_MASK: u32 = Self::CHECKED_SIZE - 1;
 
     // warp size == 32 => 0

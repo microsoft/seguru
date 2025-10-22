@@ -1,0 +1,2 @@
+[build]
+rustflags = ["--emit=metadata"] # To enable inline MIR from external crates

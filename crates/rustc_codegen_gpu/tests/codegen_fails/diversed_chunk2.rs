@@ -8,14 +8,14 @@
 #[gpu::device]
 #[no_mangle]
 #[inline(never)]
-fn dev_call(a: u32, b: u32) -> u32 {
-    (a + b) + 1
+fn dev_call(a: u32, b: u32) -> usize {
+    ((a + b) + 1) as usize
 }
 
 #[gpu::device]
 #[inline(always)]
-fn dev_call_inline(a: u32, b: u32) -> u32 {
-    (a + b) + 1
+fn dev_call_inline(a: u32, b: u32) -> usize {
+    ((a + b) + 1) as usize
 }
 
 

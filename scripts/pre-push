@@ -38,11 +38,11 @@ done
 
 cd crates
 cargo fmt --all -- --check  || exit 1
-cargo clippy --workspace -- -D warnings || exit 1
+cargo clippy --workspace -- -D warnings -D clippy::cast_possible_truncation || exit 1
 cargo test || exit 1
 
 cd ../examples
 cargo fmt --all -- --check
-__CODEGEN_TARGET__="GPU-CLIPPY" RUSTC=rustc cargo clippy --workspace --exclude llm-rs-gpu -- -D warnings || exit 1
+__CODEGEN_TARGET__="GPU-CLIPPY" RUSTC=rustc cargo clippy --workspace --exclude llm-rs-gpu -- -D warnings -D clippy::cast_possible_truncation || exit 1
 cargo build  || exit 1
 cargo test || exit 1

@@ -105,12 +105,12 @@ jobs:
       - name: Clippy
         working-directory: crates
         if: ${{ steps.check_changes.outputs.crates_changed == 'true' }}
-        run: cargo clippy -- -D warnings
+        run: cargo clippy -- -D warnings -D clippy::cast_possible_truncation
 
       - name: Clippy examples
         working-directory: examples
         if: ${{ steps.check_changes.outputs.crates_or_examples_changed == 'true' }}
-        run: __CODEGEN_TARGET__="GPU-CLIPPY" RUSTC=rustc cargo clippy -- -D warnings
+        run: __CODEGEN_TARGET__="GPU-CLIPPY" RUSTC=rustc cargo clippy -- -D warnings -D clippy::cast_possible_truncation
 
       - name: Run tests
         working-directory: crates/rustc_codegen_gpu

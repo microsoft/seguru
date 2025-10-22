@@ -1,6 +1,7 @@
 #![no_std]
 #![allow(non_snake_case)]
 #![allow(clippy::too_many_arguments)]
+#![deny(clippy::cast_possible_truncation)]
 
 use core::f32;
 
@@ -485,7 +486,7 @@ pub fn softmax_forward_kernel5(
         // recalculation is faster than doing the round-trip through memory.
         let ev = (inv_temperature * (x[i as usize].ldcs() - global_maxval)).exp();
         //__stcs(out + idx * T + i, ev * norm);
-        out[idx as u32].stcs(ev * norm);
+        out[idx].stcs(ev * norm);
     }
 }
 /*
@@ -573,7 +574,7 @@ pub fn gelu_backward_kernel(dinp: &mut [f32], inp: &[f32], N: u32) {
 
     let mut dinp_local = chunk_mut(dinp, gpu::MapLinear::new(1));
     let idx = dinp_local.local2global(0);
-    if idx < N {
+    if idx < N as usize {
         let x = inp[idx as usize].ldcs();
         let cube = 0.044715 * x * x * x;
         let tanh_arg = gelu_scaling_factor * (x + cube);
@@ -1024,13 +1025,10 @@ pub fn softmax_autoregressive_backward_kernel(
         // block-level reduction
         local_sum = warp.redux(ReduxAdd, block_acc[lane_id as usize]);
 
-        for (i, t3) in (block.thread_rank()..=t)
-            .step_by(BLOCK_SIZE as usize)
-            .enumerate()
-        {
+        for (i, t3) in (0_u32..).zip((block.thread_rank()..=t).step_by(BLOCK_SIZE as usize)) {
             let acc = att_bth[t3 as usize].ldcs() * (datt_bth[t3 as usize].ldcs() - local_sum);
             let val = scale * acc;
-            dpreatt_bth[(i as u32, to)].stcs(val);
+            dpreatt_bth[(i, to)].stcs(val);
         }
     }
 }
@@ -1184,7 +1182,7 @@ fn prepare_softmax_blockwide_noFloat4(
     let tid = thread_id::<gpu::DimX>();
     let block_size = block_dim::<DimX>();
     for i in (0..=V + tid - block_size).rev().step_by(block_size as _) {
-        let v = inp[i];
+        let v = inp[i as _];
         let old_maxval = thread_maxval;
         thread_maxval = thread_maxval.max(v);
         thread_sumval *= (old_maxval - thread_maxval).exp();
@@ -1291,7 +1289,7 @@ pub fn fused_classifier_kernel3(
     let block2thread = build_chunk_scope(block, Thread);
 
     // chunk logits to (B*T, P)
-    let logits_block = logits.chunk_to_scope(grid2block, MapLinear::new(P)); // blockid * P + tid
+    let logits_block = logits.chunk_to_scope(grid2block, MapLinear::new(P as _)); // blockid * P + tid
 
     let mut losses_chunk = losses
         .chunk_to_scope(grid2block, MapLinear::new(1))
@@ -1308,15 +1306,15 @@ pub fn fused_classifier_kernel3(
     // calculate the probability needed for the loss and update (single-threaded)
     if gpu::thread_id::<gpu::DimX>() == 0 {
         /*
-        let prob = ((logits_block[ix as u32] - sp.offset).exp()) * sp.scale;
+        let prob = ((logits_block[ix as _] - sp.offset).exp()) * sp.scale;
         losses_chunk[0] = -prob.ln();
         */
         // The above is the llm.c implementation, but it is not stable enough in LLVM.
         // When enabling -ffast-math, the assembly uses exp2 and log2 which are less accurate.
-        // If logits_block[ix as u32] - sp.offset ~= -80 - -100, exp2f will underflow to 0,
+        // If logits_block[ix as _] - sp.offset ~= -80 - -100, exp2f will underflow to 0,
         // and log2f(0) = -inf, resulting in -inf loss.
         // Below is equivalent, but more numerically stable
-        losses_chunk[0] = -(logits_block[ix as u32] - sp.offset) - sp.scale.ln()
+        losses_chunk[0] = -(logits_block[ix as _] - sp.offset) - sp.scale.ln()
     }
     // very sensible default for dlosses is 1/(B*T), which is the uniform loss
     let dloss = if !dlosses.is_empty() {
@@ -1332,7 +1330,7 @@ pub fn fused_classifier_kernel3(
     let mut logits_chunk = logits_block.chunk_to_scope(block2thread, MapLinear::new(1));
     let prob_is_empty = probs.is_empty();
     let mut probs_chunk = probs
-        .chunk_to_scope(grid2block, MapLinear::new(V))
+        .chunk_to_scope(grid2block, MapLinear::new(V as _))
         .chunk_to_scope(block2thread, MapLinear::new(1));
 
     for (k, i) in (gpu::thread_id::<gpu::DimX>()..V)
@@ -1535,8 +1533,8 @@ pub fn matmul_forward_kernel4(
                 rhs[u as usize] = rhs_s[rhs_idx as usize];
             }
             unroll! {for ii in 0..8 {
-                let lhs_index = (ii as u32 + 8 * tid_x) * 8 + (si % 32) / 4;
-                let lhs = lhs_s[lhs_index as usize];
+                let lhs_index = (ii * 8) + ((8 * tid_x) * 8 + (si % 32) / 4) as usize;
+                let lhs = lhs_s[lhs_index];
                 for j in 0..2 {
                     for k in 0..4 {
                         // Use v4 load

@@ -1,5 +1,6 @@
 #![no_std]
 #![allow(clippy::too_many_arguments)]
+#![deny(clippy::cast_possible_truncation)]
 
 use gpu::*;
 
@@ -29,7 +30,7 @@ pub fn inner_product_kernel2(a: &[f32], b: &[f32], c: ThreadChunkMatrix2D<'_>, n
                     sum += aa[k] * b[b_idx];
                     b_idx += n;
                 }
-                c[(j as u32, i as u32)] = sum;
+                c[(j, i)] = sum;
             }
             col += dim_x as usize;
         }
@@ -40,7 +41,7 @@ pub fn inner_product_kernel2(a: &[f32], b: &[f32], c: ThreadChunkMatrix2D<'_>, n
 #[cfg(feature = "v1")]
 #[gpu::cuda_kernel]
 pub fn inner_product_kernel(a: &[f32], b: &[f32], c: &mut [f32], n: usize) {
-    let mut c = chunk_mut(c, Map2D::new(n as u32));
+    let mut c = chunk_mut(c, Map2D::new(n));
     let bid_x = block_id::<gpu::DimX>();
     let bid_y = block_id::<gpu::DimY>();
     let tid_x = thread_id::<gpu::DimX>();
@@ -62,7 +63,7 @@ pub fn inner_product_kernel(a: &[f32], b: &[f32], c: &mut [f32], n: usize) {
                     sum += aa[k] * b[b_idx];
                     b_idx += n;
                 }
-                c[(j as u32, i as u32)] = sum;
+                c[(j, i)] = sum;
             }
             col += dim_x as usize;
         }

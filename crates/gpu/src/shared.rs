@@ -5,6 +5,7 @@ use core::ops::{Deref, DerefMut};
 
 #[cfg(not(feature = "codegen_tests"))]
 use cuda_bindings::SafeGpuConfig;
+use num_traits::AsPrimitive;
 
 use crate::assert_ptr;
 use crate::chunk::{ScopeUniqueMap, ScopeUniqueMapProvidedMethods};
@@ -125,8 +126,9 @@ impl<'a, T: ?Sized + AsSharedSlice, CS: ChunkScope, Map: ScopeUniqueMap<CS>>
         map_params: Map2,
     ) -> SMemThreadChunk<'a, T, ChainedScope<CS, CS2>, ChainedMap<CS, CS2, Map, Map2>>
     where
-        Map: ScopeUniqueMap<CS, IndexType = Map2::GlobalIndexType>,
+        Map: ScopeUniqueMap<CS>,
         CS: ChunkScope<ToScope = CS2::FromScope>,
+        Map2::GlobalIndexType: AsPrimitive<Map::IndexType>,
     {
         if !map_params.precondition() {
             core::intrinsics::abort();
@@ -240,7 +242,7 @@ impl<'a, T: ?Sized + AsSharedSlice, CS: ChunkScope, Map: ScopeUniqueMap<CS>>
     #[gpu_codegen::memspace_shared(1000)]
     fn index(&self, idx: Map::IndexType) -> &Self::Output {
         let (idx_precondition, idx) = self.map_params.local_to_global_index(idx);
-        let idx = idx.into() as usize;
+        let idx = idx.as_();
         let valid = self.map_params.precondition() & idx_precondition;
         assert_ptr(valid, &self.data.value.as_slice()[idx])
     }
@@ -256,7 +258,7 @@ where
     #[gpu_codegen::memspace_shared(1000)]
     fn index_mut(&mut self, idx: Map::IndexType) -> &mut Self::Output {
         let (idx_precondition, idx) = self.map_params.local_to_global_index(idx);
-        let idx = idx.into() as usize;
+        let idx = idx.as_();
         let valid = self.map_params.precondition() & idx_precondition;
         assert_ptr(valid, &mut self.data.value.as_mut_slice()[idx])
     }

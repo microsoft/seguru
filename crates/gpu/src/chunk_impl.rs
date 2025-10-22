@@ -20,7 +20,7 @@ use crate::chunk_scope::{ChunkScope, TID_MAX_LEN};
 /// [0, 1, 2, 3, 0, 1, 2, 3]
 #[derive(Copy, Clone)]
 pub struct MapLinearWithDim<const N: usize = 3> {
-    width: u32,
+    width: usize,
 }
 
 pub type MapLinear = MapLinearWithDim<3>;
@@ -28,7 +28,7 @@ pub type MapLinear = MapLinearWithDim<3>;
 impl<const N: usize> MapLinearWithDim<N> {
     #[gpu_codegen::device]
     #[gpu_codegen::ret_sync_data(1000)]
-    pub fn new(width: u32) -> Self {
+    pub fn new(width: usize) -> Self {
         Self { width }
     }
 }
@@ -37,8 +37,8 @@ impl<const N: usize> MapLinearWithDim<N> {
 /// It is safe to use this mapping as long as the thread dimensions are properly
 /// configured.
 unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for MapLinearWithDim<1> {
-    type IndexType = u32;
-    type GlobalIndexType = u32;
+    type IndexType = usize;
+    type GlobalIndexType = usize;
 
     #[inline]
     #[gpu_codegen::device]
@@ -58,8 +58,8 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for MapLinearWithDim<1> {
 }
 
 unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for MapLinearWithDim<2> {
-    type IndexType = u32;
-    type GlobalIndexType = u32;
+    type IndexType = usize;
+    type GlobalIndexType = usize;
 
     #[inline]
     #[gpu_codegen::device]
@@ -79,18 +79,23 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for MapLinearWithDim<2> {
 }
 
 unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for MapLinearWithDim<3> {
-    type IndexType = u32;
-    type GlobalIndexType = u32;
+    type IndexType = usize;
+    type GlobalIndexType = usize;
 
     #[inline]
     #[gpu_codegen::device]
-    fn map(&self, idx: u32, thread_ids: [u32; TID_MAX_LEN]) -> (bool, Self::GlobalIndexType) {
+    fn map(
+        &self,
+        idx: Self::IndexType,
+        thread_ids: [u32; TID_MAX_LEN],
+    ) -> (bool, Self::GlobalIndexType) {
         let x_id = CS::global_id_x(thread_ids);
         let y_id = CS::global_id_y(thread_ids);
         let z_id = CS::global_id_z(thread_ids);
-        let global_thread_id = x_id + (z_id * CS::global_dim_y() + y_id) * CS::global_dim_x();
+        let global_thread_id =
+            (x_id + (z_id * CS::global_dim_y() + y_id) * CS::global_dim_x()) as usize;
         let stride = self.width;
-        let total_dim = CS::global_dim_x() * CS::global_dim_y() * CS::global_dim_z();
+        let total_dim = (CS::global_dim_x() * CS::global_dim_y() * CS::global_dim_z()) as usize;
         (true, idx % stride + (idx / stride) * stride * total_dim + global_thread_id * stride)
     }
 }
@@ -136,7 +141,7 @@ impl Map2D {
 
 unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for Map2D {
     type IndexType = (usize, usize);
-    type GlobalIndexType = u64;
+    type GlobalIndexType = usize;
 
     #[inline]
     #[gpu_codegen::device]
@@ -156,7 +161,7 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for Map2D {
         let inner_y = idx.1;
         let x = inner_x * CS::global_dim_x() as usize + CS::global_id_x(thread_ids) as usize;
         let y = inner_y * CS::global_dim_y() as usize + CS::global_id_y(thread_ids) as usize;
-        (x < shape_x, (shape_x * y + x) as u64)
+        (x < shape_x, shape_x * y + x)
     }
 }
 
@@ -336,6 +341,8 @@ macro_rules! reshape_map {
 
 #[cfg(test)]
 mod test {
+    use num_traits::AsPrimitive;
+
     use super::*;
     use crate::chunk_scope::test::MockWarp2ThreadScope;
 
@@ -359,7 +366,7 @@ mod test {
             for i in 0..n {
                 let tids = [0, t as u32, 0, 0, 0, 0];
                 let (valid, mapped_idx) = ScopeUniqueMap::<CS>::map(map, i as u32, tids);
-                let mapped_idx: usize = mapped_idx.into() as usize;
+                let mapped_idx: usize = mapped_idx.as_();
                 if valid && mapped_idx < n {
                     access_map[mapped_idx] = t as _;
                 }

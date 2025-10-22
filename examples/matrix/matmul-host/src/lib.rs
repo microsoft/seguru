@@ -1,3 +1,6 @@
+#![deny(clippy::cast_possible_truncation)]
+#![deny(clippy::cast_sign_loss)]
+
 use matmul_gpu::{inner_product_kernel, inner_product_kernel2};
 
 fn cpu_inner_product(a: &[f32], b: &[f32], c: &mut [f32], n: usize) {

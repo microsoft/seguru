@@ -1,5 +1,6 @@
 #![no_std]
 #![allow(clippy::too_many_arguments)]
+#![deny(clippy::cast_possible_truncation)]
 
 use gpu::*;
 

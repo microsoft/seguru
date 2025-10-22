@@ -1,6 +1,7 @@
 #![feature(rustc_private)]
 #![allow(unused_variables)]
 #![feature(box_patterns)]
+#![allow(clippy::cast_possible_truncation)]
 extern crate rustc_abi;
 extern crate rustc_ast;
 extern crate rustc_const_eval;

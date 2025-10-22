@@ -1,5 +1,7 @@
 use core::marker::PhantomData;
 
+use num_traits::AsPrimitive;
+
 pub use crate::cg::{Block, Grid, Thread, ThreadWarpTile};
 use crate::chunk::ScopeUniqueMap;
 use crate::dim::{
@@ -521,8 +523,9 @@ unsafe impl<CS1: ChunkScope, CS2: ChunkScope, Map1: ScopeUniqueMap<CS1>, Map2: S
     ScopeUniqueMap<ChainedScope<CS1, CS2>> for ChainedMap<CS1, CS2, Map1, Map2>
 where
     CS2: ChunkScope<FromScope = CS1::ToScope>,
-    Map1: ScopeUniqueMap<CS1, IndexType = Map2::GlobalIndexType>,
+    Map1: ScopeUniqueMap<CS1>,
     Map2: ScopeUniqueMap<CS2>,
+    Map2::GlobalIndexType: AsPrimitive<Map1::IndexType>,
 {
     type IndexType = Map2::IndexType;
     type GlobalIndexType = Map1::GlobalIndexType;
@@ -533,7 +536,7 @@ where
         thread_ids: [u32; TID_MAX_LEN],
     ) -> (bool, Self::GlobalIndexType) {
         let (valid2, idx2) = self.map2.map(idx, thread_ids);
-        let (valid1, idx1) = self.map1.map(idx2, thread_ids);
+        let (valid1, idx1) = self.map1.map(idx2.as_(), thread_ids);
         (valid1 & valid2, idx1)
     }
 }
@@ -587,7 +590,7 @@ pub mod test {
         ($cs:ty, $m:expr, $idx:expr, $thread_ids:expr, $expected:expr) => {
             let (valid, mapped_idx) = ScopeUniqueMap::<$cs>::map(&$m, $idx, $thread_ids);
             assert!(
-                valid == $expected.0 && (mapped_idx == $expected.1 as u32 || !valid),
+                valid == $expected.0 && (mapped_idx == $expected.1 || !valid),
                 "idx = {}, mapped_idx = {}, valid = {} expected = {:?}",
                 $idx,
                 mapped_idx,
@@ -657,8 +660,8 @@ pub mod test {
         const WIDTH: usize = 64;
         const WARP_SIZE: usize = 32;
         const N: usize = BLOCK_SIZE / WARP_SIZE * WIDTH;
-        let map_warps = crate::MapLinear::new(WIDTH as u32);
-        let map_warp_threads = crate::MapLinear::new(WIDTH as u32);
+        let map_warps = crate::MapLinear::new(WIDTH);
+        let map_warp_threads = crate::MapLinear::new(WIDTH);
         type S1 = MockBlock2WarpScope<WARP_SIZE, 1, BLOCK_SIZE>;
         type S2 = MockWarp2ThreadScope<WARP_SIZE, 1>;
 

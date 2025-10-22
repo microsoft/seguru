@@ -2,6 +2,8 @@ use alloc::vec::Vec;
 use core::marker::PhantomData;
 use core::ops::{Index, IndexMut};
 
+use num_traits::AsPrimitive;
+
 use crate::chunk_scope::{
     ChainedMap, ChainedScope, ChunkScope, Grid, Grid2ThreadScope, TID_MAX_LEN, Thread,
 };
@@ -23,8 +25,8 @@ use crate::{GpuGlobal, assert_ptr};
 ///         map(idx1, thread_ids1) !=  map(idx2, thread_ids2)
 /// ```
 pub unsafe trait ScopeUniqueMap<CS: ChunkScope>: Clone {
-    type IndexType;
-    type GlobalIndexType: Into<u64>;
+    type IndexType: Copy + 'static;
+    type GlobalIndexType: AsPrimitive<usize>;
     #[inline]
     #[gpu_codegen::device]
     fn precondition(&self) -> bool {
@@ -119,8 +121,9 @@ impl<'a, T, CS: ChunkScope, Map: ScopeUniqueMap<CS>> GlobalGroupChunk<'a, T, CS,
         map: Map2,
     ) -> GlobalGroupChunk<'a, T, ChainedScope<CS, CS2>, ChainedMap<CS, CS2, Map, Map2>>
     where
-        Map: ScopeUniqueMap<CS, IndexType = Map2::GlobalIndexType>,
+        Map: ScopeUniqueMap<CS>,
         CS: ChunkScope<ToScope = CS2::FromScope>,
+        Map2::GlobalIndexType: AsPrimitive<Map::IndexType>,
     {
         GlobalGroupChunk {
             data: self.data,
@@ -167,7 +170,7 @@ where
     #[gpu_codegen::device]
     fn index(&self, idx: Map::IndexType) -> &T {
         let (idx_precondition, idx) = self.map_params.local_to_global_index(idx);
-        let idx = idx.into() as usize;
+        let idx = idx.as_();
         assert_ptr(self.map_params.precondition() & idx_precondition, &self.data[idx])
     }
 }
@@ -184,7 +187,7 @@ where
     #[gpu_codegen::device]
     fn index_mut(&mut self, idx: Map::IndexType) -> &mut T {
         let (idx_precondition, idx) = self.map_params.local_to_global_index(idx);
-        let idx = idx.into() as usize;
+        let idx = idx.as_();
         assert_ptr(self.map_params.precondition() & idx_precondition, &mut self.data[idx])
     }
 }

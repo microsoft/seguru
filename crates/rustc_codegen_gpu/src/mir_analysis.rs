@@ -110,6 +110,7 @@ struct TaintTracking<'tcx, 'a> {
     // we can ignore the divergence.
     // See more about why sync_thread can cause deadlock: https://www.stuffedcow.net/files/gpuarch-ispass2010.pdf
     ignore_divergence_due_to_panic_return: bool,
+    possible_divergent_cf: bool,
     init: DenseBitSet<Local>,
     implicit: DenseBitSet<rustc_middle::mir::BasicBlock>,
     tcx: TyCtxt<'tcx>,
@@ -126,6 +127,7 @@ fn operand_local<'tcx>(op: &Operand<'tcx>) -> Option<Local> {
 impl<'tcx, 'a> TaintTracking<'tcx, 'a> {
     pub fn new(
         kernel_entry: bool,
+        possible_divergent_cf: bool,
         ignore_divergence_due_to_panic_return: bool,
         tainted: DenseBitSet<Local>,
         tcx: TyCtxt<'tcx>,
@@ -135,6 +137,7 @@ impl<'tcx, 'a> TaintTracking<'tcx, 'a> {
             kernel_entry,
             init: tainted,
             ignore_divergence_due_to_panic_return,
+            possible_divergent_cf: possible_divergent_cf && !kernel_entry,
             implicit: DenseBitSet::new_empty(body.basic_blocks.len()),
             tcx,
             body,
@@ -583,6 +586,12 @@ impl<'mir, 'tcx, 'a> ResultsVisitor<'mir, 'tcx, TaintTracking<'tcx, 'a>>
                         self.invalid_diversed.push(span);
                     }
                 }
+
+                // If the call happens in a device function that may have divergent control flow,
+                // we cannot guarantee the call is used in a non-divergent way.
+                if results.analysis.possible_divergent_cf {
+                    self.invalid_diversed.push(span);
+                }
             }
         }
     }
@@ -592,6 +601,7 @@ impl<'mir, 'tcx, 'a> ResultsVisitor<'mir, 'tcx, TaintTracking<'tcx, 'a>>
 /// Ensures that the args to those functions are used in a non-diversed way.
 fn analyze_diversed_data<'tcx>(
     ignore_divergence_due_to_panic_return: bool,
+    possible_divergent_cf: bool,
     tcx: rustc_middle::ty::TyCtxt<'tcx>,
     def_id: rustc_span::def_id::DefId,
     body: &Body<'tcx>,
@@ -599,6 +609,7 @@ fn analyze_diversed_data<'tcx>(
 ) -> GpuCodegenResult<()> {
     let analysis = TaintTracking::new(
         kernel_entry, // kernel entry
+        possible_divergent_cf,
         ignore_divergence_due_to_panic_return,
         DenseBitSet::new_empty(body.local_decls.len()),
         tcx,
@@ -729,7 +740,14 @@ pub(crate) fn analyze_gpu_code<'tcx>(
         debug!("analyze_diversed_data {:?}", def_id);
         let gpu_attr = crate::attr::GpuAttributes::build(&tcx, def_id);
         if !gpu_attr.disable_diverse_checker {
-            analyze_diversed_data(true, tcx, def_id, &mir, is_kernel_entry)?;
+            analyze_diversed_data(
+                true,
+                gpu_attr.sync_data.is_none(),
+                tcx,
+                def_id,
+                &mir,
+                is_kernel_entry,
+            )?;
         }
         crate::mir_thread_sync_check::analyze_shared_access(tcx, &mir, is_kernel_entry)?;
     }

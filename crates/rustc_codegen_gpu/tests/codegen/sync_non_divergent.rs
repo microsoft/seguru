@@ -7,6 +7,13 @@
 extern crate gpu;
 use gpu::prelude::*;
 
+#[gpu::device]
+#[gpu::attr(sync_data)]
+#[inline(never)]
+fn device_call() {
+    gpu::sync_threads();
+}
+
 #[no_mangle]
 #[gpu::kernel]
 pub fn reduce_per_grid(
@@ -15,6 +22,7 @@ pub fn reduce_per_grid(
     mut smem_alloc: gpu::DynamicSharedAlloc,
 ) {
     let tid = thread_id::<DimX>();
+    device_call();
     let block_dim = block_dim::<DimX>();
     let id = tid + block_dim * block_id::<DimX>();
     let grid_dim = grid_dim::<DimX>();

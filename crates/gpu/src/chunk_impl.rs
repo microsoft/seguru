@@ -122,21 +122,21 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for MapLinearWithDim<3> {
 /// - thread (0,0) and (0,1) have access to a shape of 3*2 = 6 elements.
 #[derive(Copy, Clone)]
 pub struct Map2D {
-    pub x_size: u32,
+    pub x_size: usize,
 }
 
 impl Map2D {
     #[inline]
     #[gpu_codegen::device]
     #[gpu_codegen::ret_sync_data(1000)]
-    pub fn new(x_size: u32) -> Self {
+    pub fn new(x_size: usize) -> Self {
         Self { x_size }
     }
 }
 
 unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for Map2D {
-    type IndexType = (u32, u32);
-    type GlobalIndexType = u32;
+    type IndexType = (usize, usize);
+    type GlobalIndexType = u64;
 
     #[inline]
     #[gpu_codegen::device]
@@ -154,9 +154,9 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for Map2D {
         let shape_x = self.x_size;
         let inner_x = idx.0;
         let inner_y = idx.1;
-        let x = inner_x * CS::global_dim_x() + CS::global_id_x(thread_ids);
-        let y = inner_y * CS::global_dim_y() + CS::global_id_y(thread_ids);
-        (x < shape_x, shape_x * y + x)
+        let x = inner_x * CS::global_dim_x() as usize + CS::global_id_x(thread_ids) as usize;
+        let y = inner_y * CS::global_dim_y() as usize + CS::global_id_y(thread_ids) as usize;
+        (x < shape_x, (shape_x * y + x) as u64)
     }
 }
 

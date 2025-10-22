@@ -21,7 +21,7 @@ pub fn test_valid_conditional_chunk(a: &mut [f32]) {
 #[no_mangle]
 pub fn test_valid_chunk_size(a: &mut [f32]) {
     // This is allowed since block_dim() returns a consistent value across all threads.
-    let mut local = gpu::chunk_mut(a, gpu::MapLinear::new(gpu::block_dim::<gpu::DimX>()));
+    let mut local = gpu::chunk_mut(a, gpu::MapLinear::new(gpu::block_dim::<gpu::DimX>() as usize));
     local[0] = 1.0;
 }
 

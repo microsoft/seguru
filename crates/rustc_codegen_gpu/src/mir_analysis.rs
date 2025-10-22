@@ -106,6 +106,10 @@ impl<'tcx> Visitor<'tcx> for TaintSourceDetector<'tcx> {
 /// Tracking the diversed var that might has different values across threads.
 struct TaintTracking<'tcx, 'a> {
     kernel_entry: bool,
+    // If the divergent target always cause panic or return without using sync or access shared memory,
+    // we can ignore the divergence.
+    // See more about why sync_thread can cause deadlock: https://www.stuffedcow.net/files/gpuarch-ispass2010.pdf
+    ignore_divergence_due_to_panic_return: bool,
     init: DenseBitSet<Local>,
     implicit: DenseBitSet<rustc_middle::mir::BasicBlock>,
     tcx: TyCtxt<'tcx>,
@@ -122,6 +126,7 @@ fn operand_local<'tcx>(op: &Operand<'tcx>) -> Option<Local> {
 impl<'tcx, 'a> TaintTracking<'tcx, 'a> {
     pub fn new(
         kernel_entry: bool,
+        ignore_divergence_due_to_panic_return: bool,
         tainted: DenseBitSet<Local>,
         tcx: TyCtxt<'tcx>,
         body: &'a Body<'tcx>,
@@ -129,6 +134,7 @@ impl<'tcx, 'a> TaintTracking<'tcx, 'a> {
         Self {
             kernel_entry,
             init: tainted,
+            ignore_divergence_due_to_panic_return,
             implicit: DenseBitSet::new_empty(body.basic_blocks.len()),
             tcx,
             body,
@@ -325,14 +331,14 @@ impl<'tcx> Analysis<'tcx> for TaintTracking<'tcx, '_> {
                         let mut divergent_candidates =
                             DenseBitSet::new_empty(self.body.basic_blocks.len());
                         for target in targets.all_targets() {
-                            let reachable = reachable_bb(self.body, *target);
-                            if reachable.count() == 1 {
-                                let bb = reachable.iter().next().unwrap();
-                                // Ignore the target block if it always panics or returns.
-                                if block_always_panics_or_returns(self.body, bb) {
-                                    continue;
-                                }
+                            // If the check is for sync deadlock, we skip the divergent target
+                            // that always panics or returns without sync.
+                            if self.ignore_divergence_due_to_panic_return
+                                && block_panics_or_returns_without_call(self.body, *target)
+                            {
+                                continue;
                             }
+                            let reachable = reachable_bb(self.body, *target);
                             if let Some(intersect) = intersect.as_mut() {
                                 intersect.intersect(&reachable);
                             } else {
@@ -344,7 +350,9 @@ impl<'tcx> Analysis<'tcx> for TaintTracking<'tcx, '_> {
                         // We remove the bb if the bb is reachable from all
                         // targets which means it does not depend on the
                         // discriminant.
-                        divergent_candidates.subtract(intersect.as_ref().unwrap());
+                        if let Some(intersect) = intersect.as_ref() {
+                            divergent_candidates.subtract(intersect);
+                        }
 
                         self.implicit.union(&divergent_candidates);
                         debug!("Marking blocks {:?} as implicit", divergent_candidates);
@@ -435,8 +443,47 @@ fn reachable_bb<'tcx>(body: &Body<'tcx>, start: BasicBlock) -> DenseBitSet<Basic
     visited
 }
 
-fn block_always_panics_or_returns<'tcx>(body: &Body<'tcx>, bb: BasicBlock) -> bool {
-    match &body.basic_blocks[bb].terminator {
+/// Returns true if the block will always reach panics or returns without reaching a call
+/// that needs non-divergent control flow.
+fn block_panics_or_returns_without_call<'tcx>(body: &Body<'tcx>, bb: BasicBlock) -> bool {
+    fn helper<'tcx>(
+        body: &Body<'tcx>,
+        bb: BasicBlock,
+        visited: &mut DenseBitSet<BasicBlock>,
+    ) -> bool {
+        if !visited.insert(bb) {
+            // We've seen this block before, avoid infinite recursion
+            return true;
+        }
+
+        let block = &body.basic_blocks[bb];
+        match &block.terminator().kind {
+            TerminatorKind::Unreachable => true,
+            TerminatorKind::Return => true, // ends in return
+            TerminatorKind::Call { target, .. } => {
+                // If the call has no normal target, it's diverging
+                // Either panic or infinite loop
+                // We do not consider infinite loop here, since it is considered to
+                // be a functional bugs and should be fixed or checked by formal verifier.
+                // If calling a function that does not panic, we cannot conclude here.
+                // We aggresively think that function may include panic.
+                target.is_none()
+            }
+            TerminatorKind::Assert { target, .. } => {
+                // Assert may panic, but we only care about the normal target here.
+                helper(body, *target, visited)
+            }
+            TerminatorKind::Goto { target } => helper(body, *target, visited),
+            TerminatorKind::SwitchInt { targets, .. } => {
+                targets.all_targets().iter().all(|&target| helper(body, target, visited))
+            }
+            _ => false, // any other kind, assume may not panic
+        }
+    }
+
+    let mut visited = DenseBitSet::new_empty(body.basic_blocks.len());
+    helper(body, bb, &mut visited)
+    /*match &body.basic_blocks[bb].terminator {
         Some(terminator) => match &terminator.kind {
             TerminatorKind::Unreachable => true,
             TerminatorKind::Call { target, .. } => {
@@ -449,7 +496,7 @@ fn block_always_panics_or_returns<'tcx>(body: &Body<'tcx>, bb: BasicBlock) -> bo
             _ => false,
         },
         None => false, // block is incomplete
-    }
+    }*/
 }
 
 struct TaintResultVisitor<'tcx> {
@@ -503,12 +550,11 @@ impl<'mir, 'tcx, 'a> ResultsVisitor<'mir, 'tcx, TaintTracking<'tcx, 'a>>
         debug!("Visiting terminator at {:?} with state: {:?}", location, state);
         if let TerminatorKind::Call { func, destination, ref args, fn_span, .. } = &terminator.kind
         {
-            let mut sync_data = None;
             let (inline, real) = check_terminator_call(self.tcx, &self.body, terminator);
-            if let Some(real_attr) = real {
-                sync_data = real_attr.sync_data;
-            }
-
+            let Some(real_attr) = real else {
+                return;
+            };
+            let sync_data = real_attr.sync_data;
             let span = location_span(&self.body, location);
 
             if let Some(sync_data) = sync_data {
@@ -545,6 +591,7 @@ impl<'mir, 'tcx, 'a> ResultsVisitor<'mir, 'tcx, TaintTracking<'tcx, 'a>>
 /// Analyze the body to check use of chunk function and shared variable.
 /// Ensures that the args to those functions are used in a non-diversed way.
 fn analyze_diversed_data<'tcx>(
+    ignore_divergence_due_to_panic_return: bool,
     tcx: rustc_middle::ty::TyCtxt<'tcx>,
     def_id: rustc_span::def_id::DefId,
     body: &Body<'tcx>,
@@ -552,6 +599,7 @@ fn analyze_diversed_data<'tcx>(
 ) -> GpuCodegenResult<()> {
     let analysis = TaintTracking::new(
         kernel_entry, // kernel entry
+        ignore_divergence_due_to_panic_return,
         DenseBitSet::new_empty(body.local_decls.len()),
         tcx,
         body,
@@ -681,7 +729,7 @@ pub(crate) fn analyze_gpu_code<'tcx>(
         debug!("analyze_diversed_data {:?}", def_id);
         let gpu_attr = crate::attr::GpuAttributes::build(&tcx, def_id);
         if !gpu_attr.disable_diverse_checker {
-            analyze_diversed_data(tcx, def_id, &mir, is_kernel_entry)?;
+            analyze_diversed_data(true, tcx, def_id, &mir, is_kernel_entry)?;
         }
         crate::mir_thread_sync_check::analyze_shared_access(tcx, &mir, is_kernel_entry)?;
     }

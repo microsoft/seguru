@@ -209,6 +209,7 @@ pub trait ChunkScope: PrivateTraitGuard + Clone {
 
     fn thread_ids() -> [u32; TID_MAX_LEN];
 
+    #[gpu_codegen::ret_sync_data(1000)]
     fn global_dim<D: DimType>() -> u32;
     fn global_id<D: DimType>(thread_ids: [u32; TID_MAX_LEN]) -> u32;
 
@@ -233,17 +234,20 @@ pub trait ChunkScope: PrivateTraitGuard + Clone {
 
     #[inline]
     #[gpu_codegen::device]
+    #[gpu_codegen::ret_sync_data(1000)]
     fn global_dim_x() -> u32 {
         Self::global_dim::<DimX>()
     }
 
     #[inline]
+    #[gpu_codegen::ret_sync_data(1000)]
     #[gpu_codegen::device]
     fn global_dim_y() -> u32 {
         Self::global_dim::<DimY>()
     }
 
     #[inline]
+    #[gpu_codegen::ret_sync_data(1000)]
     #[gpu_codegen::device]
     fn global_dim_z() -> u32 {
         Self::global_dim::<DimZ>()

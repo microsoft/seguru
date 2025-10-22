@@ -1,6 +1,5 @@
 use gpu::prelude::*;
 
-#[gpu::attr(skip_divergence_check)]
 #[gpu::cuda_kernel(dynamic_shared)]
 pub fn reduce_per_grid<C: Copy + Sync + Default + 'static + core::ops::Add<Output = C>>(
     inputs: &[C],

@@ -147,9 +147,15 @@ impl<'tcx, 'a> TaintTracking<'tcx, 'a> {
         args.iter().enumerate().for_each(|(i, arg)| {
             if let Some(local) = operand_local(&arg.node) {
                 let local_decl = &self.body.local_decls[local];
-                if local_decl.mutability.is_mut() {
+                if matches!(
+                    local_decl.ty.kind(),
+                    rustc_middle::ty::TyKind::Ref(_, _, rustc_middle::ty::Mutability::Mut)
+                ) {
                     mut_args.push((i, local));
                 }
+                /*if local_decl.mutability.is_mut() {
+                    mut_args.push((i, local));
+                }*/
             }
         });
         args.iter().for_each(|arg| {
@@ -315,29 +321,33 @@ impl<'tcx> Analysis<'tcx> for TaintTracking<'tcx, '_> {
                 // If the discriminant is tainted, all targets are tainted.
                 if let Some(local) = operand_local(discr) {
                     if state.contains(local) {
-                        for target in targets.all_targets() {
-                            debug!("Setting block {:?} as implicit", target);
-                            self.implicit.insert(*target);
-                        }
                         let mut intersect: Option<DenseBitSet<BasicBlock>> = None;
-                        let mut union = DenseBitSet::new_empty(self.body.basic_blocks.len());
+                        let mut divergent_candidates =
+                            DenseBitSet::new_empty(self.body.basic_blocks.len());
                         for target in targets.all_targets() {
                             let reachable = reachable_bb(self.body, *target);
+                            if reachable.count() == 1 {
+                                let bb = reachable.iter().next().unwrap();
+                                // Ignore the target block if it always panics or returns.
+                                if block_always_panics_or_returns(self.body, bb) {
+                                    continue;
+                                }
+                            }
                             if let Some(intersect) = intersect.as_mut() {
                                 intersect.intersect(&reachable);
                             } else {
                                 intersect = Some(reachable.clone());
                             }
-                            union.union(&reachable);
+                            divergent_candidates.union(&reachable);
                         }
 
                         // We remove the bb if the bb is reachable from all
                         // targets which means it does not depend on the
                         // discriminant.
-                        union.subtract(intersect.as_ref().unwrap());
+                        divergent_candidates.subtract(intersect.as_ref().unwrap());
 
-                        self.implicit.union(&union);
-                        debug!("Marking blocks {:?} as implicit", union);
+                        self.implicit.union(&divergent_candidates);
+                        debug!("Marking blocks {:?} as implicit", divergent_candidates);
                         /*
                         // The union should cover the following strict cases.
                         for bb in self.body.basic_blocks.iter_nodes() {
@@ -423,6 +433,23 @@ fn reachable_bb<'tcx>(body: &Body<'tcx>, start: BasicBlock) -> DenseBitSet<Basic
     }
 
     visited
+}
+
+fn block_always_panics_or_returns<'tcx>(body: &Body<'tcx>, bb: BasicBlock) -> bool {
+    match &body.basic_blocks[bb].terminator {
+        Some(terminator) => match &terminator.kind {
+            TerminatorKind::Unreachable => true,
+            TerminatorKind::Call { target, .. } => {
+                // If the call has no normal target, it's diverging
+                // Either panic or infinite loop
+                // We do not consider infinite loop here, since it is considered to
+                // be a functional bugs and should be fixed or checked by formal verifier.
+                target.is_none()
+            }
+            _ => false,
+        },
+        None => false, // block is incomplete
+    }
 }
 
 struct TaintResultVisitor<'tcx> {

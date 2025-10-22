@@ -32,6 +32,7 @@ impl<'a, T> GpuGlobal<'a, [T]> {
     /// See `ChunkScope` for more details about chunk scope.
     #[gpu_codegen::device]
     #[gpu_codegen::sync_data(0, 1, 2)]
+    #[gpu_codegen::ret_sync_data(1000)]
     #[inline(always)]
     pub fn chunk_to_scope<CS, Map: ScopeUniqueMap<CS>>(
         self,

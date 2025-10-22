@@ -1,2 +1,0 @@
-[build]
-rustflags = ["--cfg=gpu_codegen", "--emit=metadata"] # To enable gpu mode in gpu_macros.

@@ -35,9 +35,9 @@ pub fn reduce_per_grid(
     );
 
     let mut local_sum = u32::default();
-    for i in (id..(inputs.len() as u32)).step_by(grid_size as usize) {
-        let left = inputs[i as usize];
-        let right = inputs[(i + grid_size / 2) as usize];
+    for i in (id as usize..inputs.len()).step_by(grid_size as usize) {
+        let left = inputs[i];
+        let right = inputs[i + (grid_size / 2) as usize];
         local_sum = local_sum + left + right;
     }
     smem_chunk[0] = local_sum;

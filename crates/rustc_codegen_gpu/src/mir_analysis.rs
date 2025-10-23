@@ -30,20 +30,30 @@ fn check_terminator_call<'tcx>(
     body: &Body<'tcx>,
     terminator: &Terminator<'tcx>,
 ) -> (Option<GpuAttributes>, Option<GpuAttributes>) {
+    let (inlined_def_id, real_def_id) = get_terminator_call_def_id(tcx, body, terminator);
+    (
+        inlined_def_id.map(|def_id| crate::attr::GpuAttributes::build(&tcx, def_id)),
+        real_def_id.map(|def_id| crate::attr::GpuAttributes::build(&tcx, def_id)),
+    )
+}
+
+fn get_terminator_call_def_id<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    body: &Body<'tcx>,
+    terminator: &Terminator<'tcx>,
+) -> (Option<rustc_span::def_id::DefId>, Option<rustc_span::def_id::DefId>) {
     let mut inlines = None;
     let mut real = None;
     if let TerminatorKind::Call { func, args, .. } = &terminator.kind {
         // Check if the function being called is an inlined function
         if let Some(inlined_info) = from_inlined_func(body, &terminator.source_info) {
-            let gpu_attr = crate::attr::GpuAttributes::build(&tcx, inlined_info.def_id());
-            inlines = Some(gpu_attr);
+            inlines = Some(inlined_info.def_id());
         }
         if let Some((def_id, generic_args)) = func.const_fn_def() {
             if let Ok(Some(instance)) =
                 Instance::try_resolve(tcx, body.typing_env(tcx), def_id, generic_args)
             {
-                let gpu_attr = crate::attr::GpuAttributes::build(&tcx, instance.def_id());
-                real = Some(gpu_attr);
+                real = Some(instance.def_id());
             }
         }
     }
@@ -337,7 +347,9 @@ impl<'tcx> Analysis<'tcx> for TaintTracking<'tcx, '_> {
                             // If the check is for sync deadlock, we skip the divergent target
                             // that always panics or returns without sync.
                             if self.ignore_divergence_due_to_panic_return
-                                && block_panics_or_returns_without_call(self.body, *target)
+                                && block_panics_or_returns_without_dev_call(
+                                    self.tcx, self.body, *target,
+                                )
                             {
                                 continue;
                             }
@@ -448,8 +460,13 @@ fn reachable_bb<'tcx>(body: &Body<'tcx>, start: BasicBlock) -> DenseBitSet<Basic
 
 /// Returns true if the block will always reach panics or returns without reaching a call
 /// that needs non-divergent control flow.
-fn block_panics_or_returns_without_call<'tcx>(body: &Body<'tcx>, bb: BasicBlock) -> bool {
+fn block_panics_or_returns_without_dev_call<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    body: &Body<'tcx>,
+    bb: BasicBlock,
+) -> bool {
     fn helper<'tcx>(
+        tcx: TyCtxt<'tcx>,
         body: &Body<'tcx>,
         bb: BasicBlock,
         visited: &mut DenseBitSet<BasicBlock>,
@@ -463,29 +480,40 @@ fn block_panics_or_returns_without_call<'tcx>(body: &Body<'tcx>, bb: BasicBlock)
         match &block.terminator().kind {
             TerminatorKind::Unreachable => true,
             TerminatorKind::Return => true, // ends in return
-            TerminatorKind::Call { target, .. } => {
+            TerminatorKind::Call { func, target, .. } => {
                 // If the call has no normal target, it's diverging
                 // Either panic or infinite loop
                 // We do not consider infinite loop here, since it is considered to
                 // be a functional bugs and should be fixed or checked by formal verifier.
                 // If calling a function that does not panic, we cannot conclude here.
-                // We aggresively think that function may include panic.
-                target.is_none()
+                // We aggresively think that user-defined function may call sync_thread or use shared mem.
+                let (_, real_attr) = check_terminator_call(tcx, body, block.terminator());
+                let primitive_call_no_sync_required = if let Some(real_attr) = real_attr {
+                    // If the call is builtin and has no sync_data attribute, we consider it safe.
+                    // If the call is not device function, we think it does not require sync data.
+                    (real_attr.is_builtin() && real_attr.sync_data.is_none()) || !real_attr.device
+                } else {
+                    // If the call is not GPU device function, we think it does not require sync data.
+                    true
+                };
+                target.is_none() || primitive_call_no_sync_required
             }
             TerminatorKind::Assert { target, .. } => {
                 // Assert may panic, but we only care about the normal target here.
-                helper(body, *target, visited)
+                helper(tcx, body, *target, visited)
             }
-            TerminatorKind::Goto { target } => helper(body, *target, visited),
+            TerminatorKind::Goto { target } => helper(tcx, body, *target, visited),
             TerminatorKind::SwitchInt { targets, .. } => {
-                targets.all_targets().iter().all(|&target| helper(body, target, visited))
+                targets.all_targets().iter().all(|&target| helper(tcx, body, target, visited))
             }
-            _ => false, // any other kind, assume may not panic
+            _ => {
+                false // any other kind, assume may not panic
+            }
         }
     }
 
     let mut visited = DenseBitSet::new_empty(body.basic_blocks.len());
-    helper(body, bb, &mut visited)
+    helper(tcx, body, bb, &mut visited)
     /*match &body.basic_blocks[bb].terminator {
         Some(terminator) => match &terminator.kind {
             TerminatorKind::Unreachable => true,

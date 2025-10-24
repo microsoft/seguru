@@ -597,7 +597,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         if let ty::InstanceKind::DropGlue(_, None) = drop_fn.def {
             // we don't actually need to drop anything.
             return helper.funclet_br(self, bx, target, mergeable_succ);
-        } else {
+        } else if bx.tcx().env_var("__CODEGEN_TARGET__") == Ok("GPU") {
             bx.tcx().sess.dcx().span_warn(
                 rustc_span::DUMMY_SP,
                 format!("Ignore drop function {:?} in GPU mode", drop_fn.def_id()),

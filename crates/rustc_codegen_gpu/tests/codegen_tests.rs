@@ -43,7 +43,7 @@ fn run_codegen_tests(src: PathBuf, mode: &str) {
     let gpu_macros_path = find_lib(&target_dir.join("deps"), "libgpu_macros-", ".so");
     let gpu_macros = format!("gpu_macros={}", &gpu_macros_path.to_str().unwrap());
 
-    let num_traits_path = find_lib(&target_dir.join("deps"), "libnum_traits-", ".rmeta");
+    let num_traits_path = find_lib(&target_dir.join("deps"), "libnum_traits-", ".rlib");
     let num_traits = format!("num_traits={}", &num_traits_path.to_str().unwrap());
 
     let gpu_src = target_dir.join("../../gpu/src/lib.rs");

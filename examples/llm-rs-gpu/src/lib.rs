@@ -643,7 +643,6 @@ __global__ void matmul_backward_bias_kernel4(float* dbias, const float* dout, in
 
 // TODO: Add tests
 // This constructs matmul_backward with cublasSgemm
-#[gpu::attr(skip_divergence_check)]
 #[gpu::cuda_kernel(dynamic_shared)]
 pub fn matmul_backward_bias_kernel4(dbias: &mut [f32], dout: &[f32], B: u32, T: u32, OC: u32) {
     // this kernel is launched with 1D grid_dim of OC/32
@@ -766,7 +765,6 @@ __global__ void layernorm_backward_kernel2(float* dinp, float* dweight, float* d
 }
 */
 
-#[gpu::attr(skip_divergence_check)]
 #[gpu::cuda_kernel(dynamic_shared)]
 pub fn layernorm_backward_kernel2(
     dinp: &mut [f32],
@@ -930,7 +928,6 @@ __global__ void softmax_autoregressive_backward_kernel(float* dpreatt, const flo
 }
 */
 
-#[gpu::attr(skip_divergence_check)]
 #[gpu::cuda_kernel]
 pub fn softmax_autoregressive_backward_kernel(
     dpreatt: &mut [f32],
@@ -1151,7 +1148,6 @@ struct SoftmaxParams {
 // inp: Shape(V,)
 #[inline(always)]
 #[gpu::device]
-#[gpu::attr(skip_divergence_check)]
 fn prepare_softmax_blockwide_noFloat4(
     inp: &GlobalGroupChunk<'_, f32, Grid2BlockScope, MapLinear>,
     V: u32,
@@ -1271,7 +1267,6 @@ __global__ void fused_classifier_kernel3(float* logits, float* losses, float* pr
 */
 
 // assert!(P >= V);
-#[gpu::attr(skip_divergence_check)]
 #[gpu::cuda_kernel]
 pub fn fused_classifier_kernel3(
     logits: &mut [f32],
@@ -1432,7 +1427,6 @@ fn dot4(a: Float4, b: Float4) -> f32 {
 
 #[gpu::cuda_kernel]
 #[gpu::attr(nvvm_launch_bound(256, 1, 1, 2))]
-#[gpu::attr(skip_divergence_check)]
 #[allow(clippy::needless_range_loop)]
 pub fn matmul_forward_kernel4(
     out: &mut [Float4],

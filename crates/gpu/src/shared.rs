@@ -205,6 +205,7 @@ impl<T: ?Sized + AsSharedSlice> GpuShared<T> {
     #[gpu_codegen::device]
     #[gpu_codegen::memspace_shared(0, 1000)]
     #[gpu_codegen::sync_data(0, 1)]
+    #[gpu_codegen::ret_sync_data(0, 1000)]
     #[rustc_diagnostic_item = "gpu::shared_chunk_mut"]
     pub fn chunk_mut<'a, Map: ScopeUniqueMap<Block2ThreadScope>>(
         &'a mut self,
@@ -220,6 +221,7 @@ impl<T: ?Sized + AsSharedSlice> GpuShared<T> {
     #[gpu_codegen::device]
     #[gpu_codegen::memspace_shared(0, 1000)]
     #[gpu_codegen::sync_data(0, 1, 2)]
+    #[gpu_codegen::ret_sync_data(0, 1000)]
     pub fn chunk_to_scope<'a, CS: ChunkScope, Map: ScopeUniqueMap<CS>>(
         &'a mut self,
         _scope: CS,

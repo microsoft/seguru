@@ -339,19 +339,17 @@ fn get_const_array(
             } else {
                 None
             }
-        },
-        Expr::Group(ExprGroup { expr, .. }) => {
-            match *expr {
-                Expr::Lit(expr_lit) => {
-                    if let syn::Lit::Int(lit_int) = &expr_lit.lit {
-                        let val = lit_int.base10_parse::<usize>().unwrap();
-                        Some(val)
-                    } else {
-                        None
-                    }
-                },
-                _ => None,
+        }
+        Expr::Group(ExprGroup { expr, .. }) => match *expr {
+            Expr::Lit(expr_lit) => {
+                if let syn::Lit::Int(lit_int) = &expr_lit.lit {
+                    let val = lit_int.base10_parse::<usize>().unwrap();
+                    Some(val)
+                } else {
+                    None
+                }
             }
+            _ => None,
         },
         Expr::Path(path) => {
             // use i0..iN represent 0..N, t0..tM represent N+0..N+M

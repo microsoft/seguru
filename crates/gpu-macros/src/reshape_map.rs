@@ -223,7 +223,11 @@ pub(crate) fn map_reshape_params(tokens: TokenStream) -> TokenStream {
         // If the size is an expression that is not dynamic to the function,
         // we can directly use it instead of loading from an array.
         let get_non_dynamic_expr = |e: &Expr| match e {
-            Expr::Lit(_) | Expr::Group(ExprGroup { expr: box Expr::Lit(_), .. }) => Some(e.clone()),
+            Expr::Lit(_) => Some(e.clone()),
+            Expr::Group(ExprGroup { expr, .. }) => match **expr {
+                Expr::Lit(_) => Some(e.clone()),
+                _ => None,
+            },
             Expr::Call(call_expr) if call_expr.args.is_empty() => Some(e.clone()),
             Expr::Const(_) => Some(e.clone()),
             _ => None,
@@ -328,14 +332,27 @@ fn get_const_array(
     let mut const_neg = vec![];
 
     let get_const_val = |size: Expr| match size {
-        Expr::Lit(expr_lit) | Expr::Group(ExprGroup { expr: box Expr::Lit(expr_lit), .. }) => {
+        Expr::Lit(expr_lit) => {
             if let syn::Lit::Int(lit_int) = &expr_lit.lit {
                 let val = lit_int.base10_parse::<usize>().unwrap();
                 Some(val)
             } else {
                 None
             }
-        }
+        },
+        Expr::Group(ExprGroup { expr, .. }) => {
+            match *expr {
+                Expr::Lit(expr_lit) => {
+                    if let syn::Lit::Int(lit_int) = &expr_lit.lit {
+                        let val = lit_int.base10_parse::<usize>().unwrap();
+                        Some(val)
+                    } else {
+                        None
+                    }
+                },
+                _ => None,
+            }
+        },
         Expr::Path(path) => {
             // use i0..iN represent 0..N, t0..tM represent N+0..N+M
             if path.path.segments.len() == 1 {
@@ -358,8 +375,8 @@ fn get_const_array(
     for expr in exprs {
         let span = expr.span();
         let (val, neg) = match expr {
-            Expr::Unary(ExprUnary { op: syn::UnOp::Neg(_), box expr, .. }) => {
-                (get_const_val(expr), true)
+            Expr::Unary(ExprUnary { op: syn::UnOp::Neg(_), expr, .. }) => {
+                (get_const_val(*expr), true)
             }
             _ => (get_const_val(expr), false),
         };

@@ -224,7 +224,7 @@ pub(crate) fn map_reshape_params(tokens: TokenStream) -> TokenStream {
         // we can directly use it instead of loading from an array.
         let get_non_dynamic_expr = |e: &Expr| match e {
             Expr::Lit(_) => Some(e.clone()),
-            Expr::Group(ExprGroup { expr, .. }) => match **expr {
+            Expr::Group(ExprGroup { expr, .. }) => match &**expr {
                 Expr::Lit(_) => Some(e.clone()),
                 _ => None,
             },
@@ -340,7 +340,7 @@ fn get_const_array(
                 None
             }
         }
-        Expr::Group(ExprGroup { expr, .. }) => match *expr {
+        Expr::Group(ExprGroup { expr, .. }) => match &*expr {
             Expr::Lit(expr_lit) => {
                 if let syn::Lit::Int(lit_int) = &expr_lit.lit {
                     let val = lit_int.base10_parse::<usize>().unwrap();

@@ -250,7 +250,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                     debug!("Function return is ignored: {:?}", abi.ret.layout);
                 }
                 rustc_target::callconv::PassMode::Cast { cast, .. } => {
-                    ret.extend(self.expand_type(self.cast_to_mlir_type(&*cast)));
+                    ret.extend(self.expand_type(self.cast_to_mlir_type(&**cast)));
                 }
             }
         }

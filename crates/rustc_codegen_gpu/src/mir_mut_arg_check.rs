@@ -53,13 +53,16 @@ impl<'tcx> Analysis<'tcx> for MutArgAnalysis {
         _location: Location,
     ) {
         // Propagate aliases through moves/copies
-        if let StatementKind::Assign(box (
-            lhs,
-            Rvalue::Ref(_, _, src) | Rvalue::Use(Operand::Copy(src) | Operand::Move(src)),
-        )) = &stmt.kind
-        {
-            if state.contains(src.local) {
-                state.insert(lhs.local);
+        if let StatementKind::Assign(lhs_and_rvalue) = &stmt.kind {
+            let rvalue = &lhs_and_rvalue.1;
+            match rvalue {
+                Rvalue::Ref(_, _, src) | Rvalue::Use(Operand::Copy(src) | Operand::Move(src)) => {
+                    let lhs = &lhs_and_rvalue.0;
+                    if state.contains(src.local) {
+                        state.insert(lhs.local);
+                    }
+                }
+                _ => {}
             }
         }
     }

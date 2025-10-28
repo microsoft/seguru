@@ -259,7 +259,9 @@ impl<'tcx> Analysis<'tcx> for TaintTracking<'tcx, '_> {
         statement: &Statement<'tcx>,
         _location: Location,
     ) {
-        if let StatementKind::Assign(box (lhs, rvalue)) = &statement.kind {
+        if let StatementKind::Assign(lhs_and_rvalue) = &statement.kind {
+            let lhs = &lhs_and_rvalue.0;
+            let rvalue = &lhs_and_rvalue.1;
             let mut tainted = false;
             // Walk all operands used in the rvalue
             match rvalue {
@@ -276,7 +278,9 @@ impl<'tcx> Analysis<'tcx> for TaintTracking<'tcx, '_> {
                     }
                 }
 
-                Rvalue::BinaryOp(_, box (op1, op2)) => {
+                Rvalue::BinaryOp(_, op1_and_op2) => {
+                    let op1 = &op1_and_op2.0;
+                    let op2 = &op1_and_op2.1;
                     if operand_local(op1).is_some_and(|l| state.contains(l))
                         || operand_local(op2).is_some_and(|l| state.contains(l))
                     {
@@ -426,7 +430,8 @@ impl<'tcx> Analysis<'tcx> for TaintTracking<'tcx, '_> {
                     if state.contains(local) {
                         state.insert(resume_arg.local);
                         for stmt in &self.body.basic_blocks[*resume].statements {
-                            if let StatementKind::Assign(box (lhs, _)) = &stmt.kind {
+                            if let StatementKind::Assign(lhs_etc) = &stmt.kind {
+                                let lhs = &lhs_etc.0;
                                 state.insert(lhs.local);
                             }
                         }

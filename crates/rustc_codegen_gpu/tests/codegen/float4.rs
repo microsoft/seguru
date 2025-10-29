@@ -16,13 +16,19 @@ pub fn test_float4(out: &mut [Float4], in2: &Float4) {
     out[0] = in1 + *in2;
 }
 
+#[repr(align(16))]
+#[derive(Clone, Copy)]
+struct F64_2 {
+    a: f64,
+    b: f64,
+}
 #[gpu::kernel]
 #[no_mangle]
-pub fn test_float2(out: &mut [[Float2; 2]], in2: &[Float2; 2]) {
-    let in2 = *in2;
-    let mut out = gpu::chunk_mut(out, gpu::MapLinear::new(2));
-    out[0] = in2;
+pub fn test_float2(out: &mut [F64_2], in2: &F64_2) {
+    let mut out = gpu::chunk_mut(out, gpu::MapLinear::new(1));
+    out[0] = *in2;
 }
+
 // CHECK: @gpu_bin_cst = internal constant
 // PTX_CHECK: .visible .entry float4
 // PTX_CHECK: 0f3F9DF3B6

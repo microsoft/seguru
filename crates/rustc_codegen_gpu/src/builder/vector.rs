@@ -105,6 +105,17 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
     ) {
         let dst_ty = MemRefType::try_from(dst.r#type()).unwrap();
         let src_ty = MemRefType::try_from(src.r#type()).unwrap();
+        let to_vec_type = |align: u64| {
+            if align % 8 == 0 {
+                self.type_vector(&[align / 8], self.type_i64())
+            } else if align % 4 == 0 {
+                self.type_vector(&[align / 4], self.type_i32())
+            } else if align % 2 == 0 {
+                self.type_vector(&[align / 2], self.type_i16())
+            } else {
+                self.type_vector(&[align], self.type_i8())
+            }
+        };
         // If both src and dst are in local memory, we do scalar copy
         if dst_ty.memory_space() == Some(self.local_mem_space())
             && src_ty.memory_space() == Some(self.local_mem_space())
@@ -116,13 +127,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         if let Some(const_size) = crate::mlir::mlir_val_to_const_int(size) {
             let const_size = const_size as u64;
             let align = dst_align.bytes().min(src_align.bytes()).min(const_size);
-            let vec_ty = if align % 4 == 0 {
-                self.type_vector(&[align / 4], self.type_i32())
-            } else if align % 2 == 0 {
-                self.type_vector(&[align / 2], self.type_i16())
-            } else {
-                self.type_vector(&[align], self.type_i8())
-            };
+            let vec_ty = to_vec_type(align);
             let zero = self.const_value(0, self.type_index());
             let dims = [(const_size / align) as i64];
             let src = self.use_memref_as_vector_memref(src, &dims, vec_ty);
@@ -139,13 +144,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             return;
         }
         assert!(src_align.bytes() == dst_align.bytes());
-        let vec_ty = if src_align.bytes() % 4 == 0 {
-            self.type_vector(&[src_align.bytes() / 4], self.type_i32())
-        } else if src_align.bytes() % 2 == 0 {
-            self.type_vector(&[src_align.bytes() / 2], self.type_i16())
-        } else {
-            self.type_vector(&[src_align.bytes()], self.type_i8())
-        };
+        let vec_ty = to_vec_type(src_align.bytes());
         let align = self.const_value(src_align.bytes(), self.type_index());
         let len = self.udiv(size, align);
         let src = self.mlir_memref_view(src, vec_ty, None, Some(len));

@@ -515,6 +515,13 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let in_gpu_mod = gpu_attrs.kernel || gpu_attrs.device;
         operation.set_op_visible(self.mlir_ctx, visibility);
         operation.set_attribute("linkage", linkage);
+
+        // Set inline attribute
+        use rustc_attr_data_structures::InlineAttr;
+        let attrs = tcx.codegen_fn_attrs(def_id);
+        if matches!(attrs.inline, InlineAttr::Always | InlineAttr::Force { .. }) {
+            operation.set_attribute("always_inline", melior::ir::Attribute::unit(self.mlir_ctx));
+        }
         let body = self.mlir_body(in_gpu_mod);
         debug!("append operation to block {} {:?}", operation, fn_sym);
         let op = body.append_operation(operation);

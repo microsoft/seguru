@@ -185,7 +185,7 @@ impl<'a, T: ?Sized + SizedOrSlice> TensorView<'a, T> {
     where
         T: core::ops::Index<I>,
     {
-        let dev_ptr = unsafe { &(*self.devptr)[index] };
+        let dev_ptr = unsafe { &(&(*self.devptr))[index] };
         TensorView { devptr: dev_ptr as *const _ as *mut _, _marker: PhantomData }
     }
 

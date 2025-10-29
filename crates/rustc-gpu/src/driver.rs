@@ -193,7 +193,7 @@ fn gpu_eval_to_const_value_raw<'tcx>(
 
 fn config_link_gpu_code(config: &mut Config) {
     // Link to gpu code
-    let mut need_link_gpu = config.opts.test;
+    let mut need_link_gpu = config.opts.test || config.opts.crate_types.is_empty();
 
     for crate_type in &mut config.opts.crate_types {
         if !matches!(crate_type, CrateType::Executable) {

@@ -5,9 +5,9 @@ edition = "2021"
 
 [dependencies]
 rustc_codegen_ssa_gpu = { package = "rustc_codegen_ssa", path = "../../compiler/rustc_codegen_ssa" }
-
 melior = { version = "0.25.0", features = ["helpers"]}
 mlir-sys = "0.5.0"
+regex = "1.12"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3" }
 mlir-compile = {workspace = true}

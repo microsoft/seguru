@@ -661,7 +661,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 }
             }
             GpuItem::CoreFn(fn_name) => {
-                if crate::attr::PANIC_FUNCTIONS.contains(&fn_name.as_str()) {
+                if crate::attr::is_panic_function(fn_name.as_str()) {
                     self.assert(
                         self.const_value(0, self.type_i1()),
                         &format!("{} abort at {}", fn_name, self.cur_loc()),

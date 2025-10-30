@@ -186,6 +186,11 @@ impl<'tcx, 'ml, 'a> IntrinsicCallBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 
                 self.intrinsic_volatile_load(arg_tys[0], args_imm[0], llresult);
                 return Ok(());
             }
+            sym::bswap => {
+                let op = melior::dialect::ods::llvm::intr_bswap(ctx, args_imm[0], loc).into();
+                self.append_op(op);
+                return Ok(());
+            }
             _ => {}
         }
         intrinsic_match! {name, llresult, args_imm, self, ctx, loc,

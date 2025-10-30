@@ -54,7 +54,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let (block, attr_str) = if let Some(builder) = self.builder.read().unwrap().as_ref() {
             let block = builder.cur_block;
             let name = &builder.name;
-            (block, format!("{name} {i} : {typ}"))
+            (block, format!("{name} {block} {i} : {typ}"))
         } else {
             (self.mlir_body(true), format!("{i} : {typ}"))
         };

@@ -2046,47 +2046,6 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         todo!()
     }
 
-    fn emit_gpu_scalar_to_backend(
-        &self,
-        cv: rustc_const_eval::interpret::Scalar,
-        layout: rustc_abi::Scalar,
-        ty: Self::Type,
-    ) -> Self::Value {
-        match cv {
-            rustc_const_eval::interpret::Scalar::Int(int) => {
-                assert_eq!(int.size(), layout.primitive().size(self));
-                let data = int.to_uint(int.size());
-
-                if let rustc_abi::Primitive::Pointer(_) = layout.primitive() {
-                    if data == 0 { self.const_null(ty) } else { self.const_undef(ty) }
-                } else {
-                    let data = if ty.is_index() || ty.is_integer() {
-                        data.to_string()
-                    } else if ty.is_float() {
-                        let val = int.to_bits(int.size());
-                        match int.size().bits() {
-                            16 => format!("0x{:04X}", val),
-                            32 => format!("0x{:08X}", val),
-                            64 => format!("0x{:016X}", val),
-                            _ => panic!("Unsupported float size: {:?}", int.size()),
-                        }
-                    } else {
-                        self.emit_error(
-                            format!("Unsupported type for scalar: {:?}", ty),
-                            self.cur_span,
-                        )
-                    };
-                    self.mlir_const_val_from_type(data, ty, self.cur_block())
-                }
-            }
-            rustc_const_eval::interpret::Scalar::Ptr(ptr, s) => {
-                let (prov, offset) = ptr.into_parts();
-                let alloc_id = prov.alloc_id();
-                self.const_data_memref_from_alloc_id(alloc_id)
-            }
-        }
-    }
-
     #[cfg(all(feature = "inplace_bound_check", feature = "arith_immediate_bound_check"))]
     compile_error!(
         "Features `inplace_bound_check` and `arith_immediate_bound_check` are mutually exclusive"

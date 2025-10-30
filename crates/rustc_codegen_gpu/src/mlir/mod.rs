@@ -344,7 +344,7 @@ pub(crate) fn mlir_val_to_const_int<'ml, 'a>(value: melior::ir::Value<'ml, 'a>) 
     if let Ok(op) = value.is_from_op(Some("arith.constant")) {
         melior::ir::attribute::IntegerAttribute::try_from(op.attribute("value").unwrap())
             .ok()
-            .map(|v| v.value() as u128)
+            .map(|v| v.value() as u64 as u128)
     } else {
         None
     }

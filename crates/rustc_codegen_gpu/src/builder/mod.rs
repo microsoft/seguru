@@ -2141,15 +2141,45 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn gep(&mut self, ty: Self::Type, ptr: Self::Value, indices: &[Self::Value]) -> Self::Value {
-        self.inbounds_gep(ty, ptr, indices)
+        let ptr = self.use_value(ptr);
+        let idx = self.use_value(indices[0]);
+        let addr = self.ptrtoint(ptr, self.type_i64());
+        let size = self.static_size_of(ty);
+        let size = self.const_value(size as i64, self.type_i64());
+        let offset = self.mul(idx, size);
+        let addr_with_offset = self.add(addr, offset);
+        let ptr_ty = ptr.r#type();
+        let mem_ref_ty = MemRefType::try_from(ptr_ty).unwrap();
+        let ptr = self.inttoptr(
+            addr_with_offset,
+            self.type_memref(ty, &[1], None, mem_ref_ty.memory_space()),
+        );
+        ptr
     }
 
+    // indices are unsigned
+    fn inbounds_nuw_gep(
+        &mut self,
+        ty: Self::Type,
+        ptr: Self::Value,
+        indices: &[Self::Value],
+    ) -> Self::Value {
+        self.inbounds_gep_ret(ty, ptr, indices, true)
+    }
+
+    // indices are signed
     fn inbounds_gep(
         &mut self,
         ty: Self::Type,
         ptr: Self::Value,
         indices: &[Self::Value],
     ) -> Self::Value {
+        let index = indices[0];
+        if let Some(const_index) = crate::mlir::mlir_val_to_const_int(index) {
+            if (const_index as i64) < 0 {
+                return self.gep(ty, ptr, indices);
+            }
+        }
         self.inbounds_gep_ret(ty, ptr, indices, true)
     }
 

@@ -144,11 +144,18 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             return;
         }
         assert!(src_align.bytes() == dst_align.bytes());
-        let vec_ty = to_vec_type(src_align.bytes());
-        let align = self.const_value(src_align.bytes(), self.type_index());
+        let align = std::cmp::min(src_align.bytes(), dst_align.bytes());
+        let vec_ty = to_vec_type(align);
+        let align = self.const_value(align, self.type_index());
         let len = self.udiv(size, align);
-        let src = self.mlir_memref_view(src, vec_ty, None, Some(len));
-        let dst = self.mlir_memref_view(dst, vec_ty, None, Some(len));
+        let memref_vec_ty = self.type_memref(
+            vec_ty,
+            &[crate::mlir::memref::dynamic_size()],
+            None,
+            src_ty.memory_space(),
+        );
+        let src = self.mlir_memref_view(src, memref_vec_ty, None, Some(len));
+        let dst = self.mlir_memref_view(dst, memref_vec_ty, None, Some(len));
         let op = self.append_op(crate::mlir::linalg::linalg_copy_op(
             self.mlir_ctx,
             src,

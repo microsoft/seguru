@@ -30,6 +30,12 @@ pub struct FnInfo<'tcx, 'ml, 'a> {
     pub ptr: Option<mlir_ir::Value<'ml, 'a>>,
 }
 
+pub(crate) struct BuilderInfo<'ml, 'a> {
+    pub name: String,
+    pub cur_block: &'a melior::ir::Block<'ml>,
+    pub cur_span: rustc_span::Span,
+}
+
 pub(crate) struct GPUCodegenContext<'tcx, 'ml, 'a> {
     pub cgu_name: String,
     pub cgu: &'tcx rustc_middle::mir::mono::CodegenUnit<'tcx>,
@@ -49,6 +55,8 @@ pub(crate) struct GPUCodegenContext<'tcx, 'ml, 'a> {
     pub tcx: rustc_middle::ty::TyCtxt<'tcx>,
     pub gpu_attrs: HashMap<rustc_middle::ty::Instance<'tcx>, crate::attr::GpuAttributes>,
     pub disable_bound_check: bool,
+    pub const_values: RwLock<HashMap<String, mlir_ir::Value<'ml, 'a>>>,
+    pub builder: RwLock<Option<BuilderInfo<'ml, 'a>>>,
 }
 
 impl<'tcx, 'ml, 'a> std::fmt::Debug for GPUCodegenContext<'tcx, 'ml, 'a> {
@@ -100,6 +108,8 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             static_shared_count: AtomicUsize::new(0),
             gpu_attrs: HashMap::new(),
             disable_bound_check,
+            const_values: RwLock::new(HashMap::new()),
+            builder: RwLock::new(None),
         };
         if disable_bound_check {
             ret.emit_warning(

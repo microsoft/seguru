@@ -92,6 +92,7 @@ pub(crate) struct GpuBuilder<'tcx, 'ml, 'a> {
     dummy: PhantomData<&'a mlir_ir::operation::Operation<'ml>>,
     #[cfg(feature = "inplace_bound_check")]
     valid_mem_access: Option<InplaceBoundCheckData<'ml, 'a>>,
+    const_values: HashMap<String, mlir_ir::Value<'ml, 'a>>,
 }
 
 impl<'tcx, 'ml, 'a> Drop for GpuBuilder<'tcx, 'ml, 'a> {
@@ -109,6 +110,7 @@ impl<'tcx, 'ml, 'a> Drop for GpuBuilder<'tcx, 'ml, 'a> {
             self.valid_mem_access,
             crate::mlir::value_loc(self.valid_mem_access.as_ref().unwrap().idx[0]).unwrap()
         );
+        *self.cx.builder.write().unwrap() = None;
     }
 }
 impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
@@ -121,11 +123,17 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
     }
 
     pub fn const_value(
-        &self,
+        &mut self,
         val: impl std::fmt::Display,
         ty: mlir_ir::Type<'ml>,
     ) -> mlir_ir::Value<'ml, 'a> {
-        self.mlir_const_val_from_type(val, ty, self.cur_block())
+        let attr_str = format!("{val} : {ty}");
+        if let Some(val) = self.const_values.get(&attr_str) {
+            return val.clone();
+        }
+        let const_val = self.mlir_const_val_from_type(val, ty, self.cur_block());
+        self.const_values.insert(attr_str, const_val);
+        const_val
     }
 
     fn get_const_str(&self, arg: mlir_ir::Value<'ml, 'a>) -> Result<String, ()> {
@@ -468,24 +476,14 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                     arg,
                     rustc_abi::Align::EIGHT,
                 );
-                let size_ptr = self.inbounds_gep(
-                    self.type_index(),
-                    arg,
-                    &[self.const_value(1, self.type_index())],
-                );
+                let one = self.const_value(1, self.type_index());
+                let size_ptr = self.inbounds_gep(self.type_index(), arg, &[one]);
                 let size = self.load(self.type_index(), size_ptr, rustc_abi::Align::EIGHT);
-                let window_ptr = self.inbounds_gep(
-                    self.type_i64(),
-                    arg,
-                    &[self.const_value(2, self.type_index())],
-                );
+                let two = self.const_value(2, self.type_index());
+                let window_ptr = self.inbounds_gep(self.type_i64(), arg, &[two]);
                 let window = self.load(self.type_i64(), window_ptr, rustc_abi::Align::EIGHT);
-
-                let index_ptr = self.inbounds_gep(
-                    self.type_index(),
-                    arg,
-                    &[self.const_value(3, self.type_index())],
-                );
+                let three = self.const_value(3, self.type_index());
+                let index_ptr = self.inbounds_gep(self.type_index(), arg, &[three]);
                 let index = self.load(self.type_index(), index_ptr, rustc_abi::Align::EIGHT);
                 let offset = self.mul(window, index);
                 self.call_gpu_builtin_operation(
@@ -653,8 +651,9 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             }
             GpuItem::Core(lang_item) => {
                 // Not a builtin.
+                let zero = self.const_value(0, self.type_i1());
                 if lang_item.name().to_string().starts_with("panic") {
-                    self.assert(self.const_value(0, self.type_i1()), &lang_item.name().to_string());
+                    self.assert(zero, &lang_item.name().to_string());
                     Ok(None)
                 } else {
                     todo!("unhandled core lang item: {:?}", lang_item);
@@ -662,10 +661,8 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             }
             GpuItem::CoreFn(fn_name) => {
                 if crate::attr::is_panic_function(fn_name.as_str()) {
-                    self.assert(
-                        self.const_value(0, self.type_i1()),
-                        &format!("{} abort at {}", fn_name, self.cur_loc()),
-                    );
+                    let zero = self.const_value(0, self.type_i1());
+                    self.assert(zero, &format!("{} abort at {}", fn_name, self.cur_loc()));
                     return Ok(None);
                 }
                 todo!();
@@ -700,7 +697,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                     let v = self.use_value(*v);
 
                     let element_size =
-                        self.emit_constant(self.static_size_of(ty) as u64, self.type_i64());
+                        self.const_value(self.static_size_of(ty) as u64, self.type_i64());
                     let byte_index = self.mul(v, element_size);
 
                     self.intcast(byte_index, self.type_index(), false).into()
@@ -812,8 +809,14 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         val: <GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::Value,
     ) -> <GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::Value {
         if let Ok(op) = val.is_from_op(Some("arith.constant")) {
-            let op = self.append_op((op).clone());
-            op.result(0).unwrap().into()
+            let attr = op.attribute("value").unwrap();
+            let attr_str = format!("{}", attr);
+            self.const_values.get(&attr_str).cloned().unwrap_or_else(|| {
+                let op = self.append_op((op).clone());
+                let val = op.result(0).unwrap().into();
+                self.const_values.insert(attr_str, val);
+                val
+            })
         } else if let Ok(op) = val.is_from_op(Some("memref.get_global")) {
             let op = self.append_op((op).clone());
             op.result(0).unwrap().into()
@@ -1145,8 +1148,9 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         // if signed: overflow = (y < 0) == (z < x)
         // if unsigned: overflow = (x < y)
         let overflow = if signed {
-            let neg_rhs = self.icmp(IntPredicate::IntSLT, rhs, self.const_value(0, rhs.r#type()));
-            let pos_rhs = self.icmp(IntPredicate::IntSLT, rhs, self.const_value(0, rhs.r#type()));
+            let zero = self.const_value(0, rhs.r#type());
+            let neg_rhs = self.icmp(IntPredicate::IntSLT, rhs, zero);
+            let pos_rhs = self.icmp(IntPredicate::IntSLT, rhs, zero);
             let res_smaller_lhs = self.icmp(IntPredicate::IntSLT, ret, lhs);
             let res_greater_lhs = self.icmp(IntPredicate::IntSLT, ret, lhs);
             let c1 = self.and(res_smaller_lhs, neg_rhs);
@@ -1219,8 +1223,8 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
 
         #[cfg(feature = "inplace_bound_check")]
         let ptr = if check && !self.disable_bound_check { self.select_ptr(ptr, None) } else { ptr };
-        let mut loaded =
-            self.mlir_load(load_ty, ptr, &[self.const_value(0, self.type_index())], align);
+        let zero = self.const_value(0, self.type_index());
+        let mut loaded = self.mlir_load(load_ty, ptr, &[zero], align);
         // If the type is memref, we need to cast the address to the correct type.
         if ty.is_mem_ref() {
             loaded = self.inttoptr(loaded, ty);
@@ -1266,7 +1270,8 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
     }
 
     fn null_ptr(&mut self, ty: mlir_ir::Type<'ml>) -> mlir_ir::Value<'ml, 'a> {
-        self.inttoptr(self.const_value(0, self.type_i64()), ty)
+        let zero = self.const_value(0, self.type_i64());
+        self.inttoptr(zero, ty)
     }
 
     #[cfg(feature = "inplace_bound_check")]
@@ -1441,6 +1446,11 @@ impl<'tcx, 'ml, 'a> StaticBuilderMethods for GpuBuilder<'tcx, 'ml, 'a> {
 
 impl<'tcx, 'ml, 'a> Deref for GpuBuilder<'tcx, 'ml, 'a> {
     fn deref(&self) -> &Self::Target {
+        *self.cx.builder.write().unwrap() = Some(crate::context::BuilderInfo {
+            name: self.name.to_string(),
+            cur_block: self.cur_block(),
+            cur_span: self.cur_span,
+        });
         self.cx
     }
 
@@ -1457,6 +1467,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             llbb.parent_operation().unwrap().attribute("sym_name").unwrap(),
         )
         .unwrap();
+        *cx.builder.write().unwrap() = None;
         let mut builder = Self {
             cx,
             name: sym.value().to_string(),
@@ -1469,6 +1480,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             san_dummy: None,
             #[cfg(feature = "inplace_bound_check")]
             valid_mem_access: None,
+            const_values: HashMap::new(),
         };
         builder.add_dim_assumptions();
         builder
@@ -1684,7 +1696,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn unreachable(&mut self) {
-        self.assert(self.const_value(0, self.type_i1()), "unreachable");
+        let zero = self.const_value(0, self.type_i1());
+        self.assert(zero, "unreachable");
         let block = self.append_sibling_block("unreachable");
         self.br(block);
         let cur = self.cur_block;
@@ -1753,7 +1766,12 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn exactudiv(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        // TODO: check division is exact, if not, panic
+        let rem = self.urem(lhs, rhs);
+        let zero = self.const_value(0, rem.r#type());
+        let is_exact = self.icmp(IntPredicate::IntEQ, rem, zero);
+        self.assert(is_exact, "exactudiv remainder is not zero");
+        self.udiv(lhs, rhs)
     }
 
     fn sdiv(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
@@ -1839,7 +1857,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn neg(&mut self, v: Self::Value) -> Self::Value {
-        self.sub(self.const_value(0, v.r#type()), v)
+        let zero = self.const_value(0, v.r#type());
+        self.sub(zero, v)
     }
 
     fn fneg(&mut self, v: Self::Value) -> Self::Value {
@@ -2025,10 +2044,6 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
 
     fn nonnull_metadata(&mut self, load: Self::Value) {
         todo!()
-    }
-
-    fn emit_constant(&mut self, val: u64, ty: Self::Type) -> Self::Value {
-        self.mlir_const_val_from_type(val, ty, self.cur_block())
     }
 
     fn emit_gpu_scalar_to_backend(
@@ -2270,7 +2285,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         let ptr = self.inbounds_gep_ret(self.type_i64(), base_memref, &[one], false);
         self.store_with_check(val, ptr, align, false);
         let ptr = self.inbounds_gep_ret(self.type_i64(), base_memref, &[two], false);
-        self.store_with_check(self.const_value(0, self.type_i64()), ptr, align, false);
+        let zero_u64 = self.const_value(0, self.type_i64());
+        self.store_with_check(zero_u64, ptr, align, false);
         if self.fn_shared_memory_size.read().unwrap()[&self.name] > 0 {
             panic!(
                 "inttoptr: {:?} {} -> {} where memoryspace is unknown",

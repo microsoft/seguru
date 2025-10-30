@@ -106,12 +106,13 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         let len = mem_ref_ty.dim_size(0).unwrap();
         let dst = self.use_value_as_ty(dst, ty);
         let src = self.use_value_as_ty(src, ty);
+        let len = self.const_value(len, self.type_index());
         self.memcpy(
             dst,
             rustc_abi::Align::ONE,
             src,
             rustc_abi::Align::ONE,
-            self.const_value(len, self.type_index()),
+            len,
             rustc_codegen_ssa_gpu::MemFlags::VOLATILE,
         );
     }
@@ -221,7 +222,8 @@ impl<'tcx, 'ml, 'a> IntrinsicCallBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 
     }
 
     fn abort(&mut self) {
-        self.assert(self.const_value(0, self.type_i1()), &format!("abort at {}", self.cur_loc()));
+        let cond = self.const_value(0, self.type_i1());
+        self.assert(cond, &format!("abort at {}", self.cur_loc()));
     }
 
     fn assume(&mut self, val: Self::Value) {

@@ -1104,7 +1104,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         &mut self,
         lhs: mlir_ir::Value<'ml, 'a>,
         rhs: mlir_ir::Value<'ml, 'a>,
-        signed: bool,
+        signed: Option<bool>,
     ) -> (mlir_ir::Value<'ml, 'a>, mlir_ir::Value<'ml, 'a>) {
         let (lhs, rhs) = self.int_val_pair_cast(lhs, rhs);
         if let Some(res) = crate::mlir::const_add(lhs, rhs, signed) {
@@ -1112,14 +1112,18 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         }
         let op = melior::dialect::arith::addi(lhs, rhs, self.cur_loc());
         let ret = self.append_op_res(op);
+        let mut overflow = self.const_value(0, self.type_i1());
         if self.tcx.sess.opts.cg.overflow_checks != Some(true) {
-            let overflow = self.const_value(0, self.type_i1());
             return (ret, overflow);
         }
+        let Some(signed) = signed else {
+            // signless add does not care overflow.
+            return (ret, overflow);
+        };
         let cmp_op = if signed { IntPredicate::IntSGT } else { IntPredicate::IntUGT };
         let lhs_greater = self.icmp(cmp_op, lhs, ret);
         // overflow = (z < x) == (y > 0)
-        let overflow = if signed {
+        overflow = if signed {
             let zero: Value<'_, '_> = self.const_value(0, rhs.r#type());
             let rhs_pos = self.icmp(IntPredicate::IntSGE, rhs, zero);
             self.icmp(IntPredicate::IntEQ, lhs_greater, rhs_pos)
@@ -1133,7 +1137,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         &mut self,
         lhs: mlir_ir::Value<'ml, 'a>,
         rhs: mlir_ir::Value<'ml, 'a>,
-        signed: bool,
+        signed: Option<bool>,
     ) -> (mlir_ir::Value<'ml, 'a>, mlir_ir::Value<'ml, 'a>) {
         let (lhs, rhs) = self.int_val_pair_cast(lhs, rhs);
         if let Some(res) = crate::mlir::const_sub(lhs, rhs, signed) {
@@ -1141,13 +1145,17 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         }
         let op = melior::dialect::arith::subi(lhs, rhs, self.cur_loc());
         let ret = self.append_op_res(op);
+        let mut overflow = self.const_value(0, self.type_i1());
         if self.tcx.sess.opts.cg.overflow_checks != Some(true) {
-            let overflow = self.const_value(0, self.type_i1());
             return (ret, overflow);
         }
+        let Some(signed) = signed else {
+            // signless sub does not care overflow.
+            return (ret, overflow);
+        };
         // if signed: overflow = (y < 0) == (z < x)
         // if unsigned: overflow = (x < y)
-        let overflow = if signed {
+        overflow = if signed {
             let zero = self.const_value(0, rhs.r#type());
             let neg_rhs = self.icmp(IntPredicate::IntSLT, rhs, zero);
             let pos_rhs = self.icmp(IntPredicate::IntSLT, rhs, zero);
@@ -1166,7 +1174,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         &mut self,
         lhs: mlir_ir::Value<'ml, 'a>,
         rhs: mlir_ir::Value<'ml, 'a>,
-        signed: bool,
+        signed: Option<bool>,
     ) -> (mlir_ir::Value<'ml, 'a>, mlir_ir::Value<'ml, 'a>) {
         let (lhs, rhs) = self.int_val_pair_cast(lhs, rhs);
         if let Some(res) = crate::mlir::const_mul(lhs, rhs, signed) {
@@ -1175,14 +1183,18 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
 
         let op = melior::dialect::arith::muli(lhs, rhs, self.cur_loc());
         let ret = self.append_op_res(op);
+        let mut overflow = self.const_value(0, self.type_i1());
         if self.tcx.sess.opts.cg.overflow_checks != Some(true) {
-            let overflow = self.const_value(0, self.type_i1());
             return (ret, overflow);
         }
+        let Some(signed) = signed else {
+            // signless mul does not care overflow.
+            return (ret, overflow);
+        };
         let zero = self.const_value(0, rhs.r#type());
         // if signed, overflow = (((x ^ y ^ z) & (x ^ z)) < 0);
         // if unsigned, overflow = (y != 0 && x > z);
-        let overflow = if signed {
+        overflow = if signed {
             let x_xor_y = self.xor(lhs, rhs);
             let x_xor_y_xor_z = self.xor(x_xor_y, ret);
             let x_xor_z = self.xor(lhs, ret);
@@ -1707,7 +1719,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn add(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        self.mlir_overflowing_add(lhs, rhs, false).0
+        self.mlir_overflowing_add(lhs, rhs, None).0
     }
 
     fn fadd(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
@@ -1726,7 +1738,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn sub(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        self.mlir_overflowing_sub(lhs, rhs, false).0
+        self.mlir_overflowing_sub(lhs, rhs, None).0
     }
 
     fn fsub(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
@@ -1743,7 +1755,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn mul(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        self.mlir_overflowing_mul(lhs, rhs, false).0
+        self.mlir_overflowing_mul(lhs, rhs, None).0
     }
 
     fn fmul(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
@@ -1892,9 +1904,9 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             _ => panic!("non integer discriminant"),
         };
         match oop {
-            OverflowOp::Add => self.mlir_overflowing_add(lhs, rhs, signed),
-            OverflowOp::Sub => self.mlir_overflowing_sub(lhs, rhs, signed),
-            OverflowOp::Mul => self.mlir_overflowing_mul(lhs, rhs, signed),
+            OverflowOp::Add => self.mlir_overflowing_add(lhs, rhs, Some(signed)),
+            OverflowOp::Sub => self.mlir_overflowing_sub(lhs, rhs, Some(signed)),
+            OverflowOp::Mul => self.mlir_overflowing_mul(lhs, rhs, Some(signed)),
         }
     }
 
@@ -2296,7 +2308,17 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
             panic!();
         }
         if let Some(const_val) = crate::mlir::mlir_val_to_const_int(val) {
-            return self.const_value(const_val & ((1 << int_width(dest_ty).unwrap()) - 1), dest_ty);
+            let bit_width = int_width(dest_ty).unwrap();
+            let val = const_val & ((1 << bit_width) - 1);
+            match bit_width {
+                1 => return self.const_value(val != 0, dest_ty),
+                8 => return self.const_value(val as u8 as i8, dest_ty),
+                16 => return self.const_value(val as u16 as i16, dest_ty),
+                32 => return self.const_value(val as u32 as i32, dest_ty),
+                64 => return self.const_value(val as u64 as i64, dest_ty),
+                128 => return self.const_value(val as u128 as i128, dest_ty),
+                _ => panic!("Unsupported intcast to width {}", bit_width),
+            }
         }
         if dest_ty.is_mem_ref() {
             return self.inttoptr(val, dest_ty);

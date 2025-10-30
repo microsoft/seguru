@@ -344,7 +344,7 @@ pub(crate) fn mlir_val_to_const_int<'ml, 'a>(value: melior::ir::Value<'ml, 'a>) 
     if let Ok(op) = value.is_from_op(Some("arith.constant")) {
         melior::ir::attribute::IntegerAttribute::try_from(op.attribute("value").unwrap())
             .ok()
-            .map(|v| v.value() as u64 as u128)
+            .map(|v| v.value() as u64 as i128 as u128)
     } else {
         None
     }
@@ -370,22 +370,25 @@ pub(crate) fn int_width(ty: melior::ir::r#type::Type<'_>) -> Option<u32> {
 
 macro_rules! const_op {
     ($op: tt, $name: ident) => {
-        pub(crate) fn $name<'ml, 'a>(left: melior::ir::Value<'ml, 'a>, right: melior::ir::Value<'ml, 'a>, signed: bool) -> Option<u128> {
+        pub(crate) fn $name<'ml, 'a>(left: melior::ir::Value<'ml, 'a>, right: melior::ir::Value<'ml, 'a>, signed: Option<bool>) -> Option<i128> {
             let bits = int_width(left.r#type())?;
             let (Some(left), Some(right)) = (crate::mlir::mlir_val_to_const_int(left), crate::mlir::mlir_val_to_const_int(right)) else {
               return None
             };
-            let ret = match (bits, signed) {
-                (8, true) => (left as i8 $op right as i8) as u128,
-                (8, false) => (left as u8 $op right as u8) as u128,
-                (16, true) => (left as i16 $op right as i16) as u128,
-                (16, false) => (left as u16 $op right as u16) as u128,
-                (32, true) => (left as i32 $op right as i32) as u128,
-                (32, false) => (left as u32 $op right as u32) as u128,
-                (64, true) => (left as i64 $op right as i64) as u128,
-                (64, false) => (left as u64 $op right as u64) as u128,
-                (128, true) => (left as i128 $op right as i128) as u128,
-                (128, false) => left $op right,
+            let use_signed = matches!(signed, Some(true) | None);
+            let ret = match (bits, use_signed) {
+                (8, true) => (left as i8 $op right as i8) as u8 as i128,
+                (8, false) => (left as u8 $op right as u8) as i128,
+                (16, true) => (left as i16 $op right as i16) as u16 as i128,
+                (16, false) => (left as u16 $op right as u16) as i128,
+                (32, true) => (left as i32 $op right as i32) as u32 as i128,
+                (32, false) => (left as u32 $op right as u32) as i128,
+                (64, true) => {
+                    (left as i64 $op right as i64) as u64 as i128
+                },
+                (64, false) => (left as u64 $op right as u64) as i128,
+                (128, true) => (left as i128 $op right as i128),
+                (128, false) => (left $op right) as i128,
                 _ => panic!("Unsupported integer size: {}", bits),
             };
             Some(ret)

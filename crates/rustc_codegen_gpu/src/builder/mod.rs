@@ -129,7 +129,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
     ) -> mlir_ir::Value<'ml, 'a> {
         let attr_str = format!("{val} : {ty}");
         if let Some(val) = self.const_values.get(&attr_str) {
-            return val.clone();
+            return *val;
         }
         let const_val = self.mlir_const_val_from_type(val, ty, self.cur_block());
         self.const_values.insert(attr_str, const_val);

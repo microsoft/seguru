@@ -175,10 +175,10 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         MLIRType::from(mlir_type::RankedTensorType::new(&[len], ty, None))
     }
 
-    pub(crate) fn type_llvm_ptr(&self) -> MLIRType<'ml> {
+    pub(crate) fn type_llvm_ptr(&self, address_space: u32) -> MLIRType<'ml> {
         // This is a pointer to the LLVM dialect, which is used for LLVM intrinsics.
         // We use the `llvm.ptr` type from the LLVM dialect.
-        MLIRType::from(melior::dialect::llvm::r#type::pointer(self.mlir_ctx, 0))
+        MLIRType::from(melior::dialect::llvm::r#type::pointer(self.mlir_ctx, address_space))
     }
 
     pub(crate) fn expand_type(&self, ty: MLIRType<'ml>) -> Vec<MLIRType<'ml>> {

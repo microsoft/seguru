@@ -995,17 +995,24 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         self.cur_block().append_operation(op)
     }
 
-    fn inttollvmptr(&mut self, val: mlir_ir::Value<'ml, 'a>) -> mlir_ir::Value<'ml, 'a> {
-        assert!(!self.is_unreachable());
-        let dest_ty = self.type_llvm_ptr();
-        let int64_val = if val.r#type() == self.type_i64() {
-            val
+    fn ptrtollvmptr(&mut self, ptr: mlir_ir::Value<'ml, 'a>) -> mlir_ir::Value<'ml, 'a> {
+        let memref_ty = MemRefType::try_from(ptr.r#type()).unwrap();
+        let addr = self.ptrtoint(ptr, self.type_i64());
+        let addr_space = if let Some(addr_space) = memref_ty.memory_space() {
+            use crate::mlir::memref::MemorySpace;
+            if addr_space == MemorySpace::Shared.to_attr(self.mlir_ctx) {
+                3
+            } else if addr_space == MemorySpace::Global.to_attr(self.mlir_ctx) {
+                1
+            } else {
+                0
+            }
         } else {
-            self.intcast(val, self.type_i64(), false)
+            0
         };
-        let op =
-            melior::dialect::ods::llvm::inttoptr(self.mlir_ctx, dest_ty, int64_val, self.cur_loc())
-                .into();
+        let dest_ty = self.type_llvm_ptr(addr_space);
+        let op = melior::dialect::ods::llvm::inttoptr(self.mlir_ctx, dest_ty, addr, self.cur_loc())
+            .into();
         self.append_op_res(op)
     }
 
@@ -1066,7 +1073,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         let llvm_raw_ptr_int = self.intcast(raw_ptr, self.type_i64(), false);
 
         // Ptr to LLVM
-        let llvm_ptr = self.inttollvmptr(llvm_raw_ptr_int);
+        let llvm_ptr = self.ptrtollvmptr(raw_ptr);
 
         // LLVM store with volatile
         let llvm_store_op = melior::dialect::llvm::load(
@@ -2526,8 +2533,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     ) {
         let is_volatile = flags.contains(rustc_codegen_ssa_gpu::MemFlags::VOLATILE);
         let is_volatile = IntegerAttribute::new(self.type_i1(), if is_volatile { 1 } else { 0 });
-        let dst_addr = self.ptrtoint(ptr, self.type_i64());
-        let dst = self.inttollvmptr(dst_addr);
+        let dst = self.ptrtollvmptr(ptr);
         let fill_byte = self.use_value(fill_byte);
         let size = self.use_value(size);
         self.append_op(

@@ -211,8 +211,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a> AsmBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a
         use melior::ir::{TypeLike, ValueLike};
         for i in &mut inputs {
             if i.r#type().is_mem_ref() {
-                let addr = self.ptrtoint(*i, self.type_i64());
-                *i = self.inttollvmptr(addr);
+                *i = self.ptrtollvmptr(*i);
             }
         }
         let builder = builder.operands(&inputs);

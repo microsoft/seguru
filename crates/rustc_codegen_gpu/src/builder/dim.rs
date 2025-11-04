@@ -35,11 +35,8 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         for dim in dims.iter().skip(1) {
             total_dim = self.mul(total_dim, *dim);
         }
-        let cond = self.icmp(
-            rustc_codegen_ssa_gpu::common::IntPredicate::IntULE,
-            total_dim,
-            self.const_value(i32::MAX, self.type_i32()),
-        );
+        let max = self.const_value(i32::MAX, self.type_i32());
+        let cond = self.icmp(rustc_codegen_ssa_gpu::common::IntPredicate::IntULE, total_dim, max);
         self.assume(cond);
     }
 

@@ -72,18 +72,9 @@ pub trait BuilderMethods<'a, 'tcx>:
     fn cx(&self) -> &Self::CodegenCx;
     fn llbb(&self) -> Self::BasicBlock;
 
-    fn emit_constant(&mut self, val: u64, ty: Self::Type) -> Self::Value;
-
     fn alloca_san_dummy(&mut self) -> Self::Value;
 
     fn alloca_shared(&mut self, size: Size, align: Align) -> Self::Value;
-
-    fn emit_gpu_scalar_to_backend(
-        &self,
-        cv: rustc_middle::mir::interpret::Scalar,
-        layout: rustc_abi::Scalar,
-        ty: Self::Type,
-    ) -> Self::Value;
 
     fn emit_bound_check(&mut self, idx: Self::Value, len: Self::Value, ptr: Self::Value) -> bool;
 

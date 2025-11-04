@@ -2,7 +2,7 @@ use melior::dialect::memref as mlir_memref;
 use melior::helpers::ArithBlockExt;
 use melior::ir::attribute::StringAttribute;
 use melior::ir::operation::OperationMutLike;
-use melior::ir::{self as mlir_ir, BlockLike, Location, r#type as mlir_type};
+use melior::ir::{self as mlir_ir, BlockLike, Location, TypeLike, r#type as mlir_type};
 use rustc_abi::Size;
 use rustc_codegen_ssa_gpu::traits::{
     BackendTypes, BaseTypeCodegenMethods, ConstCodegenMethods, StaticCodegenMethods,
@@ -51,7 +51,19 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         i: impl std::fmt::Display,
         typ: <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type,
     ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Value {
-        self.mlir_const_val_from_type(i, typ, self.mlir_body(false))
+        let (block, attr_str) = if let Some(builder) = self.builder.read().unwrap().as_ref() {
+            let block = builder.cur_block;
+            let name = &builder.name;
+            (block, format!("{name} {block} {i} : {typ}"))
+        } else {
+            (self.mlir_body(true), format!("{i} : {typ}"))
+        };
+        if let Some(value) = self.const_values.read().unwrap().get(&attr_str) {
+            return *value;
+        }
+        let val = self.mlir_const_val_from_type(i, typ, block);
+        self.const_values.write().unwrap().insert(attr_str, val);
+        val
     }
 
     pub(crate) fn define_static_shared_mem(
@@ -297,16 +309,32 @@ impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
                 if let rustc_abi::Primitive::Pointer(_) = layout.primitive() {
                     if data == 0 { self.const_null(ty) } else { self.const_undef(ty) }
                 } else {
-                    self.mlir_global_const_int_from_type(
-                        cv.assert_scalar_int().to_int(int.size()),
-                        ty,
-                    )
+                    let data = if ty.is_index() || ty.is_integer() {
+                        data.to_string()
+                    } else if ty.is_float() {
+                        let val = int.to_bits(int.size());
+                        match int.size().bits() {
+                            16 => format!("0x{:04X}", val),
+                            32 => format!("0x{:08X}", val),
+                            64 => format!("0x{:016X}", val),
+                            _ => panic!("Unsupported float size: {:?}", int.size()),
+                        }
+                    } else {
+                        self.emit_error(
+                            format!("Unsupported type for scalar: {:?}", ty),
+                            self.builder
+                                .read()
+                                .unwrap()
+                                .as_ref()
+                                .map_or(rustc_span::DUMMY_SP, |b| b.cur_span),
+                        )
+                    };
+                    self.mlir_global_const_int_from_type(data, ty)
                 }
             }
             rustc_const_eval::interpret::Scalar::Ptr(ptr, s) => {
                 let (prov, offset) = ptr.into_parts();
                 let alloc_id = prov.alloc_id();
-                trace!("scalar_to_backend ptr: {:?}", self.tcx.global_alloc(alloc_id));
                 self.const_data_memref_from_alloc_id(alloc_id)
             }
         }

@@ -1,5 +1,7 @@
 use core::marker::Sized;
 
+use num_traits::AsPrimitive;
+
 #[rustc_diagnostic_item = "gpu::printf"]
 #[gpu_codegen::device]
 #[inline(never)]
@@ -7,8 +9,9 @@ pub fn printf(_fmt: &'static str) {
     unimplemented!()
 }
 
-trait SupportedPrintfArg {
+trait SupportedPrintfArg: AsPrimitive<Self::Output> {
     const HOLDER: &'static str;
+    type Output: Copy + SupportedPrintfArg;
 }
 
 #[allow(private_bounds)]
@@ -19,7 +22,7 @@ pub trait PushPrintfArg: SupportedPrintfArg + Sized {
     #[gpu_codegen::device]
     #[inline(always)]
     fn push_printf_arg(self) {
-        self._push_printf_arg(Self::HOLDER);
+        self.as_()._push_printf_arg(Self::HOLDER);
     }
 }
 
@@ -34,29 +37,30 @@ impl<T: SupportedPrintfArg + Sized> PushPrintfArg for T {
 }
 
 macro_rules! def_push_printf_arg {
-    ($t:ty, $holder: literal) => {
+    ($t:ty, $ot: ty, $holder: literal) => {
         impl SupportedPrintfArg for $t {
             const HOLDER: &'static str = $holder;
+            type Output = $ot;
         }
     };
     () => {};
 }
 
-def_push_printf_arg!(u8, "%u");
-def_push_printf_arg!(u16, "%u");
-def_push_printf_arg!(u32, "%u");
-def_push_printf_arg!(u64, "%lu");
-def_push_printf_arg!(u128, "%llu");
-def_push_printf_arg!(i8, "%d");
-def_push_printf_arg!(i16, "%d");
-def_push_printf_arg!(i32, "%d");
-def_push_printf_arg!(i64, "%ld");
-def_push_printf_arg!(i128, "%lld");
-def_push_printf_arg!(usize, "%ld");
-def_push_printf_arg!(isize, "%ld");
-def_push_printf_arg!(f32, "%f");
-def_push_printf_arg!(f64, "%f");
-def_push_printf_arg!(bool, "%d");
+def_push_printf_arg!(u8, u32, "%u");
+def_push_printf_arg!(u16, u32, "%u");
+def_push_printf_arg!(u32, u32, "%u");
+def_push_printf_arg!(u64, u64, "%lu");
+def_push_printf_arg!(u128, u128, "%llu");
+def_push_printf_arg!(i8, i32, "%d");
+def_push_printf_arg!(i16, i32, "%d");
+def_push_printf_arg!(i32, i32, "%d");
+def_push_printf_arg!(i64, i64, "%ld");
+def_push_printf_arg!(i128, i128, "%lld");
+def_push_printf_arg!(usize, usize, "%ld");
+def_push_printf_arg!(isize, isize, "%ld");
+def_push_printf_arg!(f32, f32, "%f");
+def_push_printf_arg!(f64, f64, "%f");
+def_push_printf_arg!(bool, u32, "%d");
 
 #[macro_export]
 macro_rules! println {

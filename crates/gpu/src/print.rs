@@ -42,7 +42,7 @@ macro_rules! def_push_printf_arg {
     () => {};
 }
 
-def_push_printf_arg!(u8, "%c");
+def_push_printf_arg!(u8, "%u");
 def_push_printf_arg!(u16, "%u");
 def_push_printf_arg!(u32, "%u");
 def_push_printf_arg!(u64, "%lu");

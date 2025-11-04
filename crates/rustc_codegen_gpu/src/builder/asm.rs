@@ -2,7 +2,7 @@ use melior::ir::attribute::{IntegerAttribute, StringAttribute};
 use rustc_ast::{InlineAsmOptions, InlineAsmTemplatePiece};
 use rustc_codegen_ssa_gpu::mir::operand::OperandValue;
 use rustc_codegen_ssa_gpu::traits::{
-    AsmBuilderMethods, BaseTypeCodegenMethods, BuilderMethods, InlineAsmOperandRef,
+    AsmBuilderMethods, BaseTypeCodegenMethods, InlineAsmOperandRef,
 };
 use rustc_data_structures::fx::FxHashMap;
 use rustc_target::asm::{InlineAsmRegClass, InlineAsmRegOrRegClass};

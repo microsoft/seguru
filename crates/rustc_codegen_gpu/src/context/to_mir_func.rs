@@ -68,6 +68,15 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             .tcx
             .try_instantiate_and_normalize_erasing_regions(instance.args, self.typing_env(), ty)
             .expect("failed to instantiate and normalize");
+        if mono_ty.contains_closure() {
+            // If the function contains a closure, use the full symbol name to avoid conflicts.
+            // since closures can capture variables from their environment, we need to ensure
+            // that the symbol name is unique.
+            return gpu_name::convert_def_path_to_gpu_sym_name(self.tcx.symbol_name(instance).name);
+        }
+        // If no closure, we can use the type name directly.
+        // This produces shorter and more readable names.
+        // It makes it easy to get the name from a given public kernel entry function.
         gpu_name::convert_def_path_to_gpu_sym_name(&rustc_const_eval::util::type_name(
             self.tcx, mono_ty,
         ))

@@ -2,7 +2,7 @@ use melior::ir::attribute::{IntegerAttribute, StringAttribute};
 use rustc_ast::{InlineAsmOptions, InlineAsmTemplatePiece};
 use rustc_codegen_ssa_gpu::mir::operand::OperandValue;
 use rustc_codegen_ssa_gpu::traits::{
-    AsmBuilderMethods, BaseTypeCodegenMethods, BuilderMethods, InlineAsmOperandRef,
+    AsmBuilderMethods, BaseTypeCodegenMethods, InlineAsmOperandRef,
 };
 use rustc_data_structures::fx::FxHashMap;
 use rustc_target::asm::{InlineAsmRegClass, InlineAsmRegOrRegClass};
@@ -211,8 +211,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a> AsmBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a
         use melior::ir::{TypeLike, ValueLike};
         for i in &mut inputs {
             if i.r#type().is_mem_ref() {
-                let addr = self.ptrtoint(*i, self.type_i64());
-                *i = self.inttollvmptr(addr);
+                *i = self.ptrtollvmptr(*i);
             }
         }
         let builder = builder.operands(&inputs);

@@ -1,0 +1,40 @@
+name: Docs
+
+on:
+  push:
+    branches:
+      - main  # or your default branch
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install rust toolchain
+        run: rustup toolchain install --profile minimal
+
+      - name: Add NVIDIA package repository
+        run: |
+          sudo wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i cuda-keyring_1.1-1_all.deb
+          sudo apt update
+
+      - name: Install Minimal CUDA Toolkit
+        run: |
+          sudo apt install -y cuda-nvcc-12-9 cuda-cuobjdump-12-9 # Or adjust version as needed
+          echo "PATH=/usr/local/cuda/bin:${PATH}" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+
+      - name: Build docs
+        working-directory: crates
+        run: cargo doc --no-deps -p gpu -p gpu_host -p cuda_bindings -p gpu_macros
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        if: github.ref == 'refs/heads/main'
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./crates/target/doc

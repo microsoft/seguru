@@ -40,7 +40,7 @@ jobs:
         run: |
           mv ./crates/target/doc ./_site/libs
           cp README.md ./_site/
-          cp -r docs ./_site/docs
+          cp -r doc ./_site/doc
 
 
       - name: Upload Pages artifact

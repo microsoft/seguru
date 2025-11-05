@@ -38,9 +38,6 @@ jobs:
         run: |
           mv ./crates/target/doc ./_site/libs
 
-      - name: add markdowns
-        uses: actions/jekyll-build-pages@v1
-
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:

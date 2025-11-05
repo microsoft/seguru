@@ -39,7 +39,7 @@ jobs:
       - name: Move docs to _site
         run: |
           mv ./crates/target/doc ./_site/libs
-          cp README.md ./_site/
+          cp README.md ./_site/index.md
           cp -r doc ./_site/doc
 
 
@@ -62,5 +62,3 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         uses: actions/deploy-pages@v4
-        with:
-          preview: ${{ github.event_name == 'pull_request' }}

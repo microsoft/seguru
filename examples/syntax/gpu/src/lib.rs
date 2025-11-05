@@ -6,6 +6,34 @@
 use gpu::cg::CGOperations;
 use gpu::{thread_id, CacheStreamLoadStore, DimX, GPUDeviceFloatIntrinsics};
 
+pub enum TestEnum {
+    A,
+    B,
+}
+
+impl TestEnum {
+    #[gpu::device]
+    #[inline]
+    pub fn test_enum_closure(&self, el: [u64; 4]) -> [u8; 32] {
+        let mut res = [0u8; 32];
+        match self {
+            TestEnum::A => {
+                el.iter().enumerate().for_each(|(i, limb)| {
+                    let off = i * 8;
+                    res[off..off + 8].copy_from_slice(&limb.to_le_bytes());
+                });
+            }
+            TestEnum::B => {
+                el.iter().enumerate().for_each(|(i, limb)| {
+                    let off = i * 8;
+                    res[off..off + 8].copy_from_slice(&limb.to_be_bytes());
+                });
+            }
+        }
+        res
+    }
+}
+
 type ThreadChunkMatrix2D<'a> = gpu::GlobalThreadChunk<'a, u32, gpu::Map2D>;
 /// # Safety
 /// This kernel might be unsafe because it uses Chunkable::new that is not defined as trusted chunking func.
@@ -59,6 +87,11 @@ pub fn kernel_arith<const N: u32>(
     // Use atomic to update h
     let atomic_h = gpu::sync::Atomic::new(h);
     atomic_h.atomic_addf(g[thread_id as usize]);
+    let l = 1u64.to_le_bytes();
+    let (l0, l7) = (l[0], l[7]);
+    assert!(l0 == 1 && l7 == 0);
+    let x = TestEnum::A.test_enum_closure([1, 2, 3, 4]);
+    assert!(x[0] == 1 && x[8] == 2 && x[16] == 3 && x[24] == 4);
     /*let warp = gpu::cg::ThreadWarpTile::<32, 1>();
     warp.run_on_lane_0::<f32>(f, |v| {
         *v += 1.5;

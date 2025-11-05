@@ -3,9 +3,7 @@ name: Docs
 on:
   push:
     branches:
-      - main  # or your default branch
-  pull_request:
-    branches: [ "main" ]
+      - main
 
 jobs:
   build-docs:
@@ -39,9 +37,9 @@ jobs:
       - name: Move docs to _site
         run: |
           mv ./crates/target/doc ./_site/libs
-          cp README.md ./_site/
-          cp -r doc ./_site/doc
 
+      - name: add markdowns
+        uses: actions/jekyll-build-pages@v1
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
@@ -62,5 +60,3 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         uses: actions/deploy-pages@v4
-        with:
-          preview: ${{ github.event_name == 'pull_request' }}

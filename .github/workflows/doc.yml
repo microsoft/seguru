@@ -8,7 +8,7 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build:
+  build-docs:
     runs-on: ubuntu-latest
 
     steps:
@@ -32,9 +32,35 @@ jobs:
         working-directory: crates
         run: cargo doc --no-deps -p gpu -p gpu_host -p cuda_bindings -p gpu_macros
 
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
-        if: github.ref == 'refs/heads/main'
+      - name: Set up dir structure
+        run: |
+          mkdir ./_site
+
+      - name: Move docs to _site
+        run: |
+          mv ./crates/target/doc ./_site/libs
+          cp README.md ./_site/
+          cp -r doc ./_site/doc
+
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./crates/target/doc
+          name: github-pages
+          path: ./_site
+
+  deploy-docs:
+    needs: build-docs
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4
+        with:
+          preview: ${{ github.event_name == 'pull_request' }}

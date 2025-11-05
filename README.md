@@ -90,4 +90,26 @@ cd examples
 cargo run --bin ...
 ```
 
+## GPU libraries
+
+SeGuRu provides GPU-side library [gpu
+lib](https://microsoft.github.io/seguru/gpu/) crates for GPU primitives and a
+host-side library [gpu_host lib](https://microsoft.github.io/seguru/gpu/) to
+transfer data between GPU and CPU and launch the GPU code.
+
 ## Tests
+
+### Test tools and libs
+
+```
+cd crates
+cargo test
+```
+
+### Test GPU codes 
+
+```
+cd examples
+cargo test
+```
+

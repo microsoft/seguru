@@ -13,9 +13,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
+      - name: Install rust toolchain
+        run: rustup toolchain install --profile minimal
 
       - name: Add NVIDIA package repository
         run: |

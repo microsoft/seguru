@@ -92,10 +92,9 @@ cargo run --bin ...
 
 ## GPU libraries
 
-SeGuRu provides GPU-side library [gpu
-lib](https://microsoft.github.io/seguru/gpu/) crates for GPU primitives and a
-host-side library [gpu_host lib](https://microsoft.github.io/seguru/gpu/) to
-transfer data between GPU and CPU and launch the GPU code.
+SeGuRu provides a [GPU library](https://microsoft.github.io/seguru/libs/gpu/) for
+GPU primitives and a [host library](https://microsoft.github.io/seguru/libs/gpu/) to transfer data between
+GPU and CPU and launch the GPU code.
 
 ## Tests
 

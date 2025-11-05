@@ -39,6 +39,9 @@ jobs:
 
   deploy-docs:
     needs: build-docs
+    permissions:
+      pages: write
+      id-token: write
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to GitHub Pages

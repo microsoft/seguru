@@ -36,7 +36,7 @@ impl<'a, T> GpuGlobal<'a, [T]> {
     #[inline(always)]
     pub fn chunk_to_scope<CS, Map: ScopeUniqueMap<CS>>(
         self,
-        _cs: CS,
+        _scope: CS,
         m: Map,
     ) -> GlobalGroupChunk<'a, T, CS, Map>
     where

@@ -8,6 +8,7 @@ use cuda_bindings::SafeGpuConfig;
 use num_traits::AsPrimitive;
 
 use crate::assert_ptr;
+use crate::cg::Block;
 use crate::chunk::{ScopeUniqueMap, ScopeUniqueMapProvidedMethods};
 use crate::chunk_scope::{Block2ThreadScope, ChainedMap, ChainedScope, ChunkScope, Thread};
 
@@ -222,11 +223,14 @@ impl<T: ?Sized + AsSharedSlice> GpuShared<T> {
     #[gpu_codegen::memspace_shared(0, 1000)]
     #[gpu_codegen::sync_data(0, 1, 2)]
     #[gpu_codegen::ret_sync_data(0, 1000)]
-    pub fn chunk_to_scope<'a, CS: ChunkScope, Map: ScopeUniqueMap<CS>>(
+    pub fn chunk_to_scope<'a, CS, Map: ScopeUniqueMap<CS>>(
         &'a mut self,
         _scope: CS,
         map_params: Map,
-    ) -> SMemThreadChunk<'a, T, CS, Map> {
+    ) -> SMemThreadChunk<'a, T, CS, Map>
+    where
+        CS: ChunkScope<FromScope = Block>,
+    {
         if !map_params.precondition() {
             core::intrinsics::abort();
         }

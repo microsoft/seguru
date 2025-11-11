@@ -292,8 +292,18 @@ impl GpuAttributes {
                     gpu_attr.gpu_item = Some(GpuItem::Core(lang_item));
                 }
             } else {
+                let crate_name = tcx.crate_name(def_id.krate);
                 let path = tcx.def_path_str(def_id);
-                let path = path.as_str();
+                let path = if path.starts_with(crate_name.as_str()) {
+                    path
+                } else {
+                    format!(
+                        "{}::{}",
+                        crate_name,
+                        path.trim_start_matches(&format!("{}::", crate_name))
+                    )
+                };
+                let path: &str = &path;
                 if let Ok(gpu_item) = GpuItem::try_from(path) {
                     gpu_attr.device = true;
                     gpu_attr.gpu_item = Some(gpu_item);

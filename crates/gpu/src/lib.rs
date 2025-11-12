@@ -6,8 +6,8 @@
 #![no_std]
 #![feature(asm_experimental_arch)]
 #![feature(core_intrinsics)]
-#![allow(incomplete_features)]
-#![feature(generic_const_exprs)]
+#![cfg_attr(feature = "unstable_host_chunk", allow(incomplete_features))]
+#![cfg_attr(feature = "unstable_host_chunk", feature(generic_const_exprs))]
 
 extern crate alloc;
 

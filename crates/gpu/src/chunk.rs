@@ -1,3 +1,4 @@
+#[cfg(feature = "unstable_host_chunk")]
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 use core::ops::{Index, IndexMut};
@@ -142,6 +143,7 @@ impl<'a, T, CS: ChunkScope, Map: ScopeUniqueMap<CS>> GlobalGroupChunk<'a, T, CS,
     }
 }
 
+#[cfg(feature = "unstable_host_chunk")]
 #[cfg(not(feature = "codegen_tests"))]
 unsafe impl<'a, T: Send, CS: ChunkScope, Map: ScopeUniqueMap<CS> + 'static + Send>
     cuda_bindings::AsHostKernelParams for GlobalGroupChunk<'a, T, CS, Map>

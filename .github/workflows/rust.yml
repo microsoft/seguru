@@ -56,7 +56,10 @@ jobs:
       - name: Dep
         run: |
           test -x /home/linuxbrew/.linuxbrew/bin/brew || /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-          /home/linuxbrew/.linuxbrew/bin/brew install binutils llvm@20
+          echo "/home/linuxbrew/.linuxbrew/bin" >> $GITHUB_PATH
+          brew list binutils >/dev/null 2>&1 || HOMEBREW_NO_AUTO_UPDATE=1 brew install binutils
+          brew list llvm@20 >/dev/null 2>&1 || HOMEBREW_NO_AUTO_UPDATE=1 brew install llvm@20
+          brew list llvm@21 >/dev/null 2>&1 && brew remove llvm@21
 
       - name: Set up LLVM environment
         run: |

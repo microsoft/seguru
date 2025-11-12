@@ -56,8 +56,7 @@ jobs:
       - name: Dep
         run: |
           test -x /home/linuxbrew/.linuxbrew/bin/brew || /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-          test -x /home/linuxbrew/.linuxbrew/bin/mlir-opt || /home/linuxbrew/.linuxbrew/bin/brew install llvm@20
-          /home/linuxbrew/.linuxbrew/bin/brew install binutils
+          /home/linuxbrew/.linuxbrew/bin/brew install binutils llvm@20
 
       - name: Set up LLVM environment
         run: |

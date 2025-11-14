@@ -20,7 +20,6 @@ use rustc_middle::ty::layout::{HasTyCtxt, HasTypingEnv};
 
 use self::ty::MLIRType;
 use crate::attr::GpuAttributes;
-use crate::mlir::BlockRefWithTime;
 
 type CodegenGPUError = String;
 
@@ -32,7 +31,7 @@ pub struct FnInfo<'tcx, 'ml, 'a> {
 
 pub(crate) struct BuilderInfo<'ml, 'a> {
     pub name: String,
-    pub cur_block: &'a melior::ir::Block<'ml>,
+    pub cur_block: melior::ir::BlockRef<'ml, 'a>,
     pub cur_span: rustc_span::Span,
 }
 
@@ -120,13 +119,8 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         ret
     }
 
-    pub fn mlir_body(&self, gpu: bool) -> &'a melior::ir::Block<'ml> {
-        let cpu_block = unsafe { self.mlir_body["host"].to_ref() };
-        if !gpu {
-            return cpu_block;
-        }
-        let gpu_block = unsafe { self.mlir_body["gpu"].to_ref() };
-        gpu_block
+    pub fn mlir_body(&self, gpu: bool) -> melior::ir::BlockRef<'ml, 'a> {
+        if !gpu { self.mlir_body["host"] } else { self.mlir_body["gpu"] }
     }
 
     pub fn get_const_bytes_by_name(&self, name: &str) -> &[u8] {

@@ -164,15 +164,6 @@ impl<'ml, 'a> ValueToOpRef<'ml, 'a> for Value<'ml, 'a> {
     }
 }
 
-pub trait BlockRefWithTime<'ml, 'a> {
-    unsafe fn to_ref(&self) -> &'a Block<'ml>;
-}
-
-impl<'ml, 'a> BlockRefWithTime<'ml, 'a> for BlockRef<'ml, 'a> {
-    unsafe fn to_ref(&self) -> &'a Block<'ml> {
-        unsafe { std::mem::transmute(self) }
-    }
-}
 impl From<MLIRVisibility> for &str {
     fn from(visibility: MLIRVisibility) -> Self {
         match visibility {

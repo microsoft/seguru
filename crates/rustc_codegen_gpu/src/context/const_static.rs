@@ -1,5 +1,4 @@
 use melior::dialect::memref as mlir_memref;
-use melior::helpers::ArithBlockExt;
 use melior::ir::attribute::StringAttribute;
 use melior::ir::operation::OperationMutLike;
 use melior::ir::{self as mlir_ir, BlockLike, Location, TypeLike, r#type as mlir_type};
@@ -39,11 +38,20 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         &self,
         i: impl std::fmt::Display,
         typ: <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type,
-        block: &'a mlir_ir::Block<'ml>,
+        block: <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::BasicBlock,
     ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Value {
-        block
-            .const_int_from_type(self.mlir_ctx, self.unknown_loc(), i, typ)
-            .expect("failed to create const int")
+        use melior::ir::Attribute;
+        let attribute = format!("{i} : {typ}");
+        let ctx = self.mlir_ctx;
+        let op: melior::ir::Operation = melior::dialect::ods::arith::constant(
+            ctx,
+            typ,
+            Attribute::parse(ctx, &attribute).unwrap(),
+            self.unknown_loc(),
+        )
+        .into();
+        let op_ref = block.append_operation(op);
+        op_ref.result(0).unwrap().into()
     }
 
     fn mlir_global_const_int_from_type(
@@ -54,14 +62,16 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let (block, attr_str) = if let Some(builder) = self.builder.read().unwrap().as_ref() {
             let block = builder.cur_block;
             let name = &builder.name;
-            (block, format!("{name} {block} {i} : {typ}"))
+            (block, format!("{name}_{:x}_{i}:{typ}", block.to_raw().ptr as u64))
         } else {
-            (self.mlir_body(true), format!("{i} : {typ}"))
+            (self.mlir_body(true), format!("{i}:{typ}"))
         };
         if let Some(value) = self.const_values.read().unwrap().get(&attr_str) {
             return *value;
         }
+        eprintln!("Creating global const int: {}", attr_str);
         let val = self.mlir_const_val_from_type(i, typ, block);
+        eprintln!("Done Creating global const int: {}", attr_str);
         self.const_values.write().unwrap().insert(attr_str, val);
         val
     }

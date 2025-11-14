@@ -88,7 +88,7 @@ impl<'tcx, 'ml, 'a> ArgAbiBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
             idx: &mut usize,
         ) -> melior::ir::Value<'ml, 'a> {
             if *idx >= bx.cur_block.argument_count() {
-                dbg!(bx.cur_block().parent_operation());
+                dbg!(bx.cur_block.parent_operation());
                 dbg!(*idx);
                 dbg!(bx.cur_block.argument_count());
                 panic!();

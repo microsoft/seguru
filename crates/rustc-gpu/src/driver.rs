@@ -245,12 +245,40 @@ fn config_link_gpu_code(config: &mut Config) {
                 .expect("failed to compile gpu lib");
             assert!(gpu_obj_file.exists());
             debug!("link to {:?}", gpu_obj_file);
+            let link_path = gpu_obj_file.as_os_str().to_str().unwrap().to_string();
+            // Use “–whole-archive” option of the linker when linking with static lib
+            // such that the gpu object will not be omitted in Arm64 target
             config.opts.libs.push(NativeLib {
-                name: gpu_obj_file.as_os_str().to_str().unwrap().to_string(),
+                name: "--whole-archive".into(),
                 new_name: None,
                 kind: NativeLibKind::LinkArg,
                 verbatim: None,
             });
+            config.opts.libs.push(NativeLib {
+                name: link_path,
+                new_name: None,
+                kind: NativeLibKind::LinkArg,
+                verbatim: None,
+            });
+            // End of “–whole-archive”
+            config.opts.libs.push(NativeLib {
+                name: "-Wl,--no-whole-archive".to_string(),
+                new_name: None,
+                kind: NativeLibKind::LinkArg,
+                verbatim: Some(true),
+            });
+            let mut gpu_search_dirs = Vec::new();
+            config.opts.search_paths.iter_mut().for_each(|s| {
+                if s.kind == rustc_session::search_paths::PathKind::Dependency {
+                    gpu_search_dirs.push(new_gpu_dir(&s.dir));
+                }
+            });
+            config.opts.search_paths.extend(gpu_search_dirs.iter().map(|p| {
+                rustc_session::search_paths::SearchPath::new(
+                    rustc_session::search_paths::PathKind::Dependency,
+                    p.clone(),
+                )
+            }));
         }
     }
 }

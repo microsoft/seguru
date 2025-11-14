@@ -12,7 +12,6 @@ use std::marker::PhantomData;
 use std::ops::Deref;
 
 use melior::dialect::memref as mlir_memref;
-use melior::helpers::BuiltinBlockExt;
 use melior::ir::attribute::{DenseI64ArrayAttribute, IntegerAttribute, StringAttribute};
 use melior::ir::operation::{OperationLike, OperationMutLike};
 use melior::ir::r#type::{self as mlir_type, FunctionType, MemRefType};
@@ -36,7 +35,7 @@ use crate::mlir::gpu::{DimFn, NonDimFn, all_reduce, subgroup_reduce};
 use crate::mlir::memref::{
     StridedMetaDataResults, extract_strided_metadata, extract_strided_metadata_results,
 };
-use crate::mlir::{BUILTIN_SYM, BlockRefWithTime, MLIROpHelpers, ValueToOpRef, int_width};
+use crate::mlir::{BUILTIN_SYM, MLIROpHelpers, ValueToOpRef, int_width};
 use crate::rustc_middle::ty::layout::LayoutOf;
 
 #[derive(Debug)]
@@ -118,9 +117,9 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         self.cx.to_mlir_loc(self.cur_span)
     }
 
-    pub fn cur_block(&self) -> &'a mlir_ir::Block<'ml> {
+    /*pub fn cur_block(&self) -> &'a mlir_ir::Block<'ml> {
         unsafe { self.cur_block.to_ref() }
-    }
+    }*/
 
     pub fn const_value(
         &mut self,
@@ -131,7 +130,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         if let Some(val) = self.const_values.get(&attr_str) {
             return *val;
         }
-        let const_val = self.mlir_const_val_from_type(val, ty, self.cur_block());
+        let const_val = self.mlir_const_val_from_type(val, ty, self.cur_block);
         self.const_values.insert(attr_str, const_val);
         const_val
     }
@@ -980,7 +979,8 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
 
     fn append_op_res(&self, op: mlir_ir::Operation<'ml>) -> mlir_ir::Value<'ml, 'a> {
         trace!("append_op_res: {:?}", op);
-        self.cur_block().append_op_result(op).unwrap()
+        let op_ref = self.cur_block.append_operation(op);
+        op_ref.result(0).unwrap().into()
     }
 
     fn is_unreachable(&self) -> bool {
@@ -992,7 +992,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         if self.is_unreachable() {
             panic!("Cannot append operation to unreachable block");
         }
-        self.cur_block().append_operation(op)
+        self.cur_block.append_operation(op)
     }
 
     fn ptrtollvmptr(&mut self, ptr: mlir_ir::Value<'ml, 'a>) -> mlir_ir::Value<'ml, 'a> {
@@ -1018,11 +1018,11 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
 
     #[allow(dead_code)]
     pub fn inside_gpu_mod(&self) -> bool {
-        if let Some(op) = self.cur_block().parent_operation() { op.is_gpu_func() } else { false }
+        if let Some(op) = self.cur_block.parent_operation() { op.is_gpu_func() } else { false }
     }
 
     pub fn inside_kernel_func(&self) -> bool {
-        if let Some(op) = self.cur_block().parent_operation() { op.is_kernel_func() } else { false }
+        if let Some(op) = self.cur_block.parent_operation() { op.is_kernel_func() } else { false }
     }
 
     fn mlir_load(
@@ -1050,8 +1050,8 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
 
     fn get_params(&mut self) -> Vec<mlir_ir::Value<'ml, 'a>> {
         let mut ret = vec![];
-        for i in 0..self.cur_block().argument_count() {
-            let val = self.cur_block().argument(i).unwrap().into();
+        for i in 0..self.cur_block.argument_count() {
+            let val = self.cur_block.argument(i).unwrap().into();
             ret.push(val);
         }
         ret
@@ -1467,7 +1467,7 @@ impl<'tcx, 'ml, 'a> Deref for GpuBuilder<'tcx, 'ml, 'a> {
     fn deref(&self) -> &Self::Target {
         *self.cx.builder.write().unwrap() = Some(crate::context::BuilderInfo {
             name: self.name.to_string(),
-            cur_block: self.cur_block(),
+            cur_block: self.cur_block,
             cur_span: self.cur_span,
         });
         self.cx
@@ -1547,7 +1547,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     fn append_sibling_block(&mut self, name: &str) -> Self::BasicBlock {
         debug!("append_sibling_block: {:?}", name);
         let sibling_block = melior::ir::Block::new(&[]);
-        self.cur_block().parent_region().as_ref().unwrap().append_block(sibling_block)
+        self.cur_block.parent_region().as_ref().unwrap().append_block(sibling_block)
     }
 
     fn switch_to_block(&mut self, llbb: Self::BasicBlock) {

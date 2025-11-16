@@ -69,9 +69,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         if let Some(value) = self.const_values.read().unwrap().get(&attr_str) {
             return *value;
         }
-        eprintln!("Creating global const int: {}", attr_str);
         let val = self.mlir_const_val_from_type(i, typ, block);
-        eprintln!("Done Creating global const int: {}", attr_str);
         self.const_values.write().unwrap().insert(attr_str, val);
         val
     }

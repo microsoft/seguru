@@ -6,4 +6,4 @@ edition = "2021"
 [dependencies]
 gpu_host = {workspace = true}
 syntax_gpu = {workspace = true}
-gpu = {workspace = true}
+gpu = {workspace = true, features = ["unstable_host_chunk"]}

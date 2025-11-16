@@ -33,14 +33,14 @@ macro_rules! def_dim_fn {
     ($name: ident, $priv_name: ident, $pub_name: ident, $(#[$meta:meta])*) => {
         $(#[$meta])*
         #[rustc_diagnostic_item = concat!("gpu::", stringify!($name))]
-        #[gpu_codegen::device]
+        #[gpu_macros::device]
         #[inline(never)]
         const fn $priv_name() -> usize {
             unimplemented!()
         }
 
         $(#[$meta])*
-        #[gpu_codegen::device]
+        #[gpu_macros::device]
         #[inline(always)]
         #[expect(clippy::cast_possible_truncation)]
         pub const fn $pub_name<D: DimType>() -> u32 {
@@ -60,43 +60,43 @@ def_dim_fn!(grid_dim, _grid_dim, grid_dim, #[gpu_codegen::ret_sync_data(1000)]);
 /// the warp within a SM.
 /// Thus, it is different from the subgroup id /warp id
 /// we usually use inside BlockTile.
-#[gpu_codegen::device]
+#[gpu_macros::device]
 #[inline(always)]
 #[allow(dead_code)]
 pub fn sm_warp_id() -> u32 {
     let mut ret: u32;
     unsafe {
-        core::arch::asm!("mov.u32 {0:e}, %warpid;", out(reg) ret);
+        crate::asm!("mov.u32 {0:reg32}, %warpid;", out(reg) ret);
     }
     ret
 }
 
-#[gpu_codegen::device]
+#[gpu_macros::device]
 #[inline(always)]
 #[allow(dead_code)]
 pub fn lane_id() -> u32 {
     let mut laneid: u32;
     unsafe {
-        core::arch::asm!("mov.u32 {0:e}, %laneid;", out(reg) laneid);
+        crate::asm!("mov.u32 {0:reg32}, %laneid;", out(reg) laneid);
     }
     laneid
 }
 
-#[gpu_codegen::device]
+#[gpu_macros::device]
 #[gpu_codegen::ret_sync_data(1000)]
 #[inline(always)]
 pub const fn dim<D: DimType>() -> u32 {
     block_dim::<D>() * grid_dim::<D>()
 }
 
-#[gpu_codegen::device]
+#[gpu_macros::device]
 #[gpu_codegen::ret_sync_data(1000)]
 #[inline(always)]
 pub fn block_size() -> u32 {
     block_dim::<DimX>() * block_dim::<DimY>() * block_dim::<DimZ>()
 }
 
-#[gpu_codegen::device]
+#[gpu_macros::device]
 #[gpu_codegen::ret_sync_data(1000)]
 #[inline(always)]
 #[allow(dead_code)]

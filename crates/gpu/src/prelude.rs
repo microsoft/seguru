@@ -1,6 +1,6 @@
 #[cfg(not(feature = "codegen_tests"))]
 pub use cuda_bindings::SafeGpuConfig;
-pub use gpu_macros::{attr, cuda_kernel, device, host, kernel, reshape_map_macro};
+pub use gpu_macros::{attr, cuda_kernel, device, host, kernel, reshape_map_macro, nvptx_to_target_asm};
 
 /// Prelude for GPU programming.
 pub use crate::chunk::{GlobalGroupChunk, GlobalThreadChunk, chunk_mut};

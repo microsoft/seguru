@@ -105,7 +105,7 @@ impl<const SIZE: usize> ThreadWarpTile<SIZE, 1> {
     // warp size == 1 => 5
     pub const SHIFT_COUNT: u32 = { 5 - Self::CHECKED_SIZE.trailing_zeros() };
 
-    #[gpu_codegen::device]
+    #[gpu_macros::device]
     #[inline(always)]
     pub const fn size(&self) -> u32 {
         Self::CHECKED_SIZE as _
@@ -119,20 +119,20 @@ impl<const SIZE: usize> ThreadWarpTile<SIZE, 1> {
         crate::dim::block_size() / Self::CHECKED_SIZE
     }
 
-    #[gpu_codegen::device]
+    #[gpu_macros::device]
     #[inline(always)]
     pub fn subgroup_id(&self) -> u32 {
         Self::_subgroup_id()
     }
 
-    #[gpu_codegen::device]
+    #[gpu_macros::device]
     #[inline(always)]
     pub(crate) fn _subgroup_id() -> u32 {
         ((Block.thread_rank() >> 5) << Self::SHIFT_COUNT)
             + ((lane_id() & !{ Self::LANE_MASK }) >> Self::SHIFT_COUNT)
     }
 
-    #[gpu_codegen::device]
+    #[gpu_macros::device]
     #[inline(always)]
     pub(crate) fn _thread_rank() -> u32 {
         lane_id() & Self::LANE_MASK
@@ -148,7 +148,7 @@ impl<const SIZE: usize> ThreadWarpTile<SIZE, 1> {
         Self::BASE_THREAD_MASK << (lane_id() & !Self::LANE_MASK)
     }
 
-    #[gpu_codegen::device]
+    #[gpu_macros::device]
     #[inline(always)]
     fn reduce_with_shuffle(&self, value: f32, op: impl Fn(f32, f32) -> f32) -> f32 {
         let mut offset = Self::CHECKED_SIZE >> 1;
@@ -162,13 +162,13 @@ impl<const SIZE: usize> ThreadWarpTile<SIZE, 1> {
     }
 
     // Hardware-specific warp reduce.
-    #[gpu_codegen::device]
+    #[gpu_macros::device]
     #[inline(always)]
     #[expect(private_bounds)]
     pub fn nvcc_redux_sync<Op: NvvmReduxSyncKind<T>, T>(&self, _op: Op, value: T) -> T {
         _redux_sync::<T>(value, self.thread_mask(), <Op as NvvmReduxSyncKind<T>>::KIND)
     }
-    /*#[gpu_codegen::device]
+    /*#[gpu_macros::device]
     #[inline(always)]
     pub fn run_on_lane_0<T>(self, slice: &mut [T], f: impl FnOnce(&mut T) + Clone + Send) {
         if self.lane_id() == 0 {
@@ -262,14 +262,14 @@ impl<const SIZE: usize, const STRIDE: usize> ThreadWarpTile<SIZE, STRIDE> {
     /// Reduce by hardware-defined warp.
     /// For now, it only supports `i32` or `u32` types.
     #[rustc_diagnostic_item = "gpu::subgroup_reduce"]
-    #[gpu_codegen::device]
+    #[gpu_macros::device]
     #[inline(never)]
     pub fn _subgroup_reduce<T>(_value: T, _op: &'static str) -> T {
         unimplemented!()
     }
 
     /// Reduce by software-defined warp.
-    #[gpu_codegen::device]
+    #[gpu_macros::device]
     #[inline(always)]
     #[expect(private_bounds)]
     pub fn subgroup_reduce<Op, T>(self, _op: Op, value: T) -> T
@@ -281,14 +281,14 @@ impl<const SIZE: usize, const STRIDE: usize> ThreadWarpTile<SIZE, STRIDE> {
 }
 
 #[rustc_diagnostic_item = "nvvm::redux_sync"]
-#[gpu_codegen::device]
+#[gpu_macros::device]
 #[inline(never)]
 pub fn _redux_sync<T>(_value: T, _mask: u32, _op: &'static str) -> T {
     unimplemented!()
 }
 
 #[rustc_diagnostic_item = "gpu::shuffle"]
-#[gpu_codegen::device]
+#[gpu_macros::device]
 #[inline(never)]
 pub fn _shuffle<T>(_value: T, _offset: u32, _width: u32, _op: &'static str) -> (T, bool) {
     unimplemented!()
@@ -304,7 +304,7 @@ macro_rules! shuffle {
 }
 
 impl<const SIZE: usize> CGOperations for ThreadWarpTile<SIZE> {
-    #[gpu_codegen::device]
+    #[gpu_macros::device]
     #[inline(always)]
     fn thread_rank(&self) -> u32 {
         Self::_thread_rank() as _
@@ -312,7 +312,7 @@ impl<const SIZE: usize> CGOperations for ThreadWarpTile<SIZE> {
 }
 
 impl Block {
-    #[gpu_codegen::device]
+    #[gpu_macros::device]
     #[inline(always)]
     pub fn thread_rank(&self) -> u32 {
         crate::dim::thread_id::<crate::dim::DimX>()

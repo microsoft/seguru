@@ -10,19 +10,11 @@ use tracing::{debug, trace};
 use crate::backend::{GPUCodeGenModule, GPUCodegenBackend};
 
 pub(crate) fn get_compile_config(config: &rustc_session::config::CodegenOptions) -> CompileConfig {
-    let mut cconfig = CompileConfig::default();
-    config.llvm_args.iter().for_each(|arg| {
-        if let Some(fp_contract) = arg.strip_prefix("--fp-contract=") {
-            cconfig.use_fast = false; // diable default fast-math and rely on llvm_args to control fast-math
-            cconfig.llc_ptx_extra.push(arg.to_string());
-        } else if let Some(denormal_fp_math) = arg.strip_prefix("--denormal-fp-math=") {
-            cconfig.use_ftz = false; // diable default ftz and rely on llvm_args to control ftz
-            cconfig.llc_ptx_extra.push(arg.to_string());
-        } else {
-            cconfig.llc_ptx_extra.push(arg.to_string());
-        }
-    });
-    cconfig
+    let cpu = config.target_cpu.as_ref().map_or(
+        rustc_session::config::host_tuple().split("-").next().unwrap().to_string(),
+        |cpu| cpu.clone(),
+    );
+    CompileConfig::from_target_llvm_args(cpu.as_str(), config.llvm_args.iter().cloned())
 }
 
 pub(crate) fn codegen(

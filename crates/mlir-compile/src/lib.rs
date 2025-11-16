@@ -14,6 +14,8 @@ pub struct CompileConfig {
     pub use_ftz: bool,
     pub dep_device_bc_files: Vec<PathBuf>,
     pub llc_ptx_extra: Vec<String>,
+    pub host_arch: String,
+    pub host_elf: String,
 }
 
 impl Default for CompileConfig {
@@ -27,6 +29,8 @@ impl Default for CompileConfig {
             use_ftz: true,
             dep_device_bc_files: vec![find_libdevice().unwrap()],
             llc_ptx_extra: vec![],
+            host_arch: "i386:x86-64".into(),
+            host_elf: "elf64-x86-64".into(),
         }
     }
 }
@@ -93,6 +97,35 @@ impl CompileConfig {
             .map(|v| cconfig.opt_level = v.parse().unwrap_or_default())
             .unwrap_or_default();
         // TODO(dep): add more gpu device files to dep_device_bc_files
+        cconfig
+    }
+
+    pub fn from_target_llvm_args(target: &str, llvm_args: impl Iterator<Item = String>) -> Self {
+        let mut cconfig = CompileConfig::default();
+        match target {
+            "arm64" | "aarch64" => {
+                cconfig.host_arch = "aarch64".into();
+                cconfig.host_elf = "elf64-littleaarch64".into();
+            }
+            "x86_64" | "x86-64" | "amd64" => {
+                cconfig.host_arch = "i386:x86-64".into();
+                cconfig.host_elf = "elf64-x86-64".into();
+            }
+            _ => {
+                unimplemented!("Unsupported target cpu: {}", target);
+            }
+        }
+        llvm_args.for_each(|arg| {
+            if arg.strip_prefix("--fp-contract=").is_some() {
+                cconfig.use_fast = false; // diable default fast-math and rely on llvm_args to control fast-math
+                cconfig.llc_ptx_extra.push(arg);
+            } else if arg.strip_prefix("--denormal-fp-math=").is_some() {
+                cconfig.use_ftz = false; // diable default ftz and rely on llvm_args to control ftz
+                cconfig.llc_ptx_extra.push(arg);
+            } else {
+                cconfig.llc_ptx_extra.push(arg);
+            }
+        });
         cconfig
     }
 
@@ -261,9 +294,9 @@ impl CompileConfig {
             "--input",
             "binary",
             "--output",
-            "elf64-x86-64",
+            self.host_elf.as_str(),
             "--binary-architecture",
-            "i386:x86-64",
+            self.host_arch.as_str(),
             "--rename-section",
             ".data=.rodata",
             "--redefine-sym",
@@ -275,8 +308,8 @@ impl CompileConfig {
     }
 
     fn create_static_lib(&self, inpath: &Path, outpath: &Path) -> std::io::Result<()> {
-        info!("[llvm-ar] rcS {} {}", outpath.display(), inpath.display());
-        command("llvm-ar", ["rcS", outpath.to_str().unwrap(), inpath.to_str().unwrap()])
+        info!("[llvm-ar] rcs {} {}", outpath.display(), inpath.display());
+        command("llvm-ar", ["rcs", outpath.to_str().unwrap(), inpath.to_str().unwrap()])
     }
 
     pub fn ld(&self, inpath: &[PathBuf], outpath: &Path) -> std::io::Result<()> {

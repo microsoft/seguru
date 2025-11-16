@@ -2,6 +2,7 @@ use std::collections::btree_map::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use mlir_compile::CompileConfig;
 use rustc_ast::Crate;
 use rustc_driver::{Callbacks, Compilation};
 use rustc_interface::interface::{Compiler, Config};
@@ -23,6 +24,14 @@ pub(crate) enum CompilerStage {
     CpuOrCheckGPU = 0,
     GpuForGpu,
     GpuForCpu,
+}
+
+fn get_compile_config(config: &rustc_session::config::CodegenOptions) -> CompileConfig {
+    let cpu = config.target_cpu.as_ref().map_or(
+        rustc_session::config::host_tuple().split("-").next().unwrap().to_string(),
+        |cpu| cpu.clone(),
+    );
+    CompileConfig::from_target_llvm_args(cpu.as_str(), config.llvm_args.iter().cloned())
 }
 
 impl TryFrom<String> for CompilerStage {
@@ -231,7 +240,7 @@ fn config_link_gpu_code(config: &mut Config) {
         debug!("link gpu bc_files {:?}", bc_files);
         if !bc_files.is_empty() {
             let gpu_obj_file = bc_file.with_extension(GPU_LIB_EXT);
-            mlir_compile::CompileConfig::new()
+            get_compile_config(&config.opts.cg)
                 .gpu_link_and_create_static_lib(&bc_files, &gpu_obj_file)
                 .expect("failed to compile gpu lib");
             assert!(gpu_obj_file.exists());
@@ -348,6 +357,7 @@ impl Callbacks for GpuOrCpuRustCallback {
             })
         };
 
+        //config.opts.target_triple = rustc_target::spec::TargetTuple::from_tuple("nvptx64-nvidia-cuda").into();
         config.opts.cg.extra_filename = format!("{}{GPU_SUFFIX}", config.opts.cg.extra_filename);
         config.opts.cg.metadata.iter_mut().for_each(|m| *m = format!("{m}{GPU_SUFFIX}"));
         config.opts.cg.codegen_units = Some(1);

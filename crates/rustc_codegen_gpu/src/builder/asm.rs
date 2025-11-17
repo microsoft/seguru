@@ -10,14 +10,21 @@ use rustc_target::asm::{InlineAsmRegClass, InlineAsmRegOrRegClass};
 use crate::builder::GpuBuilder;
 use crate::error::GpuCodegenError;
 
-fn modifier_to_reg_llvm(modifier: char) -> Result<String, GpuCodegenError> {
-    match modifier {
-        'e' => Ok("r".to_string()),
-        'r' => Ok("l".to_string()),
-        'x' => Ok("h".to_string()),
-        _ => {
-            Err(GpuCodegenError::UnsupportedAsm("Only support modifiers 'e' (32-bit), 'r' (64-bit), and 'x'(16-bit) for NVPTX inline assembly".into()))
-        }
+fn modifier_to_reg_llvm(
+    tcx: &rustc_middle::ty::TyCtxt,
+    modifier: char,
+) -> Result<String, GpuCodegenError> {
+    let target: String = tcx.sess.target.arch.clone().into_owned();
+    match (target.as_str(), modifier) {
+        ("x86_64", 'e') => Ok("r".to_string()),
+        ("x86_64", 'r') => Ok("l".to_string()),
+        ("x86_64", 'x') => Ok("h".to_string()),
+        ("aarch64", 'w') => Ok("r".to_string()),
+        ("aarch64", 'x') => Ok("l".to_string()),
+        _ => Err(GpuCodegenError::UnsupportedAsm(format!(
+            "Unsupported modifier '{}' for target '{}'",
+            modifier, target
+        ))),
     }
 }
 
@@ -26,7 +33,13 @@ fn reg_to_llvm(reg: InlineAsmRegOrRegClass) -> Result<String, GpuCodegenError> {
         InlineAsmRegOrRegClass::RegClass(InlineAsmRegClass::X86(
             rustc_target::asm::X86InlineAsmRegClass::reg,
         )) => Ok("".to_string()),
-        _ => Err(GpuCodegenError::UnsupportedAsm("Register type must be reg.".into())),
+        InlineAsmRegOrRegClass::RegClass(InlineAsmRegClass::Arm(
+            rustc_target::asm::ArmInlineAsmRegClass::reg,
+        )) => Ok("".to_string()),
+        InlineAsmRegOrRegClass::RegClass(InlineAsmRegClass::AArch64(
+            rustc_target::asm::AArch64InlineAsmRegClass::reg,
+        )) => Ok("".to_string()),
+        _ => Err(GpuCodegenError::UnsupportedAsm(format!("Register type must be reg {:?}", reg))),
     }
 }
 
@@ -143,7 +156,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a> AsmBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a
                         constraints[op_idx[&operand_idx]] = format!(
                             "{}{}",
                             constraints[op_idx[&operand_idx]],
-                            modifier_to_reg_llvm(modifier).unwrap_or_else(|e| {
+                            modifier_to_reg_llvm(&tcx, modifier).unwrap_or_else(|e| {
                                 e.fatal(tcx);
                             })
                         );

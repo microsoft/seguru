@@ -25,7 +25,7 @@ fn find_lib(search_dir: &Path, lib_name: &str, suffix: &str) -> PathBuf {
 }
 
 //pub const TARGET:&str = "nvptx64-nvidia-cuda";
-pub const TARGET: &str = "x86_64-unknown-linux-gnu";
+//pub const TARGET: &str = "x86_64-unknown-linux-gnu";
 
 fn run_codegen_tests(src: PathBuf, mode: &str) {
     #[cfg(debug_assertions)]
@@ -67,8 +67,8 @@ fn run_codegen_tests(src: PathBuf, mode: &str) {
     ];
     let mut rustc_gpu_flags = rustc_flags.clone();
     rustc_gpu_flags.extend([
-        "--target",
-        TARGET,
+        //"--target",
+        //TARGET,
         "--out-dir",
         gpu_target.to_str().unwrap(),
         "--cfg",
@@ -90,7 +90,7 @@ fn run_codegen_tests(src: PathBuf, mode: &str) {
         build_base: target_dir.join(src.as_os_str()),
         llvm_filecheck: Some(target_dir.join("filecheck")),
         target_rustcflags: Some(rustc_test_flags),
-        target: TARGET.into(),
+        //target: TARGET.into(),
         ..Default::default()
     };
     std::env::set_var("__CODEGEN_TARGET__", "GPU");

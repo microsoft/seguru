@@ -1,13 +1,13 @@
 macro_rules! impl_ld {
     ($fname: ident, $ty:ty, $c: literal, $t: literal) => {
-        #[gpu_codegen::device]
+        #[gpu_macros::device]
         #[inline(always)]
         pub fn $fname(ptr: &$ty) -> $ty {
             let mut ret: $ty;
             let ptr = ptr as *const $ty;
             unsafe {
-                core::arch::asm!(
-                    concat!("ld.global.", $c, ".", $t, " {0:e}, [{1:r}];"),
+                $crate::asm!(
+                    concat!("ld.global.", $c, ".", $t, " {0:reg32}, [{1:reg64}];"),
                     out(reg) ret,
                     in(reg) ptr,
                 );
@@ -27,13 +27,13 @@ impl_ld!(__ldcg_f32, f32, "cg", "f32");
 
 macro_rules! impl_st {
     ($fname: ident, $ty:ty, $c: literal, $t: literal) => {
-        #[gpu_codegen::device]
+        #[gpu_macros::device]
         #[inline(always)]
         pub fn $fname(ptr: &mut $ty, val: $ty) {
             let ptr = ptr as *mut $ty;
             unsafe {
-                core::arch::asm!(
-                    concat!("st.global.", $c, ".", $t, "[{0:r}], {1:e};"),
+                $crate::asm!(
+                    concat!("st.global.", $c, ".", $t, "[{0:reg64}], {1:reg32};"),
                     in(reg) ptr,
                     in(reg) val,
                 );
@@ -60,25 +60,25 @@ pub trait CacheStreamLoadStore: Sized {
 
 impl CacheStreamLoadStore for i32 {
     type Output = i32;
-    #[gpu_codegen::device]
+    #[gpu_macros::device]
     #[inline(always)]
     fn ldcs(&self) -> Self::Output {
         __ldcs_i32(self)
     }
 
-    #[gpu_codegen::device]
+    #[gpu_macros::device]
     #[inline(always)]
     fn stcs(&mut self, val: Self::Output) {
         __stcs_i32(self, val)
     }
 
-    #[gpu_codegen::device]
+    #[gpu_macros::device]
     #[inline(always)]
     fn ldcg(&self) -> Self::Output {
         __ldcg_i32(self)
     }
 
-    #[gpu_codegen::device]
+    #[gpu_macros::device]
     #[inline(always)]
     fn stcg(&mut self, val: Self::Output) {
         __stcg_i32(self, val)
@@ -88,25 +88,25 @@ impl CacheStreamLoadStore for i32 {
 impl CacheStreamLoadStore for f32 {
     type Output = f32;
 
-    #[gpu_codegen::device]
+    #[gpu_macros::device]
     #[inline(always)]
     fn ldcs(&self) -> Self::Output {
         __ldcs_f32(self)
     }
 
-    #[gpu_codegen::device]
+    #[gpu_macros::device]
     #[inline(always)]
     fn stcs(&mut self, val: Self::Output) {
         __stcs_f32(self, val)
     }
 
-    #[gpu_codegen::device]
+    #[gpu_macros::device]
     #[inline(always)]
     fn ldcg(&self) -> Self::Output {
         __ldcg_f32(self)
     }
 
-    #[gpu_codegen::device]
+    #[gpu_macros::device]
     #[inline(always)]
     fn stcg(&mut self, val: Self::Output) {
         __stcg_f32(self, val)

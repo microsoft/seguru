@@ -238,8 +238,18 @@ impl CodegenBackend for GPUCodegenBackend {
 
     fn target_features_cfg(&self, sess: &Session) -> (Vec<Symbol>, Vec<Symbol>) {
         // Add faked features to remove warnings on missing target features.
-        let faked_features =
-            vec![Symbol::intern("sse"), Symbol::intern("sse2"), Symbol::intern("x87")];
+        let target: String = sess.target.arch.clone().into_owned();
+        let faked_features = match target.as_str() {
+            "x86" | "x86_64" => {
+                vec![Symbol::intern("sse"), Symbol::intern("sse2"), Symbol::intern("x87")]
+            }
+            "aarch64" => {
+                vec![Symbol::intern("neon")]
+            }
+            _ => {
+                vec![]
+            }
+        };
         (faked_features.clone(), faked_features)
     }
 

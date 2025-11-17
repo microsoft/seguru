@@ -57,8 +57,8 @@ pub fn kernel_arith<const N: u32>(
     let mut out: u32;
     let in32: u32 = *b_local + N;
     unsafe {
-        core::arch::asm!(
-        "mov.u32 {0:e}, {1:e};",
+        gpu::asm!(
+        "mov.u32 {0:reg32}, {1:reg32};",
         out(reg) out,
         in(reg) in32,
         );

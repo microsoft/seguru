@@ -9,12 +9,12 @@ use core::arch::asm;
 #[no_mangle]
 #[gpu_codegen::kernel]
 pub unsafe fn test_asm(a: u32, b: &mut u32) {
-   asm!(
-        "mov.u32 {0:e}, {1:e};",
+   gpu::asm!(
+        "mov.u32 {0:reg32}, {1:reg32};",
         out(reg) *b,
         in(reg) a,
     );
-    asm!("membar.gl;");
+    gpu::asm!("membar.gl;");
 }
 
 // CHECK: @gpu_bin_cst = internal constant

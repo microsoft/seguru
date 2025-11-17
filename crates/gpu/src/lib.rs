@@ -17,6 +17,7 @@ extern crate gpu_macros;
 #[cfg(feature = "codegen_tests")]
 extern crate num_traits;
 
+pub mod arch;
 pub mod cg;
 pub mod chunk;
 mod chunk_impl;

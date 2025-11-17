@@ -2,6 +2,7 @@ extern crate proc_macro;
 
 use proc_macro::TokenStream;
 use quote::ToTokens;
+mod arch;
 mod gpu_syntax;
 mod host_rewriter;
 mod reshape_map;
@@ -72,4 +73,9 @@ pub fn attr(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn reshape_map_macro(input: TokenStream) -> TokenStream {
     reshape_map::map_reshape_params(input)
+}
+
+#[proc_macro]
+pub fn nvptx_to_target_asm(input: TokenStream) -> TokenStream {
+    arch::replace_asm(input)
 }

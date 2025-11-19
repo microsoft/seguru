@@ -76,7 +76,9 @@ pub fn cuda_ctx_no_mod<T>(
             };
             let (ctx_h, _) = GpuCtxHandle::<CtxSpaceZero>::new(ct, dev_id, CUctx_flags::CU_CTX_SCHED_AUTO);
             let ctx = ctx_h.activate(&mut active);
-            f(&ctx)
+            let ret = f(&ctx);
+            ctx.sync().expect("GPU execution failed");
+            ret
         } else {
             panic!("No active GPU context found. Ensure cuda_scope is not called inside another cuda_scope.");
         };

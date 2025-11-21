@@ -429,10 +429,9 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
         config: C,
         host_args: &[&dyn AsHostKernelParams],
         stream: Option<&CudaStream>,
-        is_async: bool,
     ) -> Result<(), CudaError> {
         let f = self.get_func(m, func_name)?;
-        self.launch_coop_fn(&f, config, host_args, stream, is_async)
+        self.launch_coop_fn(&f, config, host_args, stream)
     }
 
     /// The host must use arguments that implement `AsHostKernelParams`.
@@ -447,10 +446,9 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
         config: C,
         host_args: &[&dyn AsHostKernelParams],
         stream: Option<&CudaStream>,
-        is_async: bool,
     ) -> Result<(), CudaError> {
         let f = self.get_func(m, func_name)?;
-        self.launch_fn(&f, config, host_args, stream, is_async)
+        self.launch_fn(&f, config, host_args, stream)
     }
 
     /// # Safety
@@ -462,7 +460,6 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
         config: C,
         host_args: &[&dyn AsHostKernelParams],
         stream: Option<&CudaStream>,
-        is_async: bool,
     ) -> Result<(), CudaError> {
         config.runtime_check(self.dev_prop, f.max_dyn_shared_size);
         let mut kernel_args: Vec<*mut core::ffi::c_void> = Vec::with_capacity(host_args.len());
@@ -490,9 +487,6 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
         if res != CUDA_SUCCESS {
             return Err(CudaError::Err(res as _));
         }
-        if !is_async {
-            self.sync()?;
-        }
         Ok(())
     }
 
@@ -506,7 +500,6 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
         config: C,
         host_args: &[&dyn AsHostKernelParams],
         stream: Option<&CudaStream>,
-        is_async: bool,
     ) -> Result<(), CudaError> {
         config.runtime_check(self.dev_prop, f.max_dyn_shared_size);
         let mut kernel_args: Vec<*mut core::ffi::c_void> = Vec::with_capacity(host_args.len());
@@ -529,9 +522,6 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
 
         if res != CUDA_SUCCESS {
             return Err(CudaError::Err(res as _));
-        }
-        if !is_async {
-            self.sync()?;
         }
         Ok(())
     }

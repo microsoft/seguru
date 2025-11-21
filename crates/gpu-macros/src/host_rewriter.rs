@@ -61,7 +61,6 @@ fn host_rewrite(
     target: CodegenTarget,
 ) {
     let is_gpu_only = target.is_gpu_only();
-    let is_async = host_func.sig.asyncness.is_some();
 
     host_func.sig.output = syn::ReturnType::Type(
         syn::token::RArrow::default(),                                   // ->
@@ -202,7 +201,6 @@ fn host_rewrite(
                 #config_arg,
                 &#host_args,
                 None,
-                #is_async,
             )
         }
     };

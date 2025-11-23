@@ -195,10 +195,10 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 panic!("{}", builtin_sym.value());
             }
         }
-        let mut next_itype = input_types.iter();
         let args = &args
             .iter()
-            .map(|v| self.use_value_as_ty(*v, *(next_itype.next().unwrap())))
+            .zip(input_types.iter())
+            .map(|(v, t)| self.use_value_as_ty(*v, *t))
             .collect::<Vec<_>>();
         if let Ok(fn_sym_ptr) = fn_sym_ptr {
             let op_ref = self.append_op(melior::dialect::func::call(

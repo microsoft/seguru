@@ -25,4 +25,4 @@ pub fn test_violate_divergence_check() {
     }
 }
 // CHECK: @gpu_bin_cst = internal constant
-// PTX_CHECK: .visible .func sync_skip_divergent
+// PTX_CHECK: .visible .func

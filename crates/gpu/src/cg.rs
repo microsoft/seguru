@@ -128,14 +128,13 @@ impl<const SIZE: usize> ThreadWarpTile<SIZE, 1> {
     #[gpu_macros::device]
     #[inline(always)]
     pub(crate) fn _subgroup_id() -> u32 {
-        ((Block.thread_rank() >> 5) << Self::SHIFT_COUNT)
-            + ((lane_id() & !{ Self::LANE_MASK }) >> Self::SHIFT_COUNT)
+        Block.thread_rank() >> (5 - Self::SHIFT_COUNT)
     }
 
     #[gpu_macros::device]
     #[inline(always)]
     pub(crate) fn _thread_rank() -> u32 {
-        lane_id() & Self::LANE_MASK
+        Block.thread_rank() & Self::LANE_MASK
     }
 
     /// E.g., when SIZE = 8,

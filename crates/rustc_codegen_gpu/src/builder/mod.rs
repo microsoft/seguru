@@ -1359,6 +1359,8 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         if debug {
             self.assert(cond, "assert_ptr");
             ptr
+        } else if self.disable_bound_check {
+            ptr
         } else {
             #[cfg(feature = "inplace_bound_check")]
             {

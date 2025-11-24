@@ -347,8 +347,19 @@ mod test {
     use crate::chunk_scope::test::MockWarp2ThreadScope;
 
     macro_rules! assert_access_map {
+        ($cs:ty, $m:expr, $thread_num:expr, $id_num:expr, $local_id_num:expr, $expected:expr) => {
+            let access = get_access_map::<$thread_num, $cs>(&$m, $id_num, $local_id_num);
+            assert!(access == $expected, "access_map = {:?}, expected = {:?}", access, $expected)
+        };
         ($cs:ty, $m:expr, $thread_num:expr, $id_num:expr, $expected:expr) => {
-            let access = get_access_map::<$thread_num, $cs>(&$m, $id_num);
+            let access = get_access_map::<$thread_num, $cs>(&$m, $id_num, $id_num);
+            assert!(access == $expected, "access_map = {:?}, expected = {:?}", access, $expected)
+        };
+    }
+
+    macro_rules! assert_access_map2 {
+        ($cs:ty, $m:expr, $thread_num:expr, $id_num:expr, $id_num2:expr, $expected:expr) => {
+            let access = get_access_map2::<$thread_num, $cs>(&$m, $id_num, $id_num2);
             assert!(access == $expected, "access_map = {:?}, expected = {:?}", access, $expected)
         };
     }
@@ -356,6 +367,7 @@ mod test {
     fn get_access_map<const NTHREADS: usize, CS>(
         map: &impl ScopeUniqueMap<CS, IndexType = u32>,
         n: usize,
+        local_n: usize,
     ) -> alloc::vec::Vec<isize>
     where
         CS: ChunkScope<FromScope = crate::cg::ThreadWarpTile<NTHREADS>, ToScope = crate::cg::Thread>,
@@ -363,12 +375,38 @@ mod test {
         let mut access_map = alloc::vec![-1isize; n];
         assert!(NTHREADS <= 32);
         for t in 0..NTHREADS {
-            for i in 0..n {
+            for i in 0..local_n {
                 let tids = [0, t as u32, 0, 0, 0, 0];
                 let (valid, mapped_idx) = ScopeUniqueMap::<CS>::map(map, i as u32, tids);
                 let mapped_idx: usize = mapped_idx.as_();
                 if valid && mapped_idx < n {
                     access_map[mapped_idx] = t as _;
+                }
+            }
+        }
+        access_map
+    }
+
+    fn get_access_map2<const NTHREADS: usize, CS>(
+        map: &impl ScopeUniqueMap<CS, IndexType = (u32, u32)>,
+        n: usize,
+        m: (usize, usize),
+    ) -> alloc::vec::Vec<isize>
+    where
+        CS: ChunkScope<FromScope = crate::cg::ThreadWarpTile<NTHREADS>, ToScope = crate::cg::Thread>,
+    {
+        let mut access_map = alloc::vec![-1isize; n];
+        assert!(NTHREADS <= 32);
+        for t in 0..NTHREADS {
+            for i in 0..m.0 {
+                for j in 0..m.1 {
+                    let tids = [0, t as u32, 0, 0, 0, 0];
+                    let (valid, mapped_idx) =
+                        ScopeUniqueMap::<CS>::map(map, (i as u32, j as u32), tids);
+                    let mapped_idx: usize = mapped_idx.as_();
+                    if valid && mapped_idx < n {
+                        access_map[mapped_idx] = t as _;
+                    }
                 }
             }
         }
@@ -402,7 +440,7 @@ mod test {
     pub(crate) fn test_reshape_map_example5_2() {
         type S = MockWarp2ThreadScope<4, 0>; // a group of 4 threads.
         let map_reshape = crate::reshape_map!([3] | [2, 2] => layout: [-t0, -i0, t1]);
-        assert_access_map!(S, map_reshape, 4, 12, [1, 0, 1, 0, 1, 0, 3, 2, 3, 2, 3, 2]);
+        assert_access_map!(S, map_reshape, 4, 12, 3, [1, 0, 1, 0, 1, 0, 3, 2, 3, 2, 3, 2]);
     }
 
     #[test]
@@ -420,5 +458,23 @@ mod test {
         //Skip some data by setting a larger size
         let map_reshape = crate::reshape_map!([(3, 4)] | [2, 2] => layout: [i0, t0, t1]);
         assert_access_map!(S, map_reshape, 4, 12, [0, 0, 0, -1, 1, 1, 1, -1, 2, 2, 2, -1]);
+    }
+
+    #[test]
+    pub(crate) fn test_reshape_map_example8() {
+        type S = MockWarp2ThreadScope<8, 0>; // a group of 8 threads.
+        // Skip some threads by setting a smaller new size
+        let map_reshape = crate::reshape_map!([1, 3] | [(4, 2), 2] => layout: [i0, t0, t1, i1]);
+        // warp2thread and so use tid[1] only
+        assert_access_map2!(S, map_reshape, 8, 12, (1, 3), [0, 1, 4, 5, 0, 1, 4, 5, 0, 1, 4, 5]);
+    }
+
+    #[test]
+    pub(crate) fn test_reshape_map_example9() {
+        type S = MockWarp2ThreadScope<8, 0>; // a group of 8 threads.
+        // Skip some threads by setting a smaller new size
+        let map_reshape = crate::reshape_map!([3] | [(4, 2), 2] => layout: [t0, t1, i0]);
+        // warp2thread and so use tid[1] only
+        assert_access_map!(S, map_reshape, 8, 12, [0, 1, 4, 5, 0, 1, 4, 5, 0, 1, 4, 5]);
     }
 }

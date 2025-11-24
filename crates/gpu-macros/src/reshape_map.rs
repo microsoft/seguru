@@ -205,10 +205,14 @@ pub(crate) fn map_reshape_params(tokens: TokenStream) -> TokenStream {
             let i = syn::Member::from(i);
             quote_spanned! { span => #lid.#i }
         };
-        let current_id = if i < local_id_len {
+        let current_id = if i < local_id_len - 1 {
             quote_spanned! { span => #current_lid % #old_s_i  }
-        } else {
+        } else if i < local_id_len {
+            quote_spanned! { span => #current_lid  }
+        } else if i < len - 1 {
             quote_spanned! { span => (#remain_tid % #old_s_i) }
+        } else {
+            quote_spanned! { span => (#remain_tid) }
         };
         let id_i = if is_reversed {
             Expr::Verbatim(quote_spanned! { span =>

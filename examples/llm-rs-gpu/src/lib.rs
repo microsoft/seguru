@@ -118,6 +118,7 @@ pub fn encoder_backward_kernel(
     }
 }
 
+#[cfg(not(feature = "use_iterator"))]
 #[gpu::cuda_kernel]
 pub fn layernorm_forward_kernel3(
     out: &mut [f32],
@@ -130,32 +131,121 @@ pub fn layernorm_forward_kernel3(
     C: u32,
 ) {
     let warp = ThreadWarpTile::<32>;
-    let grid2warp = build_chunk_scope(Grid, warp);
-    let warp2thread = build_chunk_scope(warp, Thread);
 
     // chunk to warp and then to a single thread.
-    let mut chunked_rstd = rstd
-        .chunk_to_scope(grid2warp, MapLinear::new(1))
-        .chunk_to_scope(warp2thread, MapLinear::new(1));
+    let warp_group_size = warp.meta_group_size();
+    let map = reshape_map!(
+        [1] | [(32, 1), warp_group_size * grid_dim::<DimX>()] => layout: [i0, t0, t1]
+    );
+    let mut chunked_rstd = chunk_mut(rstd, map);
 
     // chunk to warp and then to a single thread.
-    let mut chunked_mean = mean
-        .chunk_to_scope(grid2warp, MapLinear::new(1))
-        .chunk_to_scope(warp2thread, MapLinear::new(1));
+    let mut chunked_mean = chunk_mut(mean, map);
 
     // chunk to warp and then to a all thread in the warp
     // where each thread gets a strided chunk.
-    let mut chunked_out = out
-        .chunk_to_scope(grid2warp, MapLinear::new(C as _))
-        .chunk_to_scope(warp2thread, MapLinear::new(1));
+    // tid0 + tid1 * 32 * C/32 + i * 32
+    let out_map = reshape_map!(
+        [C/32] | [32, warp.meta_group_size() * grid_dim::<DimX>()] => layout: [t0, i0, t1]
+    );
+    let mut chunked_out = chunk_mut(out, out_map);
 
     let bid_x = block_id::<DimX>();
-
-    let idx = bid_x * warp.meta_group_size() + warp.subgroup_id();
-    let lane_id = warp.thread_rank();
+    let idx = bid_x * warp_group_size + warp.subgroup_id();
     if idx >= N {
         return;
     }
+
+    let lane_id = warp.thread_rank();
+
+    // the row of input that this group of threads is responsible for
+    let idx_C = idx * C;
+    let x = &inp[idx_C as usize..(idx_C + C) as usize];
+
+    // mean
+    let mut local_sum = 0.0f32;
+    let mut i = lane_id;
+    while i < C {
+        local_sum += x[i as usize];
+        i += warp.size() as u32;
+    }
+    let sum: f32 = warp.redux(ReduxAdd, local_sum);
+    let m = sum / C as f32;
+    if lane_id == 0 {
+        chunked_mean[0].stcs(m);
+    }
+    // rstd
+    let mut local_sum = 0.0f32;
+
+    let mut i = lane_id;
+    while i < C {
+        let diff = x[i as usize] - m;
+        local_sum += diff * diff;
+        i += warp.size() as u32;
+    }
+    let sum = warp.redux(ReduxAdd, local_sum);
+    let s = (sum / C as f32 + 1e-5f32).rsqrt();
+    if lane_id == 0 {
+        chunked_rstd[0].stcs(s);
+    }
+
+    // final normalization and scaling by weight/bias
+    let mut i: u32 = lane_id;
+    let mut idx: u32 = 0;
+    while i < C {
+        // load and store using the .cs "streaming" hint to the compiler,
+        // indicating that this data will not be reused soon, and can be streamed through the caches
+        // this allows the threads to get more cache-hits for the (shared) weight and bias parameters
+        let c = i as usize;
+        let n = s * (x[c].ldcs() - m);
+        let o = n * weight[c] + bias[c];
+        chunked_out[idx].stcs(o);
+        i += warp.size();
+        idx += 1;
+    }
+}
+
+/// Around 20% penalty on layernorm_forward_kernel3 due to iterator overhead
+#[cfg(feature = "use_iterator")]
+#[gpu::cuda_kernel]
+pub fn layernorm_forward_kernel3(
+    out: &mut [f32],
+    mean: &mut [f32],
+    rstd: &mut [f32],
+    inp: &[f32],
+    weight: &[f32],
+    bias: &[f32],
+    N: u32,
+    C: u32,
+) {
+    let warp = ThreadWarpTile::<32>;
+
+    // chunk to warp and then to a single thread.
+    let warp_group_size = warp.meta_group_size();
+    let map = reshape_map!(
+        [1] | [(32, 1), warp_group_size * grid_dim::<DimX>()] => layout: [i0, t0, t1]
+    );
+    let mut chunked_rstd = chunk_mut(rstd, map);
+
+    // chunk to warp and then to a single thread.
+    let mut chunked_mean = chunk_mut(mean, map);
+
+    // chunk to warp and then to a all thread in the warp
+    // where each thread gets a strided chunk.
+    // tid0 + tid1 * 32 * C/32 + i * 32
+    let out_map = reshape_map!(
+        [C/32] | [32, warp.meta_group_size() * grid_dim::<DimX>()] => layout: [t0, i0, t1]
+    );
+    let mut chunked_out = chunk_mut(out, out_map);
+
+    let bid_x = block_id::<DimX>();
+    let idx = bid_x * warp_group_size + warp.subgroup_id();
+    if idx >= N {
+        return;
+    }
+
+    let lane_id = warp.thread_rank();
+
     // the row of input that this group of threads is responsible for
     let idx_C = idx * C;
     let x = &inp[idx_C as usize..(idx_C + C) as usize];
@@ -170,7 +260,6 @@ pub fn layernorm_forward_kernel3(
     if lane_id == 0 {
         chunked_mean[0].stcs(m);
     }
-
     // rstd
     let mut local_sum = 0.0f32;
     for i in (lane_id..C).step_by(warp.size() as usize) {

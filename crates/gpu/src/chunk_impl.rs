@@ -18,11 +18,14 @@ use crate::chunk_scope::{ChunkScope, TID_MAX_LEN};
 ///
 /// width = 1, the mapping assign two non-continuous elements to thread 0-3:
 /// [0, 1, 2, 3, 0, 1, 2, 3]
+///
+/// TODO: deprecate MapLinear and MapLinearWithDim in favor of reshape_map! macro.
 #[derive(Copy, Clone)]
 pub struct MapLinearWithDim<const N: usize = 3> {
     width: usize,
 }
 
+/// TODO: deprecate MapLinear in favor of reshape_map! macro.
 pub type MapLinear = MapLinearWithDim<3>;
 
 impl<const N: usize> MapLinearWithDim<N> {
@@ -97,6 +100,39 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for MapLinearWithDim<3> {
         let stride = self.width;
         let total_dim = (CS::global_dim_x() * CS::global_dim_y() * CS::global_dim_z()) as usize;
         (true, idx % stride + (idx / stride) * stride * total_dim + global_thread_id * stride)
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct MapContinuousLinear {
+    width: u32,
+}
+
+impl MapContinuousLinear {
+    #[inline]
+    #[gpu_codegen::device]
+    #[gpu_codegen::ret_sync_data(1000)]
+    pub fn new(width: u32) -> Self {
+        Self { width }
+    }
+}
+
+unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for MapContinuousLinear {
+    type IndexType = u32;
+    type GlobalIndexType = u32;
+
+    #[inline]
+    #[gpu_codegen::device]
+    fn map(
+        &self,
+        idx: Self::IndexType,
+        thread_ids: [u32; TID_MAX_LEN],
+    ) -> (bool, Self::GlobalIndexType) {
+        let x_id = CS::global_id_x(thread_ids);
+        let y_id = CS::global_id_y(thread_ids);
+        let z_id = CS::global_id_z(thread_ids);
+        let global_thread_id = x_id + (z_id * CS::global_dim_y() + y_id) * CS::global_dim_x();
+        (idx < self.width, idx + global_thread_id * self.width)
     }
 }
 

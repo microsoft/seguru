@@ -13,3 +13,6 @@ cc = "1.0"
 [features]
 default = ["gpu"]
 gpu = []
+
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ['cfg(verus_keep_ghost)'] }

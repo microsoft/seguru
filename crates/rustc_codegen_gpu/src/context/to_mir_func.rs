@@ -68,7 +68,8 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             .tcx
             .try_instantiate_and_normalize_erasing_regions(instance.args, self.typing_env(), ty)
             .expect("failed to instantiate and normalize");
-        if mono_ty.contains_closure() {
+        let gpu_attrs = self.gpu_attrs(&instance);
+        if mono_ty.contains_closure() || !gpu_attrs.kernel {
             // If the function contains a closure, use the full symbol name to avoid conflicts.
             // since closures can capture variables from their environment, we need to ensure
             // that the symbol name is unique.

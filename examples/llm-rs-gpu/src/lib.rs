@@ -167,7 +167,7 @@ pub fn layernorm_forward_kernel3(
     let mut i = lane_id;
     while i < C {
         local_sum += x[i as usize];
-        i += warp.size() as u32;
+        i += warp.size();
     }
     let sum: f32 = warp.redux(ReduxAdd, local_sum);
     let m = sum / C as f32;
@@ -181,7 +181,7 @@ pub fn layernorm_forward_kernel3(
     while i < C {
         let diff = x[i as usize] - m;
         local_sum += diff * diff;
-        i += warp.size() as u32;
+        i += warp.size();
     }
     let sum = warp.redux(ReduxAdd, local_sum);
     let s = (sum / C as f32 + 1e-5f32).rsqrt();
@@ -854,6 +854,7 @@ __global__ void layernorm_backward_kernel2(float* dinp, float* dweight, float* d
 }
 */
 
+#[cfg(not(feature = "use_iterator"))]
 #[gpu::cuda_kernel(dynamic_shared)]
 pub fn layernorm_backward_kernel2(
     dinp: &mut [f32],
@@ -890,13 +891,151 @@ pub fn layernorm_backward_kernel2(
     // gdim = 32 * B * T;
     // dinp_warp_chunk = dinp + warp_id/T * T * C + (warp_id % T) * C
     // dinp_thread_chunk = dinp_warp_chunk + lane_id + i * warp_size
+    /*let map = gpu::reshape_map!( [C/32] | [32, B, T] => layout: [t0, i0, t1, t2]);
+    let mut dinp_chunk = chunk_mut(dinp, map);
+    */
     let mut dinp_chunk = dinp
         .chunk_to_scope(
             grid2warp,
-            //gpu::reshape_map!([B, T] | [C] => layout: [0, 1, 2]),
             gpu::reshape_map!( [C] | [B, T] => layout: [i0, t0, t1]),
         )
-        .chunk_to_scope(warp2thread, gpu::MapLinear::new(1));
+        .chunk_to_scope(
+            warp2thread,
+            gpu::reshape_map!( [C/32] | [32] => layout: [t0, i0]),
+        );
+
+    let dout_bt = &dout[(warp_offset * C) as usize..];
+    let inp_bt = &inp[(warp_offset * C) as usize..];
+    let mean_bt = mean[warp_offset as usize];
+    let rstd_bt = rstd[warp_offset as usize];
+    // the first half of shared memory is bias, second is weight
+    let dbias_shared = smem_alloc.alloc::<f32>(C as usize);
+    let mut dbias_shared_chunk = dbias_shared.chunk_mut(gpu::MapLinear::new(1));
+    let dweight_shared = smem_alloc.alloc::<f32>(C as usize);
+    let mut dweight_shared_chunk = dweight_shared.chunk_mut(gpu::MapLinear::new(1));
+    // init shared memory to zero
+    // replace iterator with while loop
+    let mut id = tid;
+    let mut i = 0;
+    while id < C {
+        dbias_shared_chunk[i as _] = 0.0;
+        dweight_shared_chunk[i as _] = 0.0;
+        id += bdim_x;
+        i += 1;
+    }
+    sync_threads();
+
+    // first: two reduce operations
+    let mut dnorm_mean_local = 0.0f32;
+    let mut dnorm_norm_mean_local = 0.0f32;
+
+    let mut i = lane_id;
+    while i < C {
+        let norm_bti = (inp_bt[i as usize] - mean_bt) * rstd_bt;
+        let dnorm_i = weight[i as usize] * dout_bt[i as usize];
+        dnorm_mean_local += dnorm_i;
+        dnorm_norm_mean_local += dnorm_i * norm_bti;
+        i += warp.size();
+    }
+
+    let dnorm_mean = warp.redux(ReduxAdd, dnorm_mean_local);
+    let dnorm_norm_mean = warp.redux(ReduxAdd, dnorm_norm_mean_local);
+    let dnorm_mean = dnorm_mean / C as f32;
+    let dnorm_norm_mean = dnorm_norm_mean / C as f32;
+
+    // now iterate again and accumulate all the gradients
+    let dbias_shared_atom = SharedAtomic::new(dbias_shared);
+    let dweight_shared_atom = SharedAtomic::new(dweight_shared);
+
+    let mut i = lane_id;
+    let mut k = 0;
+    while i < C {
+        let norm_bti = (inp_bt[i as usize] - mean_bt) * rstd_bt;
+        let dnorm_i = weight[i as usize] * dout_bt[i as usize];
+        // gradient contribution to bias
+        dbias_shared_atom
+            .index(i as usize)
+            .atomic_addf(dout_bt[i as usize]);
+        // gradient contribution to weight
+        let w = norm_bti * dout_bt[i as usize];
+        dweight_shared_atom.index(i as usize).atomic_addf(w);
+        // gradient contribution to input
+        let mut dval = 0.0f32;
+        dval += dnorm_i; // term 1
+        dval -= dnorm_mean; // term 2
+        dval -= norm_bti * dnorm_norm_mean; // term 3
+        dval *= rstd_bt; // final scale
+        dinp_chunk[k as _] += dval;
+        i += warp.size();
+        k += 1;
+    }
+    sync_threads(); // required before reading in shared memory
+
+    // write to global memory
+    let dbias = Atomic::new(dbias);
+    let dweight = Atomic::new(dweight);
+
+    let mut i = tid;
+    while i < C {
+        dbias
+            .index(i as usize)
+            .atomic_addf(*dbias_shared[i as usize]);
+        dweight
+            .index(i as usize)
+            .atomic_addf(*dweight_shared[i as usize]);
+        i += bdim_x;
+    }
+}
+
+#[cfg(feature = "use_iterator")]
+#[gpu::cuda_kernel(dynamic_shared)]
+pub fn layernorm_backward_kernel2(
+    dinp: &mut [f32],
+    dweight: &mut [f32],
+    dbias: &mut [f32],
+    dout: &[f32],
+    inp: &[f32],
+    weight: &[f32],
+    mean: &[f32],
+    rstd: &[f32],
+    B: u32,
+    T: u32,
+    C: u32,
+) {
+    // dinp, dout, inp shape: (B, T, C)
+    // weight, dbias shape: (C,)
+    // mean, rstd shape: (B, T)
+    let warp = ThreadWarpTile::<32>;
+    let grid2warp = build_chunk_scope(Grid, warp);
+    let warp2thread = build_chunk_scope(warp, Thread);
+    let bid_x = block_id::<DimX>();
+    let bdim_x = block_dim::<DimX>();
+    let tid = thread_id::<DimX>();
+    let lane_id = warp.thread_rank();
+
+    let global_warp_id = bid_x * (warp.meta_group_size()) + (warp.subgroup_id());
+
+    let N = B * T;
+    if global_warp_id >= N {
+        return;
+    } // thread guards
+
+    let warp_offset = (global_warp_id / T) * T + global_warp_id % T;
+    // gdim = 32 * B * T;
+    // dinp_warp_chunk = dinp + warp_id/T * T * C + (warp_id % T) * C
+    // dinp_thread_chunk = dinp_warp_chunk + lane_id + i * warp_size
+    /*let map = gpu::reshape_map!( [C/32] | [32, B, T] => layout: [t0, i0, t1, t2]);
+    let mut dinp_chunk = chunk_mut(dinp, map);
+    */
+    let mut dinp_chunk = dinp
+        .chunk_to_scope(
+            grid2warp,
+            gpu::reshape_map!( [C] | [B, T] => layout: [i0, t0, t1]),
+        )
+        .chunk_to_scope(
+            warp2thread,
+            gpu::reshape_map!( [C/32] | [32] => layout: [t0, i0]),
+        );
 
     let dout_bt = &dout[(warp_offset * C) as usize..];
     let inp_bt = &inp[(warp_offset * C) as usize..];

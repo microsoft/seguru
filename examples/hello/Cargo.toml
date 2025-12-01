@@ -6,3 +6,12 @@ edition = "2024"
 [dependencies]
 gpu_host = {workspace = true}
 gpu = {workspace = true}
+vstd = { path = "../../../verus/source/vstd" }
+verus_builtin = { path = "../../../verus/source/builtin" }
+verus_builtin_macros = { path = "../../../verus/source/builtin_macros" }
+
+[package.metadata.verus]
+verify = true
+
+[package.metadata.verus.ide]
+extra_args = "--expand-errors"

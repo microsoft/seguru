@@ -152,7 +152,7 @@ where
     [(); 16 - core::mem::size_of::<Map>()]:,
 {
     fn as_kernel_param_data(&self, args: &mut Vec<*mut ::core::ffi::c_void>) {
-        assert!(core::mem::size_of::<Map>() <= 16);
+        const { assert!(core::mem::size_of::<Map>() <= 16); }
         let ptr = self as *const Self as _;
         args.push(ptr);
         args.push(ptr.wrapping_add(8));

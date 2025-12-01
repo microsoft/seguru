@@ -340,7 +340,7 @@ pub struct GpuModule<N: GpuCtxSpace> {
 }
 
 impl<N: GpuCtxSpace + 'static> GpuCtxArenaTrait for GpuModule<N> {
-    fn as_any(&mut self) -> &mut (dyn core::any::Any) {
+    fn as_any(&mut self) -> &mut dyn core::any::Any {
         self
     }
 }

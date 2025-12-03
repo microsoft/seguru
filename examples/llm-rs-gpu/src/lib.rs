@@ -575,6 +575,8 @@ pub fn softmax_forward_kernel5(
     // If global_warp_id_reversed = 1, only the first two threads write to out[idx]
     // ...
     // If global_warp_id_reversed = T-1, if T > 32, all threads write to out[idx]
+
+    #[cfg(feature = "use_iterator")]
     for (idx, i) in (warp.thread_rank()..=own_pos)
         .step_by(warp.size() as usize)
         .enumerate()
@@ -584,6 +586,18 @@ pub fn softmax_forward_kernel5(
         //__stcs(out + idx * T + i, ev * norm);
         out[idx as _].stcs(ev * norm);
     }
+    #[cfg(not(feature = "use_iterator"))]{
+    let mut idx_out = 0;
+    let mut i = warp.thread_rank();
+    while i <= own_pos {
+        // recalculation is faster than doing the round-trip through memory.
+        let ev = (inv_temperature * (x[i as usize].ldcs() - global_maxval)).exp();
+        //__stcs(out + idx * T + i, ev * norm);
+        out[idx_out].stcs(ev * norm);
+        i += warp.size();
+        idx_out += 1;
+    }
+}
 }
 /*
 __global__ void residual_forward_kernel(float* out, float* inp1, float* inp2, int N) {
@@ -1233,8 +1247,20 @@ pub fn softmax_autoregressive_backward_kernel(
         let att_bth = &att[bth as usize..];
         let datt_bth = &datt[bth as usize..];
         let mut local_sum = 0.0f32;
-        for t2 in (block.thread_rank()..=t).step_by(BLOCK_SIZE as usize) {
-            local_sum += att_bth[t2 as usize] * datt_bth[t2 as usize];
+        #[cfg(feature = "use_iterator")]
+        {
+            for t2 in (block.thread_rank()..=t).step_by(BLOCK_SIZE as usize) {
+                local_sum += att_bth[t2 as usize] * datt_bth[t2 as usize];
+            }
+        }
+
+        #[cfg(not(feature = "use_iterator"))]
+        {
+            let mut t2 = block.thread_rank();
+            while t2 <= t {
+                local_sum += att_bth[t2 as usize] * datt_bth[t2 as usize];
+                t2 += BLOCK_SIZE;
+            }
         }
         // warp-level reduction
         let acc = warp.redux(ReduxAdd, local_sum);
@@ -1257,10 +1283,33 @@ pub fn softmax_autoregressive_backward_kernel(
         // block-level reduction
         local_sum = warp.redux(ReduxAdd, block_acc[lane_id as usize]);
 
-        for (i, t3) in (0_u32..).zip((block.thread_rank()..=t).step_by(BLOCK_SIZE as usize)) {
-            let acc = att_bth[t3 as usize].ldcs() * (datt_bth[t3 as usize].ldcs() - local_sum);
-            let val = scale * acc;
-            dpreatt_bth[(i, to)].stcs(val);
+        #[cfg(feature = "use_iterator")]
+        {
+            for t2 in (block.thread_rank()..=t).step_by(BLOCK_SIZE as usize) {
+                local_sum += att_bth[t2 as usize] * datt_bth[t2 as usize];
+            }
+        }
+
+        #[cfg(feature = "use_iterator")]
+        {
+            for (i, t3) in (0_u32..).zip((block.thread_rank()..=t).step_by(BLOCK_SIZE as usize)) {
+                let acc = att_bth[t3 as usize].ldcs() * (datt_bth[t3 as usize].ldcs() - local_sum);
+                let val = scale * acc;
+                dpreatt_bth[(i, to)].stcs(val);
+            }
+        }
+
+        #[cfg(not(feature = "use_iterator"))]
+        {
+            let mut t3 = block.thread_rank();
+            let mut i = 0;
+            while t3 <= t {
+                let acc = att_bth[t3 as usize].ldcs() * (datt_bth[t3 as usize].ldcs() - local_sum);
+                let val = scale * acc;
+                dpreatt_bth[(i, to)].stcs(val);
+                t3 += BLOCK_SIZE;
+                i += 1;
+            }
         }
     }
 }

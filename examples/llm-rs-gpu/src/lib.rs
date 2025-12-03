@@ -119,6 +119,7 @@ pub fn encoder_backward_kernel(
     }
 }
 
+#[cfg(not(feature = "use_iterator"))]
 #[gpu::cuda_kernel]
 pub fn layernorm_forward_kernel3(
     out: &mut [f32],
@@ -131,32 +132,121 @@ pub fn layernorm_forward_kernel3(
     C: u32,
 ) {
     let warp = ThreadWarpTile::<32>;
-    let grid2warp = build_chunk_scope(Grid, warp);
-    let warp2thread = build_chunk_scope(warp, Thread);
 
     // chunk to warp and then to a single thread.
-    let mut chunked_rstd = rstd
-        .chunk_to_scope(grid2warp, MapLinear::new(1))
-        .chunk_to_scope(warp2thread, MapLinear::new(1));
+    let warp_group_size = warp.meta_group_size();
+    let map = reshape_map!(
+        [1] | [(32, 1), warp_group_size * grid_dim::<DimX>()] => layout: [i0, t0, t1]
+    );
+    let mut chunked_rstd = chunk_mut(rstd, map);
 
     // chunk to warp and then to a single thread.
-    let mut chunked_mean = mean
-        .chunk_to_scope(grid2warp, MapLinear::new(1))
-        .chunk_to_scope(warp2thread, MapLinear::new(1));
+    let mut chunked_mean = chunk_mut(mean, map);
 
     // chunk to warp and then to a all thread in the warp
     // where each thread gets a strided chunk.
-    let mut chunked_out = out
-        .chunk_to_scope(grid2warp, MapLinear::new(C as _))
-        .chunk_to_scope(warp2thread, MapLinear::new(1));
+    // tid0 + tid1 * 32 * C/32 + i * 32
+    let out_map = reshape_map!(
+        [C/32] | [32, warp.meta_group_size() * grid_dim::<DimX>()] => layout: [t0, i0, t1]
+    );
+    let mut chunked_out = chunk_mut(out, out_map);
 
     let bid_x = block_id::<DimX>();
-
-    let idx = bid_x * warp.meta_group_size() + warp.subgroup_id();
-    let lane_id = warp.thread_rank();
+    let idx = bid_x * warp_group_size + warp.subgroup_id();
     if idx >= N {
         return;
     }
+
+    let lane_id = warp.thread_rank();
+
+    // the row of input that this group of threads is responsible for
+    let idx_C = idx * C;
+    let x = &inp[idx_C as usize..(idx_C + C) as usize];
+
+    // mean
+    let mut local_sum = 0.0f32;
+    let mut i = lane_id;
+    while i < C {
+        local_sum += x[i as usize];
+        i += warp.size();
+    }
+    let sum: f32 = warp.redux(ReduxAdd, local_sum);
+    let m = sum / C as f32;
+    if lane_id == 0 {
+        chunked_mean[0].stcs(m);
+    }
+    // rstd
+    let mut local_sum = 0.0f32;
+
+    let mut i = lane_id;
+    while i < C {
+        let diff = x[i as usize] - m;
+        local_sum += diff * diff;
+        i += warp.size();
+    }
+    let sum = warp.redux(ReduxAdd, local_sum);
+    let s = (sum / C as f32 + 1e-5f32).rsqrt();
+    if lane_id == 0 {
+        chunked_rstd[0].stcs(s);
+    }
+
+    // final normalization and scaling by weight/bias
+    let mut i: u32 = lane_id;
+    let mut idx: u32 = 0;
+    while i < C {
+        // load and store using the .cs "streaming" hint to the compiler,
+        // indicating that this data will not be reused soon, and can be streamed through the caches
+        // this allows the threads to get more cache-hits for the (shared) weight and bias parameters
+        let c = i as usize;
+        let n = s * (x[c].ldcs() - m);
+        let o = n * weight[c] + bias[c];
+        chunked_out[idx].stcs(o);
+        i += warp.size();
+        idx += 1;
+    }
+}
+
+/// Around 20% penalty on layernorm_forward_kernel3 due to iterator overhead
+#[cfg(feature = "use_iterator")]
+#[gpu::cuda_kernel]
+pub fn layernorm_forward_kernel3(
+    out: &mut [f32],
+    mean: &mut [f32],
+    rstd: &mut [f32],
+    inp: &[f32],
+    weight: &[f32],
+    bias: &[f32],
+    N: u32,
+    C: u32,
+) {
+    let warp = ThreadWarpTile::<32>;
+
+    // chunk to warp and then to a single thread.
+    let warp_group_size = warp.meta_group_size();
+    let map = reshape_map!(
+        [1] | [(32, 1), warp_group_size * grid_dim::<DimX>()] => layout: [i0, t0, t1]
+    );
+    let mut chunked_rstd = chunk_mut(rstd, map);
+
+    // chunk to warp and then to a single thread.
+    let mut chunked_mean = chunk_mut(mean, map);
+
+    // chunk to warp and then to a all thread in the warp
+    // where each thread gets a strided chunk.
+    // tid0 + tid1 * 32 * C/32 + i * 32
+    let out_map = reshape_map!(
+        [C/32] | [32, warp.meta_group_size() * grid_dim::<DimX>()] => layout: [t0, i0, t1]
+    );
+    let mut chunked_out = chunk_mut(out, out_map);
+
+    let bid_x = block_id::<DimX>();
+    let idx = bid_x * warp_group_size + warp.subgroup_id();
+    if idx >= N {
+        return;
+    }
+
+    let lane_id = warp.thread_rank();
+
     // the row of input that this group of threads is responsible for
     let idx_C = idx * C;
     let x = &inp[idx_C as usize..(idx_C + C) as usize];
@@ -485,6 +575,8 @@ pub fn softmax_forward_kernel5(
     // If global_warp_id_reversed = 1, only the first two threads write to out[idx]
     // ...
     // If global_warp_id_reversed = T-1, if T > 32, all threads write to out[idx]
+
+    #[cfg(feature = "use_iterator")]
     for (idx, i) in (warp.thread_rank()..=own_pos)
         .step_by(warp.size() as usize)
         .enumerate()
@@ -493,6 +585,19 @@ pub fn softmax_forward_kernel5(
         let ev = (inv_temperature * (x[i as usize].ldcs() - global_maxval)).exp();
         //__stcs(out + idx * T + i, ev * norm);
         out[idx as _].stcs(ev * norm);
+    }
+    #[cfg(not(feature = "use_iterator"))]
+    {
+        let mut idx_out = 0;
+        let mut i = warp.thread_rank();
+        while i <= own_pos {
+            // recalculation is faster than doing the round-trip through memory.
+            let ev = (inv_temperature * (x[i as usize].ldcs() - global_maxval)).exp();
+            //__stcs(out + idx * T + i, ev * norm);
+            out[idx_out].stcs(ev * norm);
+            i += warp.size();
+            idx_out += 1;
+        }
     }
 }
 /*
@@ -771,6 +876,7 @@ __global__ void layernorm_backward_kernel2(float* dinp, float* dweight, float* d
 }
 */
 
+#[cfg(not(feature = "use_iterator"))]
 #[gpu::cuda_kernel(dynamic_shared)]
 pub fn layernorm_backward_kernel2(
     dinp: &mut [f32],
@@ -807,13 +913,151 @@ pub fn layernorm_backward_kernel2(
     // gdim = 32 * B * T;
     // dinp_warp_chunk = dinp + warp_id/T * T * C + (warp_id % T) * C
     // dinp_thread_chunk = dinp_warp_chunk + lane_id + i * warp_size
+    /*let map = gpu::reshape_map!( [C/32] | [32, B, T] => layout: [t0, i0, t1, t2]);
+    let mut dinp_chunk = chunk_mut(dinp, map);
+    */
     let mut dinp_chunk = dinp
         .chunk_to_scope(
             grid2warp,
-            //gpu::reshape_map!([B, T] | [C] => layout: [0, 1, 2]),
             gpu::reshape_map!( [C] | [B, T] => layout: [i0, t0, t1]),
         )
-        .chunk_to_scope(warp2thread, gpu::MapLinear::new(1));
+        .chunk_to_scope(
+            warp2thread,
+            gpu::reshape_map!( [C/32] | [32] => layout: [t0, i0]),
+        );
+
+    let dout_bt = &dout[(warp_offset * C) as usize..];
+    let inp_bt = &inp[(warp_offset * C) as usize..];
+    let mean_bt = mean[warp_offset as usize];
+    let rstd_bt = rstd[warp_offset as usize];
+    // the first half of shared memory is bias, second is weight
+    let dbias_shared = smem_alloc.alloc::<f32>(C as usize);
+    let mut dbias_shared_chunk = dbias_shared.chunk_mut(gpu::MapLinear::new(1));
+    let dweight_shared = smem_alloc.alloc::<f32>(C as usize);
+    let mut dweight_shared_chunk = dweight_shared.chunk_mut(gpu::MapLinear::new(1));
+    // init shared memory to zero
+    // replace iterator with while loop
+    let mut id = tid;
+    let mut i = 0;
+    while id < C {
+        dbias_shared_chunk[i as _] = 0.0;
+        dweight_shared_chunk[i as _] = 0.0;
+        id += bdim_x;
+        i += 1;
+    }
+    sync_threads();
+
+    // first: two reduce operations
+    let mut dnorm_mean_local = 0.0f32;
+    let mut dnorm_norm_mean_local = 0.0f32;
+
+    let mut i = lane_id;
+    while i < C {
+        let norm_bti = (inp_bt[i as usize] - mean_bt) * rstd_bt;
+        let dnorm_i = weight[i as usize] * dout_bt[i as usize];
+        dnorm_mean_local += dnorm_i;
+        dnorm_norm_mean_local += dnorm_i * norm_bti;
+        i += warp.size();
+    }
+
+    let dnorm_mean = warp.redux(ReduxAdd, dnorm_mean_local);
+    let dnorm_norm_mean = warp.redux(ReduxAdd, dnorm_norm_mean_local);
+    let dnorm_mean = dnorm_mean / C as f32;
+    let dnorm_norm_mean = dnorm_norm_mean / C as f32;
+
+    // now iterate again and accumulate all the gradients
+    let dbias_shared_atom = SharedAtomic::new(dbias_shared);
+    let dweight_shared_atom = SharedAtomic::new(dweight_shared);
+
+    let mut i = lane_id;
+    let mut k = 0;
+    while i < C {
+        let norm_bti = (inp_bt[i as usize] - mean_bt) * rstd_bt;
+        let dnorm_i = weight[i as usize] * dout_bt[i as usize];
+        // gradient contribution to bias
+        dbias_shared_atom
+            .index(i as usize)
+            .atomic_addf(dout_bt[i as usize]);
+        // gradient contribution to weight
+        let w = norm_bti * dout_bt[i as usize];
+        dweight_shared_atom.index(i as usize).atomic_addf(w);
+        // gradient contribution to input
+        let mut dval = 0.0f32;
+        dval += dnorm_i; // term 1
+        dval -= dnorm_mean; // term 2
+        dval -= norm_bti * dnorm_norm_mean; // term 3
+        dval *= rstd_bt; // final scale
+        dinp_chunk[k as _] += dval;
+        i += warp.size();
+        k += 1;
+    }
+    sync_threads(); // required before reading in shared memory
+
+    // write to global memory
+    let dbias = Atomic::new(dbias);
+    let dweight = Atomic::new(dweight);
+
+    let mut i = tid;
+    while i < C {
+        dbias
+            .index(i as usize)
+            .atomic_addf(*dbias_shared[i as usize]);
+        dweight
+            .index(i as usize)
+            .atomic_addf(*dweight_shared[i as usize]);
+        i += bdim_x;
+    }
+}
+
+#[cfg(feature = "use_iterator")]
+#[gpu::cuda_kernel(dynamic_shared)]
+pub fn layernorm_backward_kernel2(
+    dinp: &mut [f32],
+    dweight: &mut [f32],
+    dbias: &mut [f32],
+    dout: &[f32],
+    inp: &[f32],
+    weight: &[f32],
+    mean: &[f32],
+    rstd: &[f32],
+    B: u32,
+    T: u32,
+    C: u32,
+) {
+    // dinp, dout, inp shape: (B, T, C)
+    // weight, dbias shape: (C,)
+    // mean, rstd shape: (B, T)
+    let warp = ThreadWarpTile::<32>;
+    let grid2warp = build_chunk_scope(Grid, warp);
+    let warp2thread = build_chunk_scope(warp, Thread);
+    let bid_x = block_id::<DimX>();
+    let bdim_x = block_dim::<DimX>();
+    let tid = thread_id::<DimX>();
+    let lane_id = warp.thread_rank();
+
+    let global_warp_id = bid_x * (warp.meta_group_size()) + (warp.subgroup_id());
+
+    let N = B * T;
+    if global_warp_id >= N {
+        return;
+    } // thread guards
+
+    let warp_offset = (global_warp_id / T) * T + global_warp_id % T;
+    // gdim = 32 * B * T;
+    // dinp_warp_chunk = dinp + warp_id/T * T * C + (warp_id % T) * C
+    // dinp_thread_chunk = dinp_warp_chunk + lane_id + i * warp_size
+    /*let map = gpu::reshape_map!( [C/32] | [32, B, T] => layout: [t0, i0, t1, t2]);
+    let mut dinp_chunk = chunk_mut(dinp, map);
+    */
+    let mut dinp_chunk = dinp
+        .chunk_to_scope(
+            grid2warp,
+            gpu::reshape_map!( [C] | [B, T] => layout: [i0, t0, t1]),
+        )
+        .chunk_to_scope(
+            warp2thread,
+            gpu::reshape_map!( [C/32] | [32] => layout: [t0, i0]),
+        );
 
     let dout_bt = &dout[(warp_offset * C) as usize..];
     let inp_bt = &inp[(warp_offset * C) as usize..];
@@ -1004,8 +1248,20 @@ pub fn softmax_autoregressive_backward_kernel(
         let att_bth = &att[bth as usize..];
         let datt_bth = &datt[bth as usize..];
         let mut local_sum = 0.0f32;
-        for t2 in (block.thread_rank()..=t).step_by(BLOCK_SIZE as usize) {
-            local_sum += att_bth[t2 as usize] * datt_bth[t2 as usize];
+        #[cfg(feature = "use_iterator")]
+        {
+            for t2 in (block.thread_rank()..=t).step_by(BLOCK_SIZE as usize) {
+                local_sum += att_bth[t2 as usize] * datt_bth[t2 as usize];
+            }
+        }
+
+        #[cfg(not(feature = "use_iterator"))]
+        {
+            let mut t2 = block.thread_rank();
+            while t2 <= t {
+                local_sum += att_bth[t2 as usize] * datt_bth[t2 as usize];
+                t2 += BLOCK_SIZE;
+            }
         }
         // warp-level reduction
         let acc = warp.redux(ReduxAdd, local_sum);
@@ -1028,10 +1284,33 @@ pub fn softmax_autoregressive_backward_kernel(
         // block-level reduction
         local_sum = warp.redux(ReduxAdd, block_acc[lane_id as usize]);
 
-        for (i, t3) in (0_u32..).zip((block.thread_rank()..=t).step_by(BLOCK_SIZE as usize)) {
-            let acc = att_bth[t3 as usize].ldcs() * (datt_bth[t3 as usize].ldcs() - local_sum);
-            let val = scale * acc;
-            dpreatt_bth[(i, to)].stcs(val);
+        #[cfg(feature = "use_iterator")]
+        {
+            for t2 in (block.thread_rank()..=t).step_by(BLOCK_SIZE as usize) {
+                local_sum += att_bth[t2 as usize] * datt_bth[t2 as usize];
+            }
+        }
+
+        #[cfg(feature = "use_iterator")]
+        {
+            for (i, t3) in (0_u32..).zip((block.thread_rank()..=t).step_by(BLOCK_SIZE as usize)) {
+                let acc = att_bth[t3 as usize].ldcs() * (datt_bth[t3 as usize].ldcs() - local_sum);
+                let val = scale * acc;
+                dpreatt_bth[(i, to)].stcs(val);
+            }
+        }
+
+        #[cfg(not(feature = "use_iterator"))]
+        {
+            let mut t3 = block.thread_rank();
+            let mut i = 0;
+            while t3 <= t {
+                let acc = att_bth[t3 as usize].ldcs() * (datt_bth[t3 as usize].ldcs() - local_sum);
+                let val = scale * acc;
+                dpreatt_bth[(i, to)].stcs(val);
+                t3 += BLOCK_SIZE;
+                i += 1;
+            }
         }
     }
 }
@@ -1272,7 +1551,6 @@ __global__ void fused_classifier_kernel3(float* logits, float* losses, float* pr
 }
 */
 
-// assert!(P >= V);
 #[gpu::cuda_kernel]
 pub fn fused_classifier_kernel3(
     logits: &mut [f32],
@@ -1340,19 +1618,41 @@ pub fn fused_classifier_kernel3(
             reshape_map!( [V.div_ceil(block_dim::<DimX>())] | [block_dim::<DimX>()] => layout: [t0, i0]),
         );
 
-    for (k, i) in (gpu::thread_id::<gpu::DimX>()..V)
-        .step_by(gpu::block_dim::<gpu::DimX>() as _)
-        .enumerate()
+    // use while loop
+    #[cfg(not(feature = "use_iterator"))]
     {
-        // this is the 2nd read of logits after the one in prepare_softmax2
-        // this data will never be needed again, so we reduce cache persistence
-        let v = logits_chunk[k as _].ldcs();
-        let prob = ((v - sp.offset).exp()) * sp.scale;
-        if !prob_is_empty {
-            probs_chunk[k as _] = prob;
+        let mut k = 0;
+        let mut i = thread_id::<gpu::DimX>();
+        while i < V {
+            // this is the 2nd read of logits after the one in prepare_softmax2
+            // this data will never be needed again, so we reduce cache persistence
+            let v = logits_chunk[k as _].ldcs();
+            let prob = ((v - sp.offset).exp()) * sp.scale;
+            if !prob_is_empty {
+                probs_chunk[k as _] = prob;
+            }
+            let indicator = if i as i32 == ix { 1.0 } else { 0.0 };
+            logits_chunk[k as _] = (prob - indicator) * dloss;
+            k += 1;
+            i += block_dim::<DimX>();
         }
-        let indicator = if i as i32 == ix { 1.0 } else { 0.0 };
-        logits_chunk[k as _] = (prob - indicator) * dloss;
+    }
+    #[cfg(feature = "use_iterator")]
+    {
+        for (k, i) in (gpu::thread_id::<gpu::DimX>()..V)
+            .step_by(gpu::block_dim::<gpu::DimX>() as _)
+            .enumerate()
+        {
+            // this is the 2nd read of logits after the one in prepare_softmax2
+            // this data will never be needed again, so we reduce cache persistence
+            let v = logits_chunk[k as _].ldcs();
+            let prob = ((v - sp.offset).exp()) * sp.scale;
+            if !prob_is_empty {
+                probs_chunk[k as _] = prob;
+            }
+            let indicator = if i as i32 == ix { 1.0 } else { 0.0 };
+            logits_chunk[k as _] = (prob - indicator) * dloss;
+        }
     }
 }
 

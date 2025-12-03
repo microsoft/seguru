@@ -8,8 +8,6 @@ cuda_bindings = { workspace = true, features = ["gpu"]}
 num-traits = { workspace = true }
 gpu_macros = {workspace = true}
 vstd = { path = "../../../verus/source/vstd" }
-verus_builtin = { path = "../../../verus/source/builtin" }
-verus_builtin_macros = { path = "../../../verus/source/builtin_macros" }
 
 [dev-dependencies]
 gpu_macros = {workspace = true}

@@ -586,18 +586,19 @@ pub fn softmax_forward_kernel5(
         //__stcs(out + idx * T + i, ev * norm);
         out[idx as _].stcs(ev * norm);
     }
-    #[cfg(not(feature = "use_iterator"))]{
-    let mut idx_out = 0;
-    let mut i = warp.thread_rank();
-    while i <= own_pos {
-        // recalculation is faster than doing the round-trip through memory.
-        let ev = (inv_temperature * (x[i as usize].ldcs() - global_maxval)).exp();
-        //__stcs(out + idx * T + i, ev * norm);
-        out[idx_out].stcs(ev * norm);
-        i += warp.size();
-        idx_out += 1;
+    #[cfg(not(feature = "use_iterator"))]
+    {
+        let mut idx_out = 0;
+        let mut i = warp.thread_rank();
+        while i <= own_pos {
+            // recalculation is faster than doing the round-trip through memory.
+            let ev = (inv_temperature * (x[i as usize].ldcs() - global_maxval)).exp();
+            //__stcs(out + idx * T + i, ev * norm);
+            out[idx_out].stcs(ev * norm);
+            i += warp.size();
+            idx_out += 1;
+        }
     }
-}
 }
 /*
 __global__ void residual_forward_kernel(float* out, float* inp1, float* inp2, int N) {

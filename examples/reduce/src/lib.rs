@@ -63,7 +63,7 @@ mod tests {
                 .new_tensor_view(partial_sums.as_mut_slice())
                 .expect("alloc failed");
             let smem = block_dim * core::mem::size_of::<u32>() as u32;
-            let config = gpu_host::gpu_config!(grid_dim, 1, 1, block_dim, 1, 1, smem as u32);
+            let config = gpu_host::gpu_config!(grid_dim, 1, 1, block_dim, 1, 1, smem);
             reduce_per_grid::launch(config, ctx, m, &d_inputs, &mut d_partial_sums)
                 .expect("reduce_per_grid kernel launch failed");
             d_partial_sums

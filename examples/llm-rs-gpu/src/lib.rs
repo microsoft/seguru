@@ -8,6 +8,7 @@ use core::f32;
 use core::ops::Add;
 use crunchy::unroll;
 use gpu::cg::{CGOperations, ReduxAdd, ReduxMax, ThreadWarpTile, WarpReduceOp};
+use gpu::chunk::ScopeUniqueMap;
 use gpu::chunk_scope::{build_chunk_scope, Block, Grid, Grid2BlockScope, Thread};
 use gpu::prelude::*;
 use gpu::sync::{Atomic, SharedAtomic};
@@ -40,7 +41,7 @@ pub fn encoder_forward_kernel3(
     T: u32,
     C: u32,
 ) {
-    let mut out = chunk_mut(out, MapLinear::new(1));
+    let mut out = chunk_mut(out, MapContinuousLinear::new(1));
     let C4 = C / 4;
     let bid_x = block_id::<DimX>();
     let bdim_x = block_dim::<DimX>();
@@ -205,9 +206,9 @@ pub fn permute_kernel(
     NH: u32,
     d: u32,
 ) {
-    let mut q = chunk_mut(q, MapLinear::new(1));
-    let mut k = chunk_mut(k, MapLinear::new(1));
-    let mut v = chunk_mut(v, MapLinear::new(1));
+    let mut q = chunk_mut(q, MapContinuousLinear::new(1));
+    let mut k = chunk_mut(k, MapContinuousLinear::new(1));
+    let mut v = chunk_mut(v, MapContinuousLinear::new(1));
     let idx = block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>();
 
     if idx < B * NH * N * d {
@@ -333,7 +334,7 @@ pub fn unpermute_kernel_backward(dinp: &mut [f32], dout: &[f32], B: u32, N: u32,
     // inp shape: (B, NH, N, D) out shape (B, N, NH, D)
     // out[b][n][nh_][d_] <- inp[b][nh_][n][d_]
     // swap tid1 and tid2
-    let map = gpu::MapLinear::new(1);
+    let map = gpu::MapContinuousLinear::new(1);
     let mut dinp = chunk_mut(dinp, map);
     let idx = gpu::block_dim::<gpu::DimX>() * gpu::block_id::<gpu::DimX>()
         + gpu::thread_id::<gpu::DimX>();
@@ -434,7 +435,12 @@ pub fn softmax_forward_kernel5(
                 [T] | [warp.meta_group_size(), grid_dim::<DimX>()] => layout: [i0, t0, -t1]
             ),
         )
-        .chunk_to_scope(warp2thread, gpu::MapLinear::new(1));
+        .chunk_to_scope(
+            warp2thread,
+            reshape_map!(
+                [T/32] | [32] => layout: [t0, i0]
+            ),
+        );
     // micro-optimization: we iterate backwards so that
     // after the softmax backward operation completes, the cache retains the
     // part of the matrix close to the upper left corner, which benefits the
@@ -486,7 +492,7 @@ pub fn softmax_forward_kernel5(
         // recalculation is faster than doing the round-trip through memory.
         let ev = (inv_temperature * (x[i as usize].ldcs() - global_maxval)).exp();
         //__stcs(out + idx * T + i, ev * norm);
-        out[idx].stcs(ev * norm);
+        out[idx as _].stcs(ev * norm);
     }
 }
 /*
@@ -500,7 +506,7 @@ __global__ void residual_forward_kernel(float* out, float* inp1, float* inp2, in
 
 #[gpu::cuda_kernel]
 pub fn residual_forward_kernel(out: &mut [f32], inp1: &[f32], inp2: &[f32], N: u32) {
-    let mut out = chunk_mut(out, gpu::MapLinear::new(1));
+    let mut out = chunk_mut(out, gpu::MapContinuousLinear::new(1));
     let idx = block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>();
     if idx < N {
         out[0] = inp1[idx as usize].ldcs() + inp2[idx as usize].ldcs();
@@ -523,7 +529,7 @@ __global__ void gelu_forward_kernel(float* out, const float* inp, int N) {
 pub fn gelu_forward_kernel(out: &mut [f32], inp: &[f32], N: u32) {
     let GELU_SCALING_FACTOR: f32 = (2.0f32 / core::f32::consts::PI).sqrt();
 
-    let mut out = chunk_mut(out, MapLinear::new(1));
+    let mut out = chunk_mut(out, gpu::MapContinuousLinear::new(1));
     let idx = block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>();
     if idx < N {
         let xi = inp[idx as usize].ldcs();
@@ -551,7 +557,7 @@ __global__ void gelu_backward_kernel(float* dinp, const float* inp, const float*
 #[gpu::cuda_kernel]
 pub fn gelu_backward_kernel_llm(dinp: &mut [f32], inp: &[f32], dout: &[f32], N: u32) {
     let gelu_scaling_factor: f32 = (2.0f32 / core::f32::consts::PI).sqrt();
-    let mut dinp = chunk_mut(dinp, MapLinear::new(1));
+    let mut dinp = chunk_mut(dinp, MapContinuousLinear::new(1));
     let idx = block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>();
     if idx < N {
         let idx = idx as usize;
@@ -572,9 +578,9 @@ pub fn gelu_backward_kernel_llm(dinp: &mut [f32], inp: &[f32], dout: &[f32], N: 
 pub fn gelu_backward_kernel(dinp: &mut [f32], inp: &[f32], N: u32) {
     let gelu_scaling_factor: f32 = (2.0f32 / core::f32::consts::PI).sqrt();
 
-    let mut dinp_local = chunk_mut(dinp, gpu::MapLinear::new(1));
+    let mut dinp_local = chunk_mut(dinp, MapContinuousLinear::new(1));
     let idx = dinp_local.local2global(0);
-    if idx < N as usize {
+    if idx < N {
         let x = inp[idx as usize].ldcs();
         let cube = 0.044715 * x * x * x;
         let tanh_arg = gelu_scaling_factor * (x + cube);
@@ -657,7 +663,7 @@ pub fn matmul_backward_bias_kernel4(dbias: &mut [f32], dout: &[f32], B: u32, T: 
         ),
     );
     let smem = smem_alloc.alloc::<f32>(block_size as usize);
-    let mut smem_chunk = smem.chunk_mut(MapLinear::new(1));
+    let mut smem_chunk = smem.chunk_mut(MapContinuousLinear::new(1));
 
     let warp_id = thread_id::<DimX>() / warp.size(); // warp index in the block, 0,1,2,3
     let lane_id = thread_id::<DimX>() % warp.size(); // thread index in the warp, 0,1,2,...,31
@@ -981,8 +987,8 @@ pub fn softmax_autoregressive_backward_kernel(
     // and then assign 1 element to each thread in the warp
     // Since block_acc.len() = 32, only the first warp writes to block_acc
     let mut block_acc_init_chunk = block_acc
-        .chunk_to_scope(block2warp, gpu::MapLinear::new(32))
-        .chunk_to_scope(warp2thread, gpu::MapLinear::new(1));
+        .chunk_to_scope(block2warp, gpu::MapContinuousLinear::new(32))
+        .chunk_to_scope(warp2thread, gpu::MapContinuousLinear::new(1));
     if warp.subgroup_id() == 0 {
         block_acc_init_chunk[0] = 0.0;
     }
@@ -1012,8 +1018,8 @@ pub fn softmax_autoregressive_backward_kernel(
         // block-level accumulation
         // Thus only lane_0 can write to block_acc_chunk
         let mut block_acc_chunk = block_acc
-            .chunk_to_scope(block2warp, gpu::MapLinear::new(1))
-            .chunk_to_scope(warp2thread, gpu::MapLinear::new(1));
+            .chunk_to_scope(block2warp, gpu::MapContinuousLinear::new(1))
+            .chunk_to_scope(warp2thread, gpu::MapContinuousLinear::new(1));
         if lane_id == 0 {
             block_acc_chunk[0] = acc;
         }
@@ -1065,9 +1071,9 @@ pub fn adamw_kernel2(
     eps: f32,
     weight_decay: f32,
 ) {
-    let mut params_memory = chunk_mut(params_memory, gpu::MapLinear::new(1));
-    let mut m_memory = chunk_mut(m_memory, gpu::MapLinear::new(1));
-    let mut v_memory = chunk_mut(v_memory, gpu::MapLinear::new(1));
+    let mut params_memory = chunk_mut(params_memory, gpu::MapContinuousLinear::new(1));
+    let mut m_memory = chunk_mut(m_memory, gpu::MapContinuousLinear::new(1));
+    let mut v_memory = chunk_mut(v_memory, gpu::MapContinuousLinear::new(1));
     let idx = (block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>()) as i32;
     if idx >= num_parameters {
         return;
@@ -1148,8 +1154,8 @@ struct SoftmaxParams {
 // inp: Shape(V,)
 #[inline(always)]
 #[gpu::device]
-fn prepare_softmax_blockwide_noFloat4(
-    inp: &GlobalGroupChunk<'_, f32, Grid2BlockScope, MapLinear>,
+fn prepare_softmax_blockwide_noFloat4<M: ScopeUniqueMap<Grid2BlockScope, IndexType = u32>>(
+    inp: &GlobalGroupChunk<'_, f32, Grid2BlockScope, M>,
     V: u32,
 ) -> SoftmaxParams {
     // two reductions of up to 1024 threads:
@@ -1162,12 +1168,12 @@ fn prepare_softmax_blockwide_noFloat4(
     let block2warp = build_chunk_scope(Block, warp);
     let warp2thread = build_chunk_scope(warp, Thread);
     let mut shared_maxval_chunk = shared_maxval
-        .chunk_to_scope(block2warp, MapLinear::new(1))
-        .chunk_to_scope(warp2thread, MapLinear::new(1));
+        .chunk_to_scope(block2warp, MapContinuousLinear::new(1))
+        .chunk_to_scope(warp2thread, MapContinuousLinear::new(1));
 
     let mut shared_sumval_chunk = shared_sumval
-        .chunk_to_scope(block2warp, MapLinear::new(1))
-        .chunk_to_scope(warp2thread, MapLinear::new(1));
+        .chunk_to_scope(block2warp, MapContinuousLinear::new(1))
+        .chunk_to_scope(warp2thread, MapContinuousLinear::new(1));
 
     // bidx * P + i * bdimx
     let mut thread_maxval = f32::NEG_INFINITY;
@@ -1284,11 +1290,11 @@ pub fn fused_classifier_kernel3(
     let block2thread = build_chunk_scope(block, Thread);
 
     // chunk logits to (B*T, P)
-    let logits_block = logits.chunk_to_scope(grid2block, MapLinear::new(P as _)); // blockid * P + tid
+    let logits_block = logits.chunk_to_scope(grid2block, MapContinuousLinear::new(P as _)); // blockid * P + tid
 
     let mut losses_chunk = losses
-        .chunk_to_scope(grid2block, MapLinear::new(1))
-        .chunk_to_scope(block2thread, MapLinear::new(1));
+        .chunk_to_scope(grid2block, MapContinuousLinear::new(1))
+        .chunk_to_scope(block2thread, MapContinuousLinear::new(1));
 
     let idx = gpu::block_id::<gpu::DimX>();
     if idx >= B * T {
@@ -1322,11 +1328,17 @@ pub fn fused_classifier_kernel3(
     // but also supports writing probs for inference-only and debugging
     // sync safety: logits_block is only used in this thread block.
     // prepare_softmax_blockwide_noFloat4 has sync_threads internally.
-    let mut logits_chunk = logits_block.chunk_to_scope(block2thread, MapLinear::new(1));
+    let mut logits_chunk = logits_block.chunk_to_scope(
+        block2thread,
+        reshape_map!( [V.div_ceil(block_dim::<DimX>())] | [block_dim::<DimX>()] => layout: [t0, i0]),
+    );
     let prob_is_empty = probs.is_empty();
     let mut probs_chunk = probs
-        .chunk_to_scope(grid2block, MapLinear::new(V as _))
-        .chunk_to_scope(block2thread, MapLinear::new(1));
+        .chunk_to_scope(grid2block, MapContinuousLinear::new(V as _))
+        .chunk_to_scope(
+            block2thread,
+            reshape_map!( [V.div_ceil(block_dim::<DimX>())] | [block_dim::<DimX>()] => layout: [t0, i0]),
+        );
 
     for (k, i) in (gpu::thread_id::<gpu::DimX>()..V)
         .step_by(gpu::block_dim::<gpu::DimX>() as _)

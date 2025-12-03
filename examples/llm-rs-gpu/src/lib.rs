@@ -1005,7 +1005,7 @@ pub fn softmax_autoregressive_backward_kernel(
         let datt_bth = &datt[bth as usize..];
         let mut local_sum = 0.0f32;
         for t2 in (block.thread_rank()..=t).step_by(BLOCK_SIZE as usize) {
-            local_sum += att_bth[t2 as usize].ldcs() * datt_bth[t2 as usize].ldcs();
+            local_sum += att_bth[t2 as usize] * datt_bth[t2 as usize];
         }
         // warp-level reduction
         let acc = warp.redux(ReduxAdd, local_sum);

@@ -13,6 +13,7 @@ pub trait DimType {
 }
 
 #[derive(Copy, Clone)]
+#[allow(dead_code)]
 pub(crate) enum DimTypeID {
     X = 0,
     Y = 1,

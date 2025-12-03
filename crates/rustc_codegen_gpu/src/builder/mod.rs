@@ -995,6 +995,15 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         self.cur_block.append_operation(op)
     }
 
+    #[inline]
+    fn append_fast_op(&self, mut op: mlir_ir::Operation<'ml>) -> mlir_ir::OperationRef<'ml, 'a> {
+        op.set_attribute(
+            "fastmath",
+            Attribute::parse(self.mlir_ctx, "#arith.fastmath<fast>").unwrap(),
+        );
+        self.append_op(op)
+    }
+
     fn ptrtollvmptr(&mut self, ptr: mlir_ir::Value<'ml, 'a>) -> mlir_ir::Value<'ml, 'a> {
         let memref_ty = MemRefType::try_from(ptr.r#type()).unwrap();
         let addr = self.ptrtoint(ptr, self.type_i64());

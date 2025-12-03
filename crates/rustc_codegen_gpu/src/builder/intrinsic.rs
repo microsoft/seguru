@@ -30,7 +30,7 @@ macro_rules! device_intrinsic_match {
                         panic!("Intrinsic `{}` expects {} args, got {}", $intrinsic, $num_args, $args.len());
                     }
                     let op = call_intrinsic!($num_args, $func, $args, $ctx, $loc);
-                    $builder.append_op(op.into())
+                    $builder.append_fast_op(op.into())
                 }
             )*
             _ => panic!("GPU intrinsic `{}` at {:?} not supported.", $name, $builder.cur_span),
@@ -49,7 +49,7 @@ macro_rules! intrinsic_match {
                         panic!("Intrinsic `{}` expects {} args, got {}", $intrinsic, $num_args, $args.len());
                     }
                     let op = call_intrinsic!($num_args, $func, $args, $ctx, $loc);
-                    let ret = $builder.append_op_res(op.into());
+                    let ret = $builder.append_fast_op_res(op.into());
                     $builder.store(ret, $llresult, rustc_abi::Align::ONE);
                 }
             )*

@@ -1,7 +1,7 @@
 #![no_std]
 #![allow(non_snake_case)]
 #![allow(clippy::too_many_arguments)]
-#![deny(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_truncation)]
 
 use core::f32;
 

@@ -1501,7 +1501,6 @@ __global__ void fused_classifier_kernel3(float* logits, float* losses, float* pr
 }
 */
 
-// assert!(P >= V);
 #[gpu::cuda_kernel]
 pub fn fused_classifier_kernel3(
     logits: &mut [f32],
@@ -1569,19 +1568,41 @@ pub fn fused_classifier_kernel3(
             reshape_map!( [V.div_ceil(block_dim::<DimX>())] | [block_dim::<DimX>()] => layout: [t0, i0]),
         );
 
-    for (k, i) in (gpu::thread_id::<gpu::DimX>()..V)
-        .step_by(gpu::block_dim::<gpu::DimX>() as _)
-        .enumerate()
+    // use while loop
+    #[cfg(not(feature = "use_iterator"))]
     {
-        // this is the 2nd read of logits after the one in prepare_softmax2
-        // this data will never be needed again, so we reduce cache persistence
-        let v = logits_chunk[k as _].ldcs();
-        let prob = ((v - sp.offset).exp()) * sp.scale;
-        if !prob_is_empty {
-            probs_chunk[k as _] = prob;
+        let mut k = 0;
+        let mut i = thread_id::<gpu::DimX>();
+        while i < V {
+            // this is the 2nd read of logits after the one in prepare_softmax2
+            // this data will never be needed again, so we reduce cache persistence
+            let v = logits_chunk[k as _].ldcs();
+            let prob = ((v - sp.offset).exp()) * sp.scale;
+            if !prob_is_empty {
+                probs_chunk[k as _] = prob;
+            }
+            let indicator = if i as i32 == ix { 1.0 } else { 0.0 };
+            logits_chunk[k as _] = (prob - indicator) * dloss;
+            k += 1;
+            i += block_dim::<DimX>();
         }
-        let indicator = if i as i32 == ix { 1.0 } else { 0.0 };
-        logits_chunk[k as _] = (prob - indicator) * dloss;
+    }
+    #[cfg(feature = "use_iterator")]
+    {
+        for (k, i) in (gpu::thread_id::<gpu::DimX>()..V)
+            .step_by(gpu::block_dim::<gpu::DimX>() as _)
+            .enumerate()
+        {
+            // this is the 2nd read of logits after the one in prepare_softmax2
+            // this data will never be needed again, so we reduce cache persistence
+            let v = logits_chunk[k as _].ldcs();
+            let prob = ((v - sp.offset).exp()) * sp.scale;
+            if !prob_is_empty {
+                probs_chunk[k as _] = prob;
+            }
+            let indicator = if i as i32 == ix { 1.0 } else { 0.0 };
+            logits_chunk[k as _] = (prob - indicator) * dloss;
+        }
     }
 }
 

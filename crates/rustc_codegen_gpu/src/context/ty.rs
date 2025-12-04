@@ -496,7 +496,7 @@ impl<'tcx, 'ml, 'a> BaseTypeCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> 
     }
 
     fn type_ptr(&self) -> Self::Type {
-        self.type_ptr_ext(rustc_abi::AddressSpace::DATA)
+        self.type_ptr_ext(rustc_abi::AddressSpace::ZERO)
     }
 
     fn element_type(&self, ty: Self::Type) -> Self::Type {

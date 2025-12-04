@@ -147,11 +147,4 @@ impl<'tcx, 'ml, 'a> ArgAbiBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
             }
         }
     }
-
-    fn arg_memory_ty(
-        &self,
-        arg_abi: &rustc_target::callconv::ArgAbi<'tcx, rustc_middle::ty::Ty<'tcx>>,
-    ) -> Self::Type {
-        todo!()
-    }
 }

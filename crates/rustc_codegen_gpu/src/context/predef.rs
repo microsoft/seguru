@@ -8,18 +8,18 @@ use crate::rustc_middle::ty::layout::{HasTypingEnv, LayoutOf};
 impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     pub(crate) fn to_mlir_linkage(
         &self,
-        linkage: rustc_middle::mir::mono::Linkage,
+        linkage: rustc_hir::attrs::Linkage,
     ) -> melior::ir::Attribute<'ml> {
         let link = match linkage {
-            rustc_middle::mir::mono::Linkage::External => "external",
-            rustc_middle::mir::mono::Linkage::AvailableExternally => "available_externally",
-            rustc_middle::mir::mono::Linkage::LinkOnceAny => "linkonce",
-            rustc_middle::mir::mono::Linkage::LinkOnceODR => "linkonce_odr",
-            rustc_middle::mir::mono::Linkage::WeakAny => "weak",
-            rustc_middle::mir::mono::Linkage::WeakODR => "weak_odr",
-            rustc_middle::mir::mono::Linkage::Internal => "internal",
-            rustc_middle::mir::mono::Linkage::ExternalWeak => "extern_weak",
-            rustc_middle::mir::mono::Linkage::Common => "common",
+            rustc_hir::attrs::Linkage::External => "external",
+            rustc_hir::attrs::Linkage::AvailableExternally => "available_externally",
+            rustc_hir::attrs::Linkage::LinkOnceAny => "linkonce",
+            rustc_hir::attrs::Linkage::LinkOnceODR => "linkonce_odr",
+            rustc_hir::attrs::Linkage::WeakAny => "weak",
+            rustc_hir::attrs::Linkage::WeakODR => "weak_odr",
+            rustc_hir::attrs::Linkage::Internal => "internal",
+            rustc_hir::attrs::Linkage::ExternalWeak => "extern_weak",
+            rustc_hir::attrs::Linkage::Common => "common",
         };
         melior::ir::Attribute::parse(self.mlir_ctx, &format!("#llvm.linkage<{link}>")).unwrap()
     }
@@ -27,16 +27,16 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
 
 impl<'tcx, 'ml, 'a> PreDefineCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, 'a> {
     fn predefine_static(
-        &self,
+        &mut self,
         def_id: rustc_hir::def_id::DefId,
-        linkage: rustc_middle::mir::mono::Linkage,
+        linkage: rustc_hir::attrs::Linkage,
         visibility: rustc_middle::mir::mono::Visibility,
         symbol_name: &str,
     ) {
         let instance = Instance::mono(self.tcx, def_id);
         let def_path = self.tcx.def_path_str(def_id);
         let ty = instance.ty(self.tcx, self.typing_env());
-        let attrs = self.tcx.get_attrs_unchecked(instance.def_id());
+        let attrs = self.tcx.get_all_attrs(instance.def_id());
         let attr = self.gpu_attrs(&instance);
         let instance = Instance::mono(self.tcx, def_id);
         let ty = instance.ty(self.tcx, self.typing_env());
@@ -59,9 +59,9 @@ impl<'tcx, 'ml, 'a> PreDefineCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'm
     }
 
     fn predefine_fn(
-        &self,
+        &mut self,
         instance: rustc_middle::ty::Instance<'tcx>,
-        linkage: rustc_middle::mir::mono::Linkage,
+        linkage: rustc_hir::attrs::Linkage,
         visibility: rustc_middle::mir::mono::Visibility,
         symbol_name: &str,
     ) {
@@ -77,5 +77,6 @@ impl<'tcx, 'ml, 'a> PreDefineCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'm
             visibility
         );
         let decl = self.to_mir_func_decl(instance, self.to_mlir_linkage(linkage));
+        self.define_indirect_if_needed();
     }
 }

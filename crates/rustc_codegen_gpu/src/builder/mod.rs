@@ -26,6 +26,7 @@ use rustc_codegen_ssa_gpu::traits::{
     BackendTypes, BaseTypeCodegenMethods, BuilderMethods, ConstCodegenMethods,
     LayoutTypeCodegenMethods, OverflowOp, StaticBuilderMethods,
 };
+use rustc_middle::ty::{AtomicOrdering, Instance};
 use rustc_span::Span;
 use tracing::{debug, trace};
 
@@ -161,7 +162,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
     fn call_op(
         &mut self,
         fn_ptr_value: melior::ir::Value<'ml, 'a>,
-        instance: Option<rustc_middle::ty::Instance<'tcx>>,
+        instance: Option<Instance<'tcx>>,
         args: &[melior::ir::Value<'ml, 'a>],
         ftype: Option<FunctionType<'ml>>,
         span: Span,
@@ -224,7 +225,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         &mut self,
         gpu_item: GpuItem,
         _fn_ptr_value: melior::ir::Value<'ml, 'a>,
-        instance: Option<rustc_middle::ty::Instance<'tcx>>,
+        instance: Option<Instance<'tcx>>,
         args: &[melior::ir::Value<'ml, 'a>],
         return_types: &[melior::ir::Type<'ml>],
         span: Span,
@@ -234,7 +235,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             let mut generic_types = vec![];
             if let Some(instance) = instance {
                 for arg in instance.args.iter() {
-                    if let rustc_type_ir::GenericArgKind::Type(ty) = arg.unpack() {
+                    if let rustc_type_ir::GenericArgKind::Type(ty) = arg.kind() {
                         generic_types.push(ty);
                     }
                 }
@@ -246,7 +247,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             let mut generic_types = vec![];
             if let Some(instance) = instance {
                 for arg in instance.args.iter() {
-                    if let rustc_type_ir::GenericArgKind::Const(c) = arg.unpack() {
+                    if let rustc_type_ir::GenericArgKind::Const(c) = arg.kind() {
                         generic_types.push(c);
                     }
                 }
@@ -1474,6 +1475,20 @@ impl<'tcx, 'ml, 'a> StaticBuilderMethods for GpuBuilder<'tcx, 'ml, 'a> {
     }
 }
 
+pub fn append_block<'tcx, 'ml, 'val, 'a>(
+    cx: &GPUCodegenContext<'tcx, 'ml, 'val>,
+    llfn: mlir_ir::operation::OperationRef<'ml, 'a>,
+    name: &str,
+) -> mlir_ir::block::BlockRef<'ml, '_> {
+    let name = rustc_data_structures::small_c_str::SmallCStr::new(name);
+    let region: RegionRef<'ml, 'a> = unsafe { llfn.to_ref() }.region(0).unwrap();
+    let types = llfn.get_op_operands_types();
+    let block: mlir_ir::BlockRef<'ml, '_> = region.append_block(melior::ir::Block::new(
+        &types.iter().map(|t| (*t, Location::unknown(cx.mlir_ctx))).collect::<Vec<_>>(),
+    ));
+    block
+}
+
 impl<'tcx, 'ml, 'a> Deref for GpuBuilder<'tcx, 'ml, 'a> {
     fn deref(&self) -> &Self::Target {
         *self.cx.builder.write().unwrap() = Some(crate::context::BuilderInfo {
@@ -1720,7 +1735,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         then: Self::BasicBlock,
         catch: Self::BasicBlock,
         funclet: Option<&Self::Funclet>,
-        instance: Option<rustc_middle::ty::Instance<'tcx>>,
+        instance: Option<Instance<'tcx>>,
     ) -> Self::Value {
         todo!()
     }
@@ -1978,11 +1993,6 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         self.append_op_res(op)
     }
 
-    fn dynamic_alloca(&mut self, size: Self::Value, align: rustc_abi::Align) -> Self::Value {
-        // add dynamic_size in memref::alloca
-        todo!();
-    }
-
     fn load(&mut self, ty: Self::Type, ptr: Self::Value, align: rustc_abi::Align) -> Self::Value {
         self.load_with_check(ty, ptr, align, true)
     }
@@ -1995,7 +2005,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         &mut self,
         ty: Self::Type,
         ptr: Self::Value,
-        order: rustc_codegen_ssa_gpu::common::AtomicOrdering,
+        order: AtomicOrdering,
         size: rustc_abi::Size,
     ) -> Self::Value {
         todo!()
@@ -2138,7 +2148,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         &mut self,
         val: Self::Value,
         ptr: Self::Value,
-        order: rustc_codegen_ssa_gpu::common::AtomicOrdering,
+        order: AtomicOrdering,
         size: rustc_abi::Size,
     ) {
         todo!()
@@ -2518,6 +2528,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         src_align: rustc_abi::Align,
         size: Self::Value,
         flags: rustc_codegen_ssa_gpu::MemFlags,
+        tt: Option<rustc_ast::expand::typetree::FncTree>,
     ) {
         self.vector_memcpy(dst, dst_align, src, src_align, size, flags);
     }
@@ -2637,15 +2648,15 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         ))
     }
 
-    fn set_personality_fn(&mut self, personality: Self::Value) {
+    fn set_personality_fn(&mut self, personality: Self::Function) {
         todo!()
     }
 
-    fn cleanup_landing_pad(&mut self, pers_fn: Self::Value) -> (Self::Value, Self::Value) {
+    fn cleanup_landing_pad(&mut self, pers_fn: Self::Function) -> (Self::Value, Self::Value) {
         todo!()
     }
 
-    fn filter_landing_pad(&mut self, pers_fn: Self::Value) -> (Self::Value, Self::Value) {
+    fn filter_landing_pad(&mut self, pers_fn: Self::Function) -> () {
         todo!()
     }
 
@@ -2679,8 +2690,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         dst: Self::Value,
         cmp: Self::Value,
         src: Self::Value,
-        order: rustc_codegen_ssa_gpu::common::AtomicOrdering,
-        failure_order: rustc_codegen_ssa_gpu::common::AtomicOrdering,
+        order: AtomicOrdering,
+        failure_order: AtomicOrdering,
         weak: bool,
     ) -> (Self::Value, Self::Value) {
         todo!()
@@ -2691,7 +2702,8 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         op: rustc_codegen_ssa_gpu::common::AtomicRmwBinOp,
         dst: Self::Value,
         src: Self::Value,
-        order: rustc_codegen_ssa_gpu::common::AtomicOrdering,
+        order: AtomicOrdering,
+        ret_ptr: bool,
     ) -> Self::Value {
         self.emit_error(
             "GPU has different intrinsics. Please use gpu::sync::atomic_xxx".into(),
@@ -2701,7 +2713,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
 
     fn atomic_fence(
         &mut self,
-        order: rustc_codegen_ssa_gpu::common::AtomicOrdering,
+        order: rustc_middle::ty::AtomicOrdering,
         scope: rustc_codegen_ssa_gpu::common::SynchronizationScope,
     ) {
         self.emit_error(
@@ -2734,7 +2746,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
         llfn: Self::Value,
         args: &[Self::Value],
         funclet: Option<&Self::Funclet>,
-        instance: Option<rustc_middle::ty::Instance<'tcx>>,
+        instance: Option<Instance<'tcx>>,
     ) -> Self::Value {
         if self.is_unreachable() {
             return llfn;
@@ -2770,5 +2782,18 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
 
     fn apply_attrs_to_cleanup_callsite(&mut self, llret: Self::Value) {
         todo!()
+    }
+
+    fn tail_call(
+        &mut self,
+        llty: Self::Type,
+        fn_attrs: Option<&rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrs>,
+        fn_abi: &rustc_target::callconv::FnAbi<'tcx, rustc_middle::ty::Ty<'tcx>>,
+        llfn: Self::Value,
+        args: &[Self::Value],
+        funclet: Option<&Self::Funclet>,
+        instance: Option<Instance<'tcx>>,
+    ) {
+        unimplemented!();
     }
 }

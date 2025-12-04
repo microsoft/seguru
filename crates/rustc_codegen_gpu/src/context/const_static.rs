@@ -196,7 +196,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 self.static_data_memref(
                     None,
                     layout.size,
-                    layout.align.pref,
+                    layout.align.abi,
                     &format!("static_{}", self.tcx.def_path_str(def_id)),
                 )
             }
@@ -341,7 +341,7 @@ impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
                 }
             }
             rustc_const_eval::interpret::Scalar::Ptr(ptr, s) => {
-                let (prov, offset) = ptr.into_parts();
+                let (prov, offset) = ptr.into_raw_parts();
                 let alloc_id = prov.alloc_id();
                 self.const_data_memref_from_alloc_id(alloc_id)
             }
@@ -369,15 +369,7 @@ impl<'tcx, 'ml, 'a> StaticCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
         cv
     }
 
-    fn codegen_static(&self, def_id: rustc_hir::def_id::DefId) {
-        todo!()
-    }
-
-    fn add_used_global(&self, global: Self::Value) {
-        todo!()
-    }
-
-    fn add_compiler_used_global(&self, global: Self::Value) {
+    fn codegen_static(&mut self, def_id: rustc_hir::def_id::DefId) {
         todo!()
     }
 }

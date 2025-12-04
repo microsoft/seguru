@@ -4,7 +4,7 @@ use super::GPUCodegenContext;
 
 impl<'tcx, 'ml, 'a> AsmCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, 'a> {
     fn codegen_global_asm(
-        &self,
+        &mut self,
         template: &[rustc_ast::InlineAsmTemplatePiece],
         operands: &[rustc_codegen_ssa_gpu::traits::GlobalAsmOperandRef<'tcx>],
         options: rustc_ast::InlineAsmOptions,

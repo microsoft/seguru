@@ -8,7 +8,10 @@ use rustc_span::Symbol;
 use super::GpuBuilder;
 use crate::mlir::gpu::{DimFn, DimType};
 
-impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
+impl<'cx, 'tcx, 'ml, 'a> GpuBuilder<'cx, 'tcx, 'ml, 'a>
+where
+    'tcx: 'a,
+{
     pub(crate) fn dim_fn_res(&mut self, f: DimFn, ty: DimType) -> mlir_ir::Value<'ml, 'a> {
         let attr = Attribute::parse(self.mlir_ctx, &format!("#gpu<dim {}>", ty.to_str())).unwrap();
         self.append_op_res(f.build(self.mlir_ctx, attr, self.cur_loc()))

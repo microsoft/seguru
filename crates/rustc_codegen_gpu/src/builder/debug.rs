@@ -2,7 +2,7 @@ use rustc_codegen_ssa_gpu::traits::{BackendTypes, DebugInfoBuilderMethods};
 
 use super::GpuBuilder;
 
-impl<'tcx, 'ml, 'a> DebugInfoBuilderMethods for GpuBuilder<'tcx, 'ml, 'a> {
+impl<'cx, 'tcx, 'ml, 'a> DebugInfoBuilderMethods for GpuBuilder<'cx, 'tcx, 'ml, 'a> {
     fn dbg_var_addr(
         &mut self,
         dbg_var: Self::DIVariable,

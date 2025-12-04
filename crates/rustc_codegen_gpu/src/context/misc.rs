@@ -5,7 +5,10 @@ use tracing::trace;
 
 use super::GPUCodegenContext;
 
-impl<'tcx, 'ml> MiscCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, '_> {
+impl<'tcx, 'ml, 'a> MiscCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, 'a>
+where
+    'tcx: 'a,
+{
     fn vtables(
         &self,
     ) -> &std::cell::RefCell<

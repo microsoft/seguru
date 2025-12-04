@@ -5,7 +5,7 @@ use rustc_codegen_ssa_gpu::traits::{BaseTypeCodegenMethods, BuilderMethods};
 
 use crate::builder::GpuBuilder;
 
-impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
+impl<'cx, 'tcx, 'ml, 'a> GpuBuilder<'cx, 'tcx, 'ml, 'a> {
     /// In MLIR, MemRef<N*f32> will not be treated as a vector type.
     /// This function converts a memref<N*f32> to memref<1xvec<Nxf32>> to use optimized behavior for vectors.
     /// For example, load/store of memref<1xvec<4*f32>> will become ld.v4.f32 instead of executing ld.f32 for 4 times

@@ -7,25 +7,25 @@ use tracing::{trace, warn};
 
 use super::GpuBuilder;
 
-impl<'tcx, 'ml, 'a> HasDataLayout for GpuBuilder<'tcx, 'ml, 'a> {
+impl<'cx, 'tcx, 'ml, 'a> HasDataLayout for GpuBuilder<'cx, 'tcx, 'ml, 'a> {
     fn data_layout(&self) -> &rustc_abi::TargetDataLayout {
         self.cx.data_layout()
     }
 }
 
-impl<'tcx, 'ml, 'a> HasTypingEnv<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
+impl<'cx, 'tcx, 'ml, 'a> HasTypingEnv<'tcx> for GpuBuilder<'cx, 'tcx, 'ml, 'a> {
     fn typing_env(&self) -> rustc_middle::ty::TypingEnv<'tcx> {
         self.cx.typing_env()
     }
 }
 
-impl<'tcx, 'ml, 'a> HasTyCtxt<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
+impl<'cx, 'tcx, 'ml, 'a> HasTyCtxt<'tcx> for GpuBuilder<'cx, 'tcx, 'ml, 'a> {
     fn tcx(&self) -> rustc_middle::ty::TyCtxt<'tcx> {
         self.cx.tcx()
     }
 }
 
-impl<'tcx, 'ml, 'a> LayoutOfHelpers<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
+impl<'cx, 'tcx, 'ml, 'a> LayoutOfHelpers<'tcx> for GpuBuilder<'cx, 'tcx, 'ml, 'a> {
     type LayoutOfResult = rustc_middle::ty::layout::TyAndLayout<'tcx>;
 
     fn handle_layout_err(
@@ -40,7 +40,7 @@ impl<'tcx, 'ml, 'a> LayoutOfHelpers<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
     }
 }
 
-impl<'tcx, 'ml, 'a> FnAbiOfHelpers<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
+impl<'cx, 'tcx, 'ml, 'a> FnAbiOfHelpers<'tcx> for GpuBuilder<'cx, 'tcx, 'ml, 'a> {
     type FnAbiOfResult = &'tcx rustc_target::callconv::FnAbi<'tcx, rustc_middle::ty::Ty<'tcx>>;
 
     fn handle_fn_abi_err(
@@ -55,7 +55,7 @@ impl<'tcx, 'ml, 'a> FnAbiOfHelpers<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
     }
 }
 
-impl<'tcx, 'ml, 'a> AbiBuilderMethods for GpuBuilder<'tcx, 'ml, 'a> {
+impl<'cx, 'tcx, 'ml, 'a> AbiBuilderMethods for GpuBuilder<'cx, 'tcx, 'ml, 'a> {
     fn get_param(&mut self, index: usize) -> Self::Value {
         trace!("get_param({})", index);
         if index >= self.cur_block.argument_count() {
@@ -72,7 +72,10 @@ impl<'tcx, 'ml, 'a> AbiBuilderMethods for GpuBuilder<'tcx, 'ml, 'a> {
     }
 }
 
-impl<'tcx, 'ml, 'a> ArgAbiBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
+impl<'cx, 'tcx, 'ml, 'a> ArgAbiBuilderMethods<'tcx> for GpuBuilder<'cx, 'tcx, 'ml, 'a>
+where
+    'tcx: 'a,
+{
     fn store_fn_arg(
         &mut self,
         arg_abi: &rustc_target::callconv::ArgAbi<'tcx, rustc_middle::ty::Ty<'tcx>>,
@@ -84,7 +87,7 @@ impl<'tcx, 'ml, 'a> ArgAbiBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
         }
         warn!("store_fn_arg {:?} {} {:?} {:?}", arg_abi, idx, dst, self.cur_span);
         fn next<'ml, 'a>(
-            bx: &GpuBuilder<'_, 'ml, 'a>,
+            bx: &GpuBuilder<'_, '_, 'ml, 'a>,
             idx: &mut usize,
         ) -> melior::ir::Value<'ml, 'a> {
             if *idx >= bx.cur_block.argument_count() {

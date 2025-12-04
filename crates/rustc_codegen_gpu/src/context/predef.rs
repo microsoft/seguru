@@ -25,7 +25,10 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     }
 }
 
-impl<'tcx, 'ml, 'a> PreDefineCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, 'a> {
+impl<'tcx, 'ml, 'a> PreDefineCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, 'a>
+where
+    'tcx: 'a,
+{
     fn predefine_static(
         &mut self,
         def_id: rustc_hir::def_id::DefId,

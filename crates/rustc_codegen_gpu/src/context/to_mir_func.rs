@@ -64,7 +64,10 @@ fn is_impl_of_trait_method(
     false
 }
 
-impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
+impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a>
+where
+    'tcx: 'a,
+{
     pub(crate) fn sanitized_symbol_name(&self, instance: Instance<'tcx>) -> String {
         let ty = self.tcx.type_of(instance.def_id());
         let mono_ty = self
@@ -303,7 +306,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         Ok((ftype, new_ftype))
     }
 
-    pub(crate) fn define_indirect_if_needed(&self) {
+    pub(crate) fn define_indirect_if_needed<'cx>(&'cx self) {
         let Some(entry) = self.indirect_entry.lock().unwrap().take() else {
             return;
         };

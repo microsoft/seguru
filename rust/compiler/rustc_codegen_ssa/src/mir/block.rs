@@ -87,6 +87,10 @@ impl<'a, 'tcx> TerminatorCodegenHelper<'tcx> {
     ) -> Bx::BasicBlock {
         let (needs_landing_pad, is_cleanupret) = self.llbb_characteristics(fx, target);
         let mut lltarget = fx.llbb(target);
+        if fx.is_gpu {
+            // Don't do cleanup since we're a GPU
+            return lltarget;
+        }
         if needs_landing_pad {
             lltarget = fx.landing_pad_for(target);
         }
@@ -96,7 +100,8 @@ impl<'a, 'tcx> TerminatorCodegenHelper<'tcx> {
             debug!("llbb_with_cleanup: creating cleanup trampoline for {:?}", target);
             let name = &format!("{:?}_cleanup_trampoline_{:?}", self.bb, target);
             let trampoline_llbb = Bx::append_block(fx.cx, fx.llfn, name);
-            let mut trampoline_bx = Bx::build(fx.cx, trampoline_llbb);
+            let mut trampoline_bx =
+                Bx::build_with_san_dummy(fx.cx, trampoline_llbb, fx.san_dummy.unwrap());
             trampoline_bx.cleanup_ret(self.funclet(fx).unwrap(), Some(lltarget));
             trampoline_llbb
         } else {
@@ -211,11 +216,20 @@ impl<'a, 'tcx> TerminatorCodegenHelper<'tcx> {
         }
 
         let unwind_block = match unwind {
-            mir::UnwindAction::Cleanup(cleanup) => Some(self.llbb_with_cleanup(fx, cleanup)),
+            mir::UnwindAction::Cleanup(cleanup) => {
+                if fx.is_gpu {
+                    None
+                } else {
+                    Some(self.llbb_with_cleanup(fx, cleanup))
+                }
+            }
             mir::UnwindAction::Continue => None,
             mir::UnwindAction::Unreachable => None,
             mir::UnwindAction::Terminate(reason) => {
-                if fx.mir[self.bb].is_cleanup && base::wants_new_eh_instructions(fx.cx.tcx().sess) {
+                if fx.is_gpu
+                    || fx.mir[self.bb].is_cleanup
+                        && base::wants_new_eh_instructions(fx.cx.tcx().sess)
+                {
                     // MSVC SEH will abort automatically if an exception tries to
                     // propagate out from cleanup.
 
@@ -601,6 +615,12 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         if let ty::InstanceKind::DropGlue(_, None) = drop_fn.def {
             // we don't actually need to drop anything.
             return helper.funclet_br(self, bx, target, mergeable_succ);
+        } else if bx.tcx().env_var("__CODEGEN_TARGET__") == Ok("GPU") {
+            bx.tcx().sess.dcx().span_warn(
+                rustc_span::DUMMY_SP,
+                format!("Ignore drop function {:?} in GPU mode", drop_fn.def_id()),
+            );
+            return helper.funclet_br(self, bx, target, mergeable_succ);
         }
 
         let place = self.codegen_place(bx, location.as_ref());
@@ -710,6 +730,24 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         // Don't codegen the panic block if success if known.
         if const_cond == Some(expected) {
             return helper.funclet_br(self, bx, target, mergeable_succ);
+        }
+
+        // Generate our SFI only if the code runs on GPU
+        if self.is_gpu {
+            let handled = match msg {
+                AssertKind::BoundsCheck { len, index } => {
+                    let len = self.codegen_operand(bx, len).immediate();
+                    let index = self.codegen_operand(bx, index).immediate();
+                    bx.emit_bound_check(index, len, self.san_dummy.unwrap())
+                }
+                _ => {
+                    // TODO: handle other cases, we should return false here and handle them properly
+                    false
+                }
+            };
+            if handled {
+                return helper.funclet_br(self, bx, target, mergeable_succ);
+            }
         }
 
         // Because we're branching to a panic block (either a `#[cold]` one
@@ -1307,7 +1345,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             Some(llbb) => llbb,
             None => return,
         };
-        let bx = &mut Bx::build(self.cx, llbb);
+        let bx = &mut Bx::build_with_san_dummy(self.cx, llbb, self.san_dummy.unwrap());
         let mir = self.mir;
 
         // MIR basic blocks stop at any function call. This may not be the case
@@ -1348,7 +1386,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             Some(llbb) => llbb,
             None => return,
         };
-        let bx = &mut Bx::build(self.cx, llbb);
+        let bx = &mut Bx::build_with_san_dummy(self.cx, llbb, self.san_dummy.unwrap());
         debug!("codegen_block_as_unreachable({:?})", bb);
         bx.unreachable();
     }
@@ -1383,7 +1421,12 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         self.set_debug_loc(bx, terminator.source_info);
         match terminator.kind {
             mir::TerminatorKind::UnwindResume => {
-                self.codegen_resume_terminator(helper, bx);
+                // Just shouldn't happen for GPU
+                if !self.is_gpu {
+                    self.codegen_resume_terminator(helper, bx);
+                } else {
+                    bx.unreachable();
+                }
                 MergingSucc::False
             }
 
@@ -1727,14 +1770,16 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         let llbb = self.llbb(bb);
         if base::wants_new_eh_instructions(self.cx.sess()) {
             let cleanup_bb = Bx::append_block(self.cx, self.llfn, &format!("funclet_{bb:?}"));
-            let mut cleanup_bx = Bx::build(self.cx, cleanup_bb);
+            let mut cleanup_bx =
+                Bx::build_with_san_dummy(self.cx, cleanup_bb, self.san_dummy.unwrap());
             let funclet = cleanup_bx.cleanup_pad(None, &[]);
             cleanup_bx.br(llbb);
             self.funclets[bb] = Some(funclet);
             cleanup_bb
         } else {
             let cleanup_llbb = Bx::append_block(self.cx, self.llfn, "cleanup");
-            let mut cleanup_bx = Bx::build(self.cx, cleanup_llbb);
+            let mut cleanup_bx =
+                Bx::build_with_san_dummy(self.cx, cleanup_llbb, self.san_dummy.unwrap());
 
             let llpersonality = self.cx.eh_personality();
             let (exn0, exn1) = cleanup_bx.cleanup_landing_pad(llpersonality);
@@ -1751,7 +1796,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
     fn unreachable_block(&mut self) -> Bx::BasicBlock {
         self.unreachable_block.unwrap_or_else(|| {
             let llbb = Bx::append_block(self.cx, self.llfn, "unreachable");
-            let mut bx = Bx::build(self.cx, llbb);
+            let mut bx = Bx::build_with_san_dummy(self.cx, llbb, self.san_dummy.unwrap());
             bx.unreachable();
             self.unreachable_block = Some(llbb);
             llbb
@@ -1801,10 +1846,10 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             llbb = Bx::append_block(self.cx, self.llfn, "cs_terminate");
             let cp_llbb = Bx::append_block(self.cx, self.llfn, "cp_terminate");
 
-            let mut cs_bx = Bx::build(self.cx, llbb);
+            let mut cs_bx = Bx::build_with_san_dummy(self.cx, llbb, self.san_dummy.unwrap());
             let cs = cs_bx.catch_switch(None, None, &[cp_llbb]);
 
-            bx = Bx::build(self.cx, cp_llbb);
+            bx = Bx::build_with_san_dummy(self.cx, cp_llbb, self.san_dummy.unwrap());
             let null =
                 bx.const_null(bx.type_ptr_ext(bx.cx().data_layout().instruction_address_space));
 
@@ -1832,7 +1877,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             funclet = Some(bx.catch_pad(cs, args));
         } else {
             llbb = Bx::append_block(self.cx, self.llfn, "terminate");
-            bx = Bx::build(self.cx, llbb);
+            bx = Bx::build_with_san_dummy(self.cx, llbb, self.san_dummy.unwrap());
 
             let llpersonality = self.cx.eh_personality();
             bx.filter_landing_pad(llpersonality);

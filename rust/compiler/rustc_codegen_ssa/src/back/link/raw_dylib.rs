@@ -235,6 +235,9 @@ fn create_elf_raw_dylib_stub(sess: &Session, soname: &str, symbols: &[DllImport]
             sess.target.arch
         ));
     };
+    // TODO: Due to stupid object version stuff, we are OVERWRTING these to fixed values
+    // Just to make it compile :-(
+    let arch = crate::from_i32_to_arch(arch as i32);
 
     let endianness = match sess.target.options.endian {
         Endian::Little => object::Endianness::Little,

@@ -62,8 +62,20 @@ pub trait BuilderMethods<'a, 'tcx>:
 
     fn build(cx: &'a Self::CodegenCx, llbb: Self::BasicBlock) -> Self;
 
+    fn build_with_san_dummy(
+        cx: &'a Self::CodegenCx,
+        llbb: Self::BasicBlock,
+        san_dummy: Self::Value,
+    ) -> Self;
+
     fn cx(&self) -> &Self::CodegenCx;
     fn llbb(&self) -> Self::BasicBlock;
+
+    fn alloca_san_dummy(&mut self) -> Self::Value;
+
+    fn alloca_shared(&mut self, size: Size, align: Align) -> Self::Value;
+
+    fn emit_bound_check(&mut self, idx: Self::Value, len: Self::Value, ptr: Self::Value) -> bool;
 
     fn set_span(&mut self, span: Span);
 

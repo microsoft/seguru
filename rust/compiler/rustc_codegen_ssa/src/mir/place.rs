@@ -53,6 +53,15 @@ impl<V: CodegenObject> PlaceValue<V> {
         PlaceValue::new_sized(llval, align)
     }
 
+    pub fn alloca_shared<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx, Value = V>>(
+        bx: &mut Bx,
+        size: Size,
+        align: Align,
+    ) -> PlaceValue<V> {
+        let llval = bx.alloca_shared(size, align);
+        PlaceValue::new_sized(llval, align)
+    }
+
     /// Creates a `PlaceRef` to this location with the given type.
     pub fn with_type<'tcx>(self, layout: TyAndLayout<'tcx>) -> PlaceRef<'tcx, V> {
         assert!(
@@ -117,6 +126,13 @@ impl<'a, 'tcx, V: CodegenObject> PlaceRef<'tcx, V> {
         size: Size,
         layout: TyAndLayout<'tcx>,
     ) -> Self {
+        if let Some(def) = layout.ty.ty_adt_def() {
+            if Some(def.did())
+                == bx.cx().tcx().get_diagnostic_item(rustc_span::Symbol::intern("gpu::GpuShared"))
+            {
+                return PlaceValue::alloca_shared(bx, size, layout.align.abi).with_type(layout);
+            }
+        }
         assert!(layout.is_sized(), "tried to statically allocate unsized place");
         PlaceValue::alloca(bx, size, layout.align.abi).with_type(layout)
     }

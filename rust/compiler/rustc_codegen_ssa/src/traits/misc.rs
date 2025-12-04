@@ -19,6 +19,7 @@ pub trait MiscCodegenMethods<'tcx>: BackendTypes {
     ) {
     }
     fn get_fn(&self, instance: Instance<'tcx>) -> Self::Function;
+    fn get_fn_with_gpu_indicator(&self, instance: Instance<'tcx>) -> (Self::Function, bool);
     fn get_fn_addr(&self, instance: Instance<'tcx>) -> Self::Value;
     fn eh_personality(&self) -> Self::Value;
     fn sess(&self) -> &Session;

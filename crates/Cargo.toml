@@ -20,3 +20,4 @@ gpu_host = { path = "gpu-host" }
 rustc_codegen_gpu = { path = "rustc_codegen_gpu" }
 mlir-compile = {path = "mlir-compile"}
 num-traits = {version = "0.2", default-features = false, features = ["libm"]}
+rustc_codegen_ssa_gpu = { package = "rustc_codegen_ssa", path = "../rust/compiler/rustc_codegen_ssa" }

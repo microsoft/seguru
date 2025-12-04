@@ -31,7 +31,10 @@ fn flat_tuple<'tcx>(t: &rustc_middle::ty::Ty<'tcx>) -> Vec<rustc_middle::ty::Ty<
     type_list
 }
 
-impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
+impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a>
+where
+    'tcx: 'a,
+{
     pub(crate) fn align_to_attr(
         &self,
         align: rustc_abi::Align,
@@ -443,7 +446,10 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     }
 }
 
-impl<'tcx, 'ml, 'a> BaseTypeCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
+impl<'tcx, 'ml, 'a> BaseTypeCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a>
+where
+    'tcx: 'a,
+{
     fn type_i8(&self) -> Self::Type {
         self.type_i_bits(8)
     }
@@ -543,7 +549,10 @@ impl<'tcx, 'ml, 'a> BaseTypeCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> 
     }
 }
 
-impl<'tcx, 'ml, 'a> LayoutTypeCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, 'a> {
+impl<'tcx, 'ml, 'a> LayoutTypeCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, 'a>
+where
+    'tcx: 'a,
+{
     fn backend_type(&self, layout: rustc_middle::ty::layout::TyAndLayout<'tcx>) -> Self::Type {
         let ty = self.mlir_type(layout, false);
         ty

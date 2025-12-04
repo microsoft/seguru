@@ -80,10 +80,13 @@ impl<'ml, 'a> InplaceBoundCheckData<'ml, 'a> {
 }
 
 #[derive(Debug)]
-pub(crate) struct GpuBuilder<'tcx, 'ml, 'a> {
-    pub cx: &'a GPUCodegenContext<'tcx, 'ml, 'a>,
+pub(crate) struct GpuBuilder<'cx, 'tcx, 'ml, 'a>
+where
+    'tcx: 'a,
+{
+    pub cx: &'cx GPUCodegenContext<'tcx, 'ml, 'a>,
     pub name: String,
-    pub cur_block: <GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::BasicBlock,
+    pub cur_block: <GpuBuilder<'cx, 'tcx, 'ml, 'a> as BackendTypes>::BasicBlock,
     pub cur_span: rustc_span::Span,
     pub span_to_type: HashMap<rustc_span::Span, mlir_type::Type<'ml>>,
     pub op_to_extra_values: HashMap<String, Vec<mlir_ir::Value<'ml, 'a>>>,
@@ -95,7 +98,7 @@ pub(crate) struct GpuBuilder<'tcx, 'ml, 'a> {
     const_values: HashMap<String, mlir_ir::Value<'ml, 'a>>,
 }
 
-impl<'tcx, 'ml, 'a> Drop for GpuBuilder<'tcx, 'ml, 'a> {
+impl<'cx, 'tcx, 'ml, 'a> Drop for GpuBuilder<'cx, 'tcx, 'ml, 'a> {
     fn drop(&mut self) {
         assert!(
             self.extra_state.attrs.is_empty(),
@@ -113,7 +116,10 @@ impl<'tcx, 'ml, 'a> Drop for GpuBuilder<'tcx, 'ml, 'a> {
         *self.cx.builder.write().unwrap() = None;
     }
 }
-impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
+impl<'cx, 'tcx, 'ml, 'a> GpuBuilder<'cx, 'tcx, 'ml, 'a>
+where
+    'tcx: 'a,
+{
     pub fn cur_loc(&self) -> Location<'ml> {
         self.cx.to_mlir_loc(self.cur_span)
     }
@@ -679,7 +685,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
     // IMPORTANT: THE OFFSETS IN THIS memref<size xi8> MUST BE SIZE-BASED!
     fn inbounds_gep_op(
         &mut self,
-        ty: <GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::Type,
+        ty: <GpuBuilder<'cx, 'tcx, 'ml, 'a> as BackendTypes>::Type,
         ptr: melior::ir::Value<'ml, 'a>,
         indices: &[melior::ir::Value<'ml, 'a>],
     ) -> mlir_ir::Operation<'ml> {
@@ -744,7 +750,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
 
     fn inbounds_gep_ret(
         &mut self,
-        ty: <GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::Type,
+        ty: <GpuBuilder<'cx, 'tcx, 'ml, 'a> as BackendTypes>::Type,
         ptr: melior::ir::Value<'ml, 'a>,
         indices: &[melior::ir::Value<'ml, 'a>],
         check: bool,
@@ -806,8 +812,8 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
 
     pub fn use_value(
         &mut self,
-        val: <GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::Value,
-    ) -> <GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::Value {
+        val: <GpuBuilder<'cx, 'tcx, 'ml, 'a> as BackendTypes>::Value,
+    ) -> <GpuBuilder<'cx, 'tcx, 'ml, 'a> as BackendTypes>::Value {
         if let Ok(op) = val.is_from_op(Some("arith.constant")) {
             let attr = op.attribute("value").unwrap();
             let attr_str = format!("{}", attr);
@@ -1037,7 +1043,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
 
     fn mlir_load(
         &mut self,
-        ty: <GpuBuilder<'tcx, 'ml, 'a> as BackendTypes>::Type,
+        ty: <GpuBuilder<'cx, 'tcx, 'ml, 'a> as BackendTypes>::Type,
         ptr: mlir_ir::Value<'ml, 'a>,
         indices: &[mlir_ir::Value<'ml, 'a>],
         align: rustc_abi::Align,
@@ -1453,7 +1459,10 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
     }
 }
 
-impl<'tcx, 'ml, 'a> BackendTypes for GpuBuilder<'tcx, 'ml, 'a> {
+impl<'cx, 'tcx, 'ml, 'a> BackendTypes for GpuBuilder<'cx, 'tcx, 'ml, 'a>
+where
+    'tcx: 'a,
+{
     type Value = <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Value;
 
     type Metadata = <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Metadata;
@@ -1469,7 +1478,10 @@ impl<'tcx, 'ml, 'a> BackendTypes for GpuBuilder<'tcx, 'ml, 'a> {
     type DIVariable = <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::DIVariable;
 }
 
-impl<'tcx, 'ml, 'a> StaticBuilderMethods for GpuBuilder<'tcx, 'ml, 'a> {
+impl<'cx, 'tcx, 'ml, 'a> StaticBuilderMethods for GpuBuilder<'cx, 'tcx, 'ml, 'a>
+where
+    'tcx: 'a,
+{
     fn get_static(&mut self, def_id: rustc_hir::def_id::DefId) -> Self::Value {
         todo!()
     }
@@ -1479,7 +1491,7 @@ pub fn append_block<'tcx, 'ml, 'val, 'a>(
     cx: &GPUCodegenContext<'tcx, 'ml, 'val>,
     llfn: mlir_ir::operation::OperationRef<'ml, 'a>,
     name: &str,
-) -> mlir_ir::block::BlockRef<'ml, '_> {
+) -> mlir_ir::block::BlockRef<'ml, 'a> {
     let name = rustc_data_structures::small_c_str::SmallCStr::new(name);
     let region: RegionRef<'ml, 'a> = unsafe { llfn.to_ref() }.region(0).unwrap();
     let types = llfn.get_op_operands_types();
@@ -1489,7 +1501,10 @@ pub fn append_block<'tcx, 'ml, 'val, 'a>(
     block
 }
 
-impl<'tcx, 'ml, 'a> Deref for GpuBuilder<'tcx, 'ml, 'a> {
+impl<'cx, 'tcx, 'ml, 'a> Deref for GpuBuilder<'cx, 'tcx, 'ml, 'a>
+where
+    'tcx: 'a,
+{
     fn deref(&self) -> &Self::Target {
         *self.cx.builder.write().unwrap() = Some(crate::context::BuilderInfo {
             name: self.name.to_string(),
@@ -1502,12 +1517,14 @@ impl<'tcx, 'ml, 'a> Deref for GpuBuilder<'tcx, 'ml, 'a> {
     type Target = GPUCodegenContext<'tcx, 'ml, 'a>;
 }
 
-impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
-    for GpuBuilder<'tcx, 'ml, 'val>
+impl<'cx, 'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'cx, 'tcx>
+    for GpuBuilder<'cx, 'tcx, 'ml, 'val>
+where
+    'tcx: 'a,
 {
     type CodegenCx = GPUCodegenContext<'tcx, 'ml, 'val>;
 
-    fn build(cx: &'a Self::CodegenCx, llbb: Self::BasicBlock) -> Self {
+    fn build(cx: &'cx Self::CodegenCx, llbb: Self::BasicBlock) -> Self {
         let sym = StringAttribute::try_from(
             llbb.parent_operation().unwrap().attribute("sym_name").unwrap(),
         )
@@ -1532,7 +1549,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn build_with_san_dummy(
-        cx: &'a Self::CodegenCx,
+        cx: &'cx Self::CodegenCx,
         llbb: Self::BasicBlock,
         san_dummy: Self::Value,
     ) -> Self {
@@ -1555,7 +1572,7 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn append_block(
-        cx: &'a Self::CodegenCx,
+        cx: &'cx Self::CodegenCx,
         llfn: mlir_ir::operation::OperationRef<'ml, 'a>,
         name: &str,
     ) -> Self::BasicBlock {

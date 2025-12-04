@@ -60,8 +60,8 @@ macro_rules! intrinsic_match {
     };
 }
 
-pub(crate) fn device_intrinsic<'tcx, 'ml, 'a>(
-    builder: &mut GpuBuilder<'tcx, 'ml, 'a>,
+pub(crate) fn device_intrinsic<'cx, 'tcx, 'ml, 'a>(
+    builder: &mut GpuBuilder<'cx, 'tcx, 'ml, 'a>,
     name: &str,
     args: &[Value<'ml, 'a>],
     loc: melior::ir::Location<'ml>,
@@ -95,7 +95,7 @@ pub(crate) fn device_intrinsic<'tcx, 'ml, 'a>(
     }
 }
 
-impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
+impl<'cx, 'tcx, 'ml, 'a> GpuBuilder<'cx, 'tcx, 'ml, 'a> {
     fn intrinsic_volatile_load(
         &mut self,
         ty: rustc_middle::ty::Ty<'tcx>,
@@ -167,7 +167,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         check.unwrap()
     }
 }
-impl<'tcx, 'ml, 'a> IntrinsicCallBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
+impl<'cx, 'tcx, 'ml, 'a> IntrinsicCallBuilderMethods<'tcx> for GpuBuilder<'cx, 'tcx, 'ml, 'a> {
     fn codegen_intrinsic_call(
         &mut self,
         instance: Instance<'tcx>,

@@ -15,7 +15,10 @@ fn get_alloc_name(alloc_id: rustc_const_eval::interpret::AllocId) -> String {
     format!("memory_alloc_{:?}", alloc_id.0)
 }
 
-impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
+impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a>
+where
+    'tcx: 'a,
+{
     fn get_name_by_alloc(
         &self,
         alloc: &rustc_const_eval::interpret::ConstAllocation<'_>,
@@ -207,7 +210,10 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         v
     }
 }
-impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
+impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a>
+where
+    'tcx: 'a,
+{
     fn const_null(&self, t: Self::Type) -> Self::Value {
         self.const_int(self.type_i64(), 0)
     }
@@ -359,7 +365,10 @@ impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
     }
 }
 
-impl<'tcx, 'ml, 'a> StaticCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
+impl<'tcx, 'ml, 'a> StaticCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a>
+where
+    'tcx: 'a,
+{
     fn static_addr_of(
         &self,
         cv: Self::Value,

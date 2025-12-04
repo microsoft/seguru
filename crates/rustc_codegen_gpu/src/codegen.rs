@@ -177,10 +177,10 @@ pub(crate) fn module_codegen<'tcx>(
             blocks,
         );
         let mono_items = cgu.items_in_deterministic_order(tcx);
-        //let mono_items = find_gpu_related_mono_items(&mut cx, &mono_items);
+        let mono_items = find_gpu_related_mono_items(&mut cx, &mono_items);
         for &(mono_item, data) in &mono_items {
             {
-                mono_item.predefine::<GpuBuilder<'_, '_, '_>>(
+                mono_item.predefine::<GpuBuilder<'_, '_, '_, '_>>(
                     &mut cx,
                     cgu_name.as_str(),
                     data.linkage,
@@ -199,7 +199,7 @@ pub(crate) fn module_codegen<'tcx>(
                             .unwrap_or_else(|err| {
                                 err.fatal(tcx);
                             });
-                        mono_item.define::<GpuBuilder<'_, '_, '_>>(
+                        mono_item.define::<GpuBuilder<'_, '_, '_, '_>>(
                             &mut cx,
                             cgu_name.as_str(),
                             mono_data,

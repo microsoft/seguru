@@ -34,6 +34,7 @@ extern crate rustc_hashes;
 extern crate rustc_hir;
 extern crate rustc_incremental;
 extern crate rustc_index;
+extern crate rustc_lint_defs;
 extern crate rustc_macros;
 extern crate rustc_metadata;
 extern crate rustc_middle;
@@ -47,9 +48,9 @@ extern crate rustc_trait_selection;
 //
 extern crate tempfile;
 extern crate thin_vec;
+extern crate smallvec;
 //#![feature(write_core)]
 extern crate ar_archive_writer;
-extern crate object;
 
 pub(crate) fn from_i32_to_arch(arch: i32) -> object::Architecture {
     if arch == object::Architecture::Aarch64 as i32 {

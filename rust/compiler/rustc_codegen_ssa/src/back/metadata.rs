@@ -407,7 +407,7 @@ pub(super) fn elf_e_flags(architecture: Architecture, sess: &Session) -> u32 {
                 // which leads to broken binaries if ELFv1 is used for the object files.
                 "elfv1" => EF_PPC64_ABI_ELF_V1,
                 "elfv2" => EF_PPC64_ABI_ELF_V2,
-                "" if sess.target.options.binary_format.to_object() == BinaryFormat::Elf => {
+                "" if sess.target.options.binary_format.to_object() as u32 == object::BinaryFormat::Elf as u32 => {
                     bug!("No ABI specified for this PPC64 ELF target");
                 }
                 // Fall back

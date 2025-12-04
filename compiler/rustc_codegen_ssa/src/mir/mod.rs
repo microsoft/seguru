@@ -3,7 +3,7 @@ use std::iter;
 use rustc_index::IndexVec;
 use rustc_index::bit_set::DenseBitSet;
 use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrFlags;
-use rustc_middle::mir::{Local, UnwindTerminateReason, traversal};
+use rustc_middle::mir::{Body, Local, UnwindTerminateReason, traversal};
 use rustc_middle::ty::layout::{FnAbiOf, HasTyCtxt, HasTypingEnv, TyAndLayout};
 use rustc_middle::ty::{self, Instance, Ty, TyCtxt, TypeFoldable, TypeVisitableExt};
 use rustc_middle::{bug, mir, span_bug};
@@ -20,12 +20,13 @@ mod coverageinfo;
 pub mod debuginfo;
 mod intrinsic;
 mod locals;
-mod naked_asm;
+pub mod naked_asm;
 pub mod operand;
 pub mod place;
 mod rvalue;
 mod statement;
 
+pub use self::block::store_cast;
 use self::debuginfo::{FunctionDebugContext, PerLocalVarDebugInfo};
 use self::operand::{OperandRef, OperandValue};
 use self::place::PlaceRef;
@@ -139,8 +140,13 @@ enum LocalRef<'tcx, V> {
     Place(PlaceRef<'tcx, V>),
     /// `UnsizedPlace(p)`: `p` itself is a thin pointer (indirect place).
     /// `*p` is the wide pointer that references the actual unsized place.
-    /// Every time it is initialized, we have to reallocate the place
-    /// and update the wide pointer. That's the reason why it is indirect.
+    ///
+    /// MIR only supports unsized args, not dynamically-sized locals, so
+    /// new unsized temps don't exist and we must reuse the referred-to place.
+    ///
+    /// FIXME: Since the removal of unsized locals in <https://github.com/rust-lang/rust/pull/142911>,
+    /// can we maybe use `Place` here? Or refactor it in another way? There are quite a few
+    /// `UnsizedPlace => bug` branches now.
     UnsizedPlace(PlaceRef<'tcx, V>),
     /// The backend [`OperandValue`] has already been generated.
     Operand(OperandRef<'tcx, V>),
@@ -170,19 +176,27 @@ pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
 ) {
     assert!(!instance.args.has_infer());
 
+    let tcx = cx.tcx();
     let llfn = cx.get_fn(instance);
 
-    let mir = cx.tcx().instance_mir(instance.def);
+    let mut mir = tcx.instance_mir(instance.def);
+    // Note that the ABI logic has deduced facts about the functions' parameters based on the MIR we
+    // got here (`deduce_param_attrs`). That means we can *not* apply arbitrary further MIR
+    // transforms as that may invalidate those deduced facts!
 
     let fn_abi = cx.fn_abi_of_instance(instance, ty::List::empty());
     debug!("fn_abi: {:?}", fn_abi);
 
-    if cx.tcx().codegen_fn_attrs(instance.def_id()).flags.contains(CodegenFnAttrFlags::NAKED) {
-        crate::mir::naked_asm::codegen_naked_asm::<Bx>(cx, &mir, instance);
-        return;
+    if tcx.features().ergonomic_clones() {
+        let monomorphized_mir = instance.instantiate_mir_and_normalize_erasing_regions(
+            tcx,
+            ty::TypingEnv::fully_monomorphized(),
+            ty::EarlyBinder::bind(mir.clone()),
+        );
+        mir = tcx.arena.alloc(optimize_use_clone::<Bx>(cx, monomorphized_mir));
     }
 
-    let debug_context = cx.create_function_debug_context(instance, fn_abi, llfn, mir);
+    let debug_context = cx.create_function_debug_context(instance, fn_abi, llfn, &mir);
 
     let start_llbb = Bx::append_block(cx, llfn, "start");
     let mut start_bx = Bx::build(cx, start_llbb);
@@ -194,7 +208,7 @@ pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
     }
 
     let cleanup_kinds =
-        base::wants_new_eh_instructions(cx.tcx().sess).then(|| analyze::cleanup_kinds(mir));
+        base::wants_new_eh_instructions(tcx.sess).then(|| analyze::cleanup_kinds(&mir));
 
     let cached_llbbs: IndexVec<mir::BasicBlock, CachedLlbb<Bx::BasicBlock>> =
         mir.basic_blocks
@@ -217,7 +231,7 @@ pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
         cleanup_kinds,
         landing_pads: IndexVec::from_elem(None, &mir.basic_blocks),
         funclets: IndexVec::from_fn_n(|_| None, mir.basic_blocks.len()),
-        cold_blocks: find_cold_blocks(cx.tcx(), mir),
+        cold_blocks: find_cold_blocks(tcx, mir),
         locals: locals::Locals::empty(),
         debug_context,
         per_local_var_debug_info: None,
@@ -233,7 +247,7 @@ pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
         fx.compute_per_local_var_debug_info(&mut start_bx).unzip();
     fx.per_local_var_debug_info = per_local_var_debug_info;
 
-    let traversal_order = traversal::mono_reachable_reverse_postorder(mir, cx.tcx(), instance);
+    let traversal_order = traversal::mono_reachable_reverse_postorder(mir, tcx, instance);
     let memory_locals = analyze::non_ssa_locals(&fx, &traversal_order);
 
     // Allocate variable and temp allocas
@@ -254,7 +268,7 @@ pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
                     }
                     PassMode::Cast { ref cast, .. } => {
                         debug!("alloc: {:?} (return place) -> place", local);
-                        let size = cast.size(&start_bx);
+                        let size = cast.size(&start_bx).max(layout.size);
                         return LocalRef::Place(PlaceRef::alloca_size(&mut start_bx, size, layout));
                     }
                     _ => {}
@@ -285,10 +299,6 @@ pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
     // Apply debuginfo to the newly allocated locals.
     fx.debug_introduce_locals(&mut start_bx, consts_debug_info.unwrap_or_default());
 
-    // If the backend supports coverage, and coverage is enabled for this function,
-    // do any necessary start-of-function codegen (e.g. locals for MC/DC bitmaps).
-    start_bx.init_coverage(instance);
-
     // The builders will be created separately for each basic block at `codegen_block`.
     // So drop the builder of `start_llbb` to avoid having two at the same time.
     drop(start_bx);
@@ -310,6 +320,62 @@ pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
     }
 }
 
+/// Replace `clone` calls that come from `use` statements with direct copies if possible.
+// FIXME: Move this function to mir::transform when post-mono MIR passes land.
+fn optimize_use_clone<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
+    cx: &'a Bx::CodegenCx,
+    mut mir: Body<'tcx>,
+) -> Body<'tcx> {
+    let tcx = cx.tcx();
+
+    if tcx.features().ergonomic_clones() {
+        for bb in mir.basic_blocks.as_mut() {
+            let mir::TerminatorKind::Call {
+                args,
+                destination,
+                target,
+                call_source: mir::CallSource::Use,
+                ..
+            } = &bb.terminator().kind
+            else {
+                continue;
+            };
+
+            // CallSource::Use calls always use 1 argument.
+            assert_eq!(args.len(), 1);
+            let arg = &args[0];
+
+            // These types are easily available from locals, so check that before
+            // doing DefId lookups to figure out what we're actually calling.
+            let arg_ty = arg.node.ty(&mir.local_decls, tcx);
+
+            let ty::Ref(_region, inner_ty, mir::Mutability::Not) = *arg_ty.kind() else { continue };
+
+            if !tcx.type_is_copy_modulo_regions(cx.typing_env(), inner_ty) {
+                continue;
+            }
+
+            let Some(arg_place) = arg.node.place() else { continue };
+
+            let destination_block = target.unwrap();
+
+            bb.statements.push(mir::Statement::new(
+                bb.terminator().source_info,
+                mir::StatementKind::Assign(Box::new((
+                    *destination,
+                    mir::Rvalue::Use(mir::Operand::Copy(
+                        arg_place.project_deeper(&[mir::ProjectionElem::Deref], tcx),
+                    )),
+                ))),
+            ));
+
+            bb.terminator_mut().kind = mir::TerminatorKind::Goto { target: destination_block };
+        }
+    }
+
+    mir
+}
+
 /// Produces, for each argument, a `Value` pointing at the
 /// argument's value. As arguments are places, these are always
 /// indirect.
@@ -324,9 +390,8 @@ fn arg_local_refs<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
 
     let mut num_untupled = None;
 
-    let codegen_fn_attrs = bx.tcx().codegen_fn_attrs(fx.instance.def_id());
-    let naked = codegen_fn_attrs.flags.contains(CodegenFnAttrFlags::NAKED);
-    if naked {
+    let codegen_fn_attrs = bx.tcx().codegen_instance_attrs(fx.instance.def);
+    if codegen_fn_attrs.flags.contains(CodegenFnAttrFlags::NAKED) {
         return vec![];
     }
 
@@ -377,6 +442,10 @@ fn arg_local_refs<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
 
             if fx.fn_abi.c_variadic && arg_index == fx.fn_abi.args.len() {
                 let va_list = PlaceRef::alloca(bx, bx.layout_of(arg_ty));
+
+                // Explicitly start the lifetime of the `va_list`, improves LLVM codegen.
+                bx.lifetime_start(va_list.val.llval, va_list.layout.size);
+
                 bx.va_start(va_list.val.llval);
 
                 return LocalRef::Place(va_list);
@@ -437,7 +506,7 @@ fn arg_local_refs<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
                         LocalRef::Place(PlaceRef::new_sized(llarg, arg.layout))
                     }
                 }
-                // Unsized indirect qrguments
+                // Unsized indirect arguments
                 PassMode::Indirect { attrs: _, meta_attrs: Some(_), on_stack: _ } => {
                     // As the storage for the indirect argument lives during
                     // the whole function call, we just copy the wide pointer.

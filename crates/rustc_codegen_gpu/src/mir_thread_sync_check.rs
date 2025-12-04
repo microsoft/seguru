@@ -8,7 +8,7 @@ use rustc_middle::mir::{
 };
 use rustc_middle::ty::TyCtxt;
 use rustc_mir_dataflow::fmt::DebugWithContext;
-use rustc_mir_dataflow::{Analysis, Results, ResultsVisitor};
+use rustc_mir_dataflow::{Analysis, ResultsVisitor, visit_reachable_results};
 use tracing::{debug, error};
 
 use crate::error::{GpuCodegenError, GpuCodegenResult};
@@ -375,14 +375,12 @@ impl ThreadSyncResultsVisitor {
     }
 }
 
-impl<'mir, 'tcx> ResultsVisitor<'mir, 'tcx, ThreadSyncAnalysis<'tcx, 'mir>>
-    for ThreadSyncResultsVisitor
-{
+impl<'mir, 'tcx> ResultsVisitor<'tcx, ThreadSyncAnalysis<'tcx, 'mir>> for ThreadSyncResultsVisitor {
     fn visit_after_primary_statement_effect(
         &mut self,
-        _results: &mut Results<'tcx, ThreadSyncAnalysis<'tcx, 'mir>>,
+        _results: &mut ThreadSyncAnalysis<'tcx, 'mir>,
         state: &Domain,
-        stmt: &'mir Statement<'tcx>,
+        stmt: &Statement<'tcx>,
         location: Location,
     ) {
         // read-write conflicts
@@ -411,7 +409,7 @@ pub(crate) fn analyze_shared_access<'tcx>(
     let analysis = ThreadSyncAnalysis { tcx, body };
     let mut results = analysis.iterate_to_fixpoint(tcx, body, None);
     let mut result_visitor = ThreadSyncResultsVisitor::new(tcx);
-    results.visit_with(body, body.basic_blocks.iter_nodes(), &mut result_visitor);
+    visit_reachable_results(body, &mut results.analysis, &results.results, &mut result_visitor);
     let mut missing_sync: bool = false;
 
     // Report missing sync error when needed.

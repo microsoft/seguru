@@ -7,10 +7,11 @@ use melior::ir::{BlockLike, Location, Operation, TypeLike, ValueLike};
 use rustc_codegen_ssa_gpu::traits::{
     ConstCodegenMethods, LayoutTypeCodegenMethods, MiscCodegenMethods,
 };
+use rustc_hir::attrs::InlineAttr;
 use rustc_hir::def_id::DefId;
 use rustc_middle::query::Key;
 use rustc_middle::ty::layout::{FnAbiOf, HasTyCtxt, HasTypingEnv, LayoutOf};
-use rustc_middle::ty::{AssocItemContainer, Instance};
+use rustc_middle::ty::{AssocContainer, Instance};
 use tracing::debug;
 
 use super::GPUCodegenContext;
@@ -48,13 +49,15 @@ fn is_impl_of_trait_method(
 
     // Check if the provided DefId is an associated function in an impl of IntoIterator
     if let Some(assoc_item) = tcx.opt_associated_item(def_id) {
-        if assoc_item.container == AssocItemContainer::Impl && assoc_item.name == method_sym {
+        if matches!(
+            assoc_item.container,
+            AssocContainer::InherentImpl | AssocContainer::TraitImpl(_)
+        ) && assoc_item.name() == method_sym
+        {
             // Get the trait ref for the impl (if it's an impl of a trait)
-            if let Some(trait_ref) =
-                tcx.impl_of_method(def_id).and_then(|impl_def_id| tcx.impl_trait_ref(impl_def_id))
-            {
-                return trait_ref.skip_binder().def_id == into_iter_trait;
-            }
+            let impl_def_id = assoc_item.container_id(*tcx);
+            let trait_ref = tcx.impl_trait_ref(impl_def_id);
+            return trait_ref.skip_binder().def_id == into_iter_trait;
         }
     }
 
@@ -300,7 +303,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         Ok((ftype, new_ftype))
     }
 
-    pub(crate) fn define_indirect_if_needed(&'ml self) {
+    pub(crate) fn define_indirect_if_needed(&self) {
         let Some(entry) = self.indirect_entry.lock().unwrap().take() else {
             return;
         };
@@ -335,7 +338,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         }
         let op: melior::ir::OperationRef<'_, '_> = body.append_operation(gpu_op);
 
-        let bb = GpuBuilder::append_block(self, op, entry_sym.as_str());
+        let bb = crate::builder::append_block(self, op, entry_sym.as_str());
         let mut builder = GpuBuilder::build(self, bb);
         let mut dev_arg_idx = 0;
         let mut call_args = vec![];
@@ -518,7 +521,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         };
         // Expose kernel functions to external linkage.
         let linkage = if gpu_attrs.kernel {
-            self.to_mlir_linkage(rustc_middle::mir::mono::Linkage::External)
+            self.to_mlir_linkage(rustc_hir::attrs::Linkage::External)
         } else {
             linkage
         };
@@ -527,7 +530,6 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         operation.set_attribute("linkage", linkage);
 
         // Set inline attribute
-        use rustc_attr_data_structures::InlineAttr;
         let attrs = tcx.codegen_fn_attrs(def_id);
         if matches!(attrs.inline, InlineAttr::Always | InlineAttr::Force { .. }) {
             operation.set_attribute("always_inline", melior::ir::Attribute::unit(self.mlir_ctx));

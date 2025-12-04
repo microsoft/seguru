@@ -282,7 +282,7 @@ impl GpuAttributes {
     }
 
     pub fn build(tcx: &rustc_middle::ty::TyCtxt<'_>, def_id: DefId) -> GpuAttributes {
-        let attrs = tcx.get_attrs_unchecked(def_id);
+        let attrs = tcx.get_all_attrs(def_id);
         let mut gpu_attr = GpuAttributes::parse(attrs);
         let crate_name = tcx.crate_name(def_id.krate);
         if crate_name == rustc_span::sym::core || crate_name == rustc_span::sym::std {

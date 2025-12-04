@@ -37,7 +37,7 @@ impl<'tcx, 'ml> MiscCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, '_> {
         (
             self.to_mir_func_decl(
                 instance,
-                self.to_mlir_linkage(rustc_middle::mir::mono::Linkage::ExternalWeak),
+                self.to_mlir_linkage(rustc_hir::attrs::Linkage::ExternalWeak),
             ),
             gpu_attrs.kernel || gpu_attrs.device,
         )
@@ -47,16 +47,12 @@ impl<'tcx, 'ml> MiscCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, '_> {
         self.to_mir_func_const(instance, None)
     }
 
-    fn eh_personality(&self) -> Self::Value {
+    fn eh_personality(&self) -> Self::Function {
         todo!()
     }
 
     fn sess(&self) -> &rustc_session::Session {
         self.tcx.sess
-    }
-
-    fn codegen_unit(&self) -> &'tcx rustc_middle::mir::mono::CodegenUnit<'tcx> {
-        self.cgu
     }
 
     fn set_frame_pointer_type(&self, llfn: Self::Function) {

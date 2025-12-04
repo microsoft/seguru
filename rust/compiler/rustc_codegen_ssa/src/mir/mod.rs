@@ -49,6 +49,8 @@ type PerLocalVarDebugInfoIndexVec<'tcx, V> =
 pub struct FunctionCx<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> {
     instance: Instance<'tcx>,
 
+    is_gpu: bool,
+
     mir: &'tcx mir::Body<'tcx>,
 
     debug_context: Option<FunctionDebugContext<'tcx, Bx::DIScope, Bx::DILocation>>,
@@ -58,6 +60,8 @@ pub struct FunctionCx<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> {
     cx: &'a Bx::CodegenCx,
 
     fn_abi: &'tcx FnAbi<'tcx, Ty<'tcx>>,
+
+    san_dummy: Option<Bx::Value>,
 
     /// When unwinding is initiated, we have to store this personality
     /// value somewhere so that we can load it and re-use it in the
@@ -170,7 +174,7 @@ pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
 ) {
     assert!(!instance.args.has_infer());
 
-    let llfn = cx.get_fn(instance);
+    let (llfn, is_gpu) = cx.get_fn_with_gpu_indicator(instance);
 
     let mir = cx.tcx().instance_mir(instance.def);
 
@@ -187,9 +191,12 @@ pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
     let start_llbb = Bx::append_block(cx, llfn, "start");
     let mut start_bx = Bx::build(cx, start_llbb);
 
-    if mir.basic_blocks.iter().any(|bb| {
-        bb.is_cleanup || matches!(bb.terminator().unwind(), Some(mir::UnwindAction::Terminate(_)))
-    }) {
+    if !is_gpu
+        && mir.basic_blocks.iter().any(|bb| {
+            bb.is_cleanup
+                || matches!(bb.terminator().unwind(), Some(mir::UnwindAction::Terminate(_)))
+        })
+    {
         start_bx.set_personality_fn(cx.eh_personality());
     }
 
@@ -206,9 +213,11 @@ pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
 
     let mut fx = FunctionCx {
         instance,
+        is_gpu,
         mir,
         llfn,
         fn_abi,
+        san_dummy: None,
         cx,
         personality_slot: None,
         cached_llbbs,
@@ -281,6 +290,8 @@ pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
             .collect()
     };
     fx.initialize_locals(local_values);
+
+    fx.san_dummy = Some(start_bx.alloca_san_dummy());
 
     // Apply debuginfo to the newly allocated locals.
     fx.debug_introduce_locals(&mut start_bx, consts_debug_info.unwrap_or_default());

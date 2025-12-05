@@ -101,7 +101,7 @@ fn new_externs_with_new_path<F: FnMut(&Path) -> Option<PathBuf>>(
                     .iter()
                     .filter_map(|p| {
                         let path = p.canonicalized();
-                        new_path(path).map(|p| CanonicalizedPath::new(p))
+                        new_path(path).map(CanonicalizedPath::new)
                     })
                     .collect();
                 new_e.force = true;

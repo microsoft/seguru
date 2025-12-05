@@ -438,32 +438,32 @@ where
         let (ftype, real_entry_ftype) = self
             .fn_abi_to_fn_type(fn_abi, gpu_attrs.kernel, &gpu_attrs.shared_data)
             .unwrap_or_else(|e| self.emit_error(e, span));
-        let fn_sym = if real_entry_ftype.is_some() && gpu_attrs.kernel {
-            gpu_attrs.kernel = false;
-            gpu_attrs.device = true;
-            let dev_sym = format!("{INDIRECT}{}", sym);
-            debug!(
-                "Function `{}` is a kernel entry function, but it has indirect arguments. \
+        let fn_sym = match (real_entry_ftype, gpu_attrs.kernel) {
+            (Some((new_ftype, indirect_args)), true) => {
+                gpu_attrs.kernel = false;
+                gpu_attrs.device = true;
+                let dev_sym = format!("{INDIRECT}{}", sym);
+                debug!(
+                    "Function `{}` is a kernel entry function, but it has indirect arguments. \
                 It will be defined as a device function with name `{}`",
-                sym, dev_sym
-            );
-            let (new_ftype, indirect_args) = real_entry_ftype.unwrap();
-            *self.indirect_entry.lock().unwrap() = Some(IndirectEntry {
-                entry_sym: sym.clone(),
-                fn_type: new_ftype,
-                indirect_args,
-                dev_fn_type: ftype,
-                dev_instance: instance,
-                extra_attributes: gpu_attrs.to_mlir_attributes(self.mlir_ctx),
-                location,
-            });
-            let fn_db = self.fn_db.read().unwrap();
-            if fn_db.contains_key(&dev_sym) {
-                return fn_db[&dev_sym].op;
+                    sym, dev_sym
+                );
+                *self.indirect_entry.lock().unwrap() = Some(IndirectEntry {
+                    entry_sym: sym.clone(),
+                    fn_type: new_ftype,
+                    indirect_args,
+                    dev_fn_type: ftype,
+                    dev_instance: instance,
+                    extra_attributes: gpu_attrs.to_mlir_attributes(self.mlir_ctx),
+                    location,
+                });
+                let fn_db = self.fn_db.read().unwrap();
+                if fn_db.contains_key(&dev_sym) {
+                    return fn_db[&dev_sym].op;
+                }
+                dev_sym
             }
-            dev_sym
-        } else {
-            sym.clone()
+            _ => sym.clone(),
         };
         let fn_sym_attr = melior::ir::attribute::StringAttribute::new(mlir_ctx, &fn_sym);
         /*if is_impl_of_trait_method(

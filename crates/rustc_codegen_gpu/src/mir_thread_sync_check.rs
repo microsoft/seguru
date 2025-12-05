@@ -1,5 +1,4 @@
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
-use rustc_data_structures::graph::DirectedGraph;
 use rustc_index::bit_set::DenseBitSet;
 use rustc_middle::mir::visit::{PlaceContext, Visitor};
 use rustc_middle::mir::{

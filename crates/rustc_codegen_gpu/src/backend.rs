@@ -91,8 +91,7 @@ impl WriteBackendMethods for GPUCodegenBackend {
         dcx: rustc_errors::DiagCtxtHandle<'_>,
         module: &mut rustc_codegen_ssa_gpu::ModuleCodegen<Self::Module>,
         config: &rustc_codegen_ssa_gpu::back::write::ModuleConfig,
-    ) -> () {
-        ()
+    ) {
     }
 
     fn optimize_thin(

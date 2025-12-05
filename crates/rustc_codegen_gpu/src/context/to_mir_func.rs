@@ -306,7 +306,7 @@ where
         Ok((ftype, new_ftype))
     }
 
-    pub(crate) fn define_indirect_if_needed<'cx>(&'cx self) {
+    pub(crate) fn define_indirect_if_needed(&self) {
         let Some(entry) = self.indirect_entry.lock().unwrap().take() else {
             return;
         };

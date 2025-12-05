@@ -34,13 +34,12 @@ impl TestEnum {
     }
 }
 
-type ThreadChunkMatrix2D<'a> = gpu::GlobalThreadChunk<'a, u32, gpu::Map2D>;
 /// # Safety
 /// This kernel might be unsafe because it uses Chunkable::new that is not defined as trusted chunking func.
 #[gpu::kernel]
 pub fn kernel_arith<const N: u32>(
     a: &[u32],
-    b: ThreadChunkMatrix2D<'_>,
+    b: &mut [u32],
     c: &[u32],
     f: &mut [f32],
     f_width: usize,
@@ -49,7 +48,7 @@ pub fn kernel_arith<const N: u32>(
 ) {
     let thread_id = gpu::thread_id::<gpu::DimY>();
     let a_local = a[thread_id as usize];
-    let mut b = b;
+    let mut b = gpu::chunk_mut(b, gpu::Map2D::new(f_width));
     let b_local = &mut b[(0, 0)];
     *b_local = a_local + c[thread_id as usize];
     *b_local += 1;
@@ -98,7 +97,7 @@ pub fn kernel_arith<const N: u32>(
     });*/
 }
 
-#[gpu::kernel]
+#[gpu::cuda_kernel]
 pub fn oob1(a: f32, b: &mut [f32], width: usize) {
     let mut b = gpu::chunk_mut(b, gpu::MapLinear::new(width));
     if thread_id::<DimX>() == 0 {
@@ -113,7 +112,7 @@ pub fn oob1(a: f32, b: &mut [f32], width: usize) {
 /// But it is silent.
 /// TODO: since the code is optimized out, static analysis should be able to capture that
 /// it always fails and so we can warn the user.
-#[gpu::kernel]
+#[gpu::cuda_kernel]
 pub fn oob_no_fails(a: f32, b: &mut [f32], _width: usize) {
     let mut b = gpu::chunk_mut(b, gpu::MapLinear::new(1));
     if thread_id::<DimX>() == 0 {
@@ -121,7 +120,7 @@ pub fn oob_no_fails(a: f32, b: &mut [f32], _width: usize) {
     }
 }
 
-#[gpu::kernel]
+#[gpu::cuda_kernel]
 pub fn oob2(a: f32, b: &mut [f32], width: usize) {
     let mut b = gpu::chunk_mut(b, gpu::Map2D::new(width));
     if thread_id::<DimX>() == 0 {
@@ -129,7 +128,7 @@ pub fn oob2(a: f32, b: &mut [f32], width: usize) {
     }
 }
 
-#[gpu::kernel]
+#[gpu::cuda_kernel]
 pub fn oob3(a: f32, b: &mut [f32], width: usize) {
     let mut b = gpu::chunk_mut(b, gpu::MapLinear::new(width));
     if thread_id::<DimX>() == 1 {

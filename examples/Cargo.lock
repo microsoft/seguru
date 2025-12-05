@@ -389,6 +389,7 @@ name = "syntax_gpu"
 version = "0.1.0"
 dependencies = [
  "gpu",
+ "gpu_host",
 ]
 
 [[package]]

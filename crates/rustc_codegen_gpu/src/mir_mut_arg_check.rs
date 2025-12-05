@@ -1,4 +1,3 @@
-use rustc_data_structures::graph::DirectedGraph;
 use rustc_index::bit_set::DenseBitSet;
 use rustc_middle::mir::visit::{MutatingUseContext, NonMutatingUseContext, PlaceContext, Visitor};
 use rustc_middle::mir::{

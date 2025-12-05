@@ -1,5 +1,4 @@
 use rustc_data_structures::fx::FxHashSet;
-use rustc_data_structures::graph::DirectedGraph;
 use rustc_index::bit_set::DenseBitSet;
 use rustc_middle::mir::pretty::write_mir_pretty;
 use rustc_middle::mir::visit::Visitor;
@@ -8,7 +7,7 @@ use rustc_middle::mir::{
     Terminator, TerminatorKind,
 };
 use rustc_middle::ty::{Instance, TyCtxt, TyKind};
-use rustc_mir_dataflow::{Analysis, Results, ResultsVisitor, visit_reachable_results};
+use rustc_mir_dataflow::{Analysis, ResultsVisitor, visit_reachable_results};
 use tracing::debug;
 
 use crate::attr::{GpuAttributes, GpuItem};

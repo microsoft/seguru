@@ -1,5 +1,3 @@
-#[cfg(feature = "unstable_host_chunk")]
-use alloc::vec::Vec;
 use core::marker::PhantomData;
 use core::ops::{Index, IndexMut};
 
@@ -140,23 +138,6 @@ impl<'a, T, CS: ChunkScope, Map: ScopeUniqueMap<CS>> GlobalGroupChunk<'a, T, CS,
         idx: <Map as ScopeUniqueMap<CS>>::IndexType,
     ) -> Map::GlobalIndexType {
         self.map_params.local_to_global_index(idx).1
-    }
-}
-
-#[cfg(feature = "unstable_host_chunk")]
-#[cfg(not(feature = "codegen_tests"))]
-unsafe impl<'a, T: Send, CS: ChunkScope, Map: ScopeUniqueMap<CS> + 'static + Send>
-    cuda_bindings::AsHostKernelParams for GlobalGroupChunk<'a, T, CS, Map>
-where
-    // Ensure Map is small enough to be passed by value.
-    [(); 16 - core::mem::size_of::<Map>()]:,
-{
-    fn as_kernel_param_data(&self, args: &mut Vec<*mut ::core::ffi::c_void>) {
-        assert!(core::mem::size_of::<Map>() <= 16);
-        let ptr = self as *const Self as _;
-        args.push(ptr);
-        args.push(ptr.wrapping_add(8));
-        args.push(ptr.wrapping_add(16));
     }
 }
 

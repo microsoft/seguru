@@ -1,7 +1,7 @@
 #![deny(clippy::cast_possible_truncation)]
 #![deny(clippy::cast_sign_loss)]
 
-use matmul_gpu::{inner_product_kernel, inner_product_kernel2};
+use matmul_gpu::inner_product_kernel;
 
 fn cpu_inner_product(a: &[f32], b: &[f32], c: &mut [f32], n: usize) {
     for i in 0..n {
@@ -67,14 +67,6 @@ pub fn run_host_matmul<'ctx>(
     let config = gpu_host::gpu_config!(grid_dim, grid_dim, 1, block_dim, block_dim, 1, 0);
     let start = std::time::Instant::now();
     inner_product_kernel::launch(config, ctx, m, &d_a, &d_b, &mut d_c, n)
-        .expect("Kernel execution failed");
-    let elapsed = start.elapsed();
-    println!("GPU execution time: {:?}", elapsed);
-
-    let config = gpu_host::gpu_config!(grid_dim, grid_dim, 1, block_dim, block_dim, 1, 0);
-    let d_c_c = gpu::GlobalThreadChunk::new_from_host(&mut d_c, gpu::Map2D::new(n));
-    let start = std::time::Instant::now();
-    inner_product_kernel2::launch(config, ctx, m, &d_a, &d_b, d_c_c, n)
         .expect("Kernel execution failed");
     let elapsed = start.elapsed();
     println!("GPU execution time: {:?}", elapsed);

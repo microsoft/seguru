@@ -84,8 +84,9 @@ fn lang_item_from_str(name: &str) -> Option<LangItem> {
     LangItem::from_name(Symbol::intern(name))
 }
 
-const PANIC_FUNCTIONS: [&str; 8] = [
+const PANIC_FUNCTIONS: [&str; 10] = [
     "core::slice::index::slice_index_order_fail",
+    "core::slice::index::slice_index_fail",
     "core::slice::index::slice_start_index_len_fail",
     "core::slice::index::slice_end_index_len_fail",
     "core::option::unwrap_failed",
@@ -93,6 +94,7 @@ const PANIC_FUNCTIONS: [&str; 8] = [
     "std::slice::index::slice_start_index_len_fail",
     "std::slice::index::slice_end_index_len_fail",
     "std::option::unwrap_failed",
+    "core::panicking::panic_nounwind_fmt",
 ];
 
 const PANIC_FUNCTION_PATTERNS: [&str; 2] = [

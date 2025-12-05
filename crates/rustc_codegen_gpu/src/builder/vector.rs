@@ -106,11 +106,11 @@ impl<'cx, 'tcx, 'ml, 'a> GpuBuilder<'cx, 'tcx, 'ml, 'a> {
         let dst_ty = MemRefType::try_from(dst.r#type()).unwrap();
         let src_ty = MemRefType::try_from(src.r#type()).unwrap();
         let to_vec_type = |align: u64| {
-            if align % 8 == 0 {
+            if align.is_multiple_of(8) {
                 self.type_vector(&[align / 8], self.type_i64())
-            } else if align % 4 == 0 {
+            } else if align.is_multiple_of(4) {
                 self.type_vector(&[align / 4], self.type_i32())
-            } else if align % 2 == 0 {
+            } else if align.is_multiple_of(2) {
                 self.type_vector(&[align / 2], self.type_i16())
             } else {
                 self.type_vector(&[align], self.type_i8())

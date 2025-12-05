@@ -2673,7 +2673,7 @@ where
         todo!()
     }
 
-    fn filter_landing_pad(&mut self, pers_fn: Self::Function) -> () {
+    fn filter_landing_pad(&mut self, pers_fn: Self::Function) {
         todo!()
     }
 

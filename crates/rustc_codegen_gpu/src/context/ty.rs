@@ -537,7 +537,7 @@ where
             rustc_codegen_ssa_gpu::common::TypeKind::Integer
         } else if ty.is_ranked_tensor() {
             rustc_codegen_ssa_gpu::common::TypeKind::Array
-        } else if ty.is_llvm_pointer_type() {
+        } else if ty.is_llvm_pointer_type() || ty.is_mem_ref() {
             rustc_codegen_ssa_gpu::common::TypeKind::Pointer
         } else if ty.is_function() {
             rustc_codegen_ssa_gpu::common::TypeKind::Function

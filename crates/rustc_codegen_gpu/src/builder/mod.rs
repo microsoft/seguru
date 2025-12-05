@@ -2391,7 +2391,17 @@ where
     }
 
     fn pointercast(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
-        val
+        use rustc_codegen_ssa_gpu::common::TypeKind;
+        match self.type_kind(dest_ty) {
+            TypeKind::Pointer => self.mlir_memref_view(val, dest_ty, None, None),
+            TypeKind::Integer => self.ptrtoint(val, dest_ty),
+            TypeKind::Float => {
+                unimplemented!()
+            }
+            _ => {
+                unimplemented!()
+            }
+        }
     }
 
     fn icmp(

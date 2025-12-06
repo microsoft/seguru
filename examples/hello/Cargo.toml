@@ -1,8 +1,0 @@
-[package]
-name = "hello"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-gpu_host = {workspace = true}
-gpu = {workspace = true}

@@ -1,3 +1,0 @@
-[submodule "llm-rs"]
-	path = llm-rs
-	url = git@github.com:MSRSSP/llm-rs.git

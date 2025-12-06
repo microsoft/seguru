@@ -1,9 +1,0 @@
-[package]
-name = "matmul-host"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-gpu_host = {workspace = true}
-matmul-gpu = {path = "../matmul-gpu"}
-gpu = {workspace = true}

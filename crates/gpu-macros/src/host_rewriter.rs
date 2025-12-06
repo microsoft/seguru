@@ -240,19 +240,19 @@ pub(crate) fn create_host_from_kernel(
         if let syn::FnArg::Receiver(_) = arg {
             panic!("Kernel function cannot have receiver argument");
         }
-        if let syn::FnArg::Typed(pat_type) = arg {
-            if let syn::Type::Reference(type_ref) = pat_type.ty.as_mut() {
-                let inner_type = &*type_ref.elem;
-                type_ref.elem = if type_ref.mutability.is_some() {
-                    syn::parse_quote! {
-                            ::gpu_host::TensorViewMut<#inner_type>
-                    }
-                } else {
-                    syn::parse_quote! {
-                        ::gpu_host::TensorView<#inner_type>
-                    }
-                };
-            }
+        if let syn::FnArg::Typed(pat_type) = arg
+            && let syn::Type::Reference(type_ref) = pat_type.ty.as_mut()
+        {
+            let inner_type = &*type_ref.elem;
+            type_ref.elem = if type_ref.mutability.is_some() {
+                syn::parse_quote! {
+                        ::gpu_host::TensorViewMut<#inner_type>
+                }
+            } else {
+                syn::parse_quote! {
+                    ::gpu_host::TensorView<#inner_type>
+                }
+            };
         }
     });
     let span = fun.span();

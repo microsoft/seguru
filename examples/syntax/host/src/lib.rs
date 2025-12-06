@@ -28,14 +28,13 @@ pub fn run_host_arith<'ctx>(
     let d_c = ctx.new_tensor_view::<[u32]>(&h_c)?;
     let mut d_f = ctx.new_tensor_view::<[f32]>(&h_f)?;
     let d_g = ctx.new_tensor_view::<[f32]>(&h_g)?;
-    let d_b_c = gpu::GlobalThreadChunk::new_from_host(&mut d_b, gpu::Map2D::new(w));
     let mut d_h = ctx.new_tensor_view(&h_h)?;
 
     // Now do the kernel
     const BDIM_Y: u32 = 4;
     let config = gpu_host::gpu_config!(1, 1, 1, 1, @const BDIM_Y, 1, 0);
     kernel_arith(
-        config, ctx, m, &d_a, d_b_c, &d_c, &mut d_f, w, &d_g, &mut d_h,
+        config, ctx, m, &d_a, &mut d_b, &d_c, &mut d_f, w, &d_g, &mut d_h,
     )
     .expect("Kernel execution failed");
     d_b.copy_to_host(&mut h_b)?;
@@ -69,7 +68,7 @@ pub fn test_oob1() {
     cuda_ctx(0, |ctx, m| {
         let mut out = ctx.new_tensor_view::<[f32]>(&[0.0; 16]).unwrap();
         let config = gpu_host::gpu_config!(1, 1, 1, 16, 1, 1, 0);
-        host::oob1(config, ctx, m, 1.1, &mut out, 1)
+        syntax_gpu::oob1::launch(config, ctx, m, 1.1, &mut out, 1)
     })
     .expect("Kernel execution failed");
 }
@@ -78,7 +77,7 @@ pub fn test_oob2() {
     cuda_ctx(0, |ctx, m| {
         let mut out = ctx.new_tensor_view::<[f32]>(&[0.0; 16]).unwrap();
         let config = gpu_host::gpu_config!(1, 1, 1, 8, 1, 1, 0);
-        host::oob2(config, ctx, m, 1.1, &mut out, 4)
+        syntax_gpu::oob2::launch(config, ctx, m, 1.1, &mut out, 4)
     })
     .expect("Kernel execution failed");
 }
@@ -87,7 +86,7 @@ pub fn test_oob3() {
     cuda_ctx(0, |ctx, m| {
         let mut out = ctx.new_tensor_view::<[f32]>(&[0.0; 16]).unwrap();
         let config = gpu_host::gpu_config!(1, 1, 1, 8, 1, 1, 0);
-        host::oob3(config, ctx, m, 1.1, &mut out, 16)
+        syntax_gpu::oob3::launch(config, ctx, m, 1.1, &mut out, 16)
     })
     .expect("Kernel execution failed");
 }
@@ -96,7 +95,7 @@ pub fn test_oob_no_fails() {
     cuda_ctx(0, |ctx, m| {
         let mut out = ctx.new_tensor_view::<[f32]>(&[0.0; 16]).unwrap();
         let config = gpu_host::gpu_config!(1, 1, 1, 8, 1, 1, 0);
-        host::oob_no_fails(config, ctx, m, 1.1, &mut out, 16)
+        syntax_gpu::oob_no_fails::launch(config, ctx, m, 1.1, &mut out, 16)
     })
     .expect("Kernel execution failed");
 }

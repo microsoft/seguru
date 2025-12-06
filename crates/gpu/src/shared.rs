@@ -67,10 +67,11 @@ impl DynamicSharedAlloc {
         let size = core::mem::size_of::<T>() * len;
         assert!(size <= self.size);
         self.size -= size;
+        #[allow(clippy::transmute_ptr_to_ref)]
         unsafe {
             let raw = core::intrinsics::offset(Self::base_ptr(), self.size);
-            &mut *(core::ptr::slice_from_raw_parts_mut(raw as *mut T, len) as *const [T]
-                as *mut GpuShared<[T]>)
+            let slice = core::ptr::slice_from_raw_parts_mut(raw as *mut T, len);
+            core::mem::transmute(slice)
         }
     }
 }
@@ -101,7 +102,7 @@ impl<T> core::ops::Index<usize> for GpuShared<[T]> {
     #[inline(always)]
     #[gpu_codegen::device]
     fn index(&self, idx: usize) -> &GpuShared<T> {
-        unsafe { &*((&self.value[idx]) as *const _ as *const GpuShared<T>) }
+        unsafe { core::mem::transmute(&self.value[idx]) }
     }
 }
 

@@ -205,9 +205,7 @@ impl CodegenBackend for GPUCodegenBackend {
 
     fn provide(&self, providers: &mut Providers) {}
 
-    /*
-    fn target_features_cfg(&self, sess: &Session) -> (Vec<Symbol>, Vec<Symbol>) {
-        // Add faked features to remove warnings on missing target features.
+    fn target_config(&self, sess: &Session) -> rustc_codegen_ssa_gpu::TargetConfig {
         let target: String = sess.target.arch.clone().into_owned();
         let faked_features = match target.as_str() {
             "x86" | "x86_64" => {
@@ -220,9 +218,15 @@ impl CodegenBackend for GPUCodegenBackend {
                 vec![]
             }
         };
-        (faked_features.clone(), faked_features)
+        rustc_codegen_ssa_gpu::TargetConfig {
+            target_features: faked_features.clone(),
+            unstable_target_features: faked_features,
+            has_reliable_f16: true,
+            has_reliable_f16_math: true,
+            has_reliable_f128: false,
+            has_reliable_f128_math: false,
+        }
     }
-    */
 
     fn codegen_crate(&self, tcx: TyCtxt<'_>) -> Box<dyn std::any::Any> {
         // Provide a dummy implementation or actual logic

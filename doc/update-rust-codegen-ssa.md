@@ -8,8 +8,9 @@ cd rust-tmp
 git remote add origin https://github.com/rust-lang/rust.git
 git sparse-checkout init --no-cone
 git sparse-checkout set compiler/rustc_codegen_ssa
-git fetch --filter=blob:none origin main
-git checkout 6501e64fc -b new
+git fetch origin main
+git checkout 3f550237 -b 1.87
+git filter-repo --path compiler/rustc_codegen_ssa --force
 ```
 
 2. Add the rustc_codegen_ssa as a subtree into seguru repo.
@@ -36,9 +37,14 @@ cd rust-tmp
 git remote add origin https://github.com/rust-lang/rust.git
 git sparse-checkout init --no-cone
 git sparse-checkout set compiler/rustc_codegen_ssa
-git fetch --filter=blob:none origin main
+git fetch origin main
 git checkout 6501e64fc -b new
+git filter-repo --path compiler/rustc_codegen_ssa --force
 ```
+
+After `git checkout 6501e64fc -b new`, we only see compiler/rustc_codegen_ssa, but other files are hidden,
+and so must call `git filter-repo --path compiler/rustc_codegen_ssa --force` so thath the later subtree pull
+will not get other files.
 
 Now the rustc_codegen_ssa repo is update to date.
 

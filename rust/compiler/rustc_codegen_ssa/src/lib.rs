@@ -2,133 +2,38 @@
 #![allow(internal_features)]
 #![allow(rustc::diagnostic_outside_of_impl)]
 #![allow(rustc::untranslatable_diagnostic)]
-#![cfg_attr(doc, recursion_limit = "256")] // FIXME(nnethercote): will be removed by #124141
 #![doc(html_root_url = "https://doc.rust-lang.org/nightly/nightly-rustc/")]
 #![doc(rust_logo)]
 #![feature(assert_matches)]
 #![feature(box_patterns)]
-#![feature(debug_closure_helpers)]
 #![feature(file_buffered)]
 #![feature(if_let_guard)]
-#![feature(let_chains)]
 #![feature(negative_impls)]
 #![feature(rustdoc_internals)]
+#![feature(string_from_utf8_lossy_owned)]
 #![feature(trait_alias)]
 #![feature(try_blocks)]
+#![recursion_limit = "256"]
 // tidy-alphabetical-end
-#![feature(rustc_private)]
 
 //! This crate contains codegen code that is used by all codegen backends (LLVM and others).
 //! The backend-agnostic functions of this crate use functions defined in various traits that
 //! have to be implemented by each backend.
-
-extern crate rustc_abi;
-extern crate rustc_arena;
-extern crate rustc_ast;
-extern crate rustc_attr_parsing;
-extern crate rustc_codegen_ssa;
-extern crate rustc_data_structures;
-extern crate rustc_errors;
-extern crate rustc_fluent_macro;
-extern crate rustc_fs_util;
-extern crate rustc_hashes;
-extern crate rustc_hir;
-extern crate rustc_incremental;
-extern crate rustc_index;
-extern crate rustc_macros;
-extern crate rustc_metadata;
-extern crate rustc_middle;
-extern crate rustc_query_system;
-extern crate rustc_serialize;
-extern crate rustc_session;
-extern crate rustc_span;
-extern crate rustc_symbol_mangling;
-extern crate rustc_target;
-extern crate rustc_trait_selection;
-//
-extern crate tempfile;
-extern crate thin_vec;
-//#![feature(write_core)]
-extern crate ar_archive_writer;
-extern crate object;
-
-pub(crate) fn from_i32_to_arch(arch: i32) -> object::Architecture {
-    if arch == object::Architecture::Aarch64 as i32 {
-        object::Architecture::Aarch64
-    } else if arch == object::Architecture::Aarch64_Ilp32 as i32 {
-        object::Architecture::Aarch64_Ilp32
-    } else if arch == object::Architecture::Arm as i32 {
-        object::Architecture::Arm
-    } else if arch == object::Architecture::Avr as i32 {
-        object::Architecture::Avr
-    } else if arch == object::Architecture::Bpf as i32 {
-        object::Architecture::Bpf
-    } else if arch == object::Architecture::Csky as i32 {
-        object::Architecture::Csky
-    } else if arch == object::Architecture::E2K32 as i32 {
-        object::Architecture::E2K32
-    } else if arch == object::Architecture::E2K64 as i32 {
-        object::Architecture::E2K64
-    } else if arch == object::Architecture::I386 as i32 {
-        object::Architecture::I386
-    } else if arch == object::Architecture::X86_64 as i32 {
-        object::Architecture::X86_64
-    } else if arch == object::Architecture::X86_64_X32 as i32 {
-        object::Architecture::X86_64_X32
-    } else if arch == object::Architecture::Hexagon as i32 {
-        object::Architecture::Hexagon
-    } else if arch == object::Architecture::LoongArch64 as i32 {
-        object::Architecture::LoongArch64
-    } else if arch == object::Architecture::M68k as i32 {
-        object::Architecture::M68k
-    } else if arch == object::Architecture::Mips as i32 {
-        object::Architecture::Mips
-    } else if arch == object::Architecture::Mips64 as i32 {
-        object::Architecture::Mips64
-    } else if arch == object::Architecture::Mips64_N32 as i32 {
-        object::Architecture::Mips64_N32
-    } else if arch == object::Architecture::Msp430 as i32 {
-        object::Architecture::Msp430
-    } else if arch == object::Architecture::PowerPc as i32 {
-        object::Architecture::PowerPc
-    } else if arch == object::Architecture::PowerPc64 as i32 {
-        object::Architecture::PowerPc64
-    } else if arch == object::Architecture::Riscv32 as i32 {
-        object::Architecture::Riscv32
-    } else if arch == object::Architecture::Riscv64 as i32 {
-        object::Architecture::Riscv64
-    } else if arch == object::Architecture::S390x as i32 {
-        object::Architecture::S390x
-    } else if arch == object::Architecture::Sbf as i32 {
-        object::Architecture::Sbf
-    } else if arch == object::Architecture::Sharc as i32 {
-        object::Architecture::Sharc
-    } else if arch == object::Architecture::Sparc as i32 {
-        object::Architecture::Sparc
-    } else if arch == object::Architecture::Sparc32Plus as i32 {
-        object::Architecture::Sparc32Plus
-    } else if arch == object::Architecture::Sparc64 as i32 {
-        object::Architecture::Sparc64
-    } else if arch == object::Architecture::Xtensa as i32 {
-        object::Architecture::Xtensa
-    } else {
-        panic!("Unknown architecture: {}", arch);
-    }
-}
 
 use std::collections::BTreeSet;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use rustc_ast as ast;
 use rustc_data_structures::fx::{FxHashSet, FxIndexMap};
 use rustc_data_structures::unord::UnordMap;
 use rustc_hir::CRATE_HIR_ID;
+use rustc_hir::attrs::{CfgEntry, NativeLibKind};
 use rustc_hir::def_id::CrateNum;
 use rustc_macros::{Decodable, Encodable, HashStable};
+use rustc_metadata::EncodedMetadata;
 use rustc_middle::dep_graph::WorkProduct;
-use rustc_middle::lint::LintLevelSource;
+use rustc_middle::lint::LevelAndSource;
 use rustc_middle::middle::debugger_visualizer::DebuggerVisualizerFile;
 use rustc_middle::middle::dependency_format::Dependencies;
 use rustc_middle::middle::exported_symbols::SymbolExportKind;
@@ -139,9 +44,7 @@ use rustc_serialize::{Decodable, Decoder, Encodable, Encoder};
 use rustc_session::Session;
 use rustc_session::config::{CrateType, OutputFilenames, OutputType, RUST_CGU_EXT};
 use rustc_session::cstore::{self, CrateSource};
-use rustc_session::lint::Level;
 use rustc_session::lint::builtin::LINKER_MESSAGES;
-use rustc_session::utils::NativeLibKind;
 use rustc_span::Symbol;
 
 pub mod assert_module_sources;
@@ -201,16 +104,22 @@ impl<M> ModuleCodegen<M> {
         emit_asm: bool,
         emit_ir: bool,
         outputs: &OutputFilenames,
+        invocation_temp: Option<&str>,
     ) -> CompiledModule {
-        let object = emit_obj.then(|| outputs.temp_path(OutputType::Object, Some(&self.name)));
-        let dwarf_object = emit_dwarf_obj.then(|| outputs.temp_path_dwo(Some(&self.name)));
-        let bytecode = emit_bc.then(|| outputs.temp_path(OutputType::Bitcode, Some(&self.name)));
-        let assembly = emit_asm.then(|| outputs.temp_path(OutputType::Assembly, Some(&self.name)));
-        let llvm_ir =
-            emit_ir.then(|| outputs.temp_path(OutputType::LlvmAssembly, Some(&self.name)));
+        let object = emit_obj
+            .then(|| outputs.temp_path_for_cgu(OutputType::Object, &self.name, invocation_temp));
+        let dwarf_object =
+            emit_dwarf_obj.then(|| outputs.temp_path_dwo_for_cgu(&self.name, invocation_temp));
+        let bytecode = emit_bc
+            .then(|| outputs.temp_path_for_cgu(OutputType::Bitcode, &self.name, invocation_temp));
+        let assembly = emit_asm
+            .then(|| outputs.temp_path_for_cgu(OutputType::Assembly, &self.name, invocation_temp));
+        let llvm_ir = emit_ir.then(|| {
+            outputs.temp_path_for_cgu(OutputType::LlvmAssembly, &self.name, invocation_temp)
+        });
 
         CompiledModule {
-            name: self.name.clone(),
+            name: self.name,
             kind: self.kind,
             object,
             dwarf_object,
@@ -260,7 +169,6 @@ pub(crate) struct CachedModuleCodegen {
 #[derive(Copy, Clone, Debug, PartialEq, Encodable, Decodable)]
 pub enum ModuleKind {
     Regular,
-    Metadata,
     Allocator,
 }
 
@@ -278,7 +186,7 @@ pub struct NativeLib {
     pub kind: NativeLibKind,
     pub name: Symbol,
     pub filename: Option<Symbol>,
-    pub cfg: Option<ast::MetaItemInner>,
+    pub cfg: Option<CfgEntry>,
     pub verbatim: bool,
     pub dll_imports: Vec<cstore::DllImport>,
 }
@@ -309,7 +217,7 @@ pub struct CrateInfo {
     pub target_cpu: String,
     pub target_features: Vec<String>,
     pub crate_types: Vec<CrateType>,
-    pub exported_symbols: UnordMap<CrateType, Vec<String>>,
+    pub exported_symbols: UnordMap<CrateType, Vec<(String, SymbolExportKind)>>,
     pub linked_symbols: FxIndexMap<CrateType, Vec<(String, SymbolExportKind)>>,
     pub local_crate_name: Symbol,
     pub compiler_builtins: Option<CrateNum>,
@@ -324,14 +232,31 @@ pub struct CrateInfo {
     pub windows_subsystem: Option<String>,
     pub natvis_debugger_visualizers: BTreeSet<DebuggerVisualizerFile>,
     pub lint_levels: CodegenLintLevels,
+    pub metadata_symbol: String,
+}
+
+/// Target-specific options that get set in `cfg(...)`.
+///
+/// RUSTC_SPECIFIC_FEATURES should be skipped here, those are handled outside codegen.
+pub struct TargetConfig {
+    /// Options to be set in `cfg(target_features)`.
+    pub target_features: Vec<Symbol>,
+    /// Options to be set in `cfg(target_features)`, but including unstable features.
+    pub unstable_target_features: Vec<Symbol>,
+    /// Option for `cfg(target_has_reliable_f16)`, true if `f16` basic arithmetic works.
+    pub has_reliable_f16: bool,
+    /// Option for `cfg(target_has_reliable_f16_math)`, true if `f16` math calls work.
+    pub has_reliable_f16_math: bool,
+    /// Option for `cfg(target_has_reliable_f128)`, true if `f128` basic arithmetic works.
+    pub has_reliable_f128: bool,
+    /// Option for `cfg(target_has_reliable_f128_math)`, true if `f128` math calls work.
+    pub has_reliable_f128_math: bool,
 }
 
 #[derive(Encodable, Decodable)]
 pub struct CodegenResults {
     pub modules: Vec<CompiledModule>,
     pub allocator_module: Option<CompiledModule>,
-    pub metadata_module: Option<CompiledModule>,
-    pub metadata: rustc_metadata::EncodedMetadata,
     pub crate_info: CrateInfo,
 }
 
@@ -376,6 +301,7 @@ impl CodegenResults {
         sess: &Session,
         rlink_file: &Path,
         codegen_results: &CodegenResults,
+        metadata: &EncodedMetadata,
         outputs: &OutputFilenames,
     ) -> Result<usize, io::Error> {
         let mut encoder = FileEncoder::new(rlink_file)?;
@@ -385,6 +311,7 @@ impl CodegenResults {
         encoder.emit_raw_bytes(&RLINK_VERSION.to_be_bytes());
         encoder.emit_str(sess.cfg_version);
         Encodable::encode(codegen_results, &mut encoder);
+        Encodable::encode(metadata, &mut encoder);
         Encodable::encode(outputs, &mut encoder);
         encoder.finish().map_err(|(_path, err)| err)
     }
@@ -392,7 +319,7 @@ impl CodegenResults {
     pub fn deserialize_rlink(
         sess: &Session,
         data: Vec<u8>,
-    ) -> Result<(Self, OutputFilenames), CodegenErrors> {
+    ) -> Result<(Self, EncodedMetadata, OutputFilenames), CodegenErrors> {
         // The Decodable machinery is not used here because it panics if the input data is invalid
         // and because its internal representation may change.
         if !data.starts_with(RLINK_MAGIC) {
@@ -423,8 +350,9 @@ impl CodegenResults {
         }
 
         let codegen_results = CodegenResults::decode(&mut decoder);
+        let metadata = EncodedMetadata::decode(&mut decoder);
         let outputs = OutputFilenames::decode(&mut decoder);
-        Ok((codegen_results, outputs))
+        Ok((codegen_results, metadata, outputs))
     }
 }
 
@@ -435,7 +363,7 @@ impl CodegenResults {
 /// Instead, encode exactly the information we need.
 #[derive(Copy, Clone, Debug, Encodable, Decodable)]
 pub struct CodegenLintLevels {
-    linker_messages: (Level, LintLevelSource),
+    linker_messages: LevelAndSource,
 }
 
 impl CodegenLintLevels {

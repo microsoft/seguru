@@ -512,7 +512,7 @@ pub fn softmax_forward_kernel5(
     N: u32,
     T: u32,
 ) {
-    assert!(T % 4 == 0);
+    assert!(T.is_multiple_of(4));
     let warp = ThreadWarpTile::<32>;
     let grid2warp = build_chunk_scope(Grid, warp);
     let warp2thread = build_chunk_scope(warp, Thread);
@@ -1755,8 +1755,8 @@ pub fn matmul_forward_kernel4(
     assert!(Config::BDIM_X >= 2);
     assert!(Config::BDIM_Y <= 16);
     assert!(Config::BDIM_Y >= 2);
-    assert!(OC % 128 == 0);
-    assert!(C % 32 == 0);
+    assert!(OC.is_multiple_of(128));
+    assert!(C.is_multiple_of(32));
     assert!(OC == 8 * dim::<DimY>());
     // out is (B,T,OC). OC is short for "output channels", e.g. OC = 4 * C
     // inp is (B,T,C), weight is (OC, C), bias is (OC)

@@ -59,7 +59,6 @@ impl DynamicSharedAlloc {
     }
 
     #[gpu_codegen::device]
-    #[inline(always)]
     #[gpu_codegen::memspace_shared(1000)]
     #[gpu_codegen::sync_data(1)] // len is non-divergent
     #[gpu_codegen::ret_sync_data(1000)] // return pointer is divergent

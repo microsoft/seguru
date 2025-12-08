@@ -68,6 +68,7 @@ pub fn run_host_matmul<'ctx>(
     let start = std::time::Instant::now();
     inner_product_kernel::launch(config, ctx, m, &d_a, &d_b, &mut d_c, n)
         .expect("Kernel execution failed");
+    let _ = ctx.sync();
     let elapsed = start.elapsed();
     println!("GPU execution time: {:?}", elapsed);
 

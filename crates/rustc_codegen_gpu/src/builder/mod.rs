@@ -2209,11 +2209,15 @@ impl<'tcx: 'a, 'ml: 'a, 'a: 'val, 'val: 'a> BuilderMethods<'a, 'tcx>
     }
 
     fn fptoui_sat(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
-        todo!()
+        let val = self.use_value(val);
+        let op = melior::dialect::arith::fptoui(val, dest_ty, self.cur_loc());
+        self.append_op_res(op)
     }
 
     fn fptosi_sat(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
-        todo!()
+        let val = self.use_value(val);
+        let op = melior::dialect::arith::fptosi(val, dest_ty, self.cur_loc());
+        self.append_op_res(op)
     }
 
     fn fptoui(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {

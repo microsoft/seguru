@@ -423,7 +423,16 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             BackendRepr::SimdVector { element, count } => todo!(),
             BackendRepr::Memory { .. } if !layout.is_zst() => match &layout.fields {
                 rustc_abi::FieldsShape::Primitive => todo!(),
-                rustc_abi::FieldsShape::Union(non_zero) => todo!(),
+                rustc_abi::FieldsShape::Union(non_zero) => {
+                    let mut max_size = rustc_abi::Size::ZERO;
+                    for i in 0..non_zero.get() {
+                        let field = layout.field(self, i);
+                        if field.size > max_size {
+                            max_size = field.size;
+                        }
+                    }
+                    self.type_array(self.type_i8(), max_size.bytes())
+                }
                 rustc_abi::FieldsShape::Array { stride, count } => {
                     let elem = self.mlir_type(layout.field(self, 0), immediate);
                     if *count == 0 {

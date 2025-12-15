@@ -292,17 +292,10 @@ impl GpuAttributes {
                     gpu_attr.gpu_item = Some(GpuItem::Core(lang_item));
                 }
             } else {
-                let crate_name = tcx.crate_name(def_id.krate);
-                let path = tcx.def_path_str(def_id);
-                let path = if path.starts_with(crate_name.as_str()) {
-                    path
-                } else {
-                    format!(
-                        "{}::{}",
-                        crate_name,
-                        path.trim_start_matches(&format!("{}::", crate_name))
-                    )
-                };
+                // def_path_str might be re-exported, so we use to_string_no_crate_verbose.
+                let path =
+                    format!("{}{}", crate_name, tcx.def_path(def_id).to_string_no_crate_verbose());
+                //eprintln!("Checking core/std item: {}", path);
                 let path: &str = &path;
                 if let Ok(gpu_item) = GpuItem::try_from(path) {
                     gpu_attr.device = true;

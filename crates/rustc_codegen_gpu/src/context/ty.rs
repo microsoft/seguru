@@ -232,11 +232,14 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let mut mlir_types = vec![];
         let field_count = layout.fields.count();
         let mut offset = rustc_abi::Size::ZERO;
+        let mut prev_effective_align = layout.align.abi;
         for i in layout.fields.index_by_increasing_offset() {
             let field = layout.field(self, i);
 
             let target_offset = layout.fields.offset(i);
             let padding_size = target_offset - offset;
+            let effective_field_align =
+                layout.align.abi.min(field.align.abi).restrict_for_offset(target_offset);
 
             if padding_size != rustc_abi::Size::ZERO {
                 // Add padding
@@ -248,6 +251,21 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             }
             mlir_types.push(self.mlir_type(field, immediate));
             offset = target_offset + field.size;
+            prev_effective_align = effective_field_align;
+        }
+
+        // Add tail padding
+        // For example, enum types may have tail padding to align to the largest variant.
+        if layout.is_sized() && field_count > 0 {
+            if offset > layout.size {
+                panic!("layout: {:#?} stride: {:?} offset: {:?}", layout, layout.size, offset);
+            }
+            let padding = layout.size - offset;
+            if padding != rustc_abi::Size::ZERO {
+                let padding_align = prev_effective_align;
+                assert_eq!(offset.align_to(padding_align) + padding, layout.size);
+                mlir_types.push(self.type_array(self.type_i8(), padding.bytes()));
+            }
         }
         match mlir_types.len() {
             0 => self.type_empty(),
@@ -424,14 +442,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
             BackendRepr::Memory { .. } if !layout.is_zst() => match &layout.fields {
                 rustc_abi::FieldsShape::Primitive => todo!(),
                 rustc_abi::FieldsShape::Union(non_zero) => {
-                    let mut max_size = rustc_abi::Size::ZERO;
-                    for i in 0..non_zero.get() {
-                        let field = layout.field(self, i);
-                        if field.size > max_size {
-                            max_size = field.size;
-                        }
-                    }
-                    self.type_array(self.type_i8(), max_size.bytes())
+                    self.type_array(self.type_i8(), layout.layout.size.bytes())
                 }
                 rustc_abi::FieldsShape::Array { stride, count } => {
                     let elem = self.mlir_type(layout.field(self, 0), immediate);

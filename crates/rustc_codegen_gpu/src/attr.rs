@@ -151,16 +151,16 @@ impl TryFrom<&str> for GpuItem {
                 GpuItem::DeviceIntrinsic(s.replace("gpu::device_intrinsics::", ""))
             }
             // Override cmath functions to use our device intrinsics
-            "std::sys::cmath::tanhf" => {
+            "std::sys::cmath::{extern#0}::tanhf" => {
                 GpuItem::DeviceIntrinsic("gpu::device_intrinsics::tanh".into())
             }
-            "std::sys::cmath::tanf" => {
+            "std::sys::cmath::{extern#0}::tanf" => {
                 GpuItem::DeviceIntrinsic("gpu::device_intrinsics::tanf".into())
             }
-            "std::sys::cmath::coshf" => {
+            "std::sys::cmath::{extern#0}::coshf" => {
                 GpuItem::DeviceIntrinsic("gpu::device_intrinsics::cosh".into())
             }
-            "std::sys::cmath::sinhf" => {
+            "std::sys::cmath::{extern#0}::sinhf" => {
                 GpuItem::DeviceIntrinsic("gpu::device_intrinsics::sinh".into())
             }
             s if is_panic_function(s) => GpuItem::CoreFn(s.to_string()),

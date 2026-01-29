@@ -1,3 +1,6 @@
 [submodule "llm-rs"]
 	path = casestudies/llm-rs
 	url = git@github.com:MSRSSP/llm-rs.git
+[submodule "casestudies/Nova"]
+	path = casestudies/Nova
+	url = git@github.com:ziqiaozhou/Nova.git

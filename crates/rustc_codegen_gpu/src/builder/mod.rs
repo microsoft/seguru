@@ -2010,6 +2010,15 @@ where
         self.append_op_res(op)
     }
 
+    fn scalable_alloca(
+        &mut self,
+        elt: u64,
+        align: rustc_abi::Align,
+        element_ty: rustc_middle::ty::Ty<'_>,
+    ) -> Self::Value {
+        unimplemented!();
+    }
+
     fn load(&mut self, ty: Self::Type, ptr: Self::Value, align: rustc_abi::Align) -> Self::Value {
         self.load_with_check(ty, ptr, align, true)
     }
@@ -2079,7 +2088,7 @@ where
         } else {
             OperandValue::Ref(place.val)
         };
-        OperandRef { val, layout: place.layout }
+        OperandRef { val, layout: place.layout, move_annotation: None }
     }
 
     fn write_operand_repeatedly(

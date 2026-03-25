@@ -15,9 +15,9 @@ use rustc_middle::middle::exported_symbols::{
 use rustc_middle::query::LocalCrate;
 use rustc_middle::ty::{self, GenericArgKind, GenericArgsRef, Instance, SymbolName, Ty, TyCtxt};
 use rustc_middle::util::Providers;
-use rustc_session::config::{CrateType, OomStrategy};
+use rustc_session::config::CrateType;
 use rustc_symbol_mangling::mangle_internal_symbol;
-use rustc_target::spec::TlsModel;
+use rustc_target::spec::{Arch, Os, TlsModel};
 use tracing::debug;
 
 use crate::back::symbol_export;
@@ -51,15 +51,7 @@ fn reachable_non_generics_provider(tcx: TyCtxt<'_>, _: LocalCrate) -> DefIdMap<S
         return Default::default();
     }
 
-    // Check to see if this crate is a "special runtime crate". These
-    // crates, implementation details of the standard library, typically
-    // have a bunch of `pub extern` and `#[no_mangle]` functions as the
-    // ABI between them. We don't want their symbols to have a `C`
-    // export level, however, as they're just implementation details.
-    // Down below we'll hardwire all of the symbols to the `Rust` export
-    // level instead.
-    let special_runtime_crate =
-        tcx.is_panic_runtime(LOCAL_CRATE) || tcx.is_compiler_builtins(LOCAL_CRATE);
+    let is_compiler_builtins = tcx.is_compiler_builtins(LOCAL_CRATE);
 
     let mut reachable_non_generics: DefIdMap<_> = tcx
         .reachable_set(())
@@ -104,11 +96,12 @@ fn reachable_non_generics_provider(tcx: TyCtxt<'_>, _: LocalCrate) -> DefIdMap<S
             if tcx.cross_crate_inlinable(def_id) { None } else { Some(def_id) }
         })
         .map(|def_id| {
-            // We won't link right if this symbol is stripped during LTO.
-            let name = tcx.symbol_name(Instance::mono(tcx, def_id.to_def_id())).name;
-            let used = name == "rust_eh_personality";
-
-            let export_level = if special_runtime_crate {
+            let export_level = if is_compiler_builtins {
+                // We don't want to export compiler-builtins symbols from any
+                // dylibs, even rust dylibs. Unlike all other crates it gets
+                // duplicated in every linker invocation and it may otherwise
+                // unintentionally override definitions of these symbols by
+                // libgcc or compiler-rt for C code.
                 SymbolExportLevel::Rust
             } else {
                 symbol_export_level(tcx, def_id.to_def_id())
@@ -131,11 +124,13 @@ fn reachable_non_generics_provider(tcx: TyCtxt<'_>, _: LocalCrate) -> DefIdMap<S
                     SymbolExportKind::Text
                 },
                 used: codegen_attrs.flags.contains(CodegenFnAttrFlags::USED_COMPILER)
-                    || codegen_attrs.flags.contains(CodegenFnAttrFlags::USED_LINKER)
-                    || used,
+                    || codegen_attrs.flags.contains(CodegenFnAttrFlags::USED_LINKER),
                 rustc_std_internal_symbol: codegen_attrs
                     .flags
-                    .contains(CodegenFnAttrFlags::RUSTC_STD_INTERNAL_SYMBOL),
+                    .contains(CodegenFnAttrFlags::RUSTC_STD_INTERNAL_SYMBOL)
+                    || codegen_attrs
+                        .flags
+                        .contains(CodegenFnAttrFlags::EXTERNALLY_IMPLEMENTABLE_ITEM),
             };
             (def_id.to_def_id(), info)
         })
@@ -479,15 +474,15 @@ fn is_unreachable_local_definition_provider(tcx: TyCtxt<'_>, def_id: LocalDefId)
 }
 
 pub(crate) fn provide(providers: &mut Providers) {
-    providers.reachable_non_generics = reachable_non_generics_provider;
-    providers.is_reachable_non_generic = is_reachable_non_generic_provider_local;
-    providers.exported_non_generic_symbols = exported_non_generic_symbols_provider_local;
-    providers.exported_generic_symbols = exported_generic_symbols_provider_local;
-    providers.upstream_monomorphizations = upstream_monomorphizations_provider;
-    providers.is_unreachable_local_definition = is_unreachable_local_definition_provider;
-    providers.upstream_drop_glue_for = upstream_drop_glue_for_provider;
-    providers.upstream_async_drop_glue_for = upstream_async_drop_glue_for_provider;
-    providers.wasm_import_module_map = wasm_import_module_map;
+    providers.queries.reachable_non_generics = reachable_non_generics_provider;
+    providers.queries.is_reachable_non_generic = is_reachable_non_generic_provider_local;
+    providers.queries.exported_non_generic_symbols = exported_non_generic_symbols_provider_local;
+    providers.queries.exported_generic_symbols = exported_generic_symbols_provider_local;
+    providers.queries.upstream_monomorphizations = upstream_monomorphizations_provider;
+    providers.queries.is_unreachable_local_definition = is_unreachable_local_definition_provider;
+    providers.queries.upstream_drop_glue_for = upstream_drop_glue_for_provider;
+    providers.queries.upstream_async_drop_glue_for = upstream_async_drop_glue_for_provider;
+    providers.queries.wasm_import_module_map = wasm_import_module_map;
     providers.extern_queries.is_reachable_non_generic = is_reachable_non_generic_provider_extern;
     providers.extern_queries.upstream_monomorphizations_for =
         upstream_monomorphizations_for_provider;
@@ -501,7 +496,6 @@ pub(crate) fn allocator_shim_symbols(
         .map(move |method| mangle_internal_symbol(tcx, global_fn_name(method.name).as_str()))
         .chain([
             mangle_internal_symbol(tcx, global_fn_name(ALLOC_ERROR_HANDLER).as_str()),
-            mangle_internal_symbol(tcx, OomStrategy::SYMBOL),
             mangle_internal_symbol(tcx, NO_ALLOC_SHIM_IS_UNSTABLE),
         ])
         .map(move |symbol_name| {
@@ -528,10 +522,12 @@ fn symbol_export_level(tcx: TyCtxt<'_>, sym_def_id: DefId) -> SymbolExportLevel 
     let is_extern = codegen_fn_attrs.contains_extern_indicator();
     let std_internal =
         codegen_fn_attrs.flags.contains(CodegenFnAttrFlags::RUSTC_STD_INTERNAL_SYMBOL);
+    let eii = codegen_fn_attrs.flags.contains(CodegenFnAttrFlags::EXTERNALLY_IMPLEMENTABLE_ITEM);
 
-    if is_extern && !std_internal {
+    if is_extern && !std_internal && !eii {
         let target = &tcx.sess.target.llvm_target;
         // WebAssembly cannot export data symbols, so reduce their export level
+        // FIXME(jdonszelmann) don't do a substring match here.
         if target.contains("emscripten") {
             if let DefKind::Static { .. } = tcx.def_kind(sym_def_id) {
                 return SymbolExportLevel::Rust;
@@ -667,11 +663,11 @@ pub(crate) fn linking_symbol_name_for_instance_in_crate<'tcx>(
         return undecorated;
     }
 
-    let prefix = match &target.arch[..] {
-        "x86" => Some('_'),
-        "x86_64" => None,
+    let prefix = match target.arch {
+        Arch::X86 => Some('_'),
+        Arch::X86_64 => None,
         // Only functions are decorated for arm64ec.
-        "arm64ec" if export_kind == SymbolExportKind::Text => Some('#'),
+        Arch::Arm64EC if export_kind == SymbolExportKind::Text => Some('#'),
         // Only x86/64 and arm64ec use symbol decorations.
         _ => return undecorated,
     };
@@ -719,7 +715,7 @@ pub(crate) fn extend_exported_symbols<'tcx>(
 ) {
     let (callconv, _) = calling_convention_for_symbol(tcx, symbol);
 
-    if callconv != CanonAbi::GpuKernel || tcx.sess.target.os != "amdhsa" {
+    if callconv != CanonAbi::GpuKernel || tcx.sess.target.os != Os::AmdHsa {
         return;
     }
 

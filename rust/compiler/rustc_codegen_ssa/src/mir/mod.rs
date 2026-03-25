@@ -491,6 +491,7 @@ fn arg_local_refs<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
                         return local(OperandRef {
                             val: OperandValue::Pair(a, b),
                             layout: arg.layout,
+                            move_annotation: None,
                         });
                     }
                     _ => {}
@@ -563,6 +564,7 @@ fn arg_local_refs<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
         fx.caller_location = Some(OperandRef {
             val: OperandValue::Immediate(bx.get_param(llarg_idx)),
             layout: arg.layout,
+            move_annotation: None,
         });
     }
 

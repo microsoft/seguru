@@ -10,7 +10,7 @@ use rustc_middle::dep_graph::{WorkProduct, WorkProductId};
 use rustc_middle::ty::TyCtxt;
 use rustc_middle::util::Providers;
 use rustc_session::Session;
-use rustc_session::config::{self, OutputFilenames, PrintRequest};
+use rustc_session::config::{self, CrateType, OutputFilenames, PrintRequest};
 use rustc_span::Symbol;
 
 use super::CodegenObject;
@@ -62,9 +62,29 @@ pub trait CodegenBackend {
         }
     }
 
+    fn supported_crate_types(&self, _sess: &Session) -> Vec<CrateType> {
+        vec![
+            CrateType::Executable,
+            CrateType::Dylib,
+            CrateType::Rlib,
+            CrateType::Staticlib,
+            CrateType::Cdylib,
+            CrateType::ProcMacro,
+            CrateType::Sdylib,
+        ]
+    }
+
     fn print_passes(&self) {}
 
     fn print_version(&self) {}
+
+    /// Value printed by `--print=backend-has-zstd`.
+    ///
+    /// Used by compiletest to determine whether tests involving zstd compression
+    /// (e.g. `-Zdebuginfo-compression=zstd`) should be executed or skipped.
+    fn has_zstd(&self) -> bool {
+        false
+    }
 
     /// The metadata loader used to load rlib and dylib metadata.
     ///

@@ -892,7 +892,7 @@ where
         byte_offset: Option<Value<'ml, 'a>>,
         dy_size: Option<Value<'ml, 'a>>,
     ) -> Value<'ml, 'a> {
-        let mut val = val;
+        let mut val = self.use_value(val);
         let ty = val.r#type();
         assert!(ty.is_mem_ref());
         assert!(dst_ty.is_mem_ref());

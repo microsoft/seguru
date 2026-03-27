@@ -4,36 +4,20 @@
 
 Currently, the project has been tested on Rust `1.87.0-nightly (3f5502370 2025-03-27)`. It'll likely work with a newer version of Rust.
 
-### Install LLVM 20.1.8+
+### Install LLVM 20
 
-This project requires MLIR which is not yet stable and is under constant evolving. We need at lest LLVM 20.1.8 which unfortunately Ubuntu's APT has yet to catch up. The quickest way to get it is through Homebrew. Install Homebrew via
+The project depends on LLVM-20 with MLIR support.
 
 ```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-```
-
-add Homebrew to your PATH
-
-```
-echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> ~/.bashrc
-eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-```
-
-Then install LLVM@20 via 
-```bash
-brew install llvm@20
+wget https://apt.llvm.org/llvm.sh
+chmod +x llvm.sh
+sudo ./llvm.sh 20
+sudo apt-get install libmlir-20-dev mlir-20-tools libpolly-20-dev
+export PATH=/usr/lib/llvm-20/bin:$PATH
+export LD_LIBRARY_PATH=/usr/lib/llvm-20/lib:$LD_LIBRARY_PATH
 ```
 
 ### Build the toolchain
-
-Remember to put the Homebrew LLVM in the `PATH`:
-
-```bash
-export PATH=`brew --prefix llvm@20`/bin:$PATH
-export LD_LIBRARY_PATH=`brew --prefix`/lib:`brew --prefix llvm@20`/bin:$LD_LIBRARY_PATH
-```
-
-Build the toolchain:
 
 ```bash
 cd crates

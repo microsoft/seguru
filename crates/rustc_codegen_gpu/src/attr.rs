@@ -114,6 +114,24 @@ pub fn is_panic_function(path: &str) -> bool {
     false
 }
 
+const GPU_DEVICE_MATH_INTRINSICS: [(&str, &str); 4] = [
+    ("tanhf", "tanh"),
+    ("tanf", "tanf"),
+    ("coshf", "cosh"),
+    ("sinhf", "sinh"),
+];
+
+fn override_gpu_math_functions(path: &str) -> Option<String> {
+    if path.starts_with("std::sys::cmath") {
+        for (func, intrinsic) in GPU_DEVICE_MATH_INTRINSICS {
+            if path.ends_with(func) {
+                return Some(format!("gpu::device_intrinsics::{}", intrinsic));
+            }
+        }
+    }
+    None
+}
+
 impl TryFrom<&str> for GpuItem {
     type Error = ();
 
@@ -151,22 +169,12 @@ impl TryFrom<&str> for GpuItem {
                 GpuItem::DeviceIntrinsic(s.replace("gpu::device_intrinsics::", ""))
             }
             // Override cmath functions to use our device intrinsics
-            "std::sys::cmath::{extern#0}::tanhf" => {
-                GpuItem::DeviceIntrinsic("gpu::device_intrinsics::tanh".into())
-            }
-            "std::sys::cmath::{extern#0}::tanf" => {
-                GpuItem::DeviceIntrinsic("gpu::device_intrinsics::tanf".into())
-            }
-            "std::sys::cmath::{extern#0}::coshf" => {
-                GpuItem::DeviceIntrinsic("gpu::device_intrinsics::cosh".into())
-            }
-            "std::sys::cmath::{extern#0}::sinhf" => {
-                GpuItem::DeviceIntrinsic("gpu::device_intrinsics::sinh".into())
-            }
             s if is_panic_function(s) => GpuItem::CoreFn(s.to_string()),
             s if s.starts_with("core") || s.starts_with("std") => {
                 if let Some(i) = lang_item_from_str(s) {
                     GpuItem::Core(i)
+                } else if let Some(intrinsic) = override_gpu_math_functions(s) {
+                    GpuItem::DeviceIntrinsic(intrinsic)
                 } else {
                     return Err(());
                 }

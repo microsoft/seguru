@@ -142,7 +142,7 @@ impl<T: ?Sized + Sync + 'static, N: GpuCtxSpace> GpuDataMarker for CudaMemBox<T,
 impl<T: ?Sized, N: GpuCtxSpace + 'static> !Sync for CudaMemBox<T, N> {}
 
 impl<T: ?Sized + 'static, N: GpuCtxSpace + 'static> GpuCtxArenaTrait for CudaMemBox<T, N> {
-    fn as_any(&mut self) -> &mut (dyn core::any::Any) {
+    fn as_any(&mut self) -> &mut dyn core::any::Any {
         self
     }
 }

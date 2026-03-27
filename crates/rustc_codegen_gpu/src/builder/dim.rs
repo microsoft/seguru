@@ -8,7 +8,10 @@ use rustc_span::Symbol;
 use super::GpuBuilder;
 use crate::mlir::gpu::{DimFn, DimType};
 
-impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
+impl<'cx, 'tcx, 'ml, 'a> GpuBuilder<'cx, 'tcx, 'ml, 'a>
+where
+    'tcx: 'a,
+{
     pub(crate) fn dim_fn_res(&mut self, f: DimFn, ty: DimType) -> mlir_ir::Value<'ml, 'a> {
         let attr = Attribute::parse(self.mlir_ctx, &format!("#gpu<dim {}>", ty.to_str())).unwrap();
         self.append_op_res(f.build(self.mlir_ctx, attr, self.cur_loc()))
@@ -50,7 +53,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         let tcx = self.tcx;
         let span = instance.def.default_span(tcx);
         for arg in instance.args.iter() {
-            if let rustc_type_ir::GenericArgKind::Type(ty) = arg.unpack() {
+            if let rustc_type_ir::GenericArgKind::Type(ty) = arg.kind() {
                 if let rustc_middle::ty::TyKind::Adt(adt_def, substs) = ty.kind() {
                     let def_id = adt_def.did();
                     let safe_config_def_id = match tcx
@@ -90,7 +93,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                         let associated_items = tcx.associated_items(impl_def_id);
                         associated_items.in_definition_order().for_each(|item| {
                             for (&dim, &tid, &dim_type, diag_id) in dim_tuples.iter() {
-                                if item.trait_item_def_id == Some(*diag_id) {
+                                if item.trait_item_def_id() == Some(*diag_id) {
                                     let val = tcx
                                         .const_eval_poly(item.def_id)
                                         .ok()

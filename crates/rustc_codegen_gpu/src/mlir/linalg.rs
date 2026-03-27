@@ -14,7 +14,7 @@ fn affine_sym(ctx: &melior::Context, pos: isize) -> MlirAffineExpr {
     unsafe { mlirAffineSymbolExprGet(ctx.to_raw(), pos) }
 }
 
-fn affine_identity_map(ctx: &melior::Context, dim_count: isize) -> Attribute {
+fn affine_identity_map(ctx: &melior::Context, dim_count: isize) -> Attribute<'_> {
     let dims = (0..dim_count).map(|i| affine_dim(ctx, i)).collect::<Vec<_>>();
     //let sym = mlirAffineSymbolExprGet(ctx, 0);// only used if not identity map
     let nexprs = dims.len() as isize;

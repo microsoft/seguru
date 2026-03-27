@@ -1,4 +1,3 @@
-use rustc_data_structures::graph::DirectedGraph;
 use rustc_index::bit_set::DenseBitSet;
 use rustc_middle::mir::visit::{MutatingUseContext, NonMutatingUseContext, PlaceContext, Visitor};
 use rustc_middle::mir::{
@@ -6,7 +5,7 @@ use rustc_middle::mir::{
     TerminatorKind,
 };
 use rustc_middle::ty::Ref;
-use rustc_mir_dataflow::{Analysis, Results, ResultsVisitor};
+use rustc_mir_dataflow::{Analysis, ResultsVisitor, visit_reachable_results};
 use tracing::debug;
 
 use crate::error::{GpuCodegenError, GpuCodegenResult};
@@ -211,12 +210,12 @@ impl<'tcx> Visitor<'tcx> for MutArgMirVisitor<'_, 'tcx> {
     }
 }
 
-impl<'mir, 'tcx> ResultsVisitor<'mir, 'tcx, MutArgAnalysis> for MutArgDataFlowVistors<'tcx> {
+impl<'tcx> ResultsVisitor<'tcx, MutArgAnalysis> for MutArgDataFlowVistors<'tcx> {
     fn visit_after_primary_statement_effect(
         &mut self,
-        _results: &mut Results<'tcx, MutArgAnalysis>,
+        _results: &mut MutArgAnalysis,
         state: &Domain,
-        stmt: &'mir Statement<'tcx>,
+        stmt: &Statement<'tcx>,
         location: Location,
     ) {
         MutArgMirVisitor { tcx: self.tcx, state, flow_visitor_res: self, inside_fcall: false }
@@ -225,9 +224,9 @@ impl<'mir, 'tcx> ResultsVisitor<'mir, 'tcx, MutArgAnalysis> for MutArgDataFlowVi
 
     fn visit_after_primary_terminator_effect(
         &mut self,
-        _results: &mut Results<'tcx, MutArgAnalysis>,
+        _results: &mut MutArgAnalysis,
         state: &Domain,
-        terminator: &'mir Terminator<'tcx>,
+        terminator: &Terminator<'tcx>,
         location: Location,
     ) {
         let mut visitor =
@@ -244,7 +243,7 @@ pub(crate) fn analyze_mut_args<'tcx>(
     let analysis = MutArgAnalysis;
     let mut results = analysis.iterate_to_fixpoint(tcx, body, None);
     let mut result_visitor = MutArgDataFlowVistors::new(tcx, body.local_decls.clone());
-    results.visit_with(body, body.basic_blocks.iter_nodes(), &mut result_visitor);
+    visit_reachable_results(body, &mut results.analysis, &results.results, &mut result_visitor);
     for (place, location) in result_visitor.invalid_write.iter() {
         let span = body.source_info(*location).span;
         tcx.sess

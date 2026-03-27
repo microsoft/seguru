@@ -3,7 +3,6 @@
 use std::borrow::Cow;
 use std::ffi::OsString;
 use std::io::Error;
-use std::num::ParseIntError;
 use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 
@@ -37,10 +36,6 @@ pub(crate) struct CguNotRecorded<'a> {
     pub cgu_user_name: &'a str,
     pub cgu_name: &'a str,
 }
-
-#[derive(Diagnostic)]
-#[diag(codegen_ssa_autodiff_without_lto)]
-pub struct AutodiffWithoutLto;
 
 #[derive(Diagnostic)]
 #[diag(codegen_ssa_unknown_reuse_kind)]
@@ -142,15 +137,8 @@ pub(crate) struct RequiresRustAbi {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_null_on_export, code = E0648)]
-pub(crate) struct NullOnExport {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
 #[diag(codegen_ssa_unsupported_instruction_set, code = E0779)]
-pub(crate) struct UnsuportedInstructionSet {
+pub(crate) struct UnsupportedInstructionSet {
     #[primary_span]
     pub span: Span,
 }
@@ -210,35 +198,6 @@ pub(crate) struct OutOfRangeInteger {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_expected_one_argument, code = E0534)]
-pub(crate) struct ExpectedOneArgument {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(codegen_ssa_expected_one_argument, code = E0722)]
-pub(crate) struct ExpectedOneArgumentOptimize {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(codegen_ssa_invalid_argument, code = E0535)]
-#[help]
-pub(crate) struct InvalidArgument {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(codegen_ssa_invalid_argument, code = E0722)]
-pub(crate) struct InvalidArgumentOptimize {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
 #[diag(codegen_ssa_copy_path_buf)]
 pub(crate) struct CopyPathBuf {
     pub source_file: PathBuf,
@@ -278,13 +237,13 @@ pub struct BinaryOutputToTty {
 #[derive(Diagnostic)]
 #[diag(codegen_ssa_ignoring_emit_path)]
 pub struct IgnoringEmitPath {
-    pub extension: String,
+    pub extension: &'static str,
 }
 
 #[derive(Diagnostic)]
 #[diag(codegen_ssa_ignoring_output)]
 pub struct IgnoringOutput {
-    pub extension: String,
+    pub extension: &'static str,
 }
 
 #[derive(Diagnostic)]
@@ -494,7 +453,7 @@ impl<G: EmissionGuarantee> Diagnostic<'_, G> for LinkingFailed<'_> {
                 } else if arg.as_encoded_bytes().ends_with(b".rlib") {
                     let rlib_path = Path::new(&arg);
                     let dir = rlib_path.parent().unwrap();
-                    let filename = rlib_path.file_name().unwrap().to_owned();
+                    let filename = rlib_path.file_stem().unwrap().to_owned();
                     if let Some(ArgGroup::Rlibs(parent, rlibs)) = args.last_mut() {
                         if parent == dir {
                             rlibs.push(filename);
@@ -508,7 +467,7 @@ impl<G: EmissionGuarantee> Diagnostic<'_, G> for LinkingFailed<'_> {
                     args.push(ArgGroup::Regular(arg));
                 }
             }
-            let crate_hash = regex::bytes::Regex::new(r"-[0-9a-f]+\.rlib$").unwrap();
+            let crate_hash = regex::bytes::Regex::new(r"-[0-9a-f]+").unwrap();
             self.command.args(args.into_iter().map(|arg_group| {
                 match arg_group {
                     // SAFETY: we are only matching on ASCII, not any surrogate pairs, so any replacements we do will still be valid.
@@ -531,7 +490,11 @@ impl<G: EmissionGuarantee> Diagnostic<'_, G> for LinkingFailed<'_> {
                             Err(_) => false,
                         };
                         let mut arg = dir.into_os_string();
-                        arg.push("/{");
+                        arg.push("/");
+                        let needs_braces = rlibs.len() >= 2;
+                        if needs_braces {
+                            arg.push("{");
+                        }
                         let mut first = true;
                         for mut rlib in rlibs {
                             if !first {
@@ -550,7 +513,10 @@ impl<G: EmissionGuarantee> Diagnostic<'_, G> for LinkingFailed<'_> {
                             }
                             arg.push(rlib);
                         }
-                        arg.push("}.rlib");
+                        if needs_braces {
+                            arg.push("}");
+                        }
+                        arg.push(".rlib");
                         arg
                     }
                 }
@@ -579,6 +545,18 @@ impl<G: EmissionGuarantee> Diagnostic<'_, G> for LinkingFailed<'_> {
 #[derive(Diagnostic)]
 #[diag(codegen_ssa_link_exe_unexpected_error)]
 pub(crate) struct LinkExeUnexpectedError;
+
+pub(crate) struct LinkExeStatusStackBufferOverrun;
+
+impl<'a, G: EmissionGuarantee> Diagnostic<'a, G> for LinkExeStatusStackBufferOverrun {
+    fn into_diag(self, dcx: rustc_errors::DiagCtxtHandle<'a>, level: Level) -> Diag<'a, G> {
+        let mut diag =
+            Diag::new(dcx, level, fluent::codegen_ssa_link_exe_status_stack_buffer_overrun);
+        diag.note(fluent::codegen_ssa_abort_note);
+        diag.note(fluent::codegen_ssa_event_log_note);
+        diag
+    }
+}
 
 #[derive(Diagnostic)]
 #[diag(codegen_ssa_repair_vs_build_tools)]
@@ -739,27 +717,6 @@ pub enum ExtractBundledLibsError<'a> {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_unsupported_arch)]
-pub(crate) struct UnsupportedArch<'a> {
-    pub arch: &'a str,
-    pub os: &'a str,
-}
-
-#[derive(Diagnostic)]
-pub(crate) enum AppleDeploymentTarget {
-    #[diag(codegen_ssa_apple_deployment_target_invalid)]
-    Invalid { env_var: &'static str, error: ParseIntError },
-    #[diag(codegen_ssa_apple_deployment_target_too_low)]
-    TooLow { env_var: &'static str, version: String, os_min: String },
-}
-
-#[derive(Diagnostic)]
-pub(crate) enum AppleSdkRootError<'a> {
-    #[diag(codegen_ssa_apple_sdk_error_sdk_path)]
-    SdkPath { sdk_name: &'a str, error: Error },
-}
-
-#[derive(Diagnostic)]
 #[diag(codegen_ssa_read_file)]
 pub(crate) struct ReadFileError {
     pub message: std::io::Error,
@@ -785,24 +742,11 @@ pub struct UnknownArchiveKind<'a> {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_expected_used_symbol)]
-pub(crate) struct ExpectedUsedSymbol {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
 #[diag(codegen_ssa_multiple_main_functions)]
 #[help]
 pub(crate) struct MultipleMainFunctions {
     #[primary_span]
     pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(codegen_ssa_metadata_object_file_write)]
-pub(crate) struct MetadataObjectFileWrite {
-    pub error: Error,
 }
 
 #[derive(Diagnostic)]
@@ -819,25 +763,17 @@ pub(crate) struct ShuffleIndicesEvaluation {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_missing_memory_ordering)]
-pub(crate) struct MissingMemoryOrdering;
-
-#[derive(Diagnostic)]
-#[diag(codegen_ssa_unknown_atomic_ordering)]
-pub(crate) struct UnknownAtomicOrdering;
-
-#[derive(Diagnostic)]
-#[diag(codegen_ssa_atomic_compare_exchange)]
-pub(crate) struct AtomicCompareExchange;
-
-#[derive(Diagnostic)]
-#[diag(codegen_ssa_unknown_atomic_operation)]
-pub(crate) struct UnknownAtomicOperation;
-
-#[derive(Diagnostic)]
 pub enum InvalidMonomorphization<'tcx> {
     #[diag(codegen_ssa_invalid_monomorphization_basic_integer_type, code = E0511)]
     BasicIntegerType {
+        #[primary_span]
+        span: Span,
+        name: Symbol,
+        ty: Ty<'tcx>,
+    },
+
+    #[diag(codegen_ssa_invalid_monomorphization_basic_integer_or_ptr_type, code = E0511)]
+    BasicIntegerOrPtrType {
         #[primary_span]
         span: Span,
         name: Symbol,
@@ -1059,22 +995,12 @@ pub enum InvalidMonomorphization<'tcx> {
         v_len: u64,
     },
 
-    #[diag(codegen_ssa_invalid_monomorphization_mask_type, code = E0511)]
-    #[note]
-    MaskType {
+    #[diag(codegen_ssa_invalid_monomorphization_mask_wrong_element_type, code = E0511)]
+    MaskWrongElementType {
         #[primary_span]
         span: Span,
         name: Symbol,
         ty: Ty<'tcx>,
-    },
-
-    #[diag(codegen_ssa_invalid_monomorphization_vector_argument, code = E0511)]
-    VectorArgument {
-        #[primary_span]
-        span: Span,
-        name: Symbol,
-        in_ty: Ty<'tcx>,
-        in_elem: Ty<'tcx>,
     },
 
     #[diag(codegen_ssa_invalid_monomorphization_cannot_return, code = E0511)]
@@ -1097,15 +1023,6 @@ pub enum InvalidMonomorphization<'tcx> {
         in_elem: Ty<'tcx>,
         in_ty: Ty<'tcx>,
         mutability: ExpectedPointerMutability,
-    },
-
-    #[diag(codegen_ssa_invalid_monomorphization_third_arg_element_type, code = E0511)]
-    ThirdArgElementType {
-        #[primary_span]
-        span: Span,
-        name: Symbol,
-        expected_element: Ty<'tcx>,
-        third_arg: Ty<'tcx>,
     },
 
     #[diag(codegen_ssa_invalid_monomorphization_unsupported_symbol_of_size, code = E0511)]
@@ -1200,30 +1117,6 @@ impl IntoDiagArg for ExpectedPointerMutability {
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_invalid_no_sanitize)]
-#[note]
-pub(crate) struct InvalidNoSanitize {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(codegen_ssa_invalid_link_ordinal_nargs)]
-#[note]
-pub(crate) struct InvalidLinkOrdinalNargs {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(codegen_ssa_illegal_link_ordinal_format)]
-#[note]
-pub(crate) struct InvalidLinkOrdinalFormat {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
 #[diag(codegen_ssa_target_feature_safe_trait)]
 pub(crate) struct TargetFeatureSafeTrait {
     #[primary_span]
@@ -1295,6 +1188,78 @@ pub(crate) struct ErrorCreatingImportLibrary<'a> {
     pub error: String,
 }
 
+#[derive(Diagnostic)]
+#[diag(codegen_ssa_aix_strip_not_used)]
+pub(crate) struct AixStripNotUsed;
+
+#[derive(Diagnostic, Debug)]
+pub(crate) enum XcrunError {
+    #[diag(codegen_ssa_xcrun_failed_invoking)]
+    FailedInvoking { sdk_name: &'static str, command_formatted: String, error: std::io::Error },
+
+    #[diag(codegen_ssa_xcrun_unsuccessful)]
+    #[note]
+    Unsuccessful {
+        sdk_name: &'static str,
+        command_formatted: String,
+        stdout: String,
+        stderr: String,
+    },
+}
+
+#[derive(Diagnostic, Debug)]
+#[diag(codegen_ssa_xcrun_sdk_path_warning)]
+#[note]
+pub(crate) struct XcrunSdkPathWarning {
+    pub sdk_name: &'static str,
+    pub stderr: String,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(codegen_ssa_aarch64_softfloat_neon)]
+pub(crate) struct Aarch64SoftfloatNeon;
+
+#[derive(Diagnostic)]
+#[diag(codegen_ssa_unknown_ctarget_feature_prefix)]
+#[note]
+pub(crate) struct UnknownCTargetFeaturePrefix<'a> {
+    pub feature: &'a str,
+}
+
+#[derive(Subdiagnostic)]
+pub(crate) enum PossibleFeature<'a> {
+    #[help(codegen_ssa_possible_feature)]
+    Some { rust_feature: &'a str },
+    #[help(codegen_ssa_consider_filing_feature_request)]
+    None,
+}
+
+#[derive(Diagnostic)]
+#[diag(codegen_ssa_unknown_ctarget_feature)]
+#[note]
+pub(crate) struct UnknownCTargetFeature<'a> {
+    pub feature: &'a str,
+    #[subdiagnostic]
+    pub rust_feature: PossibleFeature<'a>,
+}
+
+#[derive(Diagnostic)]
+#[diag(codegen_ssa_unstable_ctarget_feature)]
+#[note]
+pub(crate) struct UnstableCTargetFeature<'a> {
+    pub feature: &'a str,
+}
+
+#[derive(Diagnostic)]
+#[diag(codegen_ssa_forbidden_ctarget_feature)]
+#[note]
+#[note(codegen_ssa_forbidden_ctarget_feature_issue)]
+pub(crate) struct ForbiddenCTargetFeature<'a> {
+    pub feature: &'a str,
+    pub enabled: &'a str,
+    pub reason: &'a str,
+}
+
 pub struct TargetFeatureDisableOrEnable<'a> {
     pub features: &'a [&'a str],
     pub span: Option<Span>,
@@ -1320,17 +1285,29 @@ impl<G: EmissionGuarantee> Diagnostic<'_, G> for TargetFeatureDisableOrEnable<'_
 }
 
 #[derive(Diagnostic)]
-#[diag(codegen_ssa_aix_strip_not_used)]
-pub(crate) struct AixStripNotUsed;
-
-#[derive(LintDiagnostic)]
-#[diag(codegen_ssa_mixed_export_name_and_no_mangle)]
-pub(crate) struct MixedExportNameAndNoMangle {
+#[diag(codegen_ssa_feature_not_valid)]
+pub(crate) struct FeatureNotValid<'a> {
+    pub feature: &'a str,
+    #[primary_span]
     #[label]
-    pub no_mangle: Span,
-    pub no_mangle_attr: String,
-    #[note]
-    pub export_name: Span,
-    #[suggestion(style = "verbose", code = "", applicability = "machine-applicable")]
-    pub removal_span: Span,
+    pub span: Span,
+    #[help]
+    pub plus_hint: bool,
 }
+
+#[derive(Diagnostic)]
+#[diag(codegen_ssa_lto_disallowed)]
+pub(crate) struct LtoDisallowed;
+
+#[derive(Diagnostic)]
+#[diag(codegen_ssa_lto_dylib)]
+pub(crate) struct LtoDylib;
+
+#[derive(Diagnostic)]
+#[diag(codegen_ssa_lto_proc_macro)]
+pub(crate) struct LtoProcMacro;
+
+#[derive(Diagnostic)]
+#[diag(codegen_ssa_dynamic_linking_with_lto)]
+#[note]
+pub(crate) struct DynamicLinkingWithLTO;

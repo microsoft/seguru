@@ -21,11 +21,10 @@ pub fn inner_product_kernel(a: &[f32], b: &[f32], c: &mut [f32], n: usize) {
         for j in 0..((n - 1) / dim_x as usize + 1) {
             if row < n && col < n {
                 let mut sum = 0.0;
-                let aa = &a[row * n..row * n + n];
+                let aa: &[f32] = &a[row * n..row * n + n];
                 let mut b_idx = col;
-                #[expect(clippy::needless_range_loop)]
-                for k in 0..aa.len() {
-                    sum += aa[k] * b[b_idx];
+                for a in aa {
+                    sum += a * b[b_idx];
                     b_idx += n;
                 }
                 c[(j, i)] = sum;

@@ -16,15 +16,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-
-      - name: Cache LLVM toolchain
-        uses: actions/cache@v4
-        with:
-          path: |
-            /home/linuxbrew/.linuxbrew
-          key: cache-tool-${{ runner.os }}
-          restore-keys: |
-            cache-tool-${{ runner.os }}
       
       - name: Add NVIDIA package repository
         run: |
@@ -55,20 +46,14 @@ jobs:
 
       - name: Dep
         run: |
-          test -x /home/linuxbrew/.linuxbrew/bin/brew || /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-          export PATH=$PATH:/home/linuxbrew/.linuxbrew/bin
-          brew list binutils >/dev/null 2>&1 || HOMEBREW_NO_AUTO_UPDATE=1 brew install binutils
-          brew list llvm@20 >/dev/null 2>&1 || HOMEBREW_NO_AUTO_UPDATE=1 brew install llvm@20
-          brew list llvm@21 >/dev/null 2>&1 && brew remove llvm@21
+          . ./scripts/deps.sh
 
       - name: Set up LLVM environment
         run: |
-          LLVM_PREFIX=$(/home/linuxbrew/.linuxbrew/bin/brew --prefix llvm@20)
-          BINUTILS_PREFIX=$(/home/linuxbrew/.linuxbrew/bin/brew --prefix binutils)
+          LLVM_PREFIX=/usr/lib/llvm-20
           echo "LLVM_PREFIX=$LLVM_PREFIX" >> $GITHUB_ENV
           echo "$LLVM_PREFIX/bin" >> $GITHUB_PATH
           echo "LD_LIBRARY_PATH=$LLVM_PREFIX/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
-          echo "$BINUTILS_PREFIX/bin" >> $GITHUB_PATH
 
       - name: Confirm llvm version
         run: |

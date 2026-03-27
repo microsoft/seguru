@@ -1,4 +1,5 @@
 use rustc_data_structures::fx::FxHashSet;
+use rustc_data_structures::graph::DirectedGraph;
 use rustc_index::bit_set::DenseBitSet;
 use rustc_middle::mir::pretty::write_mir_pretty;
 use rustc_middle::mir::visit::Visitor;
@@ -7,7 +8,7 @@ use rustc_middle::mir::{
     Terminator, TerminatorKind,
 };
 use rustc_middle::ty::{Instance, TyCtxt, TyKind};
-use rustc_mir_dataflow::{Analysis, ResultsVisitor, visit_reachable_results};
+use rustc_mir_dataflow::{Analysis, Results, ResultsVisitor};
 use tracing::debug;
 
 use crate::attr::{GpuAttributes, GpuItem};
@@ -304,7 +305,7 @@ impl<'tcx> Analysis<'tcx> for TaintTracking<'tcx, '_> {
                     }
                 }
 
-                Rvalue::Discriminant(place) | Rvalue::RawPtr(_, place) => {
+                Rvalue::Discriminant(place) | Rvalue::Len(place) | Rvalue::RawPtr(_, place) => {
                     tainted = state.contains(place.local);
                 }
 
@@ -570,12 +571,14 @@ fn location_span<'tcx>(body: &Body<'tcx>, location: Location) -> rustc_span::Spa
     span
 }
 
-impl<'tcx, 'a> ResultsVisitor<'tcx, TaintTracking<'tcx, 'a>> for TaintResultVisitor<'tcx> {
+impl<'mir, 'tcx, 'a> ResultsVisitor<'mir, 'tcx, TaintTracking<'tcx, 'a>>
+    for TaintResultVisitor<'tcx>
+{
     /// We only visit early terminator since the data that is impacted by
     /// the current and future  statement/terminator does not matter.
     fn visit_after_early_terminator_effect(
         &mut self,
-        results: &mut TaintTracking<'tcx, 'a>,
+        results: &mut Results<'tcx, TaintTracking<'tcx, 'a>>,
         state: &DenseBitSet<Local>,
         terminator: &Terminator<'tcx>,
         location: Location,
@@ -610,7 +613,7 @@ impl<'tcx, 'a> ResultsVisitor<'tcx, TaintTracking<'tcx, 'a>> for TaintResultVisi
                 // If this terminator is control-dependent on a tainted value
                 // (i.e., part of an implicit flow), then it is unsafe to use
                 // divergent or data-dependent values here.
-                for bb in results.implicit.iter() {
+                for bb in results.analysis.implicit.iter() {
                     if self.body.basic_blocks[bb].terminator().source_info == terminator.source_info
                     {
                         self.invalid_diversed.push(span);
@@ -619,7 +622,7 @@ impl<'tcx, 'a> ResultsVisitor<'tcx, TaintTracking<'tcx, 'a>> for TaintResultVisi
 
                 // If the call happens in a device function that may have divergent control flow,
                 // we cannot guarantee the call is used in a non-divergent way.
-                if results.possible_divergent_cf {
+                if results.analysis.possible_divergent_cf {
                     self.invalid_diversed.push(span);
                 }
             }
@@ -647,7 +650,7 @@ fn analyze_diversed_data<'tcx>(
     );
     let mut results = analysis.iterate_to_fixpoint(tcx, body, None);
     let mut result_visitor = TaintResultVisitor::new(tcx, body.clone());
-    visit_reachable_results(body, &mut results.analysis, &results.results, &mut result_visitor);
+    results.visit_with(body, body.basic_blocks.iter_nodes(), &mut result_visitor);
     for span in &result_visitor.invalid_diversed {
         tcx.sess
             .dcx()

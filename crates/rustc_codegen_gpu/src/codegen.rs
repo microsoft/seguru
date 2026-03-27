@@ -145,7 +145,7 @@ fn find_gpu_related_mono_items<'tcx>(
             mono_item,
             rustc_middle::mir::mono::MonoItemData {
                 inlined: true,
-                linkage: rustc_hir::attrs::Linkage::Internal,
+                linkage: rustc_middle::mir::mono::Linkage::Internal,
                 visibility: rustc_middle::mir::mono::Visibility::Default,
                 size_estimate: 0,
             },
@@ -168,7 +168,7 @@ pub(crate) fn module_codegen<'tcx>(
     trace!("create MLIR module {}", cgu_name);
     let cgu = tcx.codegen_unit(cgu_name);
     {
-        let mut cx: GPUCodegenContext<'tcx, '_, '_> = crate::context::GPUCodegenContext::new(
+        let mut cx: GPUCodegenContext<'_, '_, '_> = crate::context::GPUCodegenContext::new(
             cgu_name.as_str().to_string(),
             cgu,
             tcx,
@@ -179,31 +179,21 @@ pub(crate) fn module_codegen<'tcx>(
         let mono_items = cgu.items_in_deterministic_order(tcx);
         let mono_items = find_gpu_related_mono_items(&mut cx, &mono_items);
         for &(mono_item, data) in &mono_items {
-            {
-                mono_item.predefine::<GpuBuilder<'_, '_, '_, '_>>(
-                    &mut cx,
-                    cgu_name.as_str(),
-                    data.linkage,
-                    data.visibility,
-                );
-            }
+            tracing::debug!("is_gpu_related define {}", tcx.def_path_str(mono_item.def_id()));
+            mono_item.predefine::<GpuBuilder<'_, '_, '_>>(&cx, data.linkage, data.visibility);
+            cx.define_indirect_if_needed();
         }
         for (mono_item, mono_data) in mono_items {
             match &mono_item {
                 rustc_middle::mir::mono::MonoItem::Fn(instance) => {
                     let attr = cx.gpu_attrs(instance);
-                    let is_builtin = attr.is_builtin();
-                    let is_kernel = attr.kernel;
-                    if !is_builtin {
-                        crate::mir_analysis::analyze_gpu_code(tcx, instance, is_kernel)
+                    if !attr.is_builtin() {
+                        crate::mir_analysis::analyze_gpu_code(tcx, instance, attr.kernel)
                             .unwrap_or_else(|err| {
                                 err.fatal(tcx);
                             });
-                        mono_item.define::<GpuBuilder<'_, '_, '_, '_>>(
-                            &mut cx,
-                            cgu_name.as_str(),
-                            mono_data,
-                        );
+                        mono_item.define::<GpuBuilder<'_, '_, '_>>(&cx);
+                        if attr.kernel {}
                     }
                 }
                 rustc_middle::mir::mono::MonoItem::Static(def_id) => {

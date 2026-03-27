@@ -7,11 +7,10 @@ use melior::ir::{BlockLike, Location, Operation, TypeLike, ValueLike};
 use rustc_codegen_ssa_gpu::traits::{
     ConstCodegenMethods, LayoutTypeCodegenMethods, MiscCodegenMethods,
 };
-use rustc_hir::attrs::InlineAttr;
 use rustc_hir::def_id::DefId;
 use rustc_middle::query::Key;
 use rustc_middle::ty::layout::{FnAbiOf, HasTyCtxt, HasTypingEnv, LayoutOf};
-use rustc_middle::ty::{AssocContainer, Instance};
+use rustc_middle::ty::{AssocItemContainer, Instance};
 use tracing::debug;
 
 use super::GPUCodegenContext;
@@ -49,25 +48,20 @@ fn is_impl_of_trait_method(
 
     // Check if the provided DefId is an associated function in an impl of IntoIterator
     if let Some(assoc_item) = tcx.opt_associated_item(def_id) {
-        if matches!(
-            assoc_item.container,
-            AssocContainer::InherentImpl | AssocContainer::TraitImpl(_)
-        ) && assoc_item.name() == method_sym
-        {
+        if assoc_item.container == AssocItemContainer::Impl && assoc_item.name == method_sym {
             // Get the trait ref for the impl (if it's an impl of a trait)
-            let impl_def_id = assoc_item.container_id(*tcx);
-            let trait_ref = tcx.impl_trait_ref(impl_def_id);
-            return trait_ref.skip_binder().def_id == into_iter_trait;
+            if let Some(trait_ref) =
+                tcx.impl_of_method(def_id).and_then(|impl_def_id| tcx.impl_trait_ref(impl_def_id))
+            {
+                return trait_ref.skip_binder().def_id == into_iter_trait;
+            }
         }
     }
 
     false
 }
 
-impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a>
-where
-    'tcx: 'a,
-{
+impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     pub(crate) fn sanitized_symbol_name(&self, instance: Instance<'tcx>) -> String {
         let ty = self.tcx.type_of(instance.def_id());
         let mono_ty = self
@@ -306,7 +300,7 @@ where
         Ok((ftype, new_ftype))
     }
 
-    pub(crate) fn define_indirect_if_needed(&self) {
+    pub(crate) fn define_indirect_if_needed(&'ml self) {
         let Some(entry) = self.indirect_entry.lock().unwrap().take() else {
             return;
         };
@@ -341,7 +335,7 @@ where
         }
         let op: melior::ir::OperationRef<'_, '_> = body.append_operation(gpu_op);
 
-        let bb = crate::builder::append_block(self, op, entry_sym.as_str());
+        let bb = GpuBuilder::append_block(self, op, entry_sym.as_str());
         let mut builder = GpuBuilder::build(self, bb);
         let mut dev_arg_idx = 0;
         let mut call_args = vec![];
@@ -438,32 +432,32 @@ where
         let (ftype, real_entry_ftype) = self
             .fn_abi_to_fn_type(fn_abi, gpu_attrs.kernel, &gpu_attrs.shared_data)
             .unwrap_or_else(|e| self.emit_error(e, span));
-        let fn_sym = match (real_entry_ftype, gpu_attrs.kernel) {
-            (Some((new_ftype, indirect_args)), true) => {
-                gpu_attrs.kernel = false;
-                gpu_attrs.device = true;
-                let dev_sym = format!("{INDIRECT}{}", sym);
-                debug!(
-                    "Function `{}` is a kernel entry function, but it has indirect arguments. \
+        let fn_sym = if real_entry_ftype.is_some() && gpu_attrs.kernel {
+            gpu_attrs.kernel = false;
+            gpu_attrs.device = true;
+            let dev_sym = format!("{INDIRECT}{}", sym);
+            debug!(
+                "Function `{}` is a kernel entry function, but it has indirect arguments. \
                 It will be defined as a device function with name `{}`",
-                    sym, dev_sym
-                );
-                *self.indirect_entry.lock().unwrap() = Some(IndirectEntry {
-                    entry_sym: sym.clone(),
-                    fn_type: new_ftype,
-                    indirect_args,
-                    dev_fn_type: ftype,
-                    dev_instance: instance,
-                    extra_attributes: gpu_attrs.to_mlir_attributes(self.mlir_ctx),
-                    location,
-                });
-                let fn_db = self.fn_db.read().unwrap();
-                if fn_db.contains_key(&dev_sym) {
-                    return fn_db[&dev_sym].op;
-                }
-                dev_sym
+                sym, dev_sym
+            );
+            let (new_ftype, indirect_args) = real_entry_ftype.unwrap();
+            *self.indirect_entry.lock().unwrap() = Some(IndirectEntry {
+                entry_sym: sym.clone(),
+                fn_type: new_ftype,
+                indirect_args,
+                dev_fn_type: ftype,
+                dev_instance: instance,
+                extra_attributes: gpu_attrs.to_mlir_attributes(self.mlir_ctx),
+                location,
+            });
+            let fn_db = self.fn_db.read().unwrap();
+            if fn_db.contains_key(&dev_sym) {
+                return fn_db[&dev_sym].op;
             }
-            _ => sym.clone(),
+            dev_sym
+        } else {
+            sym.clone()
         };
         let fn_sym_attr = melior::ir::attribute::StringAttribute::new(mlir_ctx, &fn_sym);
         /*if is_impl_of_trait_method(
@@ -524,7 +518,7 @@ where
         };
         // Expose kernel functions to external linkage.
         let linkage = if gpu_attrs.kernel {
-            self.to_mlir_linkage(rustc_hir::attrs::Linkage::External)
+            self.to_mlir_linkage(rustc_middle::mir::mono::Linkage::External)
         } else {
             linkage
         };
@@ -533,6 +527,7 @@ where
         operation.set_attribute("linkage", linkage);
 
         // Set inline attribute
+        use rustc_attr_data_structures::InlineAttr;
         let attrs = tcx.codegen_fn_attrs(def_id);
         if matches!(attrs.inline, InlineAttr::Always | InlineAttr::Force { .. }) {
             operation.set_attribute("always_inline", melior::ir::Attribute::unit(self.mlir_ctx));

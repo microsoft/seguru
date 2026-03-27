@@ -1,8 +1,8 @@
-use rustc_codegen_ssa_gpu::traits::{BackendTypes, DebugInfoBuilderMethods};
+use rustc_codegen_ssa_gpu::traits::DebugInfoBuilderMethods;
 
 use super::GpuBuilder;
 
-impl<'cx, 'tcx, 'ml, 'a> DebugInfoBuilderMethods for GpuBuilder<'cx, 'tcx, 'ml, 'a> {
+impl<'tcx, 'ml, 'a> DebugInfoBuilderMethods for GpuBuilder<'tcx, 'ml, 'a> {
     fn dbg_var_addr(
         &mut self,
         dbg_var: Self::DIVariable,
@@ -13,19 +13,7 @@ impl<'cx, 'tcx, 'ml, 'a> DebugInfoBuilderMethods for GpuBuilder<'cx, 'tcx, 'ml, 
         indirect_offsets: &[rustc_abi::Size],
         // Byte range in the `dbg_var` covered by this fragment,
         // if this is a fragment of a composite `DIVariable`.
-        fragment: &Option<std::ops::Range<rustc_abi::Size>>,
-    ) {
-        todo!()
-    }
-
-    fn dbg_var_value(
-        &mut self,
-        _: <Self as BackendTypes>::DIVariable,
-        _: <Self as BackendTypes>::DILocation,
-        _: <Self as BackendTypes>::Value,
-        _: rustc_abi::Size,
-        _: &[rustc_abi::Size],
-        _: &std::option::Option<std::ops::Range<rustc_abi::Size>>,
+        fragment: Option<std::ops::Range<rustc_abi::Size>>,
     ) {
         todo!()
     }
@@ -35,6 +23,10 @@ impl<'cx, 'tcx, 'ml, 'a> DebugInfoBuilderMethods for GpuBuilder<'cx, 'tcx, 'ml, 
     }
 
     fn clear_dbg_loc(&mut self) {
+        todo!()
+    }
+
+    fn get_dbg_loc(&self) -> Option<Self::DILocation> {
         todo!()
     }
 

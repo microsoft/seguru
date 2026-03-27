@@ -50,7 +50,8 @@ jobs:
 
       - name: Add rust components
         run: |-
-          rustup component add rustfmt rust-src clippy
+          rustup component add --toolchain nightly-2025-03-28-x86_64-unknown-linux-gnu rustfmt rust-src clippy
+          rustup target add nvptx64-nvidia-cuda
 
       - name: Dep
         run: |

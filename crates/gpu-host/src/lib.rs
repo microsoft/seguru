@@ -69,7 +69,7 @@ fn test_cuda_mem_multiple_ctx() {
 }
 
 #[test]
-#[should_panic(expected = "RefCell already borrowed")]
+#[should_panic(expected = "already borrowed: BorrowMutError")]
 fn test_cuda_no_nested_scope() {
     cuda_scope(|_, _| {
         cuda_scope(|_, _| {});

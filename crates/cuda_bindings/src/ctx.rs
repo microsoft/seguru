@@ -340,7 +340,7 @@ pub struct GpuModule<N: GpuCtxSpace> {
 }
 
 impl<N: GpuCtxSpace + 'static> GpuCtxArenaTrait for GpuModule<N> {
-    fn as_any(&mut self) -> &mut dyn core::any::Any {
+    fn as_any(&mut self) -> &mut (dyn core::any::Any) {
         self
     }
 }
@@ -526,7 +526,6 @@ impl<'ctx, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
         Ok(())
     }
 
-    #[allow(clippy::mut_from_ref)]
     pub fn new_module(&self, bin: *const u8) -> Result<&mut GpuModule<N>, CudaError> {
         let mut module_uninit = MaybeUninit::<CUmodule>::uninit();
         let module = unsafe {

@@ -3,7 +3,7 @@ use tracing::trace;
 
 use super::GpuBuilder;
 
-impl<'cx, 'tcx, 'ml, 'a> CoverageInfoBuilderMethods<'tcx> for GpuBuilder<'cx, 'tcx, 'ml, 'a> {
+impl<'tcx, 'ml, 'a> CoverageInfoBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
     fn add_coverage(
         &mut self,
         instance: rustc_middle::ty::Instance<'tcx>,

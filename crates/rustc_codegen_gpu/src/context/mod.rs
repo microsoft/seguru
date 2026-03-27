@@ -37,7 +37,7 @@ pub(crate) struct BuilderInfo<'ml, 'a> {
 
 pub(crate) struct GPUCodegenContext<'tcx, 'ml, 'a> {
     pub cgu_name: String,
-    pub _cgu: &'tcx rustc_middle::mir::mono::CodegenUnit<'tcx>,
+    pub cgu: &'tcx rustc_middle::mir::mono::CodegenUnit<'tcx>,
     pub mlir_ctx: &'ml melior::Context,
     pub mlir_module: &'ml melior::ir::Module<'ml>,
     pub mlir_body: HashMap<String, melior::ir::BlockRef<'ml, 'ml>>,
@@ -91,7 +91,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let disable_bound_check = tcx.env_var("DISABLE_GPU_BOUND_CHECK") == Ok("true");
         let ret = Self {
             cgu_name,
-            _cgu: cgu,
+            cgu,
             mlir_ctx,
             tcx,
             mlir_module,

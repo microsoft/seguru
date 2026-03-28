@@ -114,12 +114,8 @@ pub fn is_panic_function(path: &str) -> bool {
     false
 }
 
-const GPU_DEVICE_MATH_INTRINSICS: [(&str, &str); 4] = [
-    ("tanhf", "tanh"),
-    ("tanf", "tan"),
-    ("coshf", "cosh"),
-    ("sinhf", "sinh"),
-];
+const GPU_DEVICE_MATH_INTRINSICS: [(&str, &str); 4] =
+    [("tanhf", "tanh"), ("tanf", "tan"), ("coshf", "cosh"), ("sinhf", "sinh")];
 
 fn override_gpu_math_functions(path: &str) -> Option<String> {
     if path.starts_with("std::sys::cmath") {

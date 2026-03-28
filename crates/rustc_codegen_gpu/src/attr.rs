@@ -125,7 +125,7 @@ fn override_gpu_math_functions(path: &str) -> Option<String> {
     if path.starts_with("std::sys::cmath") {
         for (func, intrinsic) in GPU_DEVICE_MATH_INTRINSICS {
             if path.ends_with(func) {
-                return Some(format!("gpu::device_intrinsics::{}", intrinsic));
+                return Some(intrinsic.to_string());
             }
         }
     }

@@ -116,7 +116,7 @@ pub fn is_panic_function(path: &str) -> bool {
 
 const GPU_DEVICE_MATH_INTRINSICS: [(&str, &str); 4] = [
     ("tanhf", "tanh"),
-    ("tanf", "tanf"),
+    ("tanf", "tan"),
     ("coshf", "cosh"),
     ("sinhf", "sinh"),
 ];

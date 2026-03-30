@@ -116,6 +116,20 @@ pub fn is_panic_function(path: &str) -> bool {
     false
 }
 
+const GPU_DEVICE_MATH_INTRINSICS: [(&str, &str); 4] =
+    [("tanhf", "tanh"), ("tanf", "tan"), ("coshf", "cosh"), ("sinhf", "sinh")];
+
+fn override_gpu_math_functions(path: &str) -> Option<String> {
+    if path.starts_with("std::sys::cmath") {
+        for (func, intrinsic) in GPU_DEVICE_MATH_INTRINSICS {
+            if path.rsplit("::").next() == Some(func) {
+                return Some(intrinsic.to_string());
+            }
+        }
+    }
+    None
+}
+
 impl TryFrom<&str> for GpuItem {
     type Error = ();
 
@@ -153,22 +167,12 @@ impl TryFrom<&str> for GpuItem {
                 GpuItem::DeviceIntrinsic(s.replace("gpu::device_intrinsics::", ""))
             }
             // Override cmath functions to use our device intrinsics
-            "std::sys::cmath::tanhf" => {
-                GpuItem::DeviceIntrinsic("gpu::device_intrinsics::tanh".into())
-            }
-            "std::sys::cmath::tanf" => {
-                GpuItem::DeviceIntrinsic("gpu::device_intrinsics::tanf".into())
-            }
-            "std::sys::cmath::coshf" => {
-                GpuItem::DeviceIntrinsic("gpu::device_intrinsics::cosh".into())
-            }
-            "std::sys::cmath::sinhf" => {
-                GpuItem::DeviceIntrinsic("gpu::device_intrinsics::sinh".into())
-            }
             s if is_panic_function(s) => GpuItem::CoreFn(s.to_string()),
             s if s.starts_with("core") || s.starts_with("std") => {
                 if let Some(i) = lang_item_from_str(s) {
                     GpuItem::Core(i)
+                } else if let Some(intrinsic) = override_gpu_math_functions(s) {
+                    GpuItem::DeviceIntrinsic(intrinsic)
                 } else {
                     return Err(());
                 }
@@ -294,17 +298,10 @@ impl GpuAttributes {
                     gpu_attr.gpu_item = Some(GpuItem::Core(lang_item));
                 }
             } else {
-                let crate_name = tcx.crate_name(def_id.krate);
-                let path = tcx.def_path_str(def_id);
-                let path = if path.starts_with(crate_name.as_str()) {
-                    path
-                } else {
-                    format!(
-                        "{}::{}",
-                        crate_name,
-                        path.trim_start_matches(&format!("{}::", crate_name))
-                    )
-                };
+                // def_path_str might be re-exported, so we use to_string_no_crate_verbose.
+                let path =
+                    format!("{}{}", crate_name, tcx.def_path(def_id).to_string_no_crate_verbose());
+                //eprintln!("Checking core/std item: {}", path);
                 let path: &str = &path;
                 if let Ok(gpu_item) = GpuItem::try_from(path) {
                     gpu_attr.device = true;

@@ -84,7 +84,6 @@ pub fn run_host_matmul<'ctx>(
     println!("validating...");
     for i in 0..h_c.len() {
         if h_c[i] != h_c_cpu[i] {
-            print!("error: kernel result is wrong at {}. {} != {}", i, h_c_cpu[i], h_c[i]);
             if n <= 10 {
                 println!("printing matrix...");
                 println!("a and b:");
@@ -96,7 +95,7 @@ pub fn run_host_matmul<'ctx>(
             } else {
                 println!("not printing matrix because it's too big")
             }
-            return Ok(());
+            panic!("error: kernel result is wrong at {}. {} != {}", i, h_c_cpu[i], h_c[i]);
         }
     }
 

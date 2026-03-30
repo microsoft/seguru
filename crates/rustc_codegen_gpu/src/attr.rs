@@ -120,7 +120,7 @@ const GPU_DEVICE_MATH_INTRINSICS: [(&str, &str); 4] =
 fn override_gpu_math_functions(path: &str) -> Option<String> {
     if path.starts_with("std::sys::cmath") {
         for (func, intrinsic) in GPU_DEVICE_MATH_INTRINSICS {
-            if path.rsplit("::").next().map_or(false, |seg| seg == func) {
+            if path.rsplit("::").next() == Some(func) {
                 return Some(intrinsic.to_string());
             }
         }

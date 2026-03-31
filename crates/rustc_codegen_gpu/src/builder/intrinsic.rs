@@ -281,4 +281,13 @@ impl<'cx, 'tcx, 'ml, 'a> IntrinsicCallBuilderMethods<'tcx> for GpuBuilder<'cx, '
     fn va_end(&mut self, val: Self::Value) -> Self::Value {
         todo!()
     }
+
+    fn codegen_llvm_intrinsic_call(
+        &mut self,
+        instance: Instance<'tcx>,
+        args: &[OperandRef<'tcx, Self::Value>],
+        is_cleanup: bool,
+    ) -> Self::Value {
+        panic!("LLVM intrinsics are not supported in GPU codegen");
+    }
 }

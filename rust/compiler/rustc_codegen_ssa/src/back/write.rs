@@ -176,7 +176,7 @@ impl ModuleConfig {
             debug_info_for_profiling: sess.opts.unstable_opts.debug_info_for_profiling,
             instrument_coverage: if_regular!(sess.instrument_coverage(), false),
 
-            sanitizer: if_regular!(sess.opts.unstable_opts.sanitizer, SanitizerSet::empty()),
+            sanitizer: if_regular!(sess.sanitizers(), SanitizerSet::empty()),
             sanitizer_dataflow_abilist: if_regular!(
                 sess.opts.unstable_opts.sanitizer_dataflow_abilist.clone(),
                 Vec::new()
@@ -342,6 +342,7 @@ pub struct CodegenContext<B: WriteBackendMethods> {
     pub target_arch: String,
     pub target_is_like_darwin: bool,
     pub target_is_like_aix: bool,
+    pub target_is_like_gpu: bool,
     pub split_debuginfo: rustc_target::spec::SplitDebuginfo,
     pub split_dwarf_kind: rustc_session::config::SplitDwarfKind,
     pub pointer_size: Size,
@@ -1207,6 +1208,7 @@ pub struct CguMessage;
 // - `is_lint`: lints aren't relevant during codegen.
 // - `emitted_at`: not used for codegen diagnostics.
 struct Diagnostic {
+    span: Vec<SpanData>,
     level: Level,
     messages: Vec<(DiagMessage, Style)>,
     code: Option<ErrCode>,
@@ -1217,7 +1219,7 @@ struct Diagnostic {
 // A cut-down version of `rustc_errors::Subdiag` that impls `Send`. It's
 // missing the following fields from `rustc_errors::Subdiag`.
 // - `span`: it doesn't impl `Send`.
-pub(crate) struct Subdiagnostic {
+struct Subdiagnostic {
     level: Level,
     messages: Vec<(DiagMessage, Style)>,
 }
@@ -1274,13 +1276,7 @@ fn start_executing_work<B: ExtraBackendMethods>(
         })
         .expect("failed to spawn helper thread");
 
-    let ol =
-        if tcx.sess.opts.unstable_opts.no_codegen || !tcx.sess.opts.output_types.should_codegen() {
-            // If we know that we won’t be doing codegen, create target machines without optimisation.
-            config::OptLevel::No
-        } else {
-            tcx.backend_optimization_level(())
-        };
+    let ol = tcx.backend_optimization_level(());
     let backend_features = tcx.global_backend_features(());
 
     let remark_dir = if let Some(ref dir) = sess.opts.unstable_opts.remark_dir {
@@ -1315,6 +1311,7 @@ fn start_executing_work<B: ExtraBackendMethods>(
         target_arch: tcx.sess.target.arch.to_string(),
         target_is_like_darwin: tcx.sess.target.is_like_darwin,
         target_is_like_aix: tcx.sess.target.is_like_aix,
+        target_is_like_gpu: tcx.sess.target.is_like_gpu,
         split_debuginfo: tcx.sess.split_debuginfo(),
         split_dwarf_kind: tcx.sess.opts.unstable_opts.split_dwarf_kind,
         parallel: backend.supports_parallel() && !sess.opts.unstable_opts.no_parallel_backend,
@@ -1901,8 +1898,15 @@ fn spawn_thin_lto_work<'a, B: ExtraBackendMethods>(
 
 enum SharedEmitterMessage {
     Diagnostic(Diagnostic),
-    InlineAsmError(SpanData, String, Level, Option<(String, Vec<InnerSpan>)>),
+    InlineAsmError(InlineAsmError),
     Fatal(String),
+}
+
+pub struct InlineAsmError {
+    pub span: SpanData,
+    pub msg: String,
+    pub level: Level,
+    pub source: Option<(String, Vec<InnerSpan>)>,
 }
 
 #[derive(Clone)]
@@ -1921,14 +1925,8 @@ impl SharedEmitter {
         (SharedEmitter { sender }, SharedEmitterMain { receiver })
     }
 
-    pub fn inline_asm_error(
-        &self,
-        span: SpanData,
-        msg: String,
-        level: Level,
-        source: Option<(String, Vec<InnerSpan>)>,
-    ) {
-        drop(self.sender.send(SharedEmitterMessage::InlineAsmError(span, msg, level, source)));
+    pub fn inline_asm_error(&self, err: InlineAsmError) {
+        drop(self.sender.send(SharedEmitterMessage::InlineAsmError(err)));
     }
 
     fn fatal(&self, msg: &str) {
@@ -1944,7 +1942,7 @@ impl Emitter for SharedEmitter {
     ) {
         // Check that we aren't missing anything interesting when converting to
         // the cut-down local `DiagInner`.
-        assert_eq!(diag.span, MultiSpan::new());
+        assert!(!diag.span.has_span_labels());
         assert_eq!(diag.suggestions, Suggestions::Enabled(vec![]));
         assert_eq!(diag.sort_span, rustc_span::DUMMY_SP);
         assert_eq!(diag.is_lint, None);
@@ -1953,6 +1951,7 @@ impl Emitter for SharedEmitter {
         let args = mem::replace(&mut diag.args, DiagArgMap::default());
         drop(
             self.sender.send(SharedEmitterMessage::Diagnostic(Diagnostic {
+                span: diag.span.primary_spans().iter().map(|span| span.data()).collect::<Vec<_>>(),
                 level: diag.level(),
                 messages: diag.messages,
                 code: diag.code,
@@ -1997,6 +1996,9 @@ impl SharedEmitterMain {
                     let dcx = sess.dcx();
                     let mut d =
                         rustc_errors::DiagInner::new_with_messages(diag.level, diag.messages);
+                    d.span = MultiSpan::from_spans(
+                        diag.span.into_iter().map(|span| span.span()).collect(),
+                    );
                     d.code = diag.code; // may be `None`, that's ok
                     d.children = diag
                         .children
@@ -2011,15 +2013,15 @@ impl SharedEmitterMain {
                     dcx.emit_diagnostic(d);
                     sess.dcx().abort_if_errors();
                 }
-                Ok(SharedEmitterMessage::InlineAsmError(span, msg, level, source)) => {
-                    assert_matches!(level, Level::Error | Level::Warning | Level::Note);
-                    let mut err = Diag::<()>::new(sess.dcx(), level, msg);
-                    if !span.is_dummy() {
-                        err.span(span.span());
+                Ok(SharedEmitterMessage::InlineAsmError(inner)) => {
+                    assert_matches!(inner.level, Level::Error | Level::Warning | Level::Note);
+                    let mut err = Diag::<()>::new(sess.dcx(), inner.level, inner.msg);
+                    if !inner.span.is_dummy() {
+                        err.span(inner.span.span());
                     }
 
                     // Point to the generated assembly if it is available.
-                    if let Some((buffer, spans)) = source {
+                    if let Some((buffer, spans)) = inner.source {
                         let source = sess
                             .source_map()
                             .new_source_file(FileName::inline_asm_source_code(&buffer), buffer);

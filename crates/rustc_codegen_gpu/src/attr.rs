@@ -84,7 +84,9 @@ fn lang_item_from_str(name: &str) -> Option<LangItem> {
     LangItem::from_name(Symbol::intern(name))
 }
 
-const PANIC_FUNCTIONS: [&str; 10] = [
+const PANIC_FUNCTIONS: [&str; 12] = [
+    "core::slice::copy_from_slice::len_mismatch_fail",
+    "core::slice::copy_from_slice_impl::len_mismatch_fail",
     "core::slice::index::slice_index_order_fail",
     "core::slice::index::slice_index_fail",
     "core::slice::index::slice_start_index_len_fail",

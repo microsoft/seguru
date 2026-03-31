@@ -151,7 +151,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
 
         melior::ir::Location::new(
             self.mlir_ctx,
-            format!("{}", loc.file.name.prefer_local()).as_str(),
+            format!("{}", loc.file.name.prefer_local_unconditionally()).as_str(),
             loc.line,
             loc.col.0,
         )

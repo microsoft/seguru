@@ -88,6 +88,11 @@ jobs:
         if: ${{ steps.check_changes.outputs.crates_or_examples_changed == 'true' }}
         run: cargo fmt --all -- --check
 
+      - name: Build
+        working-directory: crates
+        if: ${{ steps.check_changes.outputs.crates_or_examples_changed == 'true' }}
+        run: cargo build --workspace
+
       - name: Clippy
         working-directory: crates
         if: ${{ steps.check_changes.outputs.crates_changed == 'true' }}
@@ -102,11 +107,6 @@ jobs:
         working-directory: crates/rustc_codegen_gpu
         if: ${{ steps.check_changes.outputs.crates_changed == 'true' }}
         run: cargo test
-
-      - name: Build
-        working-directory: crates
-        if: ${{ steps.check_changes.outputs.crates_or_examples_changed == 'true' }}
-        run: cargo build --workspace
 
       - name: Run examples
         working-directory: examples

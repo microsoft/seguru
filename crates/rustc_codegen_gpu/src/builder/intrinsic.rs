@@ -2,7 +2,9 @@ use melior::dialect::ods::{arith as melior_arith, math as melior_math};
 use melior::ir::attribute::DenseI32ArrayAttribute;
 use melior::ir::r#type::MemRefType;
 use melior::ir::{ShapedTypeLike, TypeLike, Value, ValueLike};
+use rustc_codegen_ssa_gpu::mir::operand::OperandRef;
 use rustc_codegen_ssa_gpu::traits::{BuilderMethods, IntrinsicCallBuilderMethods};
+use rustc_middle::ty::Instance;
 use rustc_middle::ty::layout::HasTypingEnv;
 
 use super::GpuBuilder;
@@ -58,8 +60,8 @@ macro_rules! intrinsic_match {
     };
 }
 
-pub(crate) fn device_intrinsic<'tcx, 'ml, 'a>(
-    builder: &mut GpuBuilder<'tcx, 'ml, 'a>,
+pub(crate) fn device_intrinsic<'cx, 'tcx, 'ml, 'a>(
+    builder: &mut GpuBuilder<'cx, 'tcx, 'ml, 'a>,
     name: &str,
     args: &[Value<'ml, 'a>],
     loc: melior::ir::Location<'ml>,
@@ -93,7 +95,7 @@ pub(crate) fn device_intrinsic<'tcx, 'ml, 'a>(
     }
 }
 
-impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
+impl<'cx, 'tcx, 'ml, 'a> GpuBuilder<'cx, 'tcx, 'ml, 'a> {
     fn intrinsic_volatile_load(
         &mut self,
         ty: rustc_middle::ty::Ty<'tcx>,
@@ -114,6 +116,7 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
             rustc_abi::Align::ONE,
             len,
             rustc_codegen_ssa_gpu::MemFlags::VOLATILE,
+            None,
         );
     }
 
@@ -164,16 +167,16 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         check.unwrap()
     }
 }
-impl<'tcx, 'ml, 'a> IntrinsicCallBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
+impl<'cx, 'tcx, 'ml, 'a> IntrinsicCallBuilderMethods<'tcx> for GpuBuilder<'cx, 'tcx, 'ml, 'a> {
     fn codegen_intrinsic_call(
         &mut self,
-        instance: rustc_middle::ty::Instance<'tcx>,
-        fn_abi: &rustc_target::callconv::FnAbi<'tcx, rustc_middle::ty::Ty<'tcx>>,
-        args: &[rustc_codegen_ssa_gpu::mir::operand::OperandRef<'tcx, Self::Value>],
-        llresult: Self::Value,
+        instance: Instance<'tcx>,
+        args: &[OperandRef<'tcx, Self::Value>],
+        result_dest: rustc_codegen_ssa_gpu::mir::place::PlaceRef<'tcx, Self::Value>,
         span: rustc_span::Span,
-    ) -> Result<(), rustc_middle::ty::Instance<'tcx>> {
+    ) -> Result<(), Instance<'tcx>> {
         let tcx = self.tcx;
+        let llresult = result_dest.val.llval;
         let callee_ty = instance.ty(tcx, self.typing_env());
 
         let rustc_middle::ty::FnDef(def_id, fn_args) = *callee_ty.kind() else {
@@ -206,7 +209,7 @@ impl<'tcx, 'ml, 'a> IntrinsicCallBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 
             }
             sym::bswap => {
                 let arg = args_imm[0];
-                let align = args[0].layout.layout.align().pref;
+                let align = args[0].layout.layout.align().abi;
                 self.intrinsic_bswap(arg, llresult, align, loc);
                 return Ok(());
             }
@@ -260,10 +263,6 @@ impl<'tcx, 'ml, 'a> IntrinsicCallBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 
 
     fn expect(&mut self, cond: Self::Value, expected: bool) -> Self::Value {
         cond
-    }
-
-    fn type_test(&mut self, pointer: Self::Value, typeid: Self::Metadata) -> Self::Value {
-        todo!()
     }
 
     fn type_checked_load(

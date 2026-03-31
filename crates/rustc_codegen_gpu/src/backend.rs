@@ -50,9 +50,6 @@ impl rustc_codegen_ssa_gpu::traits::ThinBufferMethods for GpuModuleBuffer {
     fn data(&self) -> &[u8] {
         &self.0
     }
-    fn thin_link_data(&self) -> &[u8] {
-        &[]
-    }
 }
 
 impl WriteBackendMethods for GPUCodegenBackend {
@@ -68,38 +65,17 @@ impl WriteBackendMethods for GPUCodegenBackend {
 
     type ThinBuffer = GpuModuleBuffer;
 
-    fn run_link(
-        cgcx: &rustc_codegen_ssa_gpu::back::write::CodegenContext<Self>,
-        dcx: rustc_errors::DiagCtxtHandle<'_>,
-        modules: Vec<rustc_codegen_ssa_gpu::ModuleCodegen<Self::Module>>,
-    ) -> Result<rustc_codegen_ssa_gpu::ModuleCodegen<Self::Module>, rustc_errors::FatalError> {
-        todo!();
-    }
-
-    fn run_fat_lto(
-        cgcx: &rustc_codegen_ssa_gpu::back::write::CodegenContext<Self>,
-        modules: Vec<rustc_codegen_ssa_gpu::back::write::FatLtoInput<Self>>,
-        cached_modules: Vec<(
-            rustc_codegen_ssa_gpu::back::lto::SerializedModule<Self::ModuleBuffer>,
-            WorkProduct,
-        )>,
-    ) -> Result<rustc_codegen_ssa_gpu::back::lto::LtoModuleCodegen<Self>, rustc_errors::FatalError>
-    {
-        todo!();
-    }
-
     fn run_thin_lto(
         cgcx: &rustc_codegen_ssa_gpu::back::write::CodegenContext<Self>,
+        exported_symbols_for_lto: &[String],
+        each_linked_rlib_for_lto: &[std::path::PathBuf],
         modules: Vec<(String, Self::ThinBuffer)>,
         cached_modules: Vec<(
             rustc_codegen_ssa_gpu::back::lto::SerializedModule<Self::ModuleBuffer>,
             WorkProduct,
         )>,
-    ) -> Result<
-        (Vec<rustc_codegen_ssa_gpu::back::lto::LtoModuleCodegen<Self>>, Vec<WorkProduct>),
-        rustc_errors::FatalError,
-    > {
-        Ok((vec![], vec![]))
+    ) -> (Vec<rustc_codegen_ssa_gpu::back::lto::ThinModule<Self>>, Vec<WorkProduct>) {
+        (vec![], vec![])
     }
 
     fn print_pass_timings(&self) {
@@ -110,26 +86,18 @@ impl WriteBackendMethods for GPUCodegenBackend {
         print!("no statistics");
     }
 
-    unsafe fn optimize(
+    fn optimize(
         cgcx: &rustc_codegen_ssa_gpu::back::write::CodegenContext<Self>,
         dcx: rustc_errors::DiagCtxtHandle<'_>,
         module: &mut rustc_codegen_ssa_gpu::ModuleCodegen<Self::Module>,
         config: &rustc_codegen_ssa_gpu::back::write::ModuleConfig,
-    ) -> Result<(), rustc_errors::FatalError> {
-        Ok(())
+    ) {
     }
 
-    fn optimize_fat(
-        cgcx: &rustc_codegen_ssa_gpu::back::write::CodegenContext<Self>,
-        llmod: &mut rustc_codegen_ssa_gpu::ModuleCodegen<Self::Module>,
-    ) -> Result<(), rustc_errors::FatalError> {
-        Ok(())
-    }
-
-    unsafe fn optimize_thin(
+    fn optimize_thin(
         cgcx: &rustc_codegen_ssa_gpu::back::write::CodegenContext<Self>,
         thin_module: rustc_codegen_ssa_gpu::back::lto::ThinModule<Self>,
-    ) -> Result<rustc_codegen_ssa_gpu::ModuleCodegen<Self::Module>, rustc_errors::FatalError> {
+    ) -> rustc_codegen_ssa_gpu::ModuleCodegen<Self::Module> {
         let module_str = std::str::from_utf8(thin_module.data()).expect("valid utf8");
         let module = ModuleCodegen {
             module_llvm: GPUCodeGenModule {
@@ -142,21 +110,19 @@ impl WriteBackendMethods for GPUCodegenBackend {
             kind: rustc_codegen_ssa_gpu::ModuleKind::Regular,
             thin_lto_buffer: Some(vec![]),
         };
-        Ok(module)
+        module
     }
 
-    unsafe fn codegen(
+    fn codegen(
         cgcx: &rustc_codegen_ssa_gpu::back::write::CodegenContext<Self>,
-        dcx: rustc_errors::DiagCtxtHandle<'_>,
         module: rustc_codegen_ssa_gpu::ModuleCodegen<Self::Module>,
         config: &rustc_codegen_ssa_gpu::back::write::ModuleConfig,
-    ) -> Result<rustc_codegen_ssa_gpu::CompiledModule, rustc_errors::FatalError> {
-        crate::write::codegen(cgcx, dcx, module, config)
+    ) -> rustc_codegen_ssa_gpu::CompiledModule {
+        crate::write::codegen(cgcx, module, config).expect("codegen success")
     }
 
     fn prepare_thin(
         module: rustc_codegen_ssa_gpu::ModuleCodegen<Self::Module>,
-        want_summary: bool,
     ) -> (String, Self::ThinBuffer) {
         Self::serialize_module(module)
     }
@@ -171,13 +137,13 @@ impl WriteBackendMethods for GPUCodegenBackend {
         (module.name, GpuModuleBuffer(buffer))
     }
 
-    fn autodiff(
+    fn run_and_optimize_fat_lto(
         cgcx: &rustc_codegen_ssa_gpu::back::write::CodegenContext<Self>,
-        module: &rustc_codegen_ssa_gpu::ModuleCodegen<Self::Module>,
-        diff_fncs: Vec<rustc_ast::expand::autodiff_attrs::AutoDiffItem>,
-        config: &rustc_codegen_ssa_gpu::back::write::ModuleConfig,
-    ) -> Result<(), rustc_errors::FatalError> {
-        Ok(())
+        exported_symbols_for_lto: &[String],
+        each_linked_rlib_for_lto: &[std::path::PathBuf],
+        modules: Vec<rustc_codegen_ssa_gpu::back::write::FatLtoInput<Self>>,
+    ) -> ModuleCodegen<Self::Module> {
+        todo!();
     }
 }
 
@@ -186,8 +152,7 @@ impl ExtraBackendMethods for GPUCodegenBackend {
         &self,
         tcx: TyCtxt<'tcx>,
         module_name: &str,
-        kind: rustc_ast::expand::allocator::AllocatorKind,
-        alloc_error_handler_kind: rustc_ast::expand::allocator::AllocatorKind,
+        methods: &[rustc_ast::expand::allocator::AllocatorMethod],
     ) -> Self::Module {
         GPUCodeGenModule {
             mlir_module: Some(MLIRModule { module: new_empty_module(create_mlir_ctx()) }),
@@ -227,6 +192,10 @@ impl ExtraBackendMethods for GPUCodegenBackend {
 impl CodegenBackend for GPUCodegenBackend {
     // Implement codegen methods
 
+    fn name(&self) -> &'static str {
+        "GPUCodegenBackend"
+    }
+
     fn locale_resource(&self) -> &'static str {
         // Provide a dummy implementation or actual logic
         ""
@@ -236,8 +205,7 @@ impl CodegenBackend for GPUCodegenBackend {
 
     fn provide(&self, providers: &mut Providers) {}
 
-    fn target_features_cfg(&self, sess: &Session) -> (Vec<Symbol>, Vec<Symbol>) {
-        // Add faked features to remove warnings on missing target features.
+    fn target_config(&self, sess: &Session) -> rustc_codegen_ssa_gpu::TargetConfig {
         let target: String = sess.target.arch.clone().into_owned();
         let faked_features = match target.as_str() {
             "x86" | "x86_64" => {
@@ -250,22 +218,22 @@ impl CodegenBackend for GPUCodegenBackend {
                 vec![]
             }
         };
-        (faked_features.clone(), faked_features)
+        rustc_codegen_ssa_gpu::TargetConfig {
+            target_features: faked_features.clone(),
+            unstable_target_features: faked_features,
+            has_reliable_f16: true,
+            has_reliable_f16_math: true,
+            has_reliable_f128: false,
+            has_reliable_f128_math: false,
+        }
     }
 
-    fn codegen_crate(
-        &self,
-        tcx: TyCtxt<'_>,
-        metadata: rustc_metadata::EncodedMetadata,
-        need_metadata_module: bool,
-    ) -> Box<dyn std::any::Any> {
+    fn codegen_crate(&self, tcx: TyCtxt<'_>) -> Box<dyn std::any::Any> {
         // Provide a dummy implementation or actual logic
         Box::new(rustc_codegen_ssa_gpu::base::codegen_crate(
             GPUCodegenBackend::new(),
             tcx,
             tcx.sess.opts.cg.target_cpu.clone().unwrap_or_else(|| tcx.sess.target.cpu.to_string()),
-            metadata,
-            need_metadata_module,
         ))
     }
 

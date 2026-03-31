@@ -5,7 +5,7 @@ use rustc_codegen_ssa_gpu::traits::{BaseTypeCodegenMethods, BuilderMethods};
 
 use crate::builder::GpuBuilder;
 
-impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
+impl<'cx, 'tcx, 'ml, 'a> GpuBuilder<'cx, 'tcx, 'ml, 'a> {
     /// In MLIR, MemRef<N*f32> will not be treated as a vector type.
     /// This function converts a memref<N*f32> to memref<1xvec<Nxf32>> to use optimized behavior for vectors.
     /// For example, load/store of memref<1xvec<4*f32>> will become ld.v4.f32 instead of executing ld.f32 for 4 times
@@ -106,11 +106,11 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
         let dst_ty = MemRefType::try_from(dst.r#type()).unwrap();
         let src_ty = MemRefType::try_from(src.r#type()).unwrap();
         let to_vec_type = |align: u64| {
-            if align % 8 == 0 {
+            if align.is_multiple_of(8) {
                 self.type_vector(&[align / 8], self.type_i64())
-            } else if align % 4 == 0 {
+            } else if align.is_multiple_of(4) {
                 self.type_vector(&[align / 4], self.type_i32())
-            } else if align % 2 == 0 {
+            } else if align.is_multiple_of(2) {
                 self.type_vector(&[align / 2], self.type_i16())
             } else {
                 self.type_vector(&[align], self.type_i8())

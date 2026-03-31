@@ -43,7 +43,7 @@ fn reg_to_llvm(reg: InlineAsmRegOrRegClass) -> Result<String, GpuCodegenError> {
     }
 }
 
-impl<'tcx: 'a, 'ml: 'a, 'a> AsmBuilderMethods<'tcx> for GpuBuilder<'tcx, 'ml, 'a> {
+impl<'cx, 'tcx: 'a, 'ml: 'a, 'a> AsmBuilderMethods<'tcx> for GpuBuilder<'cx, 'tcx, 'ml, 'a> {
     fn codegen_inline_asm(
         &mut self,
         template: &[rustc_ast::InlineAsmTemplatePiece],

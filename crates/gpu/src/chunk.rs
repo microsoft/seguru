@@ -144,8 +144,6 @@ impl<'a, T, CS: ChunkScope, Map: ScopeUniqueMap<CS>> GlobalGroupChunk<'a, T, CS,
 // Read-only access is always allowed.
 impl<'a, T, CS: ChunkScope, Map: ScopeUniqueMap<CS>> Index<Map::IndexType>
     for GlobalGroupChunk<'a, T, CS, Map>
-where
-    [(); TID_MAX_LEN]:,
 {
     type Output = T;
 
@@ -163,7 +161,6 @@ where
 impl<'a, T, CS: ChunkScope, Map: ScopeUniqueMap<CS>> IndexMut<Map::IndexType>
     for GlobalGroupChunk<'a, T, CS, Map>
 where
-    [(); TID_MAX_LEN]:,
     CS: ChunkScope<ToScope = Thread>,
 {
     #[inline(always)]

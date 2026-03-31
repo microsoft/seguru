@@ -15,7 +15,10 @@ fn get_alloc_name(alloc_id: rustc_const_eval::interpret::AllocId) -> String {
     format!("memory_alloc_{:?}", alloc_id.0)
 }
 
-impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
+impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a>
+where
+    'tcx: 'a,
+{
     fn get_name_by_alloc(
         &self,
         alloc: &rustc_const_eval::interpret::ConstAllocation<'_>,
@@ -46,10 +49,23 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         let op: melior::ir::Operation = melior::dialect::ods::arith::constant(
             ctx,
             typ,
-            Attribute::parse(ctx, &attribute).unwrap(),
+            Attribute::parse(ctx, &attribute).expect(attribute.as_str()),
             self.unknown_loc(),
         )
         .into();
+        let op_ref = block.append_operation(op);
+        op_ref.result(0).unwrap().into()
+    }
+
+    pub(crate) fn mlir_trunci(
+        &self,
+        value: <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Value,
+        typ: <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type,
+        block: <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::BasicBlock,
+    ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Value {
+        let ctx = self.mlir_ctx;
+        let op: melior::ir::Operation =
+            melior::dialect::ods::arith::trunci(ctx, typ, value, self.unknown_loc()).into();
         let op_ref = block.append_operation(op);
         op_ref.result(0).unwrap().into()
     }
@@ -58,6 +74,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         &self,
         i: impl std::fmt::Display,
         typ: <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type,
+        cast_ty: Option<<GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Type>,
     ) -> <GPUCodegenContext<'tcx, 'ml, 'a> as BackendTypes>::Value {
         let (block, attr_str) = if let Some(builder) = self.builder.read().unwrap().as_ref() {
             let block = builder.cur_block;
@@ -69,7 +86,12 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         if let Some(value) = self.const_values.read().unwrap().get(&attr_str) {
             return *value;
         }
-        let val = self.mlir_const_val_from_type(i, typ, block);
+        let mut val = self.mlir_const_val_from_type(i, typ, block);
+        if let Some(cast_ty) = cast_ty {
+            if cast_ty != typ {
+                val = self.mlir_trunci(val, cast_ty, block);
+            }
+        }
         self.const_values.write().unwrap().insert(attr_str, val);
         val
     }
@@ -196,7 +218,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 self.static_data_memref(
                     None,
                     layout.size,
-                    layout.align.pref,
+                    layout.align.abi,
                     &format!("static_{}", self.tcx.def_path_str(def_id)),
                 )
             }
@@ -207,7 +229,10 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
         v
     }
 }
-impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
+impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a>
+where
+    'tcx: 'a,
+{
     fn const_null(&self, t: Self::Type) -> Self::Value {
         self.const_int(self.type_i64(), 0)
     }
@@ -223,51 +248,57 @@ impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
     }
 
     fn const_bool(&self, val: bool) -> Self::Value {
-        self.mlir_global_const_int_from_type(val as i64, self.type_i1())
+        self.mlir_global_const_int_from_type(val as i64, self.type_i1(), None)
     }
 
     fn const_i8(&self, i: i8) -> Self::Value {
-        self.mlir_global_const_int_from_type(i, self.type_i8())
+        self.mlir_global_const_int_from_type(i, self.type_i8(), None)
     }
 
     fn const_i16(&self, i: i16) -> Self::Value {
-        self.mlir_global_const_int_from_type(i, self.type_i16())
+        self.mlir_global_const_int_from_type(i, self.type_i16(), None)
     }
 
     fn const_i32(&self, i: i32) -> Self::Value {
-        self.mlir_global_const_int_from_type(i, self.type_i32())
+        self.mlir_global_const_int_from_type(i, self.type_i32(), None)
     }
 
     fn const_int(&self, t: Self::Type, i: i64) -> Self::Value {
-        self.mlir_global_const_int_from_type(i, t)
+        self.mlir_global_const_int_from_type(i, t, None)
     }
 
     fn const_u8(&self, i: u8) -> Self::Value {
-        self.mlir_global_const_int_from_type(i as i8, self.type_i8())
+        self.mlir_global_const_int_from_type(i as i8, self.type_i8(), None)
     }
 
     fn const_u32(&self, i: u32) -> Self::Value {
-        self.mlir_global_const_int_from_type(i as i32, self.type_i32())
+        self.mlir_global_const_int_from_type(i as i32, self.type_i32(), None)
     }
 
     fn const_u64(&self, i: u64) -> Self::Value {
-        self.mlir_global_const_int_from_type(i as i64, self.type_i64())
+        self.const_uint(self.type_i64(), i)
     }
 
     fn const_u128(&self, i: u128) -> Self::Value {
-        self.mlir_global_const_int_from_type(i as i128, self.type_i128())
+        self.const_uint_big(self.type_i128(), i)
     }
 
     fn const_usize(&self, i: u64) -> Self::Value {
-        self.mlir_global_const_int_from_type(i as i64, self.type_i64())
+        use crate::rustc_abi::HasDataLayout;
+        let bit_size = self.data_layout().pointer_size().bits();
+        if bit_size < 64 {
+            // make sure it doesn't overflow
+            assert!(i < (1 << bit_size));
+        }
+        self.const_uint(self.type_i64(), i)
     }
 
     fn const_uint(&self, t: Self::Type, i: u64) -> Self::Value {
-        self.mlir_global_const_int_from_type(i as i64, t)
+        self.mlir_global_const_int_from_type(i as i64, self.type_i64(), Some(t))
     }
 
     fn const_uint_big(&self, t: Self::Type, u: u128) -> Self::Value {
-        self.mlir_global_const_int_from_type(u as i128, t)
+        self.mlir_global_const_int_from_type(u as i128, self.type_i128(), Some(t))
     }
 
     fn const_real(&self, t: Self::Type, val: f64) -> Self::Value {
@@ -337,11 +368,11 @@ impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
                                 .map_or(rustc_span::DUMMY_SP, |b| b.cur_span),
                         )
                     };
-                    self.mlir_global_const_int_from_type(data, ty)
+                    self.mlir_global_const_int_from_type(data, ty, None)
                 }
             }
             rustc_const_eval::interpret::Scalar::Ptr(ptr, s) => {
-                let (prov, offset) = ptr.into_parts();
+                let (prov, offset) = ptr.into_raw_parts();
                 let alloc_id = prov.alloc_id();
                 self.const_data_memref_from_alloc_id(alloc_id)
             }
@@ -359,7 +390,10 @@ impl<'tcx, 'ml, 'a> ConstCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
     }
 }
 
-impl<'tcx, 'ml, 'a> StaticCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
+impl<'tcx, 'ml, 'a> StaticCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a>
+where
+    'tcx: 'a,
+{
     fn static_addr_of(
         &self,
         cv: Self::Value,
@@ -369,15 +403,7 @@ impl<'tcx, 'ml, 'a> StaticCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
         cv
     }
 
-    fn codegen_static(&self, def_id: rustc_hir::def_id::DefId) {
-        todo!()
-    }
-
-    fn add_used_global(&self, global: Self::Value) {
-        todo!()
-    }
-
-    fn add_compiler_used_global(&self, global: Self::Value) {
+    fn codegen_static(&mut self, def_id: rustc_hir::def_id::DefId) {
         todo!()
     }
 }

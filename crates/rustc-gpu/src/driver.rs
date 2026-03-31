@@ -5,11 +5,12 @@ use std::sync::Mutex;
 use mlir_compile::CompileConfig;
 use rustc_ast::Crate;
 use rustc_driver::{Callbacks, Compilation};
+use rustc_hir::attrs::NativeLibKind;
 use rustc_interface::interface::{Compiler, Config};
 use rustc_middle::query::queries::registered_tools;
 use rustc_middle::ty::TyCtxt;
 use rustc_session::config::{CrateType, ExternEntry, ExternLocation, Externs};
-use rustc_session::utils::{CanonicalizedPath, NativeLib, NativeLibKind};
+use rustc_session::utils::{CanonicalizedPath, NativeLib};
 use tracing::debug;
 
 const GPU_SUFFIX: &str = "gpu";
@@ -62,20 +63,6 @@ pub const GPU_MAIN_RUST: &str = r#"
 pub fn dev_main() {}
 "#;
 
-fn parse_item_by_str(
-    psess: &rustc_session::parse::ParseSess,
-    input: &str,
-) -> Option<rustc_ast::ptr::P<rustc_ast::Item>> {
-    rustc_parse::new_parser_from_source_str(
-        psess,
-        rustc_span::FileName::Custom("gpu-tmp.rs".into()),
-        input.into(),
-    )
-    .expect("failed to create parser")
-    .parse_item(rustc_parse::parser::ForceCollect::No)
-    .expect("cannot parse as item")
-}
-
 #[derive(Default)]
 pub(crate) struct GpuOrCpuRustCallback {
     pub stage: CompilerStage,
@@ -114,7 +101,7 @@ fn new_externs_with_new_path<F: FnMut(&Path) -> Option<PathBuf>>(
                     .iter()
                     .filter_map(|p| {
                         let path = p.canonicalized();
-                        new_path(path).map(|p| CanonicalizedPath::new(&p))
+                        new_path(path).map(CanonicalizedPath::new)
                     })
                     .collect();
                 new_e.force = true;
@@ -158,7 +145,7 @@ fn gpu_codegen_fn_attrs<'tcx>(
     let mut fnattrs = CODEGEN_FN_ATTRS.lock().unwrap().unwrap()(tcx, def_id);
     // Make them inline to allow translating them to GPU code
     // TODO: mark them as device function and link to GPU code
-    fnattrs.inline = rustc_attr_data_structures::InlineAttr::Always;
+    fnattrs.inline = rustc_hir::attrs::InlineAttr::Always;
     fnattrs
 }
 
@@ -439,10 +426,20 @@ impl Callbacks for GpuOrCpuRustCallback {
     fn after_crate_root_parsing(&mut self, compiler: &Compiler, krate: &mut Crate) -> Compilation {
         if matches!(self.stage, CompilerStage::GpuForGpu) {
             krate.items.iter_mut().for_each(|item| {
-                if item.ident.name == rustc_span::Symbol::intern("main") {
-                    let tmp_item = parse_item_by_str(&compiler.sess.psess, GPU_MAIN_RUST)
-                        .expect("failed to create parser");
-                    item.vis = tmp_item.vis.clone();
+                let rustc_ast::ast::ItemKind::Fn(fitem) = &item.kind else {
+                    return;
+                };
+                if fitem.ident.name == rustc_span::Symbol::intern("main") {
+                    let tmp_item = rustc_parse::new_parser_from_source_str(
+                        &compiler.sess.psess,
+                        rustc_span::FileName::Custom("gpu-tmp.rs".into()),
+                        GPU_MAIN_RUST.into(),
+                        rustc_parse::lexer::StripTokens::Nothing,
+                    )
+                    .expect("failed to create parser")
+                    .parse_item(rustc_parse::parser::ForceCollect::No)
+                    .expect("cannot parse as item");
+                    item.vis = tmp_item.unwrap().vis.clone();
                 }
             });
         }

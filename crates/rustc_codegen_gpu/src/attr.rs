@@ -84,8 +84,9 @@ fn lang_item_from_str(name: &str) -> Option<LangItem> {
     LangItem::from_name(Symbol::intern(name))
 }
 
-const PANIC_FUNCTIONS: [&str; 8] = [
+const PANIC_FUNCTIONS: [&str; 10] = [
     "core::slice::index::slice_index_order_fail",
+    "core::slice::index::slice_index_fail",
     "core::slice::index::slice_start_index_len_fail",
     "core::slice::index::slice_end_index_len_fail",
     "core::option::unwrap_failed",
@@ -93,6 +94,7 @@ const PANIC_FUNCTIONS: [&str; 8] = [
     "std::slice::index::slice_start_index_len_fail",
     "std::slice::index::slice_end_index_len_fail",
     "std::option::unwrap_failed",
+    "core::panicking::panic_nounwind_fmt",
 ];
 
 const PANIC_FUNCTION_PATTERNS: [&str; 2] = [
@@ -286,7 +288,7 @@ impl GpuAttributes {
     }
 
     pub fn build(tcx: &rustc_middle::ty::TyCtxt<'_>, def_id: DefId) -> GpuAttributes {
-        let attrs = tcx.get_attrs_unchecked(def_id);
+        let attrs = tcx.get_all_attrs(def_id);
         let mut gpu_attr = GpuAttributes::parse(attrs);
         let crate_name = tcx.crate_name(def_id.krate);
         if crate_name == rustc_span::sym::core || crate_name == rustc_span::sym::std {

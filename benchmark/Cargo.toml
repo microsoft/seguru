@@ -1,0 +1,60 @@
+[package]
+name = "benchmark"
+version = "0.1.0"
+edition = "2024"
+
+
+[[bench]]
+name = "matmul"
+harness = false
+
+[[bench]]
+name = "softmax"
+harness = false
+
+[[bench]]
+name = "layernorm"
+harness = false
+
+[[bench]]
+name = "fused"
+harness = false
+
+[[bench]]
+name = "permute"
+harness = false
+
+[[bench]]
+name = "adamw"
+harness = false
+
+[[bench]]
+name = "encoder"
+harness = false
+
+[[bench]]
+name = "gelu"
+harness = false
+
+[[bench]]
+name = "residual"
+harness = false
+
+[features]
+default = ["seguru"]
+seguru = []
+nvvm = []
+llvm = ["llmc/llvm"]
+
+[dev-dependencies]
+# depends on llvm feature to enable llvm feature
+llmc = {path = "../llm-rs/rust/llmc"}
+llm-rs-gpu = {path = "../examples/llm-rs-gpu"}
+gpu_host = {path = "../crates/gpu-host"}
+gpu = {path = "../crates/gpu"}
+criterion = { version = "0.5", features = ["html_reports"] }
+rand = "0.9"
+
+[dependencies]
+serde_json = "1.0"
+serde = {version = "1.0", features = ["serde_derive"]}

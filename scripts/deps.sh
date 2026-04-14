@@ -1,9 +1,10 @@
-if ! command -v ptxas &> /dev/null; then
+#!/bin/bash
+if ! command -v ptxas >/dev/null 2>&1; then
     echo "CUDA not found! Please install the CUDA Toolkit (with, e.g., sudo apt install nvidia-cuda-toolkit)."
     exit 1
 fi
 
-if ! command -v mlir-opt &> /dev/null; then
+if ! command -v mlir-opt >/dev/null 2>&1; then
     wget https://apt.llvm.org/llvm.sh
     chmod +x llvm.sh
     sudo ./llvm.sh 20

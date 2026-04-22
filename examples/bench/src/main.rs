@@ -97,7 +97,7 @@ fn main() {
                 let config = gpu_host::gpu_config!(nb, 1, 1, bs, 1, 1, 0);
                 bench_vector_add::launch(config, ctx, m, &d_a, &d_b, &mut d_c, n).unwrap();
             }
-            d_c.copy_to_host(&mut h_c).unwrap();
+            ctx.sync().unwrap();
             let elapsed = start.elapsed();
             println!(
                 "vector_add SeGuRu: {:.3} us/iter (N={}, {} iters)",
@@ -128,7 +128,7 @@ fn main() {
                 let config = gpu_host::gpu_config!(nb, 1, 1, bs, 1, 1, smem);
                 bench_reduce_sum::launch(config, ctx, m, &d_in, &mut d_out, n).unwrap();
             }
-            d_out.copy_to_host(&mut h_out).unwrap();
+            ctx.sync().unwrap();
             let elapsed = start.elapsed();
             println!(
                 "reduce SeGuRu: {:.3} us/iter (N={}, {} iters)",
@@ -164,7 +164,7 @@ fn main() {
                 let config = gpu_host::gpu_config!(gx, gy, 1, bx, by, 1, 0);
                 bench_gemm::launch(config, ctx, m, &d_a, &d_b, &mut d_c, n).unwrap();
             }
-            d_c.copy_to_host(&mut h_c).unwrap();
+            ctx.sync().unwrap();
             let elapsed = start.elapsed();
             println!(
                 "gemm SeGuRu: {:.3} us/iter (N={}, {} iters)",

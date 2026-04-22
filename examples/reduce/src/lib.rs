@@ -43,6 +43,69 @@ pub fn reduce_per_grid<C: Copy + Sync + Default + 'static + core::ops::Add<Outpu
     }
 }
 
+/// Direct CUDA-style parallel reduction (sum) — mirrors reduce.cu closely.
+///
+/// CUDA equivalent:
+///   __global__ void reduce_sum(const float *input, float *output, int n) {
+///       extern __shared__ float smem[];
+///       int tid = threadIdx.x;
+///       int idx = blockIdx.x * blockDim.x * 2 + threadIdx.x;
+///       float sum = 0.0f;
+///       if (idx < n) sum += input[idx];
+///       if (idx + blockDim.x < n) sum += input[idx + blockDim.x];
+///       smem[tid] = sum;
+///       __syncthreads();
+///       for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+///           if (tid < s) smem[tid] += smem[tid + s];
+///           __syncthreads();
+///       }
+///       if (tid == 0) output[blockIdx.x] = smem[0];
+///   }
+#[gpu::cuda_kernel(dynamic_shared)]
+pub fn reduce_sum(input: &[f32], output: &mut [f32], n: usize) {
+    let tid = thread_id::<DimX>();
+    let bdim = block_dim::<DimX>();
+    let idx = (block_id::<DimX>() * bdim * 2 + tid) as usize;
+
+    let smem = smem_alloc.alloc::<f32>(bdim as usize);
+    let mut smem_chunk = smem.chunk_mut(MapLinear::new(1));
+    let mut output_chunk = chunk_mut(
+        output,
+        reshape_map!([1] | [grid_dim::<DimX>()] => layout: [i0, t0]),
+    );
+
+    // Load two elements per thread
+    let mut sum = 0.0f32;
+    if idx < n {
+        sum += input[idx];
+    }
+    if idx + (bdim as usize) < n {
+        sum += input[idx + bdim as usize];
+    }
+    smem_chunk[0] = sum;
+    sync_threads();
+
+    // Tree reduction in shared memory
+    for order in (0..16).rev() {
+        let stride = 1u32 << order;
+        if stride >= bdim {
+            continue;
+        }
+        let mut smem_chunk = smem.chunk_mut(reshape_map!([2] | [stride] => layout: [t0, i0]));
+        if tid < stride {
+            let right = smem_chunk[1];
+            let left = smem_chunk[0];
+            smem_chunk[0] = left + right;
+        }
+        sync_threads();
+    }
+
+    // Thread 0 writes block result
+    if tid == 0 {
+        output_chunk[0] = *smem[0];
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -82,5 +145,58 @@ mod tests {
         test_reduce_per_grid(1024, 1, 256);
         test_reduce_per_grid(1024, 16, 16);
         test_reduce_per_grid(1024, 32, 16);
+    }
+
+    fn test_reduce_sum_impl(n: usize, block_size: u32) {
+        let num_blocks = ((n as u32) + block_size * 2 - 1) / (block_size * 2);
+        let h_input: Vec<f32> = vec![1.0; n];
+        let mut h_output: Vec<f32> = vec![0.0; num_blocks as usize];
+
+        cuda_ctx(0, |ctx, m| {
+            let d_input = ctx
+                .new_tensor_view(h_input.as_slice())
+                .expect("alloc failed");
+            let mut d_output = ctx
+                .new_tensor_view(h_output.as_mut_slice())
+                .expect("alloc failed");
+
+            let smem_bytes = block_size * core::mem::size_of::<f32>() as u32;
+            let config = gpu_host::gpu_config!(num_blocks, 1, 1, block_size, 1, 1, smem_bytes);
+            reduce_sum::launch(config, ctx, m, &d_input, &mut d_output, n)
+                .expect("reduce_sum kernel launch failed");
+
+            d_output
+                .copy_to_host(&mut h_output)
+                .expect("copy from device failed");
+        });
+
+        let total: f32 = h_output.iter().sum();
+        assert!(
+            (total - n as f32).abs() < 1e-2,
+            "reduce_sum: got {}, expected {}",
+            total,
+            n as f32
+        );
+    }
+
+    #[test]
+    fn test_reduce_sum_small() {
+        test_reduce_sum_impl(32, 16);
+    }
+
+    #[test]
+    fn test_reduce_sum_medium() {
+        test_reduce_sum_impl(1024, 256);
+    }
+
+    #[test]
+    fn test_reduce_sum_large() {
+        test_reduce_sum_impl(4096, 256);
+    }
+
+    #[test]
+    fn test_reduce_sum_remainder() {
+        // Non-multiple-of-block-size to catch OOB bugs
+        test_reduce_sum_impl(100, 16);
     }
 }

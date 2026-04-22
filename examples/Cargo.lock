@@ -18,6 +18,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
+name = "bench-perf"
+version = "0.1.0"
+dependencies = [
+ "gpu",
+ "gpu_host",
+]
+
+[[package]]
 name = "bindgen"
 version = "0.72.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -257,6 +265,158 @@ checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
  "libm",
+]
+
+[[package]]
+name = "polybench-atax"
+version = "0.1.0"
+dependencies = [
+ "gpu",
+ "gpu_host",
+]
+
+[[package]]
+name = "polybench-bicg"
+version = "0.1.0"
+dependencies = [
+ "gpu",
+ "gpu_host",
+]
+
+[[package]]
+name = "polybench-conv2d"
+version = "0.1.0"
+dependencies = [
+ "gpu",
+ "gpu_host",
+]
+
+[[package]]
+name = "polybench-conv3d"
+version = "0.1.0"
+dependencies = [
+ "gpu",
+ "gpu_host",
+]
+
+[[package]]
+name = "polybench-corr"
+version = "0.1.0"
+dependencies = [
+ "gpu",
+ "gpu_host",
+]
+
+[[package]]
+name = "polybench-covar"
+version = "0.1.0"
+dependencies = [
+ "gpu",
+ "gpu_host",
+]
+
+[[package]]
+name = "polybench-doitgen"
+version = "0.1.0"
+dependencies = [
+ "gpu",
+ "gpu_host",
+]
+
+[[package]]
+name = "polybench-fdtd2d"
+version = "0.1.0"
+dependencies = [
+ "gpu",
+ "gpu_host",
+]
+
+[[package]]
+name = "polybench-gemm"
+version = "0.1.0"
+dependencies = [
+ "gpu",
+ "gpu_host",
+]
+
+[[package]]
+name = "polybench-gesummv"
+version = "0.1.0"
+dependencies = [
+ "gpu",
+ "gpu_host",
+]
+
+[[package]]
+name = "polybench-gramschm"
+version = "0.1.0"
+dependencies = [
+ "gpu",
+ "gpu_host",
+]
+
+[[package]]
+name = "polybench-jacobi1d"
+version = "0.1.0"
+dependencies = [
+ "gpu",
+ "gpu_host",
+]
+
+[[package]]
+name = "polybench-jacobi2d"
+version = "0.1.0"
+dependencies = [
+ "gpu",
+ "gpu_host",
+]
+
+[[package]]
+name = "polybench-lu"
+version = "0.1.0"
+dependencies = [
+ "gpu",
+ "gpu_host",
+]
+
+[[package]]
+name = "polybench-mvt"
+version = "0.1.0"
+dependencies = [
+ "gpu",
+ "gpu_host",
+]
+
+[[package]]
+name = "polybench-syr2k"
+version = "0.1.0"
+dependencies = [
+ "gpu",
+ "gpu_host",
+]
+
+[[package]]
+name = "polybench-syrk"
+version = "0.1.0"
+dependencies = [
+ "gpu",
+ "gpu_host",
+]
+
+[[package]]
+name = "polybench-threemm"
+version = "0.1.0"
+dependencies = [
+ "gpu",
+ "gpu_host",
+]
+
+[[package]]
+name = "polybench-twomm"
+version = "0.1.0"
+dependencies = [
+ "gpu",
+ "gpu_host",
 ]
 
 [[package]]

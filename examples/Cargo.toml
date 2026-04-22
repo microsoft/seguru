@@ -28,6 +28,7 @@ members = [
     "syntax/gpu",
     "syntax/host",
     "vector_add",
+    "bench",
 ]
 resolver = "1"
 

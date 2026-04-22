@@ -26,6 +26,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "bench-polybench"
+version = "0.1.0"
+dependencies = [
+ "gpu",
+ "gpu_host",
+]
+
+[[package]]
 name = "bindgen"
 version = "0.72.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

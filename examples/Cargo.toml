@@ -29,6 +29,7 @@ members = [
     "syntax/host",
     "vector_add",
     "bench",
+    "bench-polybench",
 ]
 resolver = "1"
 

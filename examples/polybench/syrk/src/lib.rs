@@ -1,0 +1,75 @@
+use gpu::prelude::*;
+
+#[gpu::cuda_kernel]
+pub fn syrk_kernel(a: &[f32], c: &mut [f32], ni: usize, nj: usize, alpha: f32, beta: f32) {
+    let mut c = chunk_mut(c, Map2D::new(ni));
+    let j = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
+    let i = (block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>()) as usize;
+    if i < ni && j < ni {
+        let mut val = c[(0, 0)] * beta;
+        let mut k: usize = 0;
+        while k < nj {
+            val += alpha * a[i * nj + k] * a[j * nj + k];
+            k += 1;
+        }
+        c[(0, 0)] = val;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpu_host::cuda_ctx;
+
+    fn run_syrk(ni: usize, nj: usize, alpha: f32, beta: f32) -> (Vec<f32>, Vec<f32>) {
+        let h_a: Vec<f32> = vec![1.0; ni * nj];
+        let mut h_c_gpu: Vec<f32> = vec![0.0; ni * ni];
+        let mut h_c_cpu: Vec<f32> = vec![0.0; ni * ni];
+
+        // CPU reference
+        for i in 0..ni {
+            for j in 0..ni {
+                h_c_cpu[i * ni + j] *= beta;
+                for k in 0..nj {
+                    h_c_cpu[i * ni + j] += alpha * h_a[i * nj + k] * h_a[j * nj + k];
+                }
+            }
+        }
+
+        cuda_ctx(0, |ctx, m| {
+            let d_a = ctx.new_tensor_view(h_a.as_slice()).expect("alloc a");
+            let mut d_c = ctx
+                .new_tensor_view(h_c_gpu.as_mut_slice())
+                .expect("alloc c");
+
+            let block_size: u32 = 16;
+            let grid_x: u32 = (ni as u32 + block_size - 1) / block_size;
+            let grid_y: u32 = (ni as u32 + block_size - 1) / block_size;
+            let config =
+                gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
+            syrk_kernel::launch(config, ctx, m, &d_a, &mut d_c, ni, nj, alpha, beta)
+                .expect("kernel launch failed");
+
+            d_c.copy_to_host(&mut h_c_gpu).expect("copy failed");
+        });
+
+        (h_c_gpu, h_c_cpu)
+    }
+
+    #[test]
+    fn test_syrk() {
+        let ni = 32;
+        let nj = 32;
+        let (gpu, cpu) = run_syrk(ni, nj, 1.0, 0.0);
+        for i in 0..gpu.len() {
+            assert!(
+                (gpu[i] - cpu[i]).abs() < 1e-1,
+                "Mismatch at {}: gpu={} cpu={}",
+                i,
+                gpu[i],
+                cpu[i],
+            );
+        }
+        assert!((gpu[0] - 32.0).abs() < 1e-4, "Expected 32.0, got {}", gpu[0]);
+    }
+}

@@ -71,7 +71,7 @@ pub fn reduce_sum(input: &[f32], output: &mut [f32], n: usize) {
     let mut smem_chunk = smem.chunk_mut(MapLinear::new(1));
     let mut output_chunk = chunk_mut(
         output,
-        reshape_map!([1] | [grid_dim::<DimX>()] => layout: [i0, t0]),
+        reshape_map!([1] | [(bdim, 1), grid_dim::<DimX>()] => layout: [i0, t1, t0]),
     );
 
     // Load two elements per thread

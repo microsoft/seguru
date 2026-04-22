@@ -1,24 +1,21 @@
 use gpu::prelude::*;
 
-/// Vector addition: c[i] = a[i] + b[i], using a grid-stride loop.
+/// Vector addition: c[i] = a[i] + b[i].
 ///
 /// CUDA equivalent:
 ///   __global__ void vector_add(const float *a, const float *b, float *c, int n) {
 ///       int idx = blockIdx.x * blockDim.x + threadIdx.x;
-///       int stride = blockDim.x * gridDim.x;
-///       for (int i = idx; i < n; i += stride) {
-///           c[i] = a[i] + b[i];
-///       }
+///       if (idx < n) c[idx] = a[idx] + b[idx];
 ///   }
+///
+/// SeGuRu note: chunk_mut assigns each thread a local view; writes use local
+/// index 0, while reads use the global index on immutable slices.
 #[gpu::cuda_kernel]
 pub fn vector_add(a: &[f32], b: &[f32], c: &mut [f32], n: usize) {
     let mut c = chunk_mut(c, MapLinear::new(1));
     let idx = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
-    let stride = (block_dim::<DimX>() * grid_dim::<DimX>()) as usize;
-    let mut i = idx;
-    while i < n {
-        c[i] = a[i] + b[i];
-        i += stride;
+    if idx < n {
+        c[0] = a[idx] + b[idx];
     }
 }
 

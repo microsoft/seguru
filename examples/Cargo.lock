@@ -156,6 +156,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "histogram"
+version = "0.1.0"
+dependencies = [
+ "gpu",
+ "gpu_host",
+]
+
+[[package]]
 name = "itertools"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -412,6 +420,14 @@ name = "unicode-ident"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a5f39404a5da50712a4c1eecf25e90dd62b613502b7e925fd4e4d19b5c96512"
+
+[[package]]
+name = "vector_add"
+version = "0.1.0"
+dependencies = [
+ "gpu",
+ "gpu_host",
+]
 
 [[package]]
 name = "wasi"

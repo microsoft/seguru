@@ -1,0 +1,134 @@
+use gpu::prelude::*;
+use gpu::sync::{Atomic, SharedAtomic};
+
+const NUM_BINS: usize = 256;
+
+/// Histogram with shared memory + atomics.
+///
+/// CUDA equivalent:
+///   __global__ void histogram(const unsigned int *data, unsigned int *bins, int n) {
+///       __shared__ unsigned int smem_bins[256];
+///       int tid = threadIdx.x;
+///       int idx = blockIdx.x * blockDim.x + threadIdx.x;
+///       int stride = blockDim.x * gridDim.x;
+///       for (int i = tid; i < NUM_BINS; i += blockDim.x) smem_bins[i] = 0;
+///       __syncthreads();
+///       for (int i = idx; i < n; i += stride) atomicAdd(&smem_bins[data[i]], 1);
+///       __syncthreads();
+///       for (int i = tid; i < NUM_BINS; i += blockDim.x) atomicAdd(&bins[i], smem_bins[i]);
+///   }
+#[gpu::cuda_kernel(dynamic_shared)]
+pub fn histogram(data: &[u32], bins: &mut [u32], n: usize) {
+    let smem_bins = smem_alloc.alloc::<u32>(NUM_BINS);
+    let mut smem_chunk = smem_bins.chunk_mut(MapLinear::new(1));
+
+    let tid = thread_id::<DimX>();
+    let bdim = block_dim::<DimX>();
+    let idx = (block_id::<DimX>() * bdim + tid) as usize;
+    let stride = (bdim * grid_dim::<DimX>()) as usize;
+
+    // Initialize shared memory bins to zero
+    let mut i = tid as usize;
+    while i < NUM_BINS {
+        smem_chunk[0] = 0;
+        i += bdim as usize;
+    }
+    sync_threads();
+
+    // Accumulate into shared memory bins using atomics
+    let smem_atomic = SharedAtomic::new(smem_bins);
+    let mut i = idx;
+    while i < n {
+        let bin = data[i] as usize;
+        smem_atomic.index(bin).atomic_addi(1u32);
+        i += stride;
+    }
+    sync_threads();
+
+    // Merge shared memory bins into global bins using atomics
+    let bins_atomic = Atomic::new(bins);
+    let mut i = tid as usize;
+    while i < NUM_BINS {
+        let local_count = *smem_bins[i];
+        if local_count > 0 {
+            bins_atomic.index(i).atomic_addi(local_count);
+        }
+        i += bdim as usize;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpu_host::cuda_ctx;
+
+    #[test]
+    fn test_histogram_uniform() {
+        let n: usize = 1 << 16; // 65536
+        // Fill with values 0..255 repeating
+        let h_data: Vec<u32> = (0..n).map(|i| (i % NUM_BINS) as u32).collect();
+        let mut h_bins: Vec<u32> = vec![0u32; NUM_BINS];
+
+        cuda_ctx(0, |ctx, m| {
+            let d_data = ctx
+                .new_tensor_view(h_data.as_slice())
+                .expect("alloc data failed");
+            let mut d_bins = ctx
+                .new_tensor_view(h_bins.as_mut_slice())
+                .expect("alloc bins failed");
+
+            let block_size: u32 = 256;
+            let num_blocks: u32 = ((n as u32) + block_size - 1) / block_size;
+            let num_blocks = num_blocks.min(1024);
+            let smem_bytes = (NUM_BINS as u32) * core::mem::size_of::<u32>() as u32;
+            let config = gpu_host::gpu_config!(num_blocks, 1, 1, block_size, 1, 1, smem_bytes);
+            histogram::launch(config, ctx, m, &d_data, &mut d_bins, n)
+                .expect("histogram kernel launch failed");
+
+            d_bins
+                .copy_to_host(&mut h_bins)
+                .expect("copy from device failed");
+        });
+
+        let expected = (n / NUM_BINS) as u32;
+        for (i, count) in h_bins.iter().enumerate() {
+            assert_eq!(
+                *count, expected,
+                "Bin {} has count {}, expected {}",
+                i, count, expected
+            );
+        }
+    }
+
+    #[test]
+    fn test_histogram_single_bin() {
+        let n: usize = 1024;
+        // All values map to bin 42
+        let h_data: Vec<u32> = vec![42u32; n];
+        let mut h_bins: Vec<u32> = vec![0u32; NUM_BINS];
+
+        cuda_ctx(0, |ctx, m| {
+            let d_data = ctx
+                .new_tensor_view(h_data.as_slice())
+                .expect("alloc data failed");
+            let mut d_bins = ctx
+                .new_tensor_view(h_bins.as_mut_slice())
+                .expect("alloc bins failed");
+
+            let block_size: u32 = 256;
+            let num_blocks: u32 = ((n as u32) + block_size - 1) / block_size;
+            let smem_bytes = (NUM_BINS as u32) * core::mem::size_of::<u32>() as u32;
+            let config = gpu_host::gpu_config!(num_blocks, 1, 1, block_size, 1, 1, smem_bytes);
+            histogram::launch(config, ctx, m, &d_data, &mut d_bins, n)
+                .expect("histogram kernel launch failed");
+
+            d_bins
+                .copy_to_host(&mut h_bins)
+                .expect("copy from device failed");
+        });
+
+        assert_eq!(h_bins[42], n as u32, "Bin 42 should have all {} counts", n);
+        let total: u32 = h_bins.iter().sum();
+        assert_eq!(total, n as u32, "Total count should be {}", n);
+    }
+}

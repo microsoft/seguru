@@ -1,12 +1,14 @@
 [workspace]
 members = [
     "hello",
+    "histogram",
     "llm-rs-gpu",
     "matrix/matmul-gpu",
     "matrix/matmul-host",
     "reduce",
     "syntax/gpu",
     "syntax/host",
+    "vector_add",
 ]
 resolver = "1"
 

@@ -12,6 +12,15 @@ pub fn bench_vector_add(a: &[f32], b: &[f32], c: &mut [f32], n: usize) {
     }
 }
 
+#[gpu::cuda_kernel]
+pub fn bench_vector_add_u32(a: &[f32], b: &[f32], c: &mut [f32], n: u32) {
+    let mut c = chunk_mut(c, MapLinear::new(1));
+    let idx = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    if idx < n {
+        c[0] = a[idx as usize] + b[idx as usize];
+    }
+}
+
 #[gpu::cuda_kernel(dynamic_shared)]
 pub fn bench_reduce_sum(input: &[f32], output: &mut [f32], n: usize) {
     let tid = thread_id::<DimX>();
@@ -70,11 +79,56 @@ pub fn bench_gemm(a: &[f32], b: &[f32], c: &mut [f32], n: usize) {
     }
 }
 
+#[gpu::cuda_kernel]
+pub fn bench_gemm_u32(a: &[f32], b: &[f32], c: &mut [f32], n: u32) {
+    let mut c = chunk_mut(c, Map2D::new(n as usize));
+    let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
+    if i < n && j < n {
+        let mut sum = 0.0f32;
+        let mut k: u32 = 0;
+        while k < n {
+            sum += a[(i * n + k) as usize] * b[(k * n + j) as usize];
+            k += 1;
+        }
+        c[(0, 0)] = sum;
+    }
+}
+
 // ===== Main benchmark runner =====
 fn main() {
     let iters = 100;
 
     gpu_host::cuda_ctx(0, |ctx, m| {
+        // ----- Launch Overhead (empty-ish kernel) -----
+        {
+            let n: usize = 1;
+            let mut h_c = vec![0.0f32; n];
+            let h_a = vec![0.0f32; n];
+            let h_b = vec![0.0f32; n];
+            let d_a = ctx.new_tensor_view(h_a.as_slice()).unwrap();
+            let d_b = ctx.new_tensor_view(h_b.as_slice()).unwrap();
+            let mut d_c = ctx.new_tensor_view(h_c.as_mut_slice()).unwrap();
+
+            let config = gpu_host::gpu_config!(1, 1, 1, 1, 1, 1, 0);
+            bench_vector_add::launch(config, ctx, m, &d_a, &d_b, &mut d_c, n).unwrap();
+            ctx.sync().unwrap();
+
+            let launch_iters = 10000;
+            let start = Instant::now();
+            for _ in 0..launch_iters {
+                let config = gpu_host::gpu_config!(1, 1, 1, 1, 1, 1, 0);
+                bench_vector_add::launch(config, ctx, m, &d_a, &d_b, &mut d_c, n).unwrap();
+            }
+            ctx.sync().unwrap();
+            let elapsed = start.elapsed();
+            println!(
+                "launch_overhead SeGuRu: {:.3} us/launch ({} launches)",
+                elapsed.as_micros() as f64 / launch_iters as f64,
+                launch_iters
+            );
+        }
+
         // ----- Vector Add (N=1M) -----
         {
             let n: usize = 1 << 20;
@@ -100,7 +154,26 @@ fn main() {
             ctx.sync().unwrap();
             let elapsed = start.elapsed();
             println!(
-                "vector_add SeGuRu: {:.3} us/iter (N={}, {} iters)",
+                "vector_add (usize) SeGuRu: {:.3} us/iter (N={}, {} iters)",
+                elapsed.as_micros() as f64 / iters as f64,
+                n,
+                iters
+            );
+
+            // u32 version
+            let config = gpu_host::gpu_config!(nb, 1, 1, bs, 1, 1, 0);
+            bench_vector_add_u32::launch(config, ctx, m, &d_a, &d_b, &mut d_c, n as u32).unwrap();
+            ctx.sync().unwrap();
+
+            let start = Instant::now();
+            for _ in 0..iters {
+                let config = gpu_host::gpu_config!(nb, 1, 1, bs, 1, 1, 0);
+                bench_vector_add_u32::launch(config, ctx, m, &d_a, &d_b, &mut d_c, n as u32).unwrap();
+            }
+            ctx.sync().unwrap();
+            let elapsed = start.elapsed();
+            println!(
+                "vector_add (u32)   SeGuRu: {:.3} us/iter (N={}, {} iters)",
                 elapsed.as_micros() as f64 / iters as f64,
                 n,
                 iters
@@ -167,7 +240,26 @@ fn main() {
             ctx.sync().unwrap();
             let elapsed = start.elapsed();
             println!(
-                "gemm SeGuRu: {:.3} us/iter (N={}, {} iters)",
+                "gemm (usize) SeGuRu: {:.3} us/iter (N={}, {} iters)",
+                elapsed.as_micros() as f64 / iters as f64,
+                n,
+                iters
+            );
+
+            // ----- GEMM u32 -----
+            let config = gpu_host::gpu_config!(gx, gy, 1, bx, by, 1, 0);
+            bench_gemm_u32::launch(config, ctx, m, &d_a, &d_b, &mut d_c, n as u32).unwrap();
+            ctx.sync().unwrap();
+
+            let start = Instant::now();
+            for _ in 0..iters {
+                let config = gpu_host::gpu_config!(gx, gy, 1, bx, by, 1, 0);
+                bench_gemm_u32::launch(config, ctx, m, &d_a, &d_b, &mut d_c, n as u32).unwrap();
+            }
+            ctx.sync().unwrap();
+            let elapsed = start.elapsed();
+            println!(
+                "gemm (u32)   SeGuRu: {:.3} us/iter (N={}, {} iters)",
                 elapsed.as_micros() as f64 / iters as f64,
                 n,
                 iters

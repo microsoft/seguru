@@ -113,6 +113,65 @@ pub fn bench_gemm_slice(a: &[f32], b: &[f32], c: &mut [f32], n: usize) {
     }
 }
 
+// Shared-memory tiled GEMM using dynamic smem (no bounds checks on ld.shared)
+#[gpu::cuda_kernel(dynamic_shared)]
+pub fn bench_gemm_tiled(a: &[f32], b: &[f32], c: &mut [f32], n: u32) {
+    let mut c = chunk_mut(c, Map2D::new(n as usize));
+
+    let tx = thread_id::<DimX>();
+    let ty = thread_id::<DimY>();
+    let col = block_id::<DimX>() * 16 + tx;
+    let row = block_id::<DimY>() * 16 + ty;
+
+    // Dynamic shared memory — two 16x16 tiles
+    let tile_a = smem_alloc.alloc::<f32>(256); // 16*16
+    let tile_b = smem_alloc.alloc::<f32>(256); // 16*16
+
+    let mut sum = 0.0f32;
+
+    let num_tiles = (n + 15) / 16;
+    let mut t: u32 = 0;
+    while t < num_tiles {
+        // Load A[row][t*16 + tx] into tile_a
+        {
+            let a_col = t * 16 + tx;
+            let mut chunk_a = tile_a.chunk_mut(MapLinear::new(1));
+            if row < n && a_col < n {
+                chunk_a[0] = a[(row * n + a_col) as usize];
+            } else {
+                chunk_a[0] = 0.0;
+            }
+        }
+
+        // Load B[t*16 + ty][col] into tile_b
+        {
+            let b_row = t * 16 + ty;
+            let mut chunk_b = tile_b.chunk_mut(MapLinear::new(1));
+            if b_row < n && col < n {
+                chunk_b[0] = b[(b_row * n + col) as usize];
+            } else {
+                chunk_b[0] = 0.0;
+            }
+        }
+
+        sync_threads();
+
+        // Compute from shared memory — *smem[i] on dynamic alloc = direct ld.shared!
+        let mut k: u32 = 0;
+        while k < 16 {
+            sum += *tile_a[(ty * 16 + k) as usize] * *tile_b[(k * 16 + tx) as usize];
+            k += 1;
+        }
+
+        sync_threads();
+        t += 1;
+    }
+
+    if row < n && col < n {
+        c[(0, 0)] = sum;
+    }
+}
+
 // ===== Main benchmark runner =====
 fn main() {
     let iters = 100;
@@ -297,6 +356,26 @@ fn main() {
             let elapsed = start.elapsed();
             println!(
                 "gemm (slice) SeGuRu: {:.3} us/iter (N={}, {} iters)",
+                elapsed.as_micros() as f64 / iters as f64,
+                n,
+                iters
+            );
+
+            // ----- GEMM tiled (shared memory) -----
+            let smem_bytes: u32 = 2 * 16 * 16 * 4; // two 16x16 f32 tiles
+            let config = gpu_host::gpu_config!(gx, gy, 1, bx, by, 1, smem_bytes);
+            bench_gemm_tiled::launch(config, ctx, m, &d_a, &d_b, &mut d_c, n as u32).unwrap();
+            ctx.sync().unwrap();
+
+            let start = Instant::now();
+            for _ in 0..iters {
+                let config = gpu_host::gpu_config!(gx, gy, 1, bx, by, 1, smem_bytes);
+                bench_gemm_tiled::launch(config, ctx, m, &d_a, &d_b, &mut d_c, n as u32).unwrap();
+            }
+            ctx.sync().unwrap();
+            let elapsed = start.elapsed();
+            println!(
+                "gemm (tiled) SeGuRu: {:.3} us/iter (N={}, {} iters)",
                 elapsed.as_micros() as f64 / iters as f64,
                 n,
                 iters

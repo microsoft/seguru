@@ -28,11 +28,11 @@ pub fn histogram_kernel(data: &[u32], bins: &mut [u32], n: u32) {
 
     // Initialize shared memory bins to zero
     {
-        let mut smem_chunk = smem_bins.chunk_mut(MapLinear::new(1));
+        let mut smem_chunk = smem_bins.chunk_mut(MapContinuousLinear::new(1));
         let mut i: u32 = tid;
         let mut local_i: u32 = 0;
         while i < NUM_BINS as u32 {
-            smem_chunk[local_i as usize] = 0;
+            smem_chunk[local_i] = 0;
             i += bdim;
             local_i += 1;
         }

@@ -10,7 +10,7 @@ pub fn covar_mean_kernel(
     m: u32,
     n: u32,
 ) {
-    let mut mean = chunk_mut(mean, MapLinear::new(1));
+    let mut mean = chunk_mut(mean, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
 
     if j < m {
@@ -32,7 +32,7 @@ pub fn covar_reduce_kernel(
     m: u32,
     n: u32,
 ) {
-    let mut data = chunk_mut(data, MapLinear::new(1));
+    let mut data = chunk_mut(data, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
 

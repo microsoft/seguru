@@ -17,10 +17,11 @@ pub fn gemm_kernel(
 
     if i < ni && j < nj {
         let mut val = c[(0, 0)] * beta;
-        let mut k: u32 = 0;
-        while k < nk {
-            val += alpha * a[(i * nk + k) as usize] * b[(k * nj + j) as usize];
-            k += 1;
+        let a_row: &[f32] = &a[(i * nk) as usize..((i + 1) * nk) as usize];
+        let mut b_idx = j as usize;
+        for a_val in a_row {
+            val += alpha * a_val * b[b_idx];
+            b_idx += nj as usize;
         }
         c[(0, 0)] = val;
     }

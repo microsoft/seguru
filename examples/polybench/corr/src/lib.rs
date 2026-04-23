@@ -6,7 +6,7 @@ const EPS: f32 = 0.005;
 // mean[j] = sum_i(data[i*m+j]) / FLOAT_N
 #[gpu::cuda_kernel]
 pub fn corr_mean_kernel(data: &[f32], mean: &mut [f32], m: u32, n: u32) {
-    let mut mean = chunk_mut(mean, MapLinear::new(1));
+    let mut mean = chunk_mut(mean, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if j < m {
         let mut sum = 0.0f32;
@@ -28,7 +28,7 @@ pub fn corr_std_kernel(
     m: u32,
     n: u32,
 ) {
-    let mut stddev = chunk_mut(stddev, MapLinear::new(1));
+    let mut stddev = chunk_mut(stddev, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if j < m {
         let mut sum = 0.0f32;
@@ -54,7 +54,7 @@ pub fn corr_reduce_kernel(
     m: u32,
     n: u32,
 ) {
-    let mut data = chunk_mut(data, MapLinear::new(1));
+    let mut data = chunk_mut(data, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i < n && j < m {

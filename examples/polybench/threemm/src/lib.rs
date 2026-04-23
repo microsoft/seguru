@@ -16,10 +16,11 @@ pub fn mm3_kernel1(
 
     if i < ni && j < nj {
         let mut val = 0.0f32;
-        let mut k: u32 = 0;
-        while k < nk {
-            val += a[(i * nk + k) as usize] * b[(k * nj + j) as usize];
-            k += 1;
+        let a_row: &[f32] = &a[(i * nk) as usize..((i + 1) * nk) as usize];
+        let mut b_idx = j as usize;
+        for a_val in a_row {
+            val += a_val * b[b_idx];
+            b_idx += nj as usize;
         }
         e[(0, 0)] = val;
     }
@@ -41,10 +42,11 @@ pub fn mm3_kernel2(
 
     if i < nj && j < nl {
         let mut val = 0.0f32;
-        let mut k: u32 = 0;
-        while k < nm {
-            val += c[(i * nm + k) as usize] * d[(k * nl + j) as usize];
-            k += 1;
+        let c_row: &[f32] = &c[(i * nm) as usize..((i + 1) * nm) as usize];
+        let mut d_idx = j as usize;
+        for c_val in c_row {
+            val += c_val * d[d_idx];
+            d_idx += nl as usize;
         }
         f[(0, 0)] = val;
     }
@@ -66,10 +68,11 @@ pub fn mm3_kernel3(
 
     if i < ni && j < nl {
         let mut val = 0.0f32;
-        let mut k: u32 = 0;
-        while k < nj {
-            val += e[(i * nj + k) as usize] * f[(k * nl + j) as usize];
-            k += 1;
+        let e_row: &[f32] = &e[(i * nj) as usize..((i + 1) * nj) as usize];
+        let mut f_idx = j as usize;
+        for e_val in e_row {
+            val += e_val * f[f_idx];
+            f_idx += nl as usize;
         }
         g[(0, 0)] = val;
     }

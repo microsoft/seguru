@@ -3,7 +3,7 @@ use gpu::prelude::*;
 /// Step 1: update ey. Row 0 uses fict[t], others use stencil with hz.
 #[gpu::cuda_kernel]
 pub fn fdtd_step1(fict: &[f32], ey: &mut [f32], hz: &[f32], nx: u32, ny: u32, t: u32) {
-    let mut ey = chunk_mut(ey, MapLinear::new(1));
+    let mut ey = chunk_mut(ey, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i < nx && j < ny {
@@ -18,7 +18,7 @@ pub fn fdtd_step1(fict: &[f32], ey: &mut [f32], hz: &[f32], nx: u32, ny: u32, t:
 /// Step 2: update ex using hz stencil.
 #[gpu::cuda_kernel]
 pub fn fdtd_step2(ex: &mut [f32], hz: &[f32], nx: u32, ny: u32) {
-    let mut ex = chunk_mut(ex, MapLinear::new(1));
+    let mut ex = chunk_mut(ex, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i < nx && j > 0 && j < ny {
@@ -29,7 +29,7 @@ pub fn fdtd_step2(ex: &mut [f32], hz: &[f32], nx: u32, ny: u32) {
 /// Step 3: update hz using ex and ey stencils.
 #[gpu::cuda_kernel]
 pub fn fdtd_step3(ex: &[f32], ey: &[f32], hz: &mut [f32], nx: u32, ny: u32) {
-    let mut hz = chunk_mut(hz, MapLinear::new(1));
+    let mut hz = chunk_mut(hz, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i < nx - 1 && j < ny - 1 {

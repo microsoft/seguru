@@ -10,17 +10,17 @@ pub fn gesummv_kernel(
     alpha: f32,
     beta: f32,
 ) {
-    let mut y = chunk_mut(y, MapLinear::new(1));
+    let mut y = chunk_mut(y, MapContinuousLinear::new(1));
     let i = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
 
     if i < n {
         let mut tmp_val: f32 = 0.0;
         let mut y_val: f32 = 0.0;
-        let mut j: u32 = 0;
-        while j < n {
-            tmp_val += a[(i * n + j) as usize] * x[j as usize];
-            y_val += b[(i * n + j) as usize] * x[j as usize];
-            j += 1;
+        let a_row: &[f32] = &a[(i * n) as usize..((i + 1) * n) as usize];
+        let b_row: &[f32] = &b[(i * n) as usize..((i + 1) * n) as usize];
+        for j_idx in 0..n as usize {
+            tmp_val += a_row[j_idx] * x[j_idx];
+            y_val += b_row[j_idx] * x[j_idx];
         }
         y[0] = alpha * tmp_val + beta * y_val;
     }

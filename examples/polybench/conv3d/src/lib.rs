@@ -3,7 +3,7 @@ use gpu::prelude::*;
 /// 3D convolution kernel. Each thread computes one element of B from a 3x3x3 stencil of A.
 #[gpu::cuda_kernel]
 pub fn conv3d_kernel(a: &[f32], b: &mut [f32], ni: u32, nj: u32, nk: u32) {
-    let mut b = chunk_mut(b, MapLinear::new(1));
+    let mut b = chunk_mut(b, MapContinuousLinear::new(1));
     let k = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let ji = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     let j = ji % nj;

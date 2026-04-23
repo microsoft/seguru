@@ -12,7 +12,7 @@ use gpu::prelude::*;
 /// index 0, while reads use the global index on immutable slices.
 #[gpu::cuda_kernel]
 pub fn vector_add(a: &[f32], b: &[f32], c: &mut [f32], n: u32) {
-    let mut c = chunk_mut(c, MapLinear::new(1));
+    let mut c = chunk_mut(c, MapContinuousLinear::new(1));
     let idx = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if idx < n {
         c[0] = a[idx as usize] + b[idx as usize];

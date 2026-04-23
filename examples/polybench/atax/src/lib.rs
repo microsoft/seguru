@@ -2,14 +2,13 @@ use gpu::prelude::*;
 
 #[gpu::cuda_kernel]
 pub fn atax_kernel1(a: &[f32], x: &[f32], tmp: &mut [f32], nx: u32, ny: u32) {
-    let mut tmp = chunk_mut(tmp, MapLinear::new(1));
+    let mut tmp = chunk_mut(tmp, MapContinuousLinear::new(1));
     let i = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if i < nx {
         let mut sum = 0.0f32;
-        let mut j: u32 = 0;
-        while j < ny {
-            sum += a[(i * ny + j) as usize] * x[j as usize];
-            j += 1;
+        let a_row: &[f32] = &a[(i * ny) as usize..((i + 1) * ny) as usize];
+        for (j_idx, a_val) in a_row.iter().enumerate() {
+            sum += a_val * x[j_idx];
         }
         tmp[0] = sum;
     }
@@ -17,7 +16,7 @@ pub fn atax_kernel1(a: &[f32], x: &[f32], tmp: &mut [f32], nx: u32, ny: u32) {
 
 #[gpu::cuda_kernel]
 pub fn atax_kernel2(a: &[f32], tmp: &[f32], y: &mut [f32], nx: u32, ny: u32) {
-    let mut y = chunk_mut(y, MapLinear::new(1));
+    let mut y = chunk_mut(y, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if j < ny {
         let mut sum = 0.0f32;

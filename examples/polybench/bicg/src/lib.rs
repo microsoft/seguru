@@ -2,7 +2,7 @@ use gpu::prelude::*;
 
 #[gpu::cuda_kernel]
 pub fn bicg_kernel1(a: &[f32], r: &[f32], s: &mut [f32], nx: u32, ny: u32) {
-    let mut s = chunk_mut(s, MapLinear::new(1));
+    let mut s = chunk_mut(s, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if j < ny {
         let mut sum = 0.0f32;
@@ -17,14 +17,13 @@ pub fn bicg_kernel1(a: &[f32], r: &[f32], s: &mut [f32], nx: u32, ny: u32) {
 
 #[gpu::cuda_kernel]
 pub fn bicg_kernel2(a: &[f32], p: &[f32], q: &mut [f32], nx: u32, ny: u32) {
-    let mut q = chunk_mut(q, MapLinear::new(1));
+    let mut q = chunk_mut(q, MapContinuousLinear::new(1));
     let i = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if i < nx {
         let mut sum = 0.0f32;
-        let mut j: u32 = 0;
-        while j < ny {
-            sum += a[(i * ny + j) as usize] * p[j as usize];
-            j += 1;
+        let a_row: &[f32] = &a[(i * ny) as usize..((i + 1) * ny) as usize];
+        for (j_idx, a_val) in a_row.iter().enumerate() {
+            sum += a_val * p[j_idx];
         }
         q[0] = sum;
     }

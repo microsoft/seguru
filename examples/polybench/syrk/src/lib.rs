@@ -7,10 +7,10 @@ pub fn syrk_kernel(a: &[f32], c: &mut [f32], ni: u32, nj: u32, alpha: f32, beta:
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i < ni && j < ni {
         let mut val = c[(0, 0)] * beta;
-        let mut k: u32 = 0;
-        while k < nj {
-            val += alpha * a[(i * nj + k) as usize] * a[(j * nj + k) as usize];
-            k += 1;
+        let a_row_i: &[f32] = &a[(i * nj) as usize..((i + 1) * nj) as usize];
+        let a_row_j: &[f32] = &a[(j * nj) as usize..((j + 1) * nj) as usize];
+        for k in 0..nj as usize {
+            val += alpha * a_row_i[k] * a_row_j[k];
         }
         c[(0, 0)] = val;
     }

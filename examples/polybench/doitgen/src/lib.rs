@@ -11,17 +11,18 @@ pub fn doitgen_kernel1(
     nq: u32,
     np: u32,
 ) {
-    let mut sum_arr = chunk_mut(sum_arr, MapLinear::new(1));
+    let mut sum_arr = chunk_mut(sum_arr, MapContinuousLinear::new(1));
     let p = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let qr = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     let q = qr % nq;
     let r = qr / nq;
     if p < np && q < nq && r < nr {
         let mut val = 0.0f32;
-        let mut s: u32 = 0;
-        while s < np {
-            val += a[(r * (nq * np) + q * np + s) as usize] * c4[(s * np + p) as usize];
-            s += 1;
+        let a_row: &[f32] = &a[(r * (nq * np) + q * np) as usize..(r * (nq * np) + q * np + np) as usize];
+        let mut c4_idx = p as usize;
+        for a_val in a_row {
+            val += a_val * c4[c4_idx];
+            c4_idx += np as usize;
         }
         sum_arr[0] = val;
     }
@@ -36,7 +37,7 @@ pub fn doitgen_kernel2(
     nq: u32,
     np: u32,
 ) {
-    let mut a = chunk_mut(a, MapLinear::new(1));
+    let mut a = chunk_mut(a, MapContinuousLinear::new(1));
     let p = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let qr = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     let q = qr % nq;

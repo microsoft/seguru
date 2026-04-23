@@ -2,7 +2,7 @@ use gpu::prelude::*;
 
 #[gpu::cuda_kernel]
 pub fn conv2d_kernel(a: &[f32], b: &mut [f32], ni: u32, nj: u32) {
-    let mut b = chunk_mut(b, MapLinear::new(1));
+    let mut b = chunk_mut(b, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
 

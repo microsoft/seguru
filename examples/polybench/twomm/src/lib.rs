@@ -17,10 +17,11 @@ pub fn mm2_kernel1(
 
     if i < ni && j < nj {
         let mut val = 0.0f32;
-        let mut k: u32 = 0;
-        while k < nk {
-            val += alpha * a[(i * nk + k) as usize] * b[(k * nj + j) as usize];
-            k += 1;
+        let a_row: &[f32] = &a[(i * nk) as usize..((i + 1) * nk) as usize];
+        let mut b_idx = j as usize;
+        for a_val in a_row {
+            val += alpha * a_val * b[b_idx];
+            b_idx += nj as usize;
         }
         tmp[(0, 0)] = val;
     }
@@ -43,10 +44,11 @@ pub fn mm2_kernel2(
 
     if i < ni && j < nl {
         let mut val = d[(0, 0)] * beta;
-        let mut k: u32 = 0;
-        while k < nj {
-            val += tmp[(i * nj + k) as usize] * c[(k * nl + j) as usize];
-            k += 1;
+        let tmp_row: &[f32] = &tmp[(i * nj) as usize..((i + 1) * nj) as usize];
+        let mut c_idx = j as usize;
+        for t_val in tmp_row {
+            val += t_val * c[c_idx];
+            c_idx += nl as usize;
         }
         d[(0, 0)] = val;
     }

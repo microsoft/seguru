@@ -54,7 +54,7 @@ pub fn gramschm_kernel3b(
     nj: u32,
     k: u32,
 ) {
-    let mut a = chunk_mut(a, MapLinear::new(1));
+    let mut a = chunk_mut(a, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if j > k && j < nj && i < ni {

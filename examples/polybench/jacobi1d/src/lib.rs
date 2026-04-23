@@ -3,7 +3,7 @@ use gpu::prelude::*;
 /// B[i] = 0.33333 * (A[i-1] + A[i] + A[i+1])
 #[gpu::cuda_kernel]
 pub fn jacobi1d_kernel1(a: &[f32], b: &mut [f32], n: u32) {
-    let mut b = chunk_mut(b, MapLinear::new(1));
+    let mut b = chunk_mut(b, MapContinuousLinear::new(1));
     let i = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if i > 0 && i < n - 1 {
         b[0] = 0.33333 * (a[(i - 1) as usize] + a[i as usize] + a[(i + 1) as usize]);
@@ -13,7 +13,7 @@ pub fn jacobi1d_kernel1(a: &[f32], b: &mut [f32], n: u32) {
 /// A[j] = B[j]
 #[gpu::cuda_kernel]
 pub fn jacobi1d_kernel2(a: &mut [f32], b: &[f32], n: u32) {
-    let mut a = chunk_mut(a, MapLinear::new(1));
+    let mut a = chunk_mut(a, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if j > 0 && j < n - 1 {
         a[0] = b[j as usize];

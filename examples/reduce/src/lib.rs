@@ -11,7 +11,7 @@ pub fn reduce_per_grid<C: Copy + Sync + Default + 'static + core::ops::Add<Outpu
     let grid_dim = grid_dim::<DimX>();
     let grid_size = block_dim * grid_dim * 2;
     let smem = smem_alloc.alloc::<C>(block_dim as usize);
-    let mut smem_chunk = smem.chunk_mut(MapLinear::new(1));
+    let mut smem_chunk = smem.chunk_mut(MapContinuousLinear::new(1));
     let mut partial_sums_chunk = chunk_mut(
         partial_sums,
         reshape_map!([1] | [(block_dim, 1), grid_dim] => layout: [i0, t1, t0]),
@@ -68,7 +68,7 @@ pub fn reduce_sum(input: &[f32], output: &mut [f32], n: u32) {
     let idx = block_id::<DimX>() * bdim * 2 + tid;
 
     let smem = smem_alloc.alloc::<f32>(bdim as usize);
-    let mut smem_chunk = smem.chunk_mut(MapLinear::new(1));
+    let mut smem_chunk = smem.chunk_mut(MapContinuousLinear::new(1));
     let mut output_chunk = chunk_mut(
         output,
         reshape_map!([1] | [(bdim, 1), grid_dim::<DimX>()] => layout: [i0, t1, t0]),

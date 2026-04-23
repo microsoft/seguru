@@ -2,14 +2,13 @@ use gpu::prelude::*;
 
 #[gpu::cuda_kernel]
 pub fn mvt_kernel1(a: &[f32], x1: &mut [f32], y1: &[f32], n: u32) {
-    let mut x1 = chunk_mut(x1, MapLinear::new(1));
+    let mut x1 = chunk_mut(x1, MapContinuousLinear::new(1));
     let i = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if i < n {
         let mut sum = x1[0];
-        let mut j: u32 = 0;
-        while j < n {
-            sum += a[(i * n + j) as usize] * y1[j as usize];
-            j += 1;
+        let a_row: &[f32] = &a[(i * n) as usize..((i + 1) * n) as usize];
+        for (j_idx, a_val) in a_row.iter().enumerate() {
+            sum += a_val * y1[j_idx];
         }
         x1[0] = sum;
     }
@@ -17,7 +16,7 @@ pub fn mvt_kernel1(a: &[f32], x1: &mut [f32], y1: &[f32], n: u32) {
 
 #[gpu::cuda_kernel]
 pub fn mvt_kernel2(a: &[f32], x2: &mut [f32], y2: &[f32], n: u32) {
-    let mut x2 = chunk_mut(x2, MapLinear::new(1));
+    let mut x2 = chunk_mut(x2, MapContinuousLinear::new(1));
     let i = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if i < n {
         let mut sum = x2[0];

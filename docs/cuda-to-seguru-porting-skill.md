@@ -358,8 +358,67 @@ gpu_host::cuda_ctx(0, |ctx, m| {
     let mut d_out = ctx.new_tensor_view(h_out.as_mut_slice()).unwrap();
     let config = gpu_host::gpu_config!(grid, 1, 1, block, 1, 1, 0);
     kernel::launch(config, ctx, m, &d_inp, &mut d_out, n as u32).unwrap();
-    d_out.copy_to_host(&mut h_out).unwrap();
+    d_out.copy_to_host(&mut h_out).unwrap();  // ← REQUIRED, see Golden Rule #7
 });
+```
+
+### Golden Rule #7 (host-side) — readback is NOT automatic
+
+> `new_tensor_view(h_vec.as_mut_slice())` snapshots the host buffer to device
+> at construction. After a kernel writes to that `TensorViewMut`, you **must**
+> call `d_out.copy_to_host(&mut h_out).unwrap()` before reading or persisting
+> `h_out`. Dropping the `TensorViewMut` does **not** trigger a readback.
+>
+> Symptom if omitted: `h_out` stays all zeros (or its initial value), and
+> your downstream verification silently reports max-abs-err equal to the
+> magnitude of the expected output. Observed in 2/3 LLM phase-B ports.
+
+### Host recipe — bench + I/O scaffold (copy-paste starting point)
+
+```rust
+pub fn run(
+    ctx: &gpu_host::GpuCtxZeroGuard<'_, '_>,
+    md:  &gpu_host::GpuModule<gpu_host::CtxSpaceZero>,
+    in_dir: &std::path::Path, out_dir: &std::path::Path,
+    iters: usize, shape: &[usize],
+) -> (f64, f64) {
+    use std::time::Instant;
+    let n = shape.iter().product::<usize>();
+    // 1. Read input(s) from disk into host buffers.
+    let h_x = super::read_bin(&in_dir.join("x.bin"), n);
+    let mut h_y = vec![0f32; n];                     // (2) allocate output
+    // 3. Host → device. These calls copy in.
+    let d_x = ctx.new_tensor_view(h_x.as_slice()).unwrap();
+    let mut d_y = ctx.new_tensor_view(h_y.as_mut_slice()).unwrap();
+    // 4. Launch config (pick block/grid for YOUR kernel).
+    let nn = n as u32;
+    let bs: u32 = 256;
+    let gs: u32 = nn.div_ceil(bs);
+    // 5. Warmup + timed loops. gpu_config! is non-Copy → recreate each iter.
+    let wt = Instant::now();
+    for _ in 0..5 {
+        let cfg = gpu_host::gpu_config!(gs, 1, 1, bs, 1, 1, 0);
+        my_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, nn).unwrap();
+    }
+    ctx.sync().unwrap();
+    let warmup_us = wt.elapsed().as_micros() as f64 / 5.0;
+
+    let t = Instant::now();
+    for _ in 0..iters {
+        let cfg = gpu_host::gpu_config!(gs, 1, 1, bs, 1, 1, 0);
+        my_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, nn).unwrap();
+    }
+    ctx.sync().unwrap();
+    let kernel_us = t.elapsed().as_micros() as f64 / iters as f64;
+
+    // 6. REQUIRED: device → host before reading h_y. Skipping this silently
+    //    produces all-zeros output.
+    d_y.copy_to_host(&mut h_y).unwrap();
+    // 7. Persist output.
+    super::write_bin(&out_dir.join("y.bin"), &h_y);
+
+    (kernel_us, warmup_us)
+}
 ```
 
 ### Static block dimensions with `@const`
@@ -653,4 +712,27 @@ Even with a thorough skill doc, the *host plumbing* is what trips up LLMs,
 not the GPU code itself. Kernel authorship is well-covered; the missing
 piece is a "host recipe" section with explicit `read → device → launch →
 sync → copy_to_host → write` scaffolding that the LLM can copy verbatim.
+
+### Phase B.full results — safety vs. raw CUDA (same LLM)
+
+Same model (Claude Sonnet sub-agent, one-shot) was asked to port the
+same three problems to (a) SeGuRu using this skill doc and (b) raw CUDA
+with `torch::Tensor` + `PYBIND11_MODULE`. Both arms ran against the
+same PyTorch reference on identical input tensors. All six generated
+kernels use float4 vectorization + grid-stride + (SeGuRu: `reshape_map!` /
+`chunk_map`; CUDA: explicit `float4*` reinterpret).
+
+| Problem   | PyTorch    | SeGuRu         | Raw CUDA       | overhead |
+|-----------|-----------:|---------------:|---------------:|---------:|
+| leaky_relu| 7.68 ms    | 8.35 ms (0.92×)| 8.05 ms (0.95×)|    −3.7% |
+| tanh      | 7.67 ms    | 8.55 ms (0.90×)| 7.97 ms (0.96×)|    −7.3% |
+| rms_norm  | 24.25 ms   |16.50 ms (1.47×)|13.27 ms (1.83×)|    −24%  |
+
+Correctness: **3/3 for both arms** (max-abs-err ≤ 8e-6). On memory-bound
+elementwise ops the safety layer is invisible; on reductions SeGuRu
+currently pays ~20% vs. hand-managed shared memory in raw CUDA, but
+*both* arms still beat PyTorch. The conclusion for KernelBench-style
+LLM codegen: SeGuRu is a viable safe target whose `fast_N` scores
+should track raw CUDA closely on memory-bound L1, with a measurable
+but not disqualifying gap on reduction kernels.
 

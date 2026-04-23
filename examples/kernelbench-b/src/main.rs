@@ -38,6 +38,9 @@ pub mod layer_norm;
 pub mod sum_dim;
 pub mod l2_norm;
 
+// Parallel set of SeGuRu kernels translated from raw CUDA (not PyTorch).
+pub mod from_cuda;
+
 // ===== shared utilities (available to all problem modules) =====
 
 pub fn read_bin(path: &Path, n: usize) -> Vec<f32> {
@@ -121,6 +124,18 @@ fn main() {
             "layer_norm" => layer_norm::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "sum_dim"    => sum_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "l2_norm"    => l2_norm::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+
+            // from_cuda variants (SeGuRu translated from the raw-CUDA kernel).
+            "leaky_relu_fc" => from_cuda::leaky_relu::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "tanh_fc"       => from_cuda::tanh::run      (ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "rms_norm_fc"   => from_cuda::rms_norm::run  (ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "relu_fc"       => from_cuda::relu::run      (ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "sigmoid_fc"    => from_cuda::sigmoid::run   (ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "gelu_fc"       => from_cuda::gelu::run      (ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "softmax_fc"    => from_cuda::softmax::run   (ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "layer_norm_fc" => from_cuda::layer_norm::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "sum_dim_fc"    => from_cuda::sum_dim::run   (ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "l2_norm_fc"    => from_cuda::l2_norm::run   (ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             other => panic!("unknown problem: {other}"),
         };
         println!(

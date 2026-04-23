@@ -178,6 +178,19 @@ def run_one(name):
     except Exception as exc:
         sg_error = f"{type(exc).__name__}: {str(exc)[:80]}"
 
+    # SeGuRu-from-CUDA arm (same SeGuRu runtime, translated from the raw CUDA arm)
+    fc_us, fc_err, fc_error = float("inf"), float("inf"), ""
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = pathlib.Path(td); (tmp / "in").mkdir(); (tmp / "out").mkdir()
+            dump_bin(tmp / "in/x.bin", x)
+            fc = run_seguru(f"{name}_fc", tmp / "in", tmp / "out", iters=50, shape=p["in_shape"])
+            y_fc = torch.from_numpy(load_bin(tmp / "out/y.bin", tuple(p["out_shape"]))).cuda()
+            fc_err = float((y_fc - ref).abs().max())
+            fc_us = fc["kernel_us"]
+    except Exception as exc:
+        fc_error = f"{type(exc).__name__}: {str(exc)[:80]}"
+
     # CUDA arm
     cu_us, cu_err, cu_error = float("inf"), float("inf"), ""
     mod, err = compile_cuda(name)
@@ -196,6 +209,7 @@ def run_one(name):
         torch_us=torch_us,
         tc_us=tc_us, tc_err=tc_err, tc_error=tc_error,
         sg_us=sg_us, sg_err=sg_err, sg_error=sg_error,
+        fc_us=fc_us, fc_err=fc_err, fc_error=fc_error,
         cu_us=cu_us, cu_err=cu_err, cu_error=cu_error,
     )
 
@@ -208,9 +222,9 @@ def fmt(r):
     atol = r["atol"]
     return (f"  {r['problem']:12s}  "
             f"torch={r['torch_us']:7.1f}us  "
-            f"compile={arm(r['tc_us'], r['tc_err'], atol, r['tc_error'])}  "
             f"seguru={arm(r['sg_us'], r['sg_err'], atol, r['sg_error'])}  "
-            f"cuda={arm(r['cu_us'], r['cu_err'], atol, r['cu_error'])}")
+            f"cuda={arm(r['cu_us'], r['cu_err'], atol, r['cu_error'])}  "
+            f"seguru_fc={arm(r['fc_us'], r['fc_err'], atol, r['fc_error'])}")
 
 
 def main():
@@ -224,9 +238,9 @@ def main():
         results.append(r)
 
     print("\n=== summary (correctness + speedup vs torch-eager) ===")
-    for arm_us, arm_err, label in [("tc_us","tc_err","compile"),
-                                   ("sg_us","sg_err","seguru"),
-                                   ("cu_us","cu_err","cuda")]:
+    for arm_us, arm_err, label in [("sg_us","sg_err","seguru"),
+                                   ("cu_us","cu_err","cuda"),
+                                   ("fc_us","fc_err","seguru_fc")]:
         n = len(results)
         ok = [r for r in results if r[arm_err] <= max(r["atol"], 1e-3) and r[arm_us] != float("inf")]
         fast1 = [r for r in ok if r["torch_us"]/r[arm_us] >= 1.0]

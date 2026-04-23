@@ -835,38 +835,53 @@ softmax / norm categories. Same Claude Sonnet sub-agent ports each problem
 to both SeGuRu (with this skill doc) and raw CUDA (with the symmetric
 `docs/cuda-raw-kernel-skill.md`). Driver: `examples/kernelbench-b/python/compare2.py`.
 
-| Problem    | PyTorch eager | SeGuRu          | Raw CUDA        |
-|------------|--------------:|----------------:|----------------:|
-| leaky_relu |       640.9µs |  698.1µs (0.92×)|  668.3µs (0.96×)|
-| tanh       |       654.0µs |  707.2µs (0.92×)|  663.7µs (0.99×)|
-| relu       |       653.7µs |  696.9µs (0.94×)|  669.1µs (0.98×)|
-| sigmoid    |       655.5µs |  703.2µs (0.93×)|  664.5µs (0.99×)|
-| gelu       |       663.6µs |  728.9µs (0.91×)|  665.7µs (1.00×)|
-| softmax    |       229.5µs |  324.8µs (0.71×)|  244.6µs (0.94×)|
-| layer_norm |       261.5µs |  338.8µs (0.77×)|  215.3µs (1.21×)|
-| rms_norm   |     24269.7µs |16574.7µs (1.46×)|13268.3µs (1.83×)|
-| sum_dim    |       177.5µs |  225.2µs (0.79×)|  152.9µs (1.16×)|
-| l2_norm    |       452.9µs |  299.5µs (1.51×)|  208.4µs (2.17×)|
+| Problem    | PyTorch eager | SeGuRu           | Raw CUDA         | SeGuRu←CUDA      |
+|------------|--------------:|-----------------:|-----------------:|-----------------:|
+| leaky_relu |       640.9µs |   698.1µs (0.92×)|   668.3µs (0.96×)|   642.0µs (1.00×)|
+| tanh       |       654.0µs |   707.2µs (0.92×)|   663.7µs (0.99×)|   637.5µs (1.03×)|
+| relu       |       653.7µs |   696.9µs (0.94×)|   669.1µs (0.98×)|   642.3µs (1.02×)|
+| sigmoid    |       655.5µs |   703.2µs (0.93×)|   664.5µs (0.99×)|   641.0µs (1.02×)|
+| gelu       |       663.6µs |   728.9µs (0.91×)|   665.7µs (1.00×)|   641.2µs (1.04×)|
+| softmax    |       229.5µs |   324.8µs (0.71×)|   244.6µs (0.94×)|   308.6µs (0.74×)|
+| layer_norm |       261.5µs |   338.8µs (0.77×)|   215.3µs (1.21×)|   242.6µs (1.08×)|
+| rms_norm   |     24269.7µs | 16574.7µs (1.46×)| 13268.3µs (1.83×)| 13342.5µs (1.82×)|
+| sum_dim    |       177.5µs |   225.2µs (0.79×)|   152.9µs (1.16×)|   163.4µs (1.09×)|
+| l2_norm    |       452.9µs |   299.5µs (1.51×)|   208.4µs (2.17×)|   242.8µs (1.87×)|
 
 Aggregate (`fast_N` = pct of problems with speedup ≥ N× vs PyTorch eager):
 
-| Arm    | correct | fast_1 | fast_2 | avg speedup |
-|--------|--------:|-------:|-------:|------------:|
-| SeGuRu |   10/10 |    20% |     0% |       0.99× |
-| CUDA   |   10/10 |    40% |    10% |       1.22× |
+| Arm          | source          | correct | fast_1 | fast_2 | avg speedup |
+|--------------|-----------------|--------:|-------:|-------:|------------:|
+| SeGuRu       | PyTorch ref     |   10/10 |    20% |     0% |       0.99× |
+| Raw CUDA     | PyTorch ref     |   10/10 |    40% |    10% |       1.22× |
+| SeGuRu←CUDA  | the `.cu` files |   10/10 |    80% |     0% |       1.17× |
 
-`sum_dim` and `l2_norm` above reflect the re-port using the
-"Row-Reduction Strategy" section of this skill doc (the first-pass LLM
-sub-agent produced `sum_dim=2981.8µs` / `l2_norm=1675.3µs` — 13× and
-5.6× slower respectively — before the skill doc explicitly called out
-the 1-thread-per-row pitfall).
+Three ports of the same 10 problems, same LLM (Claude Sonnet sub-agents,
+one-shot, in parallel):
+- **SeGuRu** from the PyTorch reference + this skill doc.
+- **Raw CUDA** from the PyTorch reference + `docs/cuda-raw-kernel-skill.md`.
+- **SeGuRu←CUDA** mechanically translates each `.cu` kernel to SeGuRu
+  (see `examples/kernelbench-b/src/from_cuda/*.rs`) using this skill doc
+  only as a reference for how to spell CUDA primitives in SeGuRu; no
+  redesign.
 
-i.e. with the updated skill doc an LLM sub-agent matches PyTorch eager
-on average across 10 L1 problems (geomean ≈ 1.0× eager) while staying
-10/10 correct. The remaining raw-CUDA edge comes from two reductions
-(softmax, layer_norm) where SeGuRu still pays ~20-50% for its safety
-layer on cross-warp reduction scaffolding — addressable with further
-skill-doc tuning, not a fundamental ceiling.
+Key takeaways:
+- **Correctness parity holds across all three arms** — 10/10 one-shot.
+- **`SeGuRu←CUDA` essentially matches raw CUDA** (1.17× vs 1.22× avg, 80%
+  beat-PyTorch vs 40%). SeGuRu's safety layer costs very little when the
+  LLM mirrors a good CUDA kernel — the big gaps in the first SeGuRu
+  column came from the LLM picking a worse strategy when designing
+  from PyTorch, not from SeGuRu's runtime.
+- **`sum_dim` and `l2_norm` row-reduction improvement from the skill
+  doc update**: the first-pass SeGuRu port produced `sum_dim=2981.8µs`
+  (0.06× PyTorch) and `l2_norm=1675.3µs` (0.27×). After adding the
+  "Row-Reduction Strategy" section explicitly calling out the
+  1-thread-per-row pitfall, a re-port produced `sum_dim=225.2µs`
+  (13.2× speedup) and `l2_norm=299.5µs` (5.6× speedup). The skill doc
+  meaningfully changes LLM codegen behavior.
+- **The residual gap on `softmax` / `layer_norm`** is in the SeGuRu
+  runtime's cross-warp reduce scaffolding, not strategy — `SeGuRu←CUDA`
+  shows `layer_norm` matches raw CUDA within ~13% (1.08× vs 1.21×).
 - **Correctness parity holds at scale.** Both arms 10/10 on a one-shot
   prompt — the skill docs are sufficient context for an LLM to produce
   numerically-correct kernels across all four op categories tested.

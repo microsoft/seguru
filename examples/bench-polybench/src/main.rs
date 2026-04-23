@@ -8,7 +8,7 @@ use std::time::Instant;
 // --- conv2d ---
 #[gpu::cuda_kernel]
 pub fn bench_conv2d(a: &[f32], b: &mut [f32], ni: u32, nj: u32) {
-    let mut b = chunk_mut(b, MapLinear::new(1));
+    let mut b = chunk_mut(b, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     let c11: f32 = 0.2;
@@ -36,7 +36,7 @@ pub fn bench_conv2d(a: &[f32], b: &mut [f32], ni: u32, nj: u32) {
 // --- conv3d ---
 #[gpu::cuda_kernel]
 pub fn bench_conv3d(a: &[f32], b: &mut [f32], ni: u32, nj: u32, nk: u32) {
-    let mut b = chunk_mut(b, MapLinear::new(1));
+    let mut b = chunk_mut(b, MapContinuousLinear::new(1));
     let k = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let ij = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     let i = ij / nj;
@@ -99,10 +99,11 @@ pub fn bench_gemm(
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i < ni && j < nj {
         let mut val = c[(0, 0)] * beta;
-        let mut k: u32 = 0;
-        while k < nk {
-            val += alpha * a[(i * nk + k) as usize] * b[(k * nj + j) as usize];
-            k += 1;
+        let a_row: &[f32] = &a[(i * nk) as usize..((i + 1) * nk) as usize];
+        let mut b_idx = j as usize;
+        for a_val in a_row {
+            val += alpha * a_val * b[b_idx];
+            b_idx += nj as usize;
         }
         c[(0, 0)] = val;
     }
@@ -124,10 +125,11 @@ pub fn bench_mm2_kernel1(
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i < ni && j < nj {
         let mut val = 0.0f32;
-        let mut k: u32 = 0;
-        while k < nk {
-            val += alpha * a[(i * nk + k) as usize] * b[(k * nj + j) as usize];
-            k += 1;
+        let a_row: &[f32] = &a[(i * nk) as usize..((i + 1) * nk) as usize];
+        let mut b_idx = j as usize;
+        for a_val in a_row {
+            val += alpha * a_val * b[b_idx];
+            b_idx += nj as usize;
         }
         tmp[(0, 0)] = val;
     }
@@ -148,10 +150,11 @@ pub fn bench_mm2_kernel2(
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i < ni && l < nl {
         let mut val = d[(0, 0)] * beta;
-        let mut j: u32 = 0;
-        while j < nj {
-            val += tmp[(i * nj + j) as usize] * c[(j * nl + l) as usize];
-            j += 1;
+        let tmp_row: &[f32] = &tmp[(i * nj) as usize..((i + 1) * nj) as usize];
+        let mut c_idx = l as usize;
+        for t_val in tmp_row {
+            val += t_val * c[c_idx];
+            c_idx += nl as usize;
         }
         d[(0, 0)] = val;
     }
@@ -172,10 +175,11 @@ pub fn bench_mm3_kernel1(
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i < ni && j < nj {
         let mut val = 0.0f32;
-        let mut k: u32 = 0;
-        while k < nk {
-            val += a[(i * nk + k) as usize] * b[(k * nj + j) as usize];
-            k += 1;
+        let a_row: &[f32] = &a[(i * nk) as usize..((i + 1) * nk) as usize];
+        let mut b_idx = j as usize;
+        for a_val in a_row {
+            val += a_val * b[b_idx];
+            b_idx += nj as usize;
         }
         e[(0, 0)] = val;
     }
@@ -195,10 +199,11 @@ pub fn bench_mm3_kernel2(
     let j = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if j < nj && l < nl {
         let mut val = 0.0f32;
-        let mut m: u32 = 0;
-        while m < nm {
-            val += c[(j * nm + m) as usize] * d[(m * nl + l) as usize];
-            m += 1;
+        let c_row: &[f32] = &c[(j * nm) as usize..((j + 1) * nm) as usize];
+        let mut d_idx = l as usize;
+        for c_val in c_row {
+            val += c_val * d[d_idx];
+            d_idx += nl as usize;
         }
         f[(0, 0)] = val;
     }
@@ -218,10 +223,11 @@ pub fn bench_mm3_kernel3(
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i < ni && l < nl {
         let mut val = 0.0f32;
-        let mut j: u32 = 0;
-        while j < nj {
-            val += e[(i * nj + j) as usize] * f[(j * nl + l) as usize];
-            j += 1;
+        let e_row: &[f32] = &e[(i * nj) as usize..((i + 1) * nj) as usize];
+        let mut f_idx = l as usize;
+        for e_val in e_row {
+            val += e_val * f[f_idx];
+            f_idx += nl as usize;
         }
         g[(0, 0)] = val;
     }
@@ -230,14 +236,13 @@ pub fn bench_mm3_kernel3(
 // --- atax ---
 #[gpu::cuda_kernel]
 pub fn bench_atax_kernel1(a: &[f32], x: &[f32], tmp: &mut [f32], nx: u32, ny: u32) {
-    let mut tmp = chunk_mut(tmp, MapLinear::new(1));
+    let mut tmp = chunk_mut(tmp, MapContinuousLinear::new(1));
     let i = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if i < nx {
         let mut sum = 0.0f32;
-        let mut j: u32 = 0;
-        while j < ny {
-            sum += a[(i * ny + j) as usize] * x[j as usize];
-            j += 1;
+        let a_row: &[f32] = &a[(i * ny) as usize..((i + 1) * ny) as usize];
+        for (j_idx, a_val) in a_row.iter().enumerate() {
+            sum += a_val * x[j_idx];
         }
         tmp[0] = sum;
     }
@@ -245,7 +250,7 @@ pub fn bench_atax_kernel1(a: &[f32], x: &[f32], tmp: &mut [f32], nx: u32, ny: u3
 
 #[gpu::cuda_kernel]
 pub fn bench_atax_kernel2(a: &[f32], tmp: &[f32], y: &mut [f32], nx: u32, ny: u32) {
-    let mut y = chunk_mut(y, MapLinear::new(1));
+    let mut y = chunk_mut(y, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if j < ny {
         let mut sum = 0.0f32;
@@ -261,7 +266,7 @@ pub fn bench_atax_kernel2(a: &[f32], tmp: &[f32], y: &mut [f32], nx: u32, ny: u3
 // --- bicg ---
 #[gpu::cuda_kernel]
 pub fn bench_bicg_kernel1(a: &[f32], r: &[f32], s: &mut [f32], nx: u32, ny: u32) {
-    let mut s = chunk_mut(s, MapLinear::new(1));
+    let mut s = chunk_mut(s, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if j < ny {
         let mut sum = 0.0f32;
@@ -276,14 +281,13 @@ pub fn bench_bicg_kernel1(a: &[f32], r: &[f32], s: &mut [f32], nx: u32, ny: u32)
 
 #[gpu::cuda_kernel]
 pub fn bench_bicg_kernel2(a: &[f32], p: &[f32], q: &mut [f32], nx: u32, ny: u32) {
-    let mut q = chunk_mut(q, MapLinear::new(1));
+    let mut q = chunk_mut(q, MapContinuousLinear::new(1));
     let i = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if i < nx {
         let mut sum = 0.0f32;
-        let mut j: u32 = 0;
-        while j < ny {
-            sum += a[(i * ny + j) as usize] * p[j as usize];
-            j += 1;
+        let a_row: &[f32] = &a[(i * ny) as usize..((i + 1) * ny) as usize];
+        for (j_idx, a_val) in a_row.iter().enumerate() {
+            sum += a_val * p[j_idx];
         }
         q[0] = sum;
     }
@@ -292,14 +296,13 @@ pub fn bench_bicg_kernel2(a: &[f32], p: &[f32], q: &mut [f32], nx: u32, ny: u32)
 // --- mvt ---
 #[gpu::cuda_kernel]
 pub fn bench_mvt_kernel1(a: &[f32], x1: &mut [f32], y1: &[f32], n: u32) {
-    let mut x1 = chunk_mut(x1, MapLinear::new(1));
+    let mut x1 = chunk_mut(x1, MapContinuousLinear::new(1));
     let i = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if i < n {
         let mut sum = x1[0];
-        let mut j: u32 = 0;
-        while j < n {
-            sum += a[(i * n + j) as usize] * y1[j as usize];
-            j += 1;
+        let a_row: &[f32] = &a[(i * n) as usize..((i + 1) * n) as usize];
+        for (j_idx, a_val) in a_row.iter().enumerate() {
+            sum += a_val * y1[j_idx];
         }
         x1[0] = sum;
     }
@@ -307,7 +310,7 @@ pub fn bench_mvt_kernel1(a: &[f32], x1: &mut [f32], y1: &[f32], n: u32) {
 
 #[gpu::cuda_kernel]
 pub fn bench_mvt_kernel2(a: &[f32], x2: &mut [f32], y2: &[f32], n: u32) {
-    let mut x2 = chunk_mut(x2, MapLinear::new(1));
+    let mut x2 = chunk_mut(x2, MapContinuousLinear::new(1));
     let i = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if i < n {
         let mut sum = x2[0];
@@ -331,16 +334,18 @@ pub fn bench_gesummv(
     alpha: f32,
     beta: f32,
 ) {
-    let mut y = chunk_mut(y, MapLinear::new(1));
+    let mut y = chunk_mut(y, MapContinuousLinear::new(1));
     let i = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if i < n {
         let mut sum_a = 0.0f32;
         let mut sum_b = 0.0f32;
-        let mut j: u32 = 0;
-        while j < n {
-            sum_a += a[(i * n + j) as usize] * x[j as usize];
-            sum_b += b[(i * n + j) as usize] * x[j as usize];
-            j += 1;
+        let a_row: &[f32] = &a[(i * n) as usize..((i + 1) * n) as usize];
+        let b_row: &[f32] = &b[(i * n) as usize..((i + 1) * n) as usize];
+        let mut j_idx: usize = 0;
+        for a_val in a_row {
+            sum_a += a_val * x[j_idx];
+            sum_b += b_row[j_idx] * x[j_idx];
+            j_idx += 1;
         }
         y[0] = alpha * sum_a + beta * sum_b;
     }
@@ -362,11 +367,12 @@ pub fn bench_syr2k(
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i < ni && j <= i {
         let mut val = c[(0, 0)] * beta;
-        let mut k: u32 = 0;
-        while k < nj {
-            val += alpha * a[(i * nj + k) as usize] * b[(j * nj + k) as usize]
-                + alpha * b[(i * nj + k) as usize] * a[(j * nj + k) as usize];
-            k += 1;
+        let a_row_i: &[f32] = &a[(i * nj) as usize..((i + 1) * nj) as usize];
+        let b_row_j: &[f32] = &b[(j * nj) as usize..((j + 1) * nj) as usize];
+        let b_row_i: &[f32] = &b[(i * nj) as usize..((i + 1) * nj) as usize];
+        let a_row_j: &[f32] = &a[(j * nj) as usize..((j + 1) * nj) as usize];
+        for k in 0..nj as usize {
+            val += alpha * a_row_i[k] * b_row_j[k] + alpha * b_row_i[k] * a_row_j[k];
         }
         c[(0, 0)] = val;
     }
@@ -387,10 +393,10 @@ pub fn bench_syrk(
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i < ni && j <= i {
         let mut val = c[(0, 0)] * beta;
-        let mut k: u32 = 0;
-        while k < nj {
-            val += alpha * a[(i * nj + k) as usize] * a[(j * nj + k) as usize];
-            k += 1;
+        let a_row_i: &[f32] = &a[(i * nj) as usize..((i + 1) * nj) as usize];
+        let a_row_j: &[f32] = &a[(j * nj) as usize..((j + 1) * nj) as usize];
+        for k in 0..nj as usize {
+            val += alpha * a_row_i[k] * a_row_j[k];
         }
         c[(0, 0)] = val;
     }
@@ -402,7 +408,7 @@ const CORR_EPS: f32 = 0.005;
 
 #[gpu::cuda_kernel]
 pub fn bench_corr_mean(data: &[f32], mean: &mut [f32], m: u32, n: u32) {
-    let mut mean = chunk_mut(mean, MapLinear::new(1));
+    let mut mean = chunk_mut(mean, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if j < m {
         let mut sum = 0.0f32;
@@ -417,7 +423,7 @@ pub fn bench_corr_mean(data: &[f32], mean: &mut [f32], m: u32, n: u32) {
 
 #[gpu::cuda_kernel]
 pub fn bench_corr_std(data: &[f32], mean: &[f32], stddev: &mut [f32], m: u32, n: u32) {
-    let mut stddev = chunk_mut(stddev, MapLinear::new(1));
+    let mut stddev = chunk_mut(stddev, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if j < m {
         let mut sum = 0.0f32;
@@ -436,7 +442,7 @@ pub fn bench_corr_std(data: &[f32], mean: &[f32], stddev: &mut [f32], m: u32, n:
 
 #[gpu::cuda_kernel]
 pub fn bench_corr_reduce(mean: &[f32], stddev: &[f32], data: &mut [f32], m: u32, n: u32) {
-    let mut data = chunk_mut(data, MapLinear::new(1));
+    let mut data = chunk_mut(data, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i < n && j < m {
@@ -466,7 +472,7 @@ const COVAR_FLOAT_N: f32 = 3214212.01;
 
 #[gpu::cuda_kernel]
 pub fn bench_covar_mean(data: &[f32], mean: &mut [f32], m: u32, n: u32) {
-    let mut mean = chunk_mut(mean, MapLinear::new(1));
+    let mut mean = chunk_mut(mean, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if j < m {
         let mut sum = 0.0f32;
@@ -481,7 +487,7 @@ pub fn bench_covar_mean(data: &[f32], mean: &mut [f32], m: u32, n: u32) {
 
 #[gpu::cuda_kernel]
 pub fn bench_covar_reduce(mean: &[f32], data: &mut [f32], m: u32, n: u32) {
-    let mut data = chunk_mut(data, MapLinear::new(1));
+    let mut data = chunk_mut(data, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i < n && j < m {
@@ -515,17 +521,18 @@ pub fn bench_doitgen_kernel1(
     nq: u32,
     np: u32,
 ) {
-    let mut sum_arr = chunk_mut(sum_arr, MapLinear::new(1));
+    let mut sum_arr = chunk_mut(sum_arr, MapContinuousLinear::new(1));
     let p = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let qr = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     let q = qr % nq;
     let r = qr / nq;
     if p < np && q < nq && r < nr {
         let mut val = 0.0f32;
-        let mut s: u32 = 0;
-        while s < np {
-            val += a[(r * (nq * np) + q * np + s) as usize] * c4[(s * np + p) as usize];
-            s += 1;
+        let a_row: &[f32] = &a[(r * (nq * np) + q * np) as usize..(r * (nq * np) + q * np + np) as usize];
+        let mut c4_idx = p as usize;
+        for a_val in a_row {
+            val += a_val * c4[c4_idx];
+            c4_idx += np as usize;
         }
         sum_arr[0] = val;
     }
@@ -539,7 +546,7 @@ pub fn bench_doitgen_kernel2(
     nq: u32,
     np: u32,
 ) {
-    let mut a = chunk_mut(a, MapLinear::new(1));
+    let mut a = chunk_mut(a, MapContinuousLinear::new(1));
     let p = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let qr = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     let q = qr % nq;
@@ -559,7 +566,7 @@ pub fn bench_fdtd_step1(
     ny: u32,
     t: u32,
 ) {
-    let mut ey = chunk_mut(ey, MapLinear::new(1));
+    let mut ey = chunk_mut(ey, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i < nx && j < ny {
@@ -573,7 +580,7 @@ pub fn bench_fdtd_step1(
 
 #[gpu::cuda_kernel]
 pub fn bench_fdtd_step2(ex: &mut [f32], hz: &[f32], nx: u32, ny: u32) {
-    let mut ex = chunk_mut(ex, MapLinear::new(1));
+    let mut ex = chunk_mut(ex, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i < nx && j > 0 && j < ny {
@@ -583,7 +590,7 @@ pub fn bench_fdtd_step2(ex: &mut [f32], hz: &[f32], nx: u32, ny: u32) {
 
 #[gpu::cuda_kernel]
 pub fn bench_fdtd_step3(ex: &[f32], ey: &[f32], hz: &mut [f32], nx: u32, ny: u32) {
-    let mut hz = chunk_mut(hz, MapLinear::new(1));
+    let mut hz = chunk_mut(hz, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i < nx - 1 && j < ny - 1 {
@@ -644,7 +651,7 @@ pub fn bench_gramschm_kernel3b(
     nj: u32,
     k: u32,
 ) {
-    let mut a = chunk_mut(a, MapLinear::new(1));
+    let mut a = chunk_mut(a, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if j > k && j < nj && i < ni {
@@ -655,7 +662,7 @@ pub fn bench_gramschm_kernel3b(
 // --- jacobi1d ---
 #[gpu::cuda_kernel]
 pub fn bench_jacobi1d_kernel1(a: &[f32], b: &mut [f32], n: u32) {
-    let mut b = chunk_mut(b, MapLinear::new(1));
+    let mut b = chunk_mut(b, MapContinuousLinear::new(1));
     let i = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if i > 0 && i < n - 1 {
         b[0] = 0.33333 * (a[(i - 1) as usize] + a[i as usize] + a[(i + 1) as usize]);
@@ -664,7 +671,7 @@ pub fn bench_jacobi1d_kernel1(a: &[f32], b: &mut [f32], n: u32) {
 
 #[gpu::cuda_kernel]
 pub fn bench_jacobi1d_kernel2(a: &mut [f32], b: &[f32], n: u32) {
-    let mut a = chunk_mut(a, MapLinear::new(1));
+    let mut a = chunk_mut(a, MapContinuousLinear::new(1));
     let i = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if i > 0 && i < n - 1 {
         a[0] = b[i as usize];
@@ -679,7 +686,10 @@ pub fn bench_jacobi2d_kernel1(a: &[f32], b: &mut [f32], n: u32) {
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i > 0 && i < n - 1 && j > 0 && j < n - 1 {
         b[(0, 0)] = 0.2
-            * (a[(i * n + j) as usize] + a[(i * n + j - 1) as usize] + a[(i * n + j + 1) as usize] + a[((i + 1) * n + j) as usize]
+            * (a[(i * n + j) as usize]
+                + a[(i * n + (j - 1)) as usize]
+                + a[(i * n + (j + 1)) as usize]
+                + a[((i + 1) * n + j) as usize]
                 + a[((i - 1) * n + j) as usize]);
     }
 }

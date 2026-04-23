@@ -845,32 +845,21 @@ to both SeGuRu (with this skill doc) and raw CUDA (with the symmetric
 | softmax    |       229.5µs |  324.8µs (0.71×)|  244.6µs (0.94×)|
 | layer_norm |       261.5µs |  338.8µs (0.77×)|  215.3µs (1.21×)|
 | rms_norm   |     24269.7µs |16574.7µs (1.46×)|13268.3µs (1.83×)|
-| sum_dim    |       177.5µs | 2981.8µs (0.06×)|  152.9µs (1.16×)|
-| l2_norm    |       452.9µs | 1675.3µs (0.27×)|  208.4µs (2.17×)|
+| sum_dim    |       177.5µs |  225.2µs (0.79×)|  152.9µs (1.16×)|
+| l2_norm    |       452.9µs |  299.5µs (1.51×)|  208.4µs (2.17×)|
 
 Aggregate (`fast_N` = pct of problems with speedup ≥ N× vs PyTorch eager):
 
 | Arm    | correct | fast_1 | fast_2 | avg speedup |
 |--------|--------:|-------:|-------:|------------:|
-| SeGuRu |   10/10 |    10% |     0% |       0.79× |
-| CUDA   |   10/10 |    40% |    10% |       1.22× |
-
-After a follow-up re-port of `sum_dim` and `l2_norm` using the
-row-reduction guidance from this skill doc (one block per row, warp
-redux, shared-memory cross-warp reduce — see section "Row-Reduction
-Strategy" above), the SeGuRu arm closes most of the remaining gap:
-
-| Problem    | SeGuRu (before) | SeGuRu (after)  | speedup |
-|------------|----------------:|----------------:|--------:|
-| sum_dim    | 2981.8µs (0.06×)|  225.2µs (0.79×)|  13.2×  |
-| l2_norm    | 1675.3µs (0.27×)|  299.5µs (1.51×)|   5.6×  |
-
-Aggregate after re-port:
-
-| Arm    | correct | fast_1 | fast_2 | avg speedup |
-|--------|--------:|-------:|-------:|------------:|
 | SeGuRu |   10/10 |    20% |     0% |       0.99× |
 | CUDA   |   10/10 |    40% |    10% |       1.22× |
+
+`sum_dim` and `l2_norm` above reflect the re-port using the
+"Row-Reduction Strategy" section of this skill doc (the first-pass LLM
+sub-agent produced `sum_dim=2981.8µs` / `l2_norm=1675.3µs` — 13× and
+5.6× slower respectively — before the skill doc explicitly called out
+the 1-thread-per-row pitfall).
 
 i.e. with the updated skill doc an LLM sub-agent matches PyTorch eager
 on average across 10 L1 problems (geomean ≈ 1.0× eager) while staying

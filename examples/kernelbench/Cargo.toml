@@ -3,9 +3,17 @@ name = "kernelbench"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+bench = []
+
 [dependencies]
 gpu = { workspace = true }
 gpu_host = { workspace = true }
 
 [dev-dependencies]
 rand = "0.9"
+
+[[bin]]
+name = "bench"
+path = "src/bin/bench.rs"
+required-features = ["bench"]

@@ -113,8 +113,19 @@ pub fn bench_gemm_slice(a: &[f32], b: &[f32], c: &mut [f32], n: usize) {
     }
 }
 
-// Shared-memory tiled GEMM using dynamic smem (no bounds checks on ld.shared)
-#[gpu::cuda_kernel(dynamic_shared)]
+// Shared-memory tiled GEMM with 2x2 register tiling per thread.
+// Block = 16x16 threads, tile = 32x32 → each thread computes 4 output elements.
+// This amortizes shared-memory loads (+ bounds checks) across more FMAs.
+// Shared-memory tiled GEMM using static GpuShared + reshape_map+chunk_mut for loads.
+//
+// Pattern (user guidance: "use both reshape_map and chunk_mut"):
+// - Loads: per-thread disjoint slot via chunk_mut(reshape_map!...) — NO bounds checks
+//   on the shared-memory write (the map proves the per-thread slot is unique/in-range).
+// - Compute: raw indexing on GpuShared<[f32; 256]>. Bounds checks on ld.shared still
+//   appear because inner-loop indices (ty*16+k, k*16+tx) are broadcast (multiple
+//   threads read same slot), which chunk_mut's disjoint-ownership model cannot express.
+//   Register tiling (each thread computes NxM outputs) is the next optimization axis.
+#[gpu::cuda_kernel]
 pub fn bench_gemm_tiled(a: &[f32], b: &[f32], c: &mut [f32], n: u32) {
     let mut c = chunk_mut(c, Map2D::new(n as usize));
 
@@ -123,43 +134,42 @@ pub fn bench_gemm_tiled(a: &[f32], b: &[f32], c: &mut [f32], n: u32) {
     let col = block_id::<DimX>() * 16 + tx;
     let row = block_id::<DimY>() * 16 + ty;
 
-    // Dynamic shared memory — two 16x16 tiles
-    let tile_a = smem_alloc.alloc::<f32>(256); // 16*16
-    let tile_b = smem_alloc.alloc::<f32>(256); // 16*16
+    // Static shared tiles.
+    let mut tile_a = gpu::GpuShared::<[f32; 256]>::zero();
+    let mut tile_b = gpu::GpuShared::<[f32; 256]>::zero();
+
+    // Per-thread disjoint chunk: thread (tx, ty) owns slot tile[ty*16 + tx].
+    // layout [i0, t0, t1]: memory = t1*16 + t0 = ty*16 + tx.
+    let load_map = reshape_map!([1] | [16, 16] => layout: [i0, t0, t1]);
 
     let mut sum = 0.0f32;
-
     let num_tiles = (n + 15) / 16;
     let mut t: u32 = 0;
     while t < num_tiles {
-        // Load A[row][t*16 + tx] into tile_a
         {
+            let mut chunk_a = tile_a.chunk_mut(load_map);
             let a_col = t * 16 + tx;
-            let mut chunk_a = tile_a.chunk_mut(MapLinear::new(1));
-            if row < n && a_col < n {
-                chunk_a[0] = a[(row * n + a_col) as usize];
+            chunk_a[0] = if row < n && a_col < n {
+                a[(row * n + a_col) as usize]
             } else {
-                chunk_a[0] = 0.0;
-            }
+                0.0
+            };
         }
-
-        // Load B[t*16 + ty][col] into tile_b
         {
+            let mut chunk_b = tile_b.chunk_mut(load_map);
             let b_row = t * 16 + ty;
-            let mut chunk_b = tile_b.chunk_mut(MapLinear::new(1));
-            if b_row < n && col < n {
-                chunk_b[0] = b[(b_row * n + col) as usize];
+            chunk_b[0] = if b_row < n && col < n {
+                b[(b_row * n + col) as usize]
             } else {
-                chunk_b[0] = 0.0;
-            }
+                0.0
+            };
         }
 
         sync_threads();
 
-        // Compute from shared memory — *smem[i] on dynamic alloc = direct ld.shared!
         let mut k: u32 = 0;
         while k < 16 {
-            sum += *tile_a[(ty * 16 + k) as usize] * *tile_b[(k * 16 + tx) as usize];
+            sum += tile_a[(ty * 16 + k) as usize] * tile_b[(k * 16 + tx) as usize];
             k += 1;
         }
 
@@ -362,14 +372,13 @@ fn main() {
             );
 
             // ----- GEMM tiled (shared memory) -----
-            let smem_bytes: u32 = 2 * 16 * 16 * 4; // two 16x16 f32 tiles
-            let config = gpu_host::gpu_config!(gx, gy, 1, bx, by, 1, smem_bytes);
+            let config = gpu_host::gpu_config!(gx, gy, 1, bx, by, 1, 0);
             bench_gemm_tiled::launch(config, ctx, m, &d_a, &d_b, &mut d_c, n as u32).unwrap();
             ctx.sync().unwrap();
 
             let start = Instant::now();
             for _ in 0..iters {
-                let config = gpu_host::gpu_config!(gx, gy, 1, bx, by, 1, smem_bytes);
+                let config = gpu_host::gpu_config!(gx, gy, 1, bx, by, 1, 0);
                 bench_gemm_tiled::launch(config, ctx, m, &d_a, &d_b, &mut d_c, n as u32).unwrap();
             }
             ctx.sync().unwrap();

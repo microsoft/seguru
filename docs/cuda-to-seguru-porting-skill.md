@@ -170,37 +170,57 @@ for k in 0..nj as usize {
 
 **This is the most important pattern for compute-bound kernels.**
 
-Naive kernels that read from global memory in inner loops pay a bounds-check cost on every access (`setp+selp+ld.global`). Tiled kernels that load into shared memory first eliminate this — `ld.shared` has NO bounds checks.
+Tiled kernels load global memory into shared memory first. Combined with the right chunking pattern, this reduces global-memory bounds-check overhead AND provides data reuse.
 
-### Why it matters
-```
-Naive GEMM inner loop:  selp + selp + ld.global (per element) → 2× overhead
-Tiled GEMM inner loop:  ld.shared (per element) → no overhead → CUDA parity
-```
+### Bounds-check behavior (measured on PTX)
 
-### Pattern: Load tile → sync → compute from shared
+| Access pattern | PTX | Bounds check? |
+|---|---|---|
+| Global `a[idx]` (raw) | `setp + selp + ld.global.f32` | Yes (always) |
+| Global via subslice `&a[row*n..]` + iteration | `ld.global.f32` from local ptr | No (checked once at slice) |
+| Shared `*smem[idx]` on `smem_alloc.alloc(n)` | `setp.lt + selp + ld.shared.f32` | Yes |
+| Shared `tile[idx]` on `GpuShared<[f32; N]>` | `setp.lt + selp + ld.shared.f32` | Yes (compiler can't prove `ty*16+k < 256`) |
+| Shared via `chunk.chunk_mut(reshape_map)[i]` | `st.shared.f32` / `ld.shared.f32` direct | No (chunk map proves slot is in-range) |
+
+### Pattern: reshape_map + chunk_mut for LOADS (eliminates store-side bounds checks)
 ```rust
-// Load a tile from global into shared memory (bounds check here — amortized)
-let mut lhs_s = GpuShared::<[Float4; 8 * 128]>::zero();
-let mut rhs_s = GpuShared::<[Float4; 8 * 128]>::zero();
+let mut tile_a = GpuShared::<[f32; 256]>::zero();
+let mut tile_b = GpuShared::<[f32; 256]>::zero();
 
-for tile_offset in (0..K).step_by(TILE_SIZE) {
-    // Load tile (bounds checks happen here, once per tile)
-    let mut lhs_chunk = lhs_s.chunk_mut(tile_map);
-    let mut rhs_chunk = rhs_s.chunk_mut(tile_map);
-    // ... load from global into shared ...
-    sync_threads();
+// Each of 16x16 threads owns ONE disjoint slot (ty*16 + tx) in each tile.
+// layout [i0, t0, t1] → memory = t1*16 + t0 = ty*16 + tx.
+let load_map = reshape_map!([1] | [16, 16] => layout: [i0, t0, t1]);
 
-    // Compute from shared (NO bounds checks — ld.shared is direct)
-    for k in 0..TILE_SIZE {
-        // These reads from shared memory have zero overhead
-        sum += *lhs_s[...] * *rhs_s[...];
+for t in 0..num_tiles {
+    {
+        let mut chunk_a = tile_a.chunk_mut(load_map);
+        chunk_a[0] = /* value from global A */;  // NO bounds check on shared write
+    }
+    {
+        let mut chunk_b = tile_b.chunk_mut(load_map);
+        chunk_b[0] = /* value from global B */;
     }
     sync_threads();
+    // Compute phase ...
 }
 ```
 
-This is how the llm-rs matmul_forward_kernel4 achieves CUDA parity — it tiles 128×128 blocks with 8×8 elements per thread, using shared memory for the inner computation.
+### Honest limitation on COMPUTE phase
+
+The matmul inner loop reads `tile_a[ty*16+k]` (broadcast across tx) and `tile_b[k*16+tx]` (broadcast across ty). These are **broadcast reads** — multiple threads read the same slot. `chunk_mut`'s disjoint-partition model cannot express broadcast reads, so raw indexing `tile_a[idx]` is unavoidable in the compute loop. This means compute reads keep their `setp+selp` bounds check.
+
+**Measured impact (GEMM N=512, A100):**
+| Variant | µs | vs CUDA |
+|---|---|---|
+| Naive global (u32) | 293 | 2.93× |
+| Subslice rows | 201 | 2.01× |
+| Dynamic smem tiled, raw `*smem[i]` | 195 | 1.95× |
+| Static `GpuShared` + reshape_map loads | **182** | **1.82×** |
+| CUDA (hand-written) | 100 | 1.00× |
+
+### Closing the remaining gap
+
+The residual 1.82× vs CUDA comes from bounds checks on compute reads. Since these can't be eliminated structurally, the way to close the gap is to **amortize them** via register tiling: each thread computes NxM outputs instead of 1, reusing each shared load across multiple FMAs. This is what `llm-rs::matmul_forward_kernel4` does (8×8 register tile → 64 FMAs per pair of shared loads, achieving CUDA parity despite bounds checks on shared reads).
 
 ### When to use shared memory tiling
 - **Compute-bound kernels** with inner loops reading global memory (GEMM, convolution)
@@ -212,24 +232,22 @@ This is how the llm-rs matmul_forward_kernel4 achieves CUDA parity — it tiles 
 - Kernels with no data reuse across threads
 - Simple element-wise operations
 
-### Static shared memory
-```rust
-let mut smem = GpuShared::<[f32; 256]>::zero();
-let mut chunk = smem.chunk_mut(MapLinear::new(1));
-chunk[0] = value;  // write
-sync_threads();
-let val = *smem[i];  // read (dereference)
-```
+### Static vs dynamic shared memory
 
-### Dynamic shared memory
+Use `GpuShared::<[T; N]>::zero()` when the tile size is compile-time constant — simpler, no `dynamic_shared` attribute, no smem_bytes in launch config. Use `smem_alloc.alloc::<T>(n)` (with `#[gpu::cuda_kernel(dynamic_shared)]`) when size depends on launch-time parameters.
+
 ```rust
+// Static
+let mut smem = GpuShared::<[f32; 256]>::zero();
+let mut chunk = smem.chunk_mut(reshape_map!([1] | [16, 16] => layout: [i0, t0, t1]));
+chunk[0] = value;
+
+// Dynamic
 #[gpu::cuda_kernel(dynamic_shared)]
-pub fn kernel(input: &[f32], output: &mut [f32], n: u32) {
+pub fn kernel(...) {
     let smem = smem_alloc.alloc::<f32>(block_dim::<DimX>() as usize);
     let mut chunk = smem.chunk_mut(MapContinuousLinear::new(1));
     chunk[0] = value;
-    sync_threads();
-    let val = *smem[i as usize];
 }
 ```
 

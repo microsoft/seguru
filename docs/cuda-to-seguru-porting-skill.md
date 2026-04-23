@@ -106,11 +106,9 @@ for a_val in a_row {
 }
 ```
 
-### When to use subslice
-- **Row traversals** (contiguous memory): Always use subslice
-- **Column/stride traversals** (non-contiguous): Cannot subslice — keep per-element `while` loop
-- **Stencil access** (neighbor elements): Fixed number of accesses — subslice doesn't help
-- **Warp-strided access**: Use `while` loop with stride (see llm-rs pattern below)
+### When NOT to use subslice
+- **One element per row** (column access): Creating a subslice per row (`&data[i*m..(i+1)*m]` → `row[j]`) adds overhead when you only read one element. Keep per-element `data[(i*m+j) as usize]` with `.ldcs()` instead.
+- **Iterators with .enumerate()**: Can have ~20% overhead vs `while` loops in some patterns (noted in llm-rs). Benchmark both.
 
 ### Warp-strided subslice pattern (from llm-rs layernorm)
 When threads in a warp cooperatively process a row with stride:

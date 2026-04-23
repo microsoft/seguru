@@ -259,6 +259,8 @@ let val = x[i as usize].ldcs();   // cache-streaming load (bypass L1)
 out[idx].stcs(value);              // cache-streaming store
 ```
 
+**High impact for column-stride access patterns** — reduced corr/covar overhead from 3.09× to 2.27× (26% faster). Use `.ldcs()` for read-only arrays accessed with non-sequential strides (column traversals, strided patterns).
+
 ## Warp Operations
 
 ### Warp reductions (from llm-rs)
@@ -371,5 +373,5 @@ Note: `gpu_config!` returns a non-Copy type — recreate it before each `launch`
 | Stencil (fdtd2d, jacobi2d) | **1.0-1.3×** | Memory-bound, few accesses per thread |
 | GEMM-family with subslice | **1.7-2.0×** | Column-stride `b[]` still per-element |
 | Matrix-vector | **1.7-1.8×** | Mix of row (fast) and column (slow) access |
-| Column-heavy reductions (corr, covar) | **~3×** | All column access, no subslice possible |
+| Column-heavy reductions (corr, covar) | **~2.3×** | Column-stride access; `.ldcs()` helps significantly |
 | Iterative with many launches | **1.9×** | Launch overhead (4.7 vs 2.0 µs) accumulates |

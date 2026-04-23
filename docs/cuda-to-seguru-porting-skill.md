@@ -19,6 +19,7 @@ With idiomatic patterns applied:
 4. **Kernel function name must differ from crate name** — `histogram::histogram` causes MLIR mangling bug; use `histogram::histogram_kernel`
 5. **Tests must use helper functions** — don't put `cuda_ctx` closure directly in `#[test]` fns (causes `{}` in MLIR symbol names)
 6. **`chunk_mut` uses LOCAL indices** — write `c[0]`, not `c[global_idx]`
+7. **Row reductions need block- or warp-per-row, not 1-thread-per-row** — reusing the elementwise template (`gs=B.div_ceil(bs)`, `if row<B`) for `sum(x,dim=-1)`-style kernels underutilizes the GPU by 10–20×. See "Row-Reduction Strategy".
 
 ## Kernel Signature Translation
 
@@ -165,6 +166,97 @@ for k in 0..nj as usize {
     val += alpha * a_row_i[k] * a_row_j[k];
 }
 ```
+
+## Row-Reduction Strategy: Pick Parallelism Per Row, Not Per Thread
+
+**The #1 mistake LLMs make on reduction kernels** (`sum`, `mean`, `norm`,
+`max`, `softmax`, …). The "subslice for row" pattern above is correct for
+the *inner loop*, but it does NOT answer the question "how many threads
+should cooperate on one row?".
+
+Wrong choice here is a 10–20× performance cliff, not a 5% overhead.
+
+### The pitfall: 1 thread per row
+
+For `y[B] = sum(x[B, D], dim=-1)` with `B=128, D=16384`, an LLM that naively
+reuses the elementwise template writes:
+
+```rust
+// ❌ WRONG for small-B reductions: only 128 threads run — GPU is ~1% busy
+let row = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+if row < B {
+    let x_row = &x[(row * D) as usize..((row + 1) * D) as usize];
+    let mut sum = 0.0f32;
+    for v in x_row { sum += v; }
+    out[0] = sum;
+}
+```
+
+This is functionally correct but ~17× slower than raw CUDA in practice
+(measured on `sum_dim` in phase B.10). `B=128` threads can't saturate an
+A100; every row sequentially scans 16K floats on a single thread.
+
+### Decision table
+
+Pick the strategy based on `B` (row count) and `D` (row width):
+
+| `B` (rows) | `D` (row width) | Strategy                      | Grid / block                     |
+|-----------:|----------------:|-------------------------------|----------------------------------|
+| ≥ ~10×SM   | small (≤ ~128)  | 1 thread per row              | `gs = B/bs, bs = 256`            |
+| moderate   | ≤ ~1024         | 1 warp per row                | `gs = B/warps_per_block`, `bs = 32 * warps_per_block` |
+| small (≤ ~1K) | large (≥ ~1K)| **1 block per row**           | `gs = B`, `bs = 256 or 512`      |
+| small      | huge (≥ ~64K)   | 1 block per row + float4 loads| `gs = B`, `bs = 512`             |
+
+Rule of thumb: you want ≥ ~4× SM count worth of *resident threads*. An A100
+has 108 SMs, so aim for at least ~50K–100K concurrent threads. `B × threads_per_row`
+should land in that range.
+
+### Pattern: 1 block per row (the right sum_dim)
+
+```rust
+#[gpu::cuda_kernel]
+pub fn sum_dim_kernel(x: &[f32], y: &mut [f32], B: u32, D: u32) {
+    let mut out = chunk_mut(y, MapContinuousLinear::new(1));
+    let row = block_id::<DimX>();                         // 1 block = 1 row
+    let tid = thread_id::<DimX>();
+    let bdim = block_dim::<DimX>();
+
+    // Each thread strides across its row accumulating a partial sum.
+    let x_row = &x[(row * D) as usize..((row + 1) * D) as usize];
+    let mut partial = 0.0f32;
+    let mut i = tid as usize;
+    while i < D as usize {
+        partial += x_row[i];
+        i += bdim as usize;
+    }
+
+    // Warp reduce, then cross-warp via shared memory (see "Warp reductions"
+    // and "Tree reduction in shared memory" below).
+    // ... block-reduce `partial` into one scalar in thread 0 ...
+
+    if tid == 0 {
+        out[0] = /* block_sum */;
+    }
+}
+
+// Host: launch with gs = B, bs = 256.
+let cfg = gpu_host::gpu_config!(bb, 1, 1, 256, 1, 1, 0);
+```
+
+### Pattern: 1 warp per row (when D is moderate)
+
+Used in `layer_norm.rs` phase B.10. Each block hosts `warps_per_block` warps,
+and each warp owns one row. See `examples/kernelbench-b/src/layer_norm.rs`
+for a working template using `warp.subgroup_id()` to index within the block.
+
+### Red flags that you chose wrong
+
+- `gs = B.div_ceil(256)` on a reduction where `B < ~10_000` → 1 thread/row, too few threads.
+- No shared memory, no `warp.redux`, no tree reduction inside the kernel → you're not reducing cooperatively.
+- Only `block_id` is used to identify the output row, no `thread_id`/`lane` cooperation inside → fine only if `D` is tiny.
+
+If you wrote a reduction kernel that compiles and passes correctness but
+looks suspiciously similar to your elementwise template, re-read this section.
 
 ## Shared Memory Tiling: The Key to CUDA Parity
 

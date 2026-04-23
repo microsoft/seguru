@@ -606,3 +606,51 @@ say so explicitly instead of implying a 1.7-2.0× tile-only ratio is tight.
 - PyTorch: `python3 examples/kernelbench/python/run_torch_baseline.py`
 
 Both crates at `examples/kernelbench/`.
+
+## Case Study: KernelBench L1 (phase B — LLM-driven generation)
+
+Three fresh LLM sub-agents (Claude Sonnet, one-shot, access only to this skill
+doc + the phase-A examples) were asked to port:
+
+- **LeakyReLU** — elementwise with scalar param
+- **Tanh** — elementwise with intrinsic
+- **RMSNorm** — strided reduction over 4D `(B, C, H, W)` tensor along dim=1
+
+Results (after a 1-line host-side fix noted below):
+
+| problem | torch | LLM-generated SeGuRu | speedup |
+|---------|-------|----------------------|---------|
+| LeakyReLU (4096×393216) | 7.68 ms | 8.35 ms | 0.92× |
+| Tanh (4096×393216)      | 7.67 ms | 8.54 ms | 0.90× |
+| RMSNorm (112×64×512×512)| 24.2 ms | 16.5 ms | **1.47×** |
+
+All 3 compiled first try. All 3 kernels produced correct output. The LLM
+actually *beat* PyTorch on RMSNorm by picking a sensible two-kernel
+decomposition (one reduction kernel writing an `inv_rms` auxiliary buffer,
+one elementwise apply kernel) — faster than PyTorch's fused-but-temporary path.
+
+### The one observed LLM failure mode: host-side `copy_to_host`
+
+**2 of 3 sub-agents produced a silent correctness bug**: after running the
+kernel, they dropped the `TensorViewMut` *without* calling
+`d_out.copy_to_host(&mut h_out)`. This yielded all-zeros output without any
+warning. The skill doc does show the right pattern in "Host-Side Patterns /
+Basic launch" but it's a one-line comment-less call in a code block; LLMs
+focused on kernel design missed it.
+
+**Golden Rule #7 (host-side):**
+
+> After a kernel writes to a `TensorViewMut<[T]>` backed by a host vector,
+> you **must** call `d_out.copy_to_host(&mut h_out).unwrap()` before reading
+> or persisting `h_out`. `new_tensor_view` snapshots the host data to device
+> at construction; there is no automatic readback on drop. This is the single
+> most frequent mistake observed in LLM-generated ports — both Tanh and
+> LeakyReLU agents hit it while writing otherwise-correct kernels.
+
+### Takeaway for phase B
+
+Even with a thorough skill doc, the *host plumbing* is what trips up LLMs,
+not the GPU code itself. Kernel authorship is well-covered; the missing
+piece is a "host recipe" section with explicit `read → device → launch →
+sync → copy_to_host → write` scaffolding that the LLM can copy verbatim.
+

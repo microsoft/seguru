@@ -166,7 +166,51 @@ for k in 0..nj as usize {
 }
 ```
 
-## Shared Memory
+## Shared Memory Tiling: The Key to CUDA Parity
+
+**This is the most important pattern for compute-bound kernels.**
+
+Naive kernels that read from global memory in inner loops pay a bounds-check cost on every access (`setp+selp+ld.global`). Tiled kernels that load into shared memory first eliminate this — `ld.shared` has NO bounds checks.
+
+### Why it matters
+```
+Naive GEMM inner loop:  selp + selp + ld.global (per element) → 2× overhead
+Tiled GEMM inner loop:  ld.shared (per element) → no overhead → CUDA parity
+```
+
+### Pattern: Load tile → sync → compute from shared
+```rust
+// Load a tile from global into shared memory (bounds check here — amortized)
+let mut lhs_s = GpuShared::<[Float4; 8 * 128]>::zero();
+let mut rhs_s = GpuShared::<[Float4; 8 * 128]>::zero();
+
+for tile_offset in (0..K).step_by(TILE_SIZE) {
+    // Load tile (bounds checks happen here, once per tile)
+    let mut lhs_chunk = lhs_s.chunk_mut(tile_map);
+    let mut rhs_chunk = rhs_s.chunk_mut(tile_map);
+    // ... load from global into shared ...
+    sync_threads();
+
+    // Compute from shared (NO bounds checks — ld.shared is direct)
+    for k in 0..TILE_SIZE {
+        // These reads from shared memory have zero overhead
+        sum += *lhs_s[...] * *rhs_s[...];
+    }
+    sync_threads();
+}
+```
+
+This is how the llm-rs matmul_forward_kernel4 achieves CUDA parity — it tiles 128×128 blocks with 8×8 elements per thread, using shared memory for the inner computation.
+
+### When to use shared memory tiling
+- **Compute-bound kernels** with inner loops reading global memory (GEMM, convolution)
+- Kernels where the same data is read by multiple threads (reuse across threads)
+- When the naive kernel shows ≥1.5× overhead vs CUDA
+
+### When NOT to tile
+- **Memory-bound kernels** (vector_add, stencils) — already at parity
+- Kernels with no data reuse across threads
+- Simple element-wise operations
 
 ### Static shared memory
 ```rust

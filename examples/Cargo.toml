@@ -30,6 +30,7 @@ members = [
     "vector_add",
     "bench",
     "bench-polybench",
+    "bench-layernorm",
 ]
 resolver = "1"
 

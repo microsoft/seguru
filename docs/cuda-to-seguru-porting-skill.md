@@ -431,7 +431,110 @@ Note: `gpu_config!` returns a non-Copy type — recreate it before each `launch`
 |----------------|----------------------|-----------------|
 | Large compute, row access (syrk, syr2k) | **1.00×** | Compute-bound, subslice amortizes checks |
 | Stencil (fdtd2d, jacobi2d) | **1.0-1.3×** | Memory-bound, few accesses per thread |
+| Reductions with fused stats + Float4 (layernorm) | **1.05×** | Algorithm fusion + vector loads |
 | GEMM-family with subslice | **1.7-2.0×** | Column-stride `b[]` still per-element |
 | Matrix-vector | **1.7-1.8×** | Mix of row (fast) and column (slow) access |
 | Column-heavy reductions (corr, covar) | **~2.3×** | Column-stride access; `.ldcs()` helps significantly |
 | Iterative with many launches | **1.9×** | Launch overhead (4.7 vs 2.0 µs) accumulates |
+| Mechanical 1:1 port of memory-bound kernel | **1.3-1.5×** | See LayerNorm case study — port the algorithm, not syntax |
+
+## Case Study: PyTorch LayerNorm (algorithm > idioms)
+
+Porting PyTorch's `vectorized_layer_norm_kernel` revealed a critical nuance about
+how SeGuRu reaches CUDA parity. Three SeGuRu variants were written from scratch
+against a hand-tuned CUDA reference on M=8192, N=1024:
+
+| Variant | Algorithm | SeGuRu idioms | Time | vs CUDA |
+|---|---|---|---|---|
+| CUDA reference | Fused Welford + float4 + warp shfl | (hand-written CUDA) | 62.7 µs | 1.00× |
+| SeGuRu vectorized | Fused stats + Float4 | `reshape_map`, `ThreadWarpTile::redux`, subslice | **65.9 µs** | **1.05×** |
+| SeGuRu naive | 3-pass (mean, var, out), scalar, block-per-row | tree reduction only | 82.3 µs | 1.31× |
+| SeGuRu "idiomatic" | 3-pass scalar, warp-per-row | `reshape_map`, `redux`, `ldcs` | 89.7 µs | 1.43× |
+
+### The surprise: idioms ≠ performance
+
+The "idiomatic" variant — using every SeGuRu performance pattern (warp-cooperative
+reduction, `ldcs`, `reshape_map` strided output, subslice rows) — was **slower than
+the naive 1:1 port**. Both run the same 3-pass algorithm; the idiomatic version
+loses because one warp per row gives only 1024 blocks of parallelism vs the naive's
+8192 blocks.
+
+### The rule
+
+**Port the algorithm first, then the idioms.** A clean SeGuRu rendering of a bad
+algorithm will not reach parity. What unlocks parity is:
+
+1. **Fuse passes** — compute mean and variance in a single traversal (local `s` +
+   `sq` accumulators, two `warp.redux` calls). Halves global memory traffic for
+   memory-bound kernels.
+2. **Vectorize loads** — use `Float4` for contiguous reads/writes. Host side builds
+   `Vec<Float4>`; kernel declares `x: &[Float4]`; index as `x[i][k]` for lanes.
+3. **Then apply SeGuRu idioms** — `reshape_map!` for per-thread output slots,
+   `ThreadWarpTile::redux` for cross-lane reductions, subslice for row access.
+
+Only when the algorithm is right do SeGuRu's safety abstractions become free.
+
+### Implication for automated porting
+
+A mechanical CUDA→SeGuRu translator will land at 1.3–2.0× overhead even with
+perfect idiom usage, because the algorithmic opportunities (pass fusion, vector
+width selection, Welford online updates) require **semantic** rewrites, not
+syntactic translation. Automation should:
+
+- Detect multi-pass statistics (mean+var, max+sum) and fuse them.
+- Detect contiguous float loads of stride 4/8 and lift them to `Float4`/`Float8`.
+- Detect warp-reducible patterns and emit `ThreadWarpTile::redux`.
+- Leave block/grid geometry choices to a tuning pass — warp-per-row vs block-per-row
+  is workload-dependent.
+
+### Fused-stats warp kernel template
+
+```rust
+#[gpu::cuda_kernel]
+pub fn layernorm_vectorized(
+    x: &[Float4], gamma: &[Float4], beta: &[Float4], y: &mut [Float4],
+) {
+    let warp = ThreadWarpTile::<32>;
+    let warps_per_block = warp.meta_group_size();
+    let row = block_id::<DimX>() * warps_per_block + warp.subgroup_id();
+    let lane = warp.thread_rank();
+
+    const N4: u32 = N / 4;
+    let x_row = &x[(row * N4) as usize..((row + 1) * N4) as usize];
+
+    // ONE pass: accumulate sum and sumsq together.
+    let mut s = 0.0f32;
+    let mut sq = 0.0f32;
+    let mut i = lane;
+    while i < N4 {
+        let v: Float4 = x_row[i as usize];
+        for k in 0..4 { let vk = v[k]; s += vk; sq += vk * vk; }
+        i += warp.size();
+    }
+    let sum = warp.redux(ReduxAdd, s);
+    let sumsq = warp.redux(ReduxAdd, sq);
+    let inv_n = 1.0 / (N as f32);
+    let mean = sum * inv_n;
+    let rstd = (sumsq * inv_n - mean * mean + 1e-5).rsqrt();
+
+    // Strided Float4 output via reshape_map.
+    let mut y_chunk = chunk_mut(y, reshape_map!(
+        [N4 / 32] | [32, warps_per_block * grid_dim::<DimX>()] => layout: [t0, i0, t1]
+    ));
+    let mut slot = 0u32;
+    let mut i = lane;
+    while i < N4 {
+        let v = x_row[i as usize];
+        let g = gamma[i as usize];
+        let b = beta[i as usize];
+        let mut out = Float4::new([0.0; 4]);
+        for k in 0..4 { out[k] = (v[k] - mean) * rstd * g[k] + b[k]; }
+        y_chunk[slot] = out;
+        i += warp.size();
+        slot += 1;
+    }
+}
+```
+
+Source: `examples/bench-layernorm/` (all three variants + host harness); CUDA
+reference at `benchmarks/cuda/layernorm_pytorch.cu`.

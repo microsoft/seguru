@@ -7,15 +7,15 @@ pub fn gramschm_kernel2(
     a: &[f32],
     r_kk: f32,
     q: &mut [f32],
-    nj: usize,
-    ni: usize,
-    k: usize,
+    nj: u32,
+    ni: u32,
+    k: u32,
 ) {
-    let mut q = chunk_mut(q, Map2D::new(nj));
-    let j = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
-    let i = (block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>()) as usize;
+    let mut q = chunk_mut(q, Map2D::new(nj as usize));
+    let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i < ni && j == k {
-        q[(0, 0)] = a[i * nj + k] / r_kk;
+        q[(0, 0)] = a[(i * nj + k) as usize] / r_kk;
     }
 }
 
@@ -26,18 +26,18 @@ pub fn gramschm_kernel3a(
     q: &[f32],
     a: &[f32],
     r: &mut [f32],
-    ni: usize,
-    nj: usize,
-    k: usize,
+    ni: u32,
+    nj: u32,
+    k: u32,
 ) {
-    let mut r = chunk_mut(r, Map2D::new(nj));
-    let j = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
-    let row = (block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>()) as usize;
+    let mut r = chunk_mut(r, Map2D::new(nj as usize));
+    let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let row = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if row == k && j > k && j < nj {
         let mut sum = 0.0f32;
-        let mut i: usize = 0;
+        let mut i: u32 = 0;
         while i < ni {
-            sum += q[i * nj + k] * a[i * nj + j];
+            sum += q[(i * nj + k) as usize] * a[(i * nj + j) as usize];
             i += 1;
         }
         r[(0, 0)] = sum;
@@ -50,15 +50,15 @@ pub fn gramschm_kernel3b(
     q: &[f32],
     r: &[f32],
     a: &mut [f32],
-    ni: usize,
-    nj: usize,
-    k: usize,
+    ni: u32,
+    nj: u32,
+    k: u32,
 ) {
     let mut a = chunk_mut(a, MapLinear::new(1));
-    let j = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
-    let i = (block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>()) as usize;
+    let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if j > k && j < nj && i < ni {
-        a[0] = a[0] - q[i * nj + k] * r[k * nj + j];
+        a[0] = a[0] - q[(i * nj + k) as usize] * r[(k * nj + j) as usize];
     }
 }
 
@@ -138,7 +138,7 @@ mod tests {
                 let config =
                     gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
                 gramschm_kernel2::launch(
-                    config, ctx, m_module, &d_a, r_kk, &mut d_q, nj, ni, k,
+                    config, ctx, m_module, &d_a, r_kk, &mut d_q, nj as u32, ni as u32, k as u32,
                 )
                 .expect("kernel2 failed");
 
@@ -148,7 +148,7 @@ mod tests {
                 let config =
                     gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
                 gramschm_kernel3a::launch(
-                    config, ctx, m_module, &d_q, &d_a, &mut d_r, ni, nj, k,
+                    config, ctx, m_module, &d_q, &d_a, &mut d_r, ni as u32, nj as u32, k as u32,
                 )
                 .expect("kernel3a failed");
 
@@ -158,7 +158,7 @@ mod tests {
                 let config =
                     gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
                 gramschm_kernel3b::launch(
-                    config, ctx, m_module, &d_q, &d_r, &mut d_a, ni, nj, k,
+                    config, ctx, m_module, &d_q, &d_r, &mut d_a, ni as u32, nj as u32, k as u32,
                 )
                 .expect("kernel3b failed");
             }

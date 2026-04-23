@@ -11,11 +11,11 @@ use gpu::prelude::*;
 /// SeGuRu note: chunk_mut assigns each thread a local view; writes use local
 /// index 0, while reads use the global index on immutable slices.
 #[gpu::cuda_kernel]
-pub fn vector_add(a: &[f32], b: &[f32], c: &mut [f32], n: usize) {
+pub fn vector_add(a: &[f32], b: &[f32], c: &mut [f32], n: u32) {
     let mut c = chunk_mut(c, MapLinear::new(1));
-    let idx = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
+    let idx = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if idx < n {
-        c[0] = a[idx] + b[idx];
+        c[0] = a[idx as usize] + b[idx as usize];
     }
 }
 
@@ -41,7 +41,7 @@ mod tests {
             let block_size: u32 = 256;
             let num_blocks: u32 = ((n as u32) + block_size - 1) / block_size;
             let config = gpu_host::gpu_config!(num_blocks, 1, 1, block_size, 1, 1, 0);
-            vector_add::launch(config, ctx, m, &d_a, &d_b, &mut d_c, n)
+            vector_add::launch(config, ctx, m, &d_a, &d_b, &mut d_c, n as u32)
                 .expect("vector_add kernel launch failed");
 
             d_c.copy_to_host(&mut h_c).expect("copy from device failed");
@@ -74,7 +74,7 @@ mod tests {
             let block_size: u32 = 256;
             let num_blocks: u32 = ((n as u32) + block_size - 1) / block_size;
             let config = gpu_host::gpu_config!(num_blocks, 1, 1, block_size, 1, 1, 0);
-            vector_add::launch(config, ctx, m, &d_a, &d_b, &mut d_c, n)
+            vector_add::launch(config, ctx, m, &d_a, &d_b, &mut d_c, n as u32)
                 .expect("vector_add kernel launch failed");
 
             d_c.copy_to_host(&mut h_c).expect("copy from device failed");

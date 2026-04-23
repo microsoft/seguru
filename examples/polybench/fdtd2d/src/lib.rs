@@ -2,41 +2,41 @@ use gpu::prelude::*;
 
 /// Step 1: update ey. Row 0 uses fict[t], others use stencil with hz.
 #[gpu::cuda_kernel]
-pub fn fdtd_step1(fict: &[f32], ey: &mut [f32], hz: &[f32], nx: usize, ny: usize, t: usize) {
+pub fn fdtd_step1(fict: &[f32], ey: &mut [f32], hz: &[f32], nx: u32, ny: u32, t: u32) {
     let mut ey = chunk_mut(ey, MapLinear::new(1));
-    let j = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
-    let i = (block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>()) as usize;
+    let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i < nx && j < ny {
         if i == 0 {
-            ey[0] = fict[t];
+            ey[0] = fict[t as usize];
         } else {
-            ey[0] = ey[0] - 0.5 * (hz[i * ny + j] - hz[(i - 1) * ny + j]);
+            ey[0] = ey[0] - 0.5 * (hz[(i * ny + j) as usize] - hz[((i - 1) * ny + j) as usize]);
         }
     }
 }
 
 /// Step 2: update ex using hz stencil.
 #[gpu::cuda_kernel]
-pub fn fdtd_step2(ex: &mut [f32], hz: &[f32], nx: usize, ny: usize) {
+pub fn fdtd_step2(ex: &mut [f32], hz: &[f32], nx: u32, ny: u32) {
     let mut ex = chunk_mut(ex, MapLinear::new(1));
-    let j = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
-    let i = (block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>()) as usize;
+    let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i < nx && j > 0 && j < ny {
-        ex[0] = ex[0] - 0.5 * (hz[i * ny + j] - hz[i * ny + (j - 1)]);
+        ex[0] = ex[0] - 0.5 * (hz[(i * ny + j) as usize] - hz[(i * ny + (j - 1)) as usize]);
     }
 }
 
 /// Step 3: update hz using ex and ey stencils.
 #[gpu::cuda_kernel]
-pub fn fdtd_step3(ex: &[f32], ey: &[f32], hz: &mut [f32], nx: usize, ny: usize) {
+pub fn fdtd_step3(ex: &[f32], ey: &[f32], hz: &mut [f32], nx: u32, ny: u32) {
     let mut hz = chunk_mut(hz, MapLinear::new(1));
-    let j = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
-    let i = (block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>()) as usize;
+    let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i < nx - 1 && j < ny - 1 {
         hz[0] = hz[0]
             - 0.7
-                * (ex[i * ny + (j + 1)] - ex[i * ny + j] + ey[(i + 1) * ny + j]
-                    - ey[i * ny + j]);
+                * (ex[(i * ny + (j + 1)) as usize] - ex[(i * ny + j) as usize] + ey[((i + 1) * ny + j) as usize]
+                    - ey[(i * ny + j) as usize]);
     }
 }
 
@@ -102,12 +102,12 @@ mod tests {
 
             for t in 0..tmax {
                 let c1 = gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
-                fdtd_step1::launch(c1, ctx, m, &d_fict, &mut d_ey, &d_hz, nx, ny, t)
+                fdtd_step1::launch(c1, ctx, m, &d_fict, &mut d_ey, &d_hz, nx as u32, ny as u32, t as u32)
                     .expect("step1");
                 let c2 = gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
-                fdtd_step2::launch(c2, ctx, m, &mut d_ex, &d_hz, nx, ny).expect("step2");
+                fdtd_step2::launch(c2, ctx, m, &mut d_ex, &d_hz, nx as u32, ny as u32).expect("step2");
                 let c3 = gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
-                fdtd_step3::launch(c3, ctx, m, &d_ex, &d_ey, &mut d_hz, nx, ny)
+                fdtd_step3::launch(c3, ctx, m, &d_ex, &d_ey, &mut d_hz, nx as u32, ny as u32)
                     .expect("step3");
             }
 

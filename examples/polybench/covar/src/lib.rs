@@ -7,17 +7,17 @@ const FLOAT_N: f32 = 3214212.01;
 pub fn covar_mean_kernel(
     data: &[f32],
     mean: &mut [f32],
-    m: usize,
-    n: usize,
+    m: u32,
+    n: u32,
 ) {
     let mut mean = chunk_mut(mean, MapLinear::new(1));
-    let j = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
+    let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
 
     if j < m {
         let mut sum = 0.0f32;
-        let mut i: usize = 0;
+        let mut i: u32 = 0;
         while i < n {
-            sum += data[i * m + j];
+            sum += data[(i * m + j) as usize];
             i += 1;
         }
         mean[0] = sum / FLOAT_N;
@@ -29,15 +29,15 @@ pub fn covar_mean_kernel(
 pub fn covar_reduce_kernel(
     mean: &[f32],
     data: &mut [f32],
-    m: usize,
-    n: usize,
+    m: u32,
+    n: u32,
 ) {
     let mut data = chunk_mut(data, MapLinear::new(1));
-    let j = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
-    let i = (block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>()) as usize;
+    let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
 
     if i < n && j < m {
-        data[0] = data[0] - mean[j];
+        data[0] = data[0] - mean[j as usize];
     }
 }
 
@@ -46,18 +46,18 @@ pub fn covar_reduce_kernel(
 pub fn covar_kernel(
     data: &[f32],
     symmat: &mut [f32],
-    m: usize,
-    n: usize,
+    m: u32,
+    n: u32,
 ) {
-    let mut symmat = chunk_mut(symmat, Map2D::new(m));
-    let j2 = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
-    let j1 = (block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>()) as usize;
+    let mut symmat = chunk_mut(symmat, Map2D::new(m as usize));
+    let j2 = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let j1 = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
 
     if j1 < m && j2 < m {
         let mut sum = 0.0f32;
-        let mut i: usize = 0;
+        let mut i: u32 = 0;
         while i < n {
-            sum += data[i * m + j1] * data[i * m + j2];
+            sum += data[(i * m + j1) as usize] * data[(i * m + j2) as usize];
             i += 1;
         }
         symmat[(0, 0)] = sum;
@@ -126,7 +126,7 @@ mod tests {
             let config =
                 gpu_host::gpu_config!(grid_x, 1, 1, block_size, 1, 1, 0);
             covar_mean_kernel::launch(
-                config, ctx, m_module, &d_data_ro, &mut d_mean, m, n,
+                config, ctx, m_module, &d_data_ro, &mut d_mean, m as u32, n as u32,
             )
             .expect("mean kernel launch failed");
 
@@ -136,7 +136,7 @@ mod tests {
             let config =
                 gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
             covar_reduce_kernel::launch(
-                config, ctx, m_module, &d_mean, &mut d_data, m, n,
+                config, ctx, m_module, &d_mean, &mut d_data, m as u32, n as u32,
             )
             .expect("reduce kernel launch failed");
 
@@ -146,7 +146,7 @@ mod tests {
             let config =
                 gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
             covar_kernel::launch(
-                config, ctx, m_module, &d_data, &mut d_symmat, m, n,
+                config, ctx, m_module, &d_data, &mut d_symmat, m as u32, n as u32,
             )
             .expect("covar kernel launch failed");
 

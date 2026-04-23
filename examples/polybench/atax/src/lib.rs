@@ -1,14 +1,14 @@
 use gpu::prelude::*;
 
 #[gpu::cuda_kernel]
-pub fn atax_kernel1(a: &[f32], x: &[f32], tmp: &mut [f32], nx: usize, ny: usize) {
+pub fn atax_kernel1(a: &[f32], x: &[f32], tmp: &mut [f32], nx: u32, ny: u32) {
     let mut tmp = chunk_mut(tmp, MapLinear::new(1));
-    let i = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
+    let i = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if i < nx {
         let mut sum = 0.0f32;
-        let mut j: usize = 0;
+        let mut j: u32 = 0;
         while j < ny {
-            sum += a[i * ny + j] * x[j];
+            sum += a[(i * ny + j) as usize] * x[j as usize];
             j += 1;
         }
         tmp[0] = sum;
@@ -16,14 +16,14 @@ pub fn atax_kernel1(a: &[f32], x: &[f32], tmp: &mut [f32], nx: usize, ny: usize)
 }
 
 #[gpu::cuda_kernel]
-pub fn atax_kernel2(a: &[f32], tmp: &[f32], y: &mut [f32], nx: usize, ny: usize) {
+pub fn atax_kernel2(a: &[f32], tmp: &[f32], y: &mut [f32], nx: u32, ny: u32) {
     let mut y = chunk_mut(y, MapLinear::new(1));
-    let j = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
+    let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if j < ny {
         let mut sum = 0.0f32;
-        let mut i: usize = 0;
+        let mut i: u32 = 0;
         while i < nx {
-            sum += a[i * ny + j] * tmp[i];
+            sum += a[(i * ny + j) as usize] * tmp[i as usize];
             i += 1;
         }
         y[0] = sum;
@@ -45,11 +45,11 @@ mod tests {
 
             let bs: u32 = 256;
             let config1 = gpu_host::gpu_config!(((nx as u32) + bs - 1) / bs, 1, 1, bs, 1, 1, 0);
-            atax_kernel1::launch(config1, ctx, m, &d_a, &d_x, &mut d_tmp, nx, ny)
+            atax_kernel1::launch(config1, ctx, m, &d_a, &d_x, &mut d_tmp, nx as u32, ny as u32)
                 .expect("kernel1 launch failed");
 
             let config2 = gpu_host::gpu_config!(((ny as u32) + bs - 1) / bs, 1, 1, bs, 1, 1, 0);
-            atax_kernel2::launch(config2, ctx, m, &d_a, &d_tmp, &mut d_y, nx, ny)
+            atax_kernel2::launch(config2, ctx, m, &d_a, &d_tmp, &mut d_y, nx as u32, ny as u32)
                 .expect("kernel2 launch failed");
 
             d_y.copy_to_host(h_y).expect("copy failed");

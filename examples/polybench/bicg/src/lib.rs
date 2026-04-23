@@ -1,14 +1,14 @@
 use gpu::prelude::*;
 
 #[gpu::cuda_kernel]
-pub fn bicg_kernel1(a: &[f32], r: &[f32], s: &mut [f32], nx: usize, ny: usize) {
+pub fn bicg_kernel1(a: &[f32], r: &[f32], s: &mut [f32], nx: u32, ny: u32) {
     let mut s = chunk_mut(s, MapLinear::new(1));
-    let j = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
+    let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if j < ny {
         let mut sum = 0.0f32;
-        let mut i: usize = 0;
+        let mut i: u32 = 0;
         while i < nx {
-            sum += r[i] * a[i * ny + j];
+            sum += r[i as usize] * a[(i * ny + j) as usize];
             i += 1;
         }
         s[0] = sum;
@@ -16,14 +16,14 @@ pub fn bicg_kernel1(a: &[f32], r: &[f32], s: &mut [f32], nx: usize, ny: usize) {
 }
 
 #[gpu::cuda_kernel]
-pub fn bicg_kernel2(a: &[f32], p: &[f32], q: &mut [f32], nx: usize, ny: usize) {
+pub fn bicg_kernel2(a: &[f32], p: &[f32], q: &mut [f32], nx: u32, ny: u32) {
     let mut q = chunk_mut(q, MapLinear::new(1));
-    let i = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
+    let i = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if i < nx {
         let mut sum = 0.0f32;
-        let mut j: usize = 0;
+        let mut j: u32 = 0;
         while j < ny {
-            sum += a[i * ny + j] * p[j];
+            sum += a[(i * ny + j) as usize] * p[j as usize];
             j += 1;
         }
         q[0] = sum;
@@ -54,11 +54,11 @@ mod tests {
             let bs: u32 = 256;
 
             let config1 = gpu_host::gpu_config!(((ny as u32) + bs - 1) / bs, 1, 1, bs, 1, 1, 0);
-            bicg_kernel1::launch(config1, ctx, m, &d_a, &d_r, &mut d_s, nx, ny)
+            bicg_kernel1::launch(config1, ctx, m, &d_a, &d_r, &mut d_s, nx as u32, ny as u32)
                 .expect("kernel1 launch failed");
 
             let config2 = gpu_host::gpu_config!(((nx as u32) + bs - 1) / bs, 1, 1, bs, 1, 1, 0);
-            bicg_kernel2::launch(config2, ctx, m, &d_a, &d_p, &mut d_q, nx, ny)
+            bicg_kernel2::launch(config2, ctx, m, &d_a, &d_p, &mut d_q, nx as u32, ny as u32)
                 .expect("kernel2 launch failed");
 
             d_s.copy_to_host(h_s).expect("copy s failed");

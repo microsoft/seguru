@@ -2,21 +2,21 @@ use gpu::prelude::*;
 
 /// B[i] = 0.33333 * (A[i-1] + A[i] + A[i+1])
 #[gpu::cuda_kernel]
-pub fn jacobi1d_kernel1(a: &[f32], b: &mut [f32], n: usize) {
+pub fn jacobi1d_kernel1(a: &[f32], b: &mut [f32], n: u32) {
     let mut b = chunk_mut(b, MapLinear::new(1));
-    let i = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
+    let i = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if i > 0 && i < n - 1 {
-        b[0] = 0.33333 * (a[i - 1] + a[i] + a[i + 1]);
+        b[0] = 0.33333 * (a[(i - 1) as usize] + a[i as usize] + a[(i + 1) as usize]);
     }
 }
 
 /// A[j] = B[j]
 #[gpu::cuda_kernel]
-pub fn jacobi1d_kernel2(a: &mut [f32], b: &[f32], n: usize) {
+pub fn jacobi1d_kernel2(a: &mut [f32], b: &[f32], n: u32) {
     let mut a = chunk_mut(a, MapLinear::new(1));
-    let j = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
+    let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if j > 0 && j < n - 1 {
-        a[0] = b[j];
+        a[0] = b[j as usize];
     }
 }
 
@@ -46,9 +46,9 @@ mod tests {
 
             for _ in 0..tsteps {
                 let c1 = gpu_host::gpu_config!(nb, 1, 1, bs, 1, 1, 0);
-                jacobi1d_kernel1::launch(c1, ctx, m, &d_a, &mut d_b, n).expect("k1");
+                jacobi1d_kernel1::launch(c1, ctx, m, &d_a, &mut d_b, n as u32).expect("k1");
                 let c2 = gpu_host::gpu_config!(nb, 1, 1, bs, 1, 1, 0);
-                jacobi1d_kernel2::launch(c2, ctx, m, &mut d_a, &d_b, n).expect("k2");
+                jacobi1d_kernel2::launch(c2, ctx, m, &mut d_a, &d_b, n as u32).expect("k2");
             }
 
             d_a.copy_to_host(h_a).expect("copy a");

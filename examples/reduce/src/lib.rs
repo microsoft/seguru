@@ -62,10 +62,10 @@ pub fn reduce_per_grid<C: Copy + Sync + Default + 'static + core::ops::Add<Outpu
 ///       if (tid == 0) output[blockIdx.x] = smem[0];
 ///   }
 #[gpu::cuda_kernel(dynamic_shared)]
-pub fn reduce_sum(input: &[f32], output: &mut [f32], n: usize) {
+pub fn reduce_sum(input: &[f32], output: &mut [f32], n: u32) {
     let tid = thread_id::<DimX>();
     let bdim = block_dim::<DimX>();
-    let idx = (block_id::<DimX>() * bdim * 2 + tid) as usize;
+    let idx = block_id::<DimX>() * bdim * 2 + tid;
 
     let smem = smem_alloc.alloc::<f32>(bdim as usize);
     let mut smem_chunk = smem.chunk_mut(MapLinear::new(1));
@@ -77,10 +77,10 @@ pub fn reduce_sum(input: &[f32], output: &mut [f32], n: usize) {
     // Load two elements per thread
     let mut sum = 0.0f32;
     if idx < n {
-        sum += input[idx];
+        sum += input[idx as usize];
     }
-    if idx + (bdim as usize) < n {
-        sum += input[idx + bdim as usize];
+    if idx + bdim < n {
+        sum += input[(idx + bdim) as usize];
     }
     smem_chunk[0] = sum;
     sync_threads();
@@ -162,7 +162,7 @@ mod tests {
 
             let smem_bytes = block_size * core::mem::size_of::<f32>() as u32;
             let config = gpu_host::gpu_config!(num_blocks, 1, 1, block_size, 1, 1, smem_bytes);
-            reduce_sum::launch(config, ctx, m, &d_input, &mut d_output, n)
+            reduce_sum::launch(config, ctx, m, &d_input, &mut d_output, n as u32)
                 .expect("reduce_sum kernel launch failed");
 
             d_output

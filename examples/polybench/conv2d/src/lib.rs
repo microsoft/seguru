@@ -1,10 +1,10 @@
 use gpu::prelude::*;
 
 #[gpu::cuda_kernel]
-pub fn conv2d_kernel(a: &[f32], b: &mut [f32], ni: usize, nj: usize) {
+pub fn conv2d_kernel(a: &[f32], b: &mut [f32], ni: u32, nj: u32) {
     let mut b = chunk_mut(b, MapLinear::new(1));
-    let j = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
-    let i = (block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>()) as usize;
+    let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
 
     let c11: f32 = 0.2;
     let c21: f32 = 0.5;
@@ -17,15 +17,15 @@ pub fn conv2d_kernel(a: &[f32], b: &mut [f32], ni: usize, nj: usize) {
     let c33: f32 = 0.10;
 
     if i > 0 && i < ni - 1 && j > 0 && j < nj - 1 {
-        b[0] = c11 * a[(i - 1) * nj + (j - 1)]
-            + c21 * a[(i - 1) * nj + j]
-            + c31 * a[(i - 1) * nj + (j + 1)]
-            + c12 * a[i * nj + (j - 1)]
-            + c22 * a[i * nj + j]
-            + c32 * a[i * nj + (j + 1)]
-            + c13 * a[(i + 1) * nj + (j - 1)]
-            + c23 * a[(i + 1) * nj + j]
-            + c33 * a[(i + 1) * nj + (j + 1)];
+        b[0] = c11 * a[((i - 1) * nj + (j - 1)) as usize]
+            + c21 * a[((i - 1) * nj + j) as usize]
+            + c31 * a[((i - 1) * nj + (j + 1)) as usize]
+            + c12 * a[(i * nj + (j - 1)) as usize]
+            + c22 * a[(i * nj + j) as usize]
+            + c32 * a[(i * nj + (j + 1)) as usize]
+            + c13 * a[((i + 1) * nj + (j - 1)) as usize]
+            + c23 * a[((i + 1) * nj + j) as usize]
+            + c33 * a[((i + 1) * nj + (j + 1)) as usize];
     }
 }
 
@@ -76,7 +76,7 @@ mod tests {
             let grid_y: u32 = (ni as u32 + block_size - 1) / block_size;
             let config =
                 gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
-            conv2d_kernel::launch(config, ctx, m, &d_a, &mut d_b, ni, nj)
+            conv2d_kernel::launch(config, ctx, m, &d_a, &mut d_b, ni as u32, nj as u32)
                 .expect("kernel launch failed");
 
             d_b.copy_to_host(&mut h_b_gpu).expect("copy failed");

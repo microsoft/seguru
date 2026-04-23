@@ -6,20 +6,20 @@ pub fn gesummv_kernel(
     b: &[f32],
     x: &[f32],
     y: &mut [f32],
-    n: usize,
+    n: u32,
     alpha: f32,
     beta: f32,
 ) {
     let mut y = chunk_mut(y, MapLinear::new(1));
-    let i = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
+    let i = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
 
     if i < n {
         let mut tmp_val: f32 = 0.0;
         let mut y_val: f32 = 0.0;
-        let mut j: usize = 0;
+        let mut j: u32 = 0;
         while j < n {
-            tmp_val += a[i * n + j] * x[j];
-            y_val += b[i * n + j] * x[j];
+            tmp_val += a[(i * n + j) as usize] * x[j as usize];
+            y_val += b[(i * n + j) as usize] * x[j as usize];
             j += 1;
         }
         y[0] = alpha * tmp_val + beta * y_val;
@@ -61,7 +61,7 @@ mod tests {
             let num_blocks: u32 = (n as u32 + block_size - 1) / block_size;
             let config = gpu_host::gpu_config!(num_blocks, 1, 1, block_size, 1, 1, 0);
             gesummv_kernel::launch(
-                config, ctx, m, &d_a, &d_b, &d_x, &mut d_y, n, alpha, beta,
+                config, ctx, m, &d_a, &d_b, &d_x, &mut d_y, n as u32, alpha, beta,
             )
             .expect("kernel launch failed");
 

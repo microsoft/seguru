@@ -6,19 +6,19 @@ pub fn mm3_kernel1(
     a: &[f32],
     b: &[f32],
     e: &mut [f32],
-    ni: usize,
-    nj: usize,
-    nk: usize,
+    ni: u32,
+    nj: u32,
+    nk: u32,
 ) {
-    let mut e = chunk_mut(e, Map2D::new(nj));
-    let j = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
-    let i = (block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>()) as usize;
+    let mut e = chunk_mut(e, Map2D::new(nj as usize));
+    let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
 
     if i < ni && j < nj {
         let mut val = 0.0f32;
-        let mut k: usize = 0;
+        let mut k: u32 = 0;
         while k < nk {
-            val += a[i * nk + k] * b[k * nj + j];
+            val += a[(i * nk + k) as usize] * b[(k * nj + j) as usize];
             k += 1;
         }
         e[(0, 0)] = val;
@@ -31,19 +31,19 @@ pub fn mm3_kernel2(
     c: &[f32],
     d: &[f32],
     f: &mut [f32],
-    nj: usize,
-    nl: usize,
-    nm: usize,
+    nj: u32,
+    nl: u32,
+    nm: u32,
 ) {
-    let mut f = chunk_mut(f, Map2D::new(nl));
-    let j = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
-    let i = (block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>()) as usize;
+    let mut f = chunk_mut(f, Map2D::new(nl as usize));
+    let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
 
     if i < nj && j < nl {
         let mut val = 0.0f32;
-        let mut k: usize = 0;
+        let mut k: u32 = 0;
         while k < nm {
-            val += c[i * nm + k] * d[k * nl + j];
+            val += c[(i * nm + k) as usize] * d[(k * nl + j) as usize];
             k += 1;
         }
         f[(0, 0)] = val;
@@ -56,19 +56,19 @@ pub fn mm3_kernel3(
     e: &[f32],
     f: &[f32],
     g: &mut [f32],
-    ni: usize,
-    nj: usize,
-    nl: usize,
+    ni: u32,
+    nj: u32,
+    nl: u32,
 ) {
-    let mut g = chunk_mut(g, Map2D::new(nl));
-    let j = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
-    let i = (block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>()) as usize;
+    let mut g = chunk_mut(g, Map2D::new(nl as usize));
+    let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
 
     if i < ni && j < nl {
         let mut val = 0.0f32;
-        let mut k: usize = 0;
+        let mut k: u32 = 0;
         while k < nj {
-            val += e[i * nj + k] * f[k * nl + j];
+            val += e[(i * nj + k) as usize] * f[(k * nl + j) as usize];
             k += 1;
         }
         g[(0, 0)] = val;
@@ -144,7 +144,7 @@ mod tests {
             let config =
                 gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
             mm3_kernel1::launch(
-                config, ctx, m, &d_a, &d_b, &mut d_e, ni, nj, nk,
+                config, ctx, m, &d_a, &d_b, &mut d_e, ni as u32, nj as u32, nk as u32,
             )
             .expect("kernel1 launch failed");
 
@@ -154,7 +154,7 @@ mod tests {
             let config =
                 gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
             mm3_kernel2::launch(
-                config, ctx, m, &d_c, &d_d, &mut d_f, nj, nl, nm,
+                config, ctx, m, &d_c, &d_d, &mut d_f, nj as u32, nl as u32, nm as u32,
             )
             .expect("kernel2 launch failed");
 
@@ -164,7 +164,7 @@ mod tests {
             let config =
                 gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
             mm3_kernel3::launch(
-                config, ctx, m, &d_e, &d_f, &mut d_g, ni, nj, nl,
+                config, ctx, m, &d_e, &d_f, &mut d_g, ni as u32, nj as u32, nl as u32,
             )
             .expect("kernel3 launch failed");
 

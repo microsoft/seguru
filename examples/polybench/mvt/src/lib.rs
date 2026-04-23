@@ -1,14 +1,14 @@
 use gpu::prelude::*;
 
 #[gpu::cuda_kernel]
-pub fn mvt_kernel1(a: &[f32], x1: &mut [f32], y1: &[f32], n: usize) {
+pub fn mvt_kernel1(a: &[f32], x1: &mut [f32], y1: &[f32], n: u32) {
     let mut x1 = chunk_mut(x1, MapLinear::new(1));
-    let i = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
+    let i = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if i < n {
         let mut sum = x1[0];
-        let mut j: usize = 0;
+        let mut j: u32 = 0;
         while j < n {
-            sum += a[i * n + j] * y1[j];
+            sum += a[(i * n + j) as usize] * y1[j as usize];
             j += 1;
         }
         x1[0] = sum;
@@ -16,14 +16,14 @@ pub fn mvt_kernel1(a: &[f32], x1: &mut [f32], y1: &[f32], n: usize) {
 }
 
 #[gpu::cuda_kernel]
-pub fn mvt_kernel2(a: &[f32], x2: &mut [f32], y2: &[f32], n: usize) {
+pub fn mvt_kernel2(a: &[f32], x2: &mut [f32], y2: &[f32], n: u32) {
     let mut x2 = chunk_mut(x2, MapLinear::new(1));
-    let i = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
+    let i = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if i < n {
         let mut sum = x2[0];
-        let mut j: usize = 0;
+        let mut j: u32 = 0;
         while j < n {
-            sum += a[j * n + i] * y2[j];
+            sum += a[(j * n + i) as usize] * y2[j as usize];
             j += 1;
         }
         x2[0] = sum;
@@ -54,11 +54,11 @@ mod tests {
             let num_blocks: u32 = (n as u32 + bs - 1) / bs;
 
             let config1 = gpu_host::gpu_config!(num_blocks, 1, 1, bs, 1, 1, 0);
-            mvt_kernel1::launch(config1, ctx, m, &d_a, &mut d_x1, &d_y1, n)
+            mvt_kernel1::launch(config1, ctx, m, &d_a, &mut d_x1, &d_y1, n as u32)
                 .expect("kernel1 launch failed");
 
             let config2 = gpu_host::gpu_config!(num_blocks, 1, 1, bs, 1, 1, 0);
-            mvt_kernel2::launch(config2, ctx, m, &d_a, &mut d_x2, &d_y2, n)
+            mvt_kernel2::launch(config2, ctx, m, &d_a, &mut d_x2, &d_y2, n as u32)
                 .expect("kernel2 launch failed");
 
             d_x1.copy_to_host(h_x1).expect("copy x1 failed");

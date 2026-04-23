@@ -18,22 +18,22 @@ const NUM_BINS: usize = 256;
 ///       for (int i = tid; i < NUM_BINS; i += blockDim.x) atomicAdd(&bins[i], smem_bins[i]);
 ///   }
 #[gpu::cuda_kernel(dynamic_shared)]
-pub fn histogram_kernel(data: &[u32], bins: &mut [u32], n: usize) {
+pub fn histogram_kernel(data: &[u32], bins: &mut [u32], n: u32) {
     let smem_bins = smem_alloc.alloc::<u32>(NUM_BINS);
 
     let tid = thread_id::<DimX>();
     let bdim = block_dim::<DimX>();
-    let idx = (block_id::<DimX>() * bdim + tid) as usize;
-    let stride = (bdim * grid_dim::<DimX>()) as usize;
+    let idx = block_id::<DimX>() * bdim + tid;
+    let stride = bdim * grid_dim::<DimX>();
 
     // Initialize shared memory bins to zero
     {
         let mut smem_chunk = smem_bins.chunk_mut(MapLinear::new(1));
-        let mut i = tid as usize;
-        let mut local_i: usize = 0;
-        while i < NUM_BINS {
-            smem_chunk[local_i] = 0;
-            i += bdim as usize;
+        let mut i: u32 = tid;
+        let mut local_i: u32 = 0;
+        while i < NUM_BINS as u32 {
+            smem_chunk[local_i as usize] = 0;
+            i += bdim;
             local_i += 1;
         }
     }
@@ -41,9 +41,9 @@ pub fn histogram_kernel(data: &[u32], bins: &mut [u32], n: usize) {
 
     // Accumulate into shared memory bins using atomics
     let smem_atomic = SharedAtomic::new(smem_bins);
-    let mut i = idx;
+    let mut i: u32 = idx;
     while i < n {
-        let bin = data[i] as usize;
+        let bin = data[i as usize] as usize;
         smem_atomic.index(bin).atomic_addi(1u32);
         i += stride;
     }
@@ -51,13 +51,13 @@ pub fn histogram_kernel(data: &[u32], bins: &mut [u32], n: usize) {
 
     // Merge shared memory bins into global bins using atomics
     let bins_atomic = Atomic::new(bins);
-    let mut i = tid as usize;
-    while i < NUM_BINS {
-        let local_count = *smem_bins[i];
+    let mut i: u32 = tid;
+    while i < NUM_BINS as u32 {
+        let local_count = *smem_bins[i as usize];
         if local_count > 0 {
-            bins_atomic.index(i).atomic_addi(local_count);
+            bins_atomic.index(i as usize).atomic_addi(local_count);
         }
-        i += bdim as usize;
+        i += bdim;
     }
 }
 
@@ -79,7 +79,7 @@ mod tests {
             let num_blocks = num_blocks.min(1024);
             let smem_bytes = (NUM_BINS as u32) * core::mem::size_of::<u32>() as u32;
             let config = gpu_host::gpu_config!(num_blocks, 1, 1, block_size, 1, 1, smem_bytes);
-            histogram_kernel::launch(config, ctx, m, &d_data, &mut d_bins, n)
+            histogram_kernel::launch(config, ctx, m, &d_data, &mut d_bins, n as u32)
                 .expect("histogram kernel launch failed");
 
             d_bins

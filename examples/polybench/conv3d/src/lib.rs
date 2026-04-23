@@ -2,10 +2,10 @@ use gpu::prelude::*;
 
 /// 3D convolution kernel. Each thread computes one element of B from a 3x3x3 stencil of A.
 #[gpu::cuda_kernel]
-pub fn conv3d_kernel(a: &[f32], b: &mut [f32], ni: usize, nj: usize, nk: usize) {
+pub fn conv3d_kernel(a: &[f32], b: &mut [f32], ni: u32, nj: u32, nk: u32) {
     let mut b = chunk_mut(b, MapLinear::new(1));
-    let k = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
-    let ji = (block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>()) as usize;
+    let k = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let ji = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     let j = ji % nj;
     let i = ji / nj;
 
@@ -20,21 +20,21 @@ pub fn conv3d_kernel(a: &[f32], b: &mut [f32], ni: usize, nj: usize, nk: usize) 
     let c33: f32 = 10.0;
 
     if i > 0 && i < ni - 1 && j > 0 && j < nj - 1 && k > 0 && k < nk - 1 {
-        b[0] = c11 * a[(i - 1) * (nk * nj) + (j - 1) * nk + (k - 1)]
-            + c13 * a[(i + 1) * (nk * nj) + (j - 1) * nk + (k - 1)]
-            + c21 * a[(i - 1) * (nk * nj) + (j - 1) * nk + (k - 1)]
-            + c23 * a[(i + 1) * (nk * nj) + (j - 1) * nk + (k - 1)]
-            + c31 * a[(i - 1) * (nk * nj) + (j - 1) * nk + (k - 1)]
-            + c33 * a[(i + 1) * (nk * nj) + (j - 1) * nk + (k - 1)]
-            + c12 * a[i * (nk * nj) + (j - 1) * nk + k]
-            + c22 * a[i * (nk * nj) + j * nk + k]
-            + c32 * a[i * (nk * nj) + (j + 1) * nk + k]
-            + c11 * a[(i - 1) * (nk * nj) + (j - 1) * nk + (k + 1)]
-            + c13 * a[(i + 1) * (nk * nj) + (j - 1) * nk + (k + 1)]
-            + c21 * a[(i - 1) * (nk * nj) + j * nk + (k + 1)]
-            + c23 * a[(i + 1) * (nk * nj) + j * nk + (k + 1)]
-            + c31 * a[(i - 1) * (nk * nj) + (j + 1) * nk + (k + 1)]
-            + c33 * a[(i + 1) * (nk * nj) + (j + 1) * nk + (k + 1)];
+        b[0] = c11 * a[((i - 1) * (nk * nj) + (j - 1) * nk + (k - 1)) as usize]
+            + c13 * a[((i + 1) * (nk * nj) + (j - 1) * nk + (k - 1)) as usize]
+            + c21 * a[((i - 1) * (nk * nj) + (j - 1) * nk + (k - 1)) as usize]
+            + c23 * a[((i + 1) * (nk * nj) + (j - 1) * nk + (k - 1)) as usize]
+            + c31 * a[((i - 1) * (nk * nj) + (j - 1) * nk + (k - 1)) as usize]
+            + c33 * a[((i + 1) * (nk * nj) + (j - 1) * nk + (k - 1)) as usize]
+            + c12 * a[(i * (nk * nj) + (j - 1) * nk + k) as usize]
+            + c22 * a[(i * (nk * nj) + j * nk + k) as usize]
+            + c32 * a[(i * (nk * nj) + (j + 1) * nk + k) as usize]
+            + c11 * a[((i - 1) * (nk * nj) + (j - 1) * nk + (k + 1)) as usize]
+            + c13 * a[((i + 1) * (nk * nj) + (j - 1) * nk + (k + 1)) as usize]
+            + c21 * a[((i - 1) * (nk * nj) + j * nk + (k + 1)) as usize]
+            + c23 * a[((i + 1) * (nk * nj) + j * nk + (k + 1)) as usize]
+            + c31 * a[((i - 1) * (nk * nj) + (j + 1) * nk + (k + 1)) as usize]
+            + c33 * a[((i + 1) * (nk * nj) + (j + 1) * nk + (k + 1)) as usize];
     }
 }
 
@@ -97,7 +97,7 @@ mod tests {
             let grid_y: u32 = ((ni * nj) as u32 + by - 1) / by;
             let config = gpu_host::gpu_config!(grid_x, grid_y, 1, bx, by, 1, 0);
 
-            conv3d_kernel::launch(config, ctx, m, &d_a, &mut d_b, ni, nj, nk)
+            conv3d_kernel::launch(config, ctx, m, &d_a, &mut d_b, ni as u32, nj as u32, nk as u32)
                 .expect("kernel launch");
 
             d_b.copy_to_host(&mut h_b_gpu).expect("copy failed");

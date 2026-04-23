@@ -6,20 +6,20 @@ pub fn mm2_kernel1(
     a: &[f32],
     b: &[f32],
     tmp: &mut [f32],
-    ni: usize,
-    nj: usize,
-    nk: usize,
+    ni: u32,
+    nj: u32,
+    nk: u32,
     alpha: f32,
 ) {
-    let mut tmp = chunk_mut(tmp, Map2D::new(nj));
-    let j = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
-    let i = (block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>()) as usize;
+    let mut tmp = chunk_mut(tmp, Map2D::new(nj as usize));
+    let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
 
     if i < ni && j < nj {
         let mut val = 0.0f32;
-        let mut k: usize = 0;
+        let mut k: u32 = 0;
         while k < nk {
-            val += alpha * a[i * nk + k] * b[k * nj + j];
+            val += alpha * a[(i * nk + k) as usize] * b[(k * nj + j) as usize];
             k += 1;
         }
         tmp[(0, 0)] = val;
@@ -32,20 +32,20 @@ pub fn mm2_kernel2(
     tmp: &[f32],
     c: &[f32],
     d: &mut [f32],
-    ni: usize,
-    nj: usize,
-    nl: usize,
+    ni: u32,
+    nj: u32,
+    nl: u32,
     beta: f32,
 ) {
-    let mut d = chunk_mut(d, Map2D::new(nl));
-    let j = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
-    let i = (block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>()) as usize;
+    let mut d = chunk_mut(d, Map2D::new(nl as usize));
+    let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
 
     if i < ni && j < nl {
         let mut val = d[(0, 0)] * beta;
-        let mut k: usize = 0;
+        let mut k: u32 = 0;
         while k < nj {
-            val += tmp[i * nj + k] * c[k * nl + j];
+            val += tmp[(i * nj + k) as usize] * c[(k * nl + j) as usize];
             k += 1;
         }
         d[(0, 0)] = val;
@@ -110,7 +110,7 @@ mod tests {
             let config =
                 gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
             mm2_kernel1::launch(
-                config, ctx, m, &d_a, &d_b, &mut d_tmp, ni, nj, nk, alpha,
+                config, ctx, m, &d_a, &d_b, &mut d_tmp, ni as u32, nj as u32, nk as u32, alpha,
             )
             .expect("kernel1 launch failed");
 
@@ -120,7 +120,7 @@ mod tests {
             let config =
                 gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
             mm2_kernel2::launch(
-                config, ctx, m, &d_tmp, &d_c, &mut d_d, ni, nj, nl, beta,
+                config, ctx, m, &d_tmp, &d_c, &mut d_d, ni as u32, nj as u32, nl as u32, beta,
             )
             .expect("kernel2 launch failed");
 

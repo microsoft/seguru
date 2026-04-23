@@ -2,28 +2,28 @@ use gpu::prelude::*;
 
 /// B[i][j] = 0.2*(A[i][j] + A[i][j-1] + A[i][j+1] + A[i+1][j] + A[i-1][j])
 #[gpu::cuda_kernel]
-pub fn jacobi2d_kernel1(a: &[f32], b: &mut [f32], n: usize) {
+pub fn jacobi2d_kernel1(a: &[f32], b: &mut [f32], n: u32) {
     let mut b = chunk_mut(b, MapLinear::new(1));
-    let j = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
-    let i = (block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>()) as usize;
+    let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i >= 1 && i < n - 1 && j >= 1 && j < n - 1 {
         b[0] = 0.2
-            * (a[i * n + j]
-                + a[i * n + (j - 1)]
-                + a[i * n + (j + 1)]
-                + a[(i + 1) * n + j]
-                + a[(i - 1) * n + j]);
+            * (a[(i * n + j) as usize]
+                + a[(i * n + (j - 1)) as usize]
+                + a[(i * n + (j + 1)) as usize]
+                + a[((i + 1) * n + j) as usize]
+                + a[((i - 1) * n + j) as usize]);
     }
 }
 
 /// A[i][j] = B[i][j]
 #[gpu::cuda_kernel]
-pub fn jacobi2d_kernel2(a: &mut [f32], b: &[f32], n: usize) {
+pub fn jacobi2d_kernel2(a: &mut [f32], b: &[f32], n: u32) {
     let mut a = chunk_mut(a, MapLinear::new(1));
-    let j = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
-    let i = (block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>()) as usize;
+    let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i >= 1 && i < n - 1 && j >= 1 && j < n - 1 {
-        a[0] = b[i * n + j];
+        a[0] = b[(i * n + j) as usize];
     }
 }
 
@@ -63,9 +63,9 @@ mod tests {
 
             for _ in 0..tsteps {
                 let c1 = gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
-                jacobi2d_kernel1::launch(c1, ctx, m, &d_a, &mut d_b, n).expect("k1");
+                jacobi2d_kernel1::launch(c1, ctx, m, &d_a, &mut d_b, n as u32).expect("k1");
                 let c2 = gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
-                jacobi2d_kernel2::launch(c2, ctx, m, &mut d_a, &d_b, n).expect("k2");
+                jacobi2d_kernel2::launch(c2, ctx, m, &mut d_a, &d_b, n as u32).expect("k2");
             }
 
             d_a.copy_to_host(h_a).expect("copy a");

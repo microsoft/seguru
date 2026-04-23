@@ -7,20 +7,20 @@ pub fn doitgen_kernel1(
     a: &[f32],
     c4: &[f32],
     sum_arr: &mut [f32],
-    nr: usize,
-    nq: usize,
-    np: usize,
+    nr: u32,
+    nq: u32,
+    np: u32,
 ) {
     let mut sum_arr = chunk_mut(sum_arr, MapLinear::new(1));
-    let p = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
-    let qr = (block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>()) as usize;
+    let p = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let qr = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     let q = qr % nq;
     let r = qr / nq;
     if p < np && q < nq && r < nr {
         let mut val = 0.0f32;
-        let mut s: usize = 0;
+        let mut s: u32 = 0;
         while s < np {
-            val += a[r * (nq * np) + q * np + s] * c4[s * np + p];
+            val += a[(r * (nq * np) + q * np + s) as usize] * c4[(s * np + p) as usize];
             s += 1;
         }
         sum_arr[0] = val;
@@ -32,17 +32,17 @@ pub fn doitgen_kernel1(
 pub fn doitgen_kernel2(
     sum_arr: &[f32],
     a: &mut [f32],
-    nr: usize,
-    nq: usize,
-    np: usize,
+    nr: u32,
+    nq: u32,
+    np: u32,
 ) {
     let mut a = chunk_mut(a, MapLinear::new(1));
-    let p = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
-    let qr = (block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>()) as usize;
+    let p = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let qr = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     let q = qr % nq;
     let r = qr / nq;
     if p < np && q < nq && r < nr {
-        a[0] = sum_arr[r * (nq * np) + q * np + p];
+        a[0] = sum_arr[(r * (nq * np) + q * np + p) as usize];
     }
 }
 
@@ -107,14 +107,14 @@ mod tests {
             let config =
                 gpu_host::gpu_config!(grid_x, grid_y, 1, bx, by, 1, 0);
             doitgen_kernel1::launch(
-                config, ctx, m_module, &d_a_ro, &d_c4, &mut d_sum, nr, nq, np,
+                config, ctx, m_module, &d_a_ro, &d_c4, &mut d_sum, nr as u32, nq as u32, np as u32,
             )
             .expect("kernel1 failed");
 
             let config =
                 gpu_host::gpu_config!(grid_x, grid_y, 1, bx, by, 1, 0);
             doitgen_kernel2::launch(
-                config, ctx, m_module, &d_sum, &mut d_a, nr, nq, np,
+                config, ctx, m_module, &d_sum, &mut d_a, nr as u32, nq as u32, np as u32,
             )
             .expect("kernel2 failed");
 

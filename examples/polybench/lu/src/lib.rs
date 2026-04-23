@@ -2,23 +2,23 @@ use gpu::prelude::*;
 
 // A[k][j] /= A[k][k] for j > k (only row k is modified)
 #[gpu::cuda_kernel]
-pub fn lu_kernel1(a_read: &[f32], a_write: &mut [f32], n: usize, k: usize) {
-    let mut a_write = chunk_mut(a_write, Map2D::new(n));
-    let j = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
-    let i = (block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>()) as usize;
+pub fn lu_kernel1(a_read: &[f32], a_write: &mut [f32], n: u32, k: u32) {
+    let mut a_write = chunk_mut(a_write, Map2D::new(n as usize));
+    let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i == k && j > k && j < n {
-        a_write[(0, 0)] = a_read[k * n + j] / a_read[k * n + k];
+        a_write[(0, 0)] = a_read[(k * n + j) as usize] / a_read[(k * n + k) as usize];
     }
 }
 
 // A[i][j] -= A[i][k] * A[k][j] for i,j > k
 #[gpu::cuda_kernel]
-pub fn lu_kernel2(a_read: &[f32], a_write: &mut [f32], n: usize, k: usize) {
-    let mut a_write = chunk_mut(a_write, Map2D::new(n));
-    let j = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
-    let i = (block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>()) as usize;
+pub fn lu_kernel2(a_read: &[f32], a_write: &mut [f32], n: u32, k: u32) {
+    let mut a_write = chunk_mut(a_write, Map2D::new(n as usize));
+    let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i > k && j > k && i < n && j < n {
-        a_write[(0, 0)] = a_read[i * n + j] - a_read[i * n + k] * a_read[k * n + j];
+        a_write[(0, 0)] = a_read[(i * n + j) as usize] - a_read[(i * n + k) as usize] * a_read[(k * n + j) as usize];
     }
 }
 
@@ -73,7 +73,7 @@ mod tests {
                 let config =
                     gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
                 lu_kernel1::launch(
-                    config, ctx, m_module, &d_a_read, &mut d_a_write, n, k,
+                    config, ctx, m_module, &d_a_read, &mut d_a_write, n as u32, k as u32,
                 )
                 .expect("kernel1 failed");
 
@@ -88,7 +88,7 @@ mod tests {
                 let config =
                     gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
                 lu_kernel2::launch(
-                    config, ctx, m_module, &d_a_read, &mut d_a_write, n, k,
+                    config, ctx, m_module, &d_a_read, &mut d_a_write, n as u32, k as u32,
                 )
                 .expect("kernel2 failed");
 

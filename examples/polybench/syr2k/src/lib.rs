@@ -5,20 +5,20 @@ pub fn syr2k_kernel(
     a: &[f32],
     b: &[f32],
     c: &mut [f32],
-    ni: usize,
-    nj: usize,
+    ni: u32,
+    nj: u32,
     alpha: f32,
     beta: f32,
 ) {
-    let mut c = chunk_mut(c, Map2D::new(ni));
-    let j = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
-    let i = (block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>()) as usize;
+    let mut c = chunk_mut(c, Map2D::new(ni as usize));
+    let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
 
     if i < ni && j < ni {
         let mut val = c[(0, 0)] * beta;
-        let mut k: usize = 0;
+        let mut k: u32 = 0;
         while k < nj {
-            val += alpha * a[i * nj + k] * b[j * nj + k] + alpha * b[i * nj + k] * a[j * nj + k];
+            val += alpha * a[(i * nj + k) as usize] * b[(j * nj + k) as usize] + alpha * b[(i * nj + k) as usize] * a[(j * nj + k) as usize];
             k += 1;
         }
         c[(0, 0)] = val;
@@ -66,7 +66,7 @@ mod tests {
             let config =
                 gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
             syr2k_kernel::launch(
-                config, ctx, m, &d_a, &d_b, &mut d_c, ni, nj, alpha, beta,
+                config, ctx, m, &d_a, &d_b, &mut d_c, ni as u32, nj as u32, alpha, beta,
             )
             .expect("kernel launch failed");
 

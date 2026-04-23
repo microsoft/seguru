@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "hello",
+    "kernelbench",
     "llm-rs-gpu",
     "matrix/matmul-gpu",
     "matrix/matmul-host",
@@ -9,6 +10,7 @@ members = [
     "syntax/host",
 ]
 resolver = "1"
+exclude = ["Nova"]
 
 [workspace.dependencies]
 gpu_host = {path = "../crates/gpu-host"}

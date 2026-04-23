@@ -882,6 +882,60 @@ Key takeaways:
 - **The residual gap on `softmax` / `layer_norm`** is in the SeGuRu
   runtime's cross-warp reduce scaffolding, not strategy — `SeGuRu←CUDA`
   shows `layer_norm` matches raw CUDA within ~13% (1.08× vs 1.21×).
+
+### Recommended automation pipeline: two-stage PyTorch → CUDA → SeGuRu
+
+The `SeGuRu←CUDA` column above is not an accident of evaluation order —
+it is the output of a **two-stage LLM pipeline**:
+
+1. Stage 1 (design): LLM reads PyTorch reference + `docs/cuda-raw-kernel-skill.md`
+   → emits a raw-CUDA `.cu` file. This is where the hard decisions
+   happen: thread geometry, vectorization width, reduction strategy,
+   block/grid shape.
+2. Stage 2 (translation): LLM reads the Stage-1 `.cu` + this skill doc
+   → emits a SeGuRu `.rs`. This is mechanical: `float4*` ↔ `Float4`,
+   `__shfl_down_sync` ↔ `warp.redux(ReduxAdd,·)`, `__shared__` ↔
+   `GpuShared<[f32; N]>`, `__syncthreads()` ↔ `sync_threads()`.
+
+Stage 1 is the same task as the "Raw CUDA" column. Stage 2 is the same
+task as the "SeGuRu←CUDA" column. End-to-end, the pipeline matches Raw
+CUDA's avg speedup within 5% (1.17× vs 1.22×) while producing safe code.
+
+**Why this beats the direct PyTorch → SeGuRu route (1.17× vs 0.99×):**
+The CUDA intermediate pins down three decisions an LLM regularly
+under-thinks when designing a SeGuRu kernel from scratch:
+
+1. **Vectorization**. The direct route wrote scalar `fn kernel(x: &[f32])`
+   for every elementwise problem; the translate route faithfully copies
+   the `.cu`'s `float4` reinterpret into `Float4` + scalar tail, which
+   is ~60µs faster on memory-bound elementwise at [2048, 65536].
+2. **Thread geometry for reductions**. First-pass direct-SeGuRu
+   `sum_dim` was 1-thread-per-row (2981µs / 0.06×). The CUDA arm was
+   always 1-block-per-row with warp-shuffle reduce; translating that
+   landed at 163µs (1.09×) on the first attempt.
+3. **Launch config**. The `.cu` files pin block size and grid clamp;
+   the translate route copies these rather than guessing.
+
+The direct PyTorch → SeGuRu route can close most of the gap once the
+skill doc explicitly names the pitfalls it tends to fall into (the
+"Row-Reduction Strategy" section moved `sum_dim` from 0.06× → 0.79×
+on its own). But as a default automation recipe, the two-stage
+pipeline is less sensitive to skill-doc gaps: the intermediate CUDA
+source acts as a compact, unambiguous specification of the desired
+kernel, making Stage 2 a near-deterministic mapping.
+
+Recommended usage:
+- **For greenfield SeGuRu codegen from ML framework ops**: use the
+  two-stage pipeline. Treat the intermediate `.cu` as a disposable
+  artifact (you can delete it after Stage 2 completes — it's only a
+  prompt for the translator). This gets you ~1.17× PyTorch eager
+  with 80% beat-rate on L1 and 10/10 correctness.
+- **For porting existing CUDA codebases to SeGuRu**: Stage 2 alone
+  suffices. The `.cu` IS your intermediate.
+- **For direct PyTorch → SeGuRu** (simpler setup, one LLM call): expect
+  ~1.0× PyTorch on average; works well for elementwise, lags on
+  reductions unless the skill doc explicitly addresses strategy.
+
 - **Correctness parity holds at scale.** Both arms 10/10 on a one-shot
   prompt — the skill docs are sufficient context for an LLM to produce
   numerically-correct kernels across all four op categories tested.

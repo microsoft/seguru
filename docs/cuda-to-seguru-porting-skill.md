@@ -2,7 +2,7 @@
 
 ## Overview
 
-This skill documents battle-tested strategies for porting CUDA C++ GPU kernels to SeGuRu (Safe GPU Rust). These patterns were validated by porting all 21 PolybenchGPU benchmarks plus 3 classic kernels, achieving near-CUDA performance on an A100 GPU.
+This skill documents battle-tested strategies for porting CUDA C++ GPU kernels to SeGuRu (Safe GPU Rust). These patterns were validated by porting all 21 PolybenchGPU benchmarks plus 3 classic kernels, and cross-referenced with the production llm-rs codebase (GPT-2 training/inference in SeGuRu).
 
 ## Performance Summary
 
@@ -33,7 +33,7 @@ Rules:
 - `__global__` → `#[gpu::cuda_kernel]`
 - Read-only pointer → `&[f32]`
 - Read-write pointer → `&mut [f32]`
-- `int`/`unsigned int` → `u32` (not `usize`)
+- `int`/`unsigned int` → `u32` or `i32` (match the CUDA type's signedness)
 - `float` scalar → `f32`
 - Dynamic shared memory → add `(dynamic_shared)` to attribute
 
@@ -110,6 +110,20 @@ for a_val in a_row {
 - **Row traversals** (contiguous memory): Always use subslice
 - **Column/stride traversals** (non-contiguous): Cannot subslice — keep per-element `while` loop
 - **Stencil access** (neighbor elements): Fixed number of accesses — subslice doesn't help
+- **Warp-strided access**: Use `while` loop with stride (see llm-rs pattern below)
+
+### Warp-strided subslice pattern (from llm-rs layernorm)
+When threads in a warp cooperatively process a row with stride:
+```rust
+let x = &inp[idx_C as usize..(idx_C + C) as usize];  // subslice the row ONCE
+let mut local_sum = 0.0f32;
+let mut i = lane_id;
+while i < C {
+    local_sum += x[i as usize];  // index into the subslice, not the full array
+    i += warp.size();
+}
+```
+This is used extensively in llm-rs for layernorm, softmax, and attention kernels.
 
 ### Examples by kernel type
 
@@ -214,6 +228,105 @@ smem_atomic.index(bin).atomic_addi(1u32);          // index then operate
 
 Note: `SharedAtomic::new` takes `&mut GpuShared<[T]>` (from `smem_alloc.alloc`), not per-element references.
 
+## Vectorized Access (Float4)
+
+For memory-bandwidth-bound kernels, use `Float4` for coalesced 128-bit loads (from llm-rs):
+```rust
+use gpu::Float4;
+
+#[gpu::cuda_kernel]
+pub fn kernel(out: &mut [Float4], inp: &[Float4], C: u32) {
+    let mut out = chunk_mut(out, MapContinuousLinear::new(1));
+    let idx = block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>();
+    if idx < N {
+        out[0] = inp[idx as usize].add(wpe[(t * C4 + c4) as usize]);
+    }
+}
+```
+
+Host-side: cast `TensorView<[f32]>` to `TensorView<[Float4]>`:
+```rust
+let inp = unsafe { &*(inp as *const _ as *const TensorView<'_, [Float4]>) };
+```
+
+## Cache Hints
+
+For streaming access patterns where data won't be reused (from llm-rs layernorm):
+```rust
+use gpu::CacheStreamLoadStore;
+
+let val = x[i as usize].ldcs();   // cache-streaming load (bypass L1)
+out[idx].stcs(value);              // cache-streaming store
+```
+
+## Warp Operations
+
+### Warp reductions (from llm-rs)
+```rust
+use gpu::cg::{CGOperations, ReduxAdd, ThreadWarpTile};
+
+let warp = ThreadWarpTile::<32>;
+let lane_id = warp.thread_rank();
+
+// Warp-cooperative sum
+let mut local_sum = 0.0f32;
+let mut i = lane_id;
+while i < C {
+    local_sum += x[i as usize];
+    i += warp.size();
+}
+let sum: f32 = warp.redux(ReduxAdd, local_sum);
+```
+
+### Warp metadata
+```rust
+let warp = ThreadWarpTile::<32>;
+warp.thread_rank()      // lane ID within warp (0-31)
+warp.meta_group_size()  // number of warps per block
+warp.subgroup_id()      // warp index within block
+warp.size()             // warp size (32)
+```
+
+## Host-Side Patterns
+
+### Basic launch
+```rust
+gpu_host::cuda_ctx(0, |ctx, m| {
+    let d_inp = ctx.new_tensor_view(h_data.as_slice()).unwrap();
+    let mut d_out = ctx.new_tensor_view(h_out.as_mut_slice()).unwrap();
+    let config = gpu_host::gpu_config!(grid, 1, 1, block, 1, 1, 0);
+    kernel::launch(config, ctx, m, &d_inp, &mut d_out, n as u32).unwrap();
+    d_out.copy_to_host(&mut h_out).unwrap();
+});
+```
+
+### Static block dimensions with `@const`
+From llm-rs — compile-time block size enables better optimization:
+```rust
+const BSIZE: usize = 256;
+let config = gpu_host::gpu_config!(grid as u32, 1, 1, @const BSIZE as u32, 1, 1, 0);
+```
+
+### Tensor sub-indexing
+Split tensors into sub-views for multi-buffer operations (from llm-rs attention):
+```rust
+let (mut q, mut rest) = qkvr.split_at_mut(bsc_len);
+let (mut k, mut v) = rest.split_at_mut(bsc_len);
+// Now q, k, v are separate TensorViewMut pointing into the same allocation
+```
+
+### cuBLAS integration
+For large matmul, use cuBLAS directly alongside SeGuRu kernels (from llm-rs):
+```rust
+unsafe {
+    cublasSgemm_v2(handle, CUBLAS_OP_N, CUBLAS_OP_N,
+        C as i32, N as i32, OC as i32,
+        &one, weight.as_devptr() as _, C as i32,
+        dout.as_devptr() as _, OC as i32,
+        &zero, dinp.as_devptr() as _, C as i32);
+}
+```
+
 ## Multi-Kernel Benchmarks
 
 SeGuRu supports multiple kernel launches within a single `cuda_ctx`:
@@ -235,23 +348,6 @@ gpu_host::cuda_ctx(0, |ctx, m| {
 
 Note: `gpu_config!` returns a non-Copy type — recreate it before each `launch` call.
 
-## Host Side Translation
-
-| CUDA | SeGuRu |
-|------|--------|
-| `cudaMalloc + cudaMemcpy H→D` | `ctx.new_tensor_view(&host_data)` |
-| `cudaMemcpy D→H` | `d_data.copy_to_host(&mut host_data)` |
-| `cudaFree` | automatic (Drop) |
-| `cudaDeviceSynchronize` | `ctx.sync()` |
-| `kernel<<<grid,block,smem>>>(args)` | `kernel::launch(gpu_config!(...), ctx, m, args)` |
-
-### Launch configuration
-```rust
-// gpu_config!(grid_x, grid_y, grid_z, block_x, block_y, block_z, shared_mem_bytes)
-let config = gpu_host::gpu_config!(num_blocks, 1, 1, 256, 1, 1, 0);
-kernel::launch(config, ctx, m, &d_input, &mut d_output, n as u32).unwrap();
-```
-
 ## Common Pitfalls
 
 | Pitfall | Symptom | Fix |
@@ -265,6 +361,7 @@ kernel::launch(config, ctx, m, &d_input, &mut d_output, n as u32).unwrap();
 | Grid-stride write loop | Runtime bounds panic | Launch enough threads, 1 element per thread |
 | `gpu_config!` reuse in loop | Compile error (not Copy) | Recreate before each `launch` |
 | Aliased read+write same array | Need separate params | Pass as both `a_read: &[f32]` and `a_write: &mut [f32]` |
+| Using iterators everywhere | Can be 20% slower (see llm-rs note) | Benchmark both; use `while` loop if iterator is slower |
 
 ## Performance Expectations (A100, naive kernels)
 

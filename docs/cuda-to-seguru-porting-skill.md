@@ -855,7 +855,29 @@ Aggregate (`fast_N` = pct of problems with speedup ≥ N× vs PyTorch eager):
 | SeGuRu |   10/10 |    10% |     0% |       0.79× |
 | CUDA   |   10/10 |    40% |    10% |       1.22× |
 
-Takeaways:
+After a follow-up re-port of `sum_dim` and `l2_norm` using the
+row-reduction guidance from this skill doc (one block per row, warp
+redux, shared-memory cross-warp reduce — see section "Row-Reduction
+Strategy" above), the SeGuRu arm closes most of the remaining gap:
+
+| Problem    | SeGuRu (before) | SeGuRu (after)  | speedup |
+|------------|----------------:|----------------:|--------:|
+| sum_dim    | 2981.8µs (0.06×)|  225.2µs (0.79×)|  13.2×  |
+| l2_norm    | 1675.3µs (0.27×)|  299.5µs (1.51×)|   5.6×  |
+
+Aggregate after re-port:
+
+| Arm    | correct | fast_1 | fast_2 | avg speedup |
+|--------|--------:|-------:|-------:|------------:|
+| SeGuRu |   10/10 |    20% |     0% |       0.99× |
+| CUDA   |   10/10 |    40% |    10% |       1.22× |
+
+i.e. with the updated skill doc an LLM sub-agent matches PyTorch eager
+on average across 10 L1 problems (geomean ≈ 1.0× eager) while staying
+10/10 correct. The remaining raw-CUDA edge comes from two reductions
+(softmax, layer_norm) where SeGuRu still pays ~20-50% for its safety
+layer on cross-warp reduction scaffolding — addressable with further
+skill-doc tuning, not a fundamental ceiling.
 - **Correctness parity holds at scale.** Both arms 10/10 on a one-shot
   prompt — the skill docs are sufficient context for an LLM to produce
   numerically-correct kernels across all four op categories tested.

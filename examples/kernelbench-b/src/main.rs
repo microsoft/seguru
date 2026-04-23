@@ -30,6 +30,13 @@ use gpu::prelude::*;
 pub mod leaky_relu;
 pub mod tanh;
 pub mod rms_norm;
+pub mod relu;
+pub mod sigmoid;
+pub mod gelu;
+pub mod softmax;
+pub mod layer_norm;
+pub mod sum_dim;
+pub mod l2_norm;
 
 // ===== shared utilities (available to all problem modules) =====
 
@@ -107,6 +114,13 @@ fn main() {
             "leaky_relu" => leaky_relu::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "tanh"       => tanh::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "rms_norm"   => rms_norm::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "relu"       => relu::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "sigmoid"    => sigmoid::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "gelu"       => gelu::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "softmax"    => softmax::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "layer_norm" => layer_norm::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "sum_dim"    => sum_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "l2_norm"    => l2_norm::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             other => panic!("unknown problem: {other}"),
         };
         println!(

@@ -736,3 +736,71 @@ LLM codegen: SeGuRu is a viable safe target whose `fast_N` scores
 should track raw CUDA closely on memory-bound L1, with a measurable
 but not disqualifying gap on reduction kernels.
 
+### Phase B.10 results — scaled to 10 KernelBench L1 problems
+
+Same setup, expanded to ten problems spanning elementwise / reduction /
+softmax / norm categories. Same Claude Sonnet sub-agent ports each problem
+to both SeGuRu (with this skill doc) and raw CUDA (with the symmetric
+`docs/cuda-raw-kernel-skill.md`). Driver: `examples/kernelbench-b/python/compare2.py`.
+
+| Problem    | PyTorch eager | SeGuRu          | Raw CUDA        |
+|------------|--------------:|----------------:|----------------:|
+| leaky_relu |       640.9µs |  698.1µs (0.92×)|  668.3µs (0.96×)|
+| tanh       |       654.0µs |  707.2µs (0.92×)|  663.7µs (0.99×)|
+| relu       |       653.7µs |  696.9µs (0.94×)|  669.1µs (0.98×)|
+| sigmoid    |       655.5µs |  703.2µs (0.93×)|  664.5µs (0.99×)|
+| gelu       |       663.6µs |  728.9µs (0.91×)|  665.7µs (1.00×)|
+| softmax    |       229.5µs |  324.8µs (0.71×)|  244.6µs (0.94×)|
+| layer_norm |       261.5µs |  338.8µs (0.77×)|  215.3µs (1.21×)|
+| rms_norm   |     24269.7µs |16574.7µs (1.46×)|13268.3µs (1.83×)|
+| sum_dim    |       177.5µs | 2981.8µs (0.06×)|  152.9µs (1.16×)|
+| l2_norm    |       452.9µs | 1675.3µs (0.27×)|  208.4µs (2.17×)|
+
+Aggregate (`fast_N` = pct of problems with speedup ≥ N× vs PyTorch eager):
+
+| Arm    | correct | fast_1 | fast_2 | avg speedup |
+|--------|--------:|-------:|-------:|------------:|
+| SeGuRu |   10/10 |    10% |     0% |       0.79× |
+| CUDA   |   10/10 |    40% |    10% |       1.22× |
+
+Takeaways:
+- **Correctness parity holds at scale.** Both arms 10/10 on a one-shot
+  prompt — the skill docs are sufficient context for an LLM to produce
+  numerically-correct kernels across all four op categories tested.
+- **Memory-bound elementwise (6 problems)**: SeGuRu sits at 0.91–0.94×
+  PyTorch, raw CUDA at 0.96–1.00×. The safety layer's ~5% overhead is
+  consistent and small enough to not change `fast_N` rankings.
+- **Reductions and softmax**: SeGuRu lags more (0.71–0.77× on softmax /
+  layer_norm). On `sum_dim` and `l2_norm` the LLM picked a 1-thread/row
+  pattern in SeGuRu vs a 1-block/row warp-shuffle pattern in CUDA — that
+  is an LLM strategy choice, not a SeGuRu ceiling. With a follow-up port
+  using SeGuRu's shared-memory reduce primitives the gap should close.
+- **rms_norm**: both arms beat PyTorch significantly (1.46× / 1.83×) —
+  PyTorch eager pays a large general-purpose dispatch tax on small norms.
+- **`torch.compile` baseline disabled** in this run (TypeError on lambda
+  wrap under our torch version). Re-enable in a follow-up by wrapping
+  problems in `nn.Module` instead of `lambda`.
+
+### CUDA gotcha learned: `__shfl_down_sync` partial masks deadlock
+
+While porting `l2_norm` the LLM wrote a cross-warp reduce of the form
+`if (tid < BLOCK/32) { acc += __shfl_down_sync(0xffffffff, acc, o); }`.
+On A100 (sm_80) this hangs the kernel forever (100% GPU util, never
+returns). The mask `0xffffffff` declares all 32 lanes participating, but
+only `BLOCK/32` lanes entered the branch — undefined behavior.
+
+**Fix pattern**: have all 32 lanes of warp 0 enter the branch, with
+inactive lanes contributing 0:
+
+```cpp
+if (threadIdx.x < 32) {
+    float acc = (threadIdx.x < BLOCK/32) ? warp_sum[threadIdx.x] : 0.0f;
+    for (int o = 16; o > 0; o >>= 1)
+        acc += __shfl_down_sync(0xffffffff, acc, o);
+    if (threadIdx.x == 0) /* write */;
+}
+```
+
+Now documented in `docs/cuda-raw-kernel-skill.md` so future raw-CUDA
+ports avoid this pitfall.
+

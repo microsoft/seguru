@@ -1,4 +1,5 @@
 use gpu::prelude::*;
+use gpu::CacheStreamLoadStore;
 use std::time::Instant;
 
 // =====================================================================
@@ -241,8 +242,10 @@ pub fn bench_atax_kernel1(a: &[f32], x: &[f32], tmp: &mut [f32], nx: u32, ny: u3
     if i < nx {
         let mut sum = 0.0f32;
         let a_row: &[f32] = &a[(i * ny) as usize..((i + 1) * ny) as usize];
-        for (j_idx, a_val) in a_row.iter().enumerate() {
-            sum += a_val * x[j_idx];
+        let mut j_idx: usize = 0;
+        while j_idx < ny as usize {
+            sum += a_row[j_idx] * x[j_idx];
+            j_idx += 1;
         }
         tmp[0] = sum;
     }
@@ -286,8 +289,10 @@ pub fn bench_bicg_kernel2(a: &[f32], p: &[f32], q: &mut [f32], nx: u32, ny: u32)
     if i < nx {
         let mut sum = 0.0f32;
         let a_row: &[f32] = &a[(i * ny) as usize..((i + 1) * ny) as usize];
-        for (j_idx, a_val) in a_row.iter().enumerate() {
-            sum += a_val * p[j_idx];
+        let mut j_idx: usize = 0;
+        while j_idx < ny as usize {
+            sum += a_row[j_idx] * p[j_idx];
+            j_idx += 1;
         }
         q[0] = sum;
     }
@@ -301,8 +306,10 @@ pub fn bench_mvt_kernel1(a: &[f32], x1: &mut [f32], y1: &[f32], n: u32) {
     if i < n {
         let mut sum = x1[0];
         let a_row: &[f32] = &a[(i * n) as usize..((i + 1) * n) as usize];
-        for (j_idx, a_val) in a_row.iter().enumerate() {
-            sum += a_val * y1[j_idx];
+        let mut j_idx: usize = 0;
+        while j_idx < n as usize {
+            sum += a_row[j_idx] * y1[j_idx];
+            j_idx += 1;
         }
         x1[0] = sum;
     }
@@ -342,8 +349,8 @@ pub fn bench_gesummv(
         let a_row: &[f32] = &a[(i * n) as usize..((i + 1) * n) as usize];
         let b_row: &[f32] = &b[(i * n) as usize..((i + 1) * n) as usize];
         let mut j_idx: usize = 0;
-        for a_val in a_row {
-            sum_a += a_val * x[j_idx];
+        while j_idx < n as usize {
+            sum_a += a_row[j_idx] * x[j_idx];
             sum_b += b_row[j_idx] * x[j_idx];
             j_idx += 1;
         }
@@ -414,7 +421,7 @@ pub fn bench_corr_mean(data: &[f32], mean: &mut [f32], m: u32, n: u32) {
         let mut sum = 0.0f32;
         let mut i: u32 = 0;
         while i < n {
-            sum += data[(i * m + j) as usize];
+            sum += data[(i * m + j) as usize].ldcs();
             i += 1;
         }
         mean[0] = sum / CORR_FLOAT_N;
@@ -430,7 +437,7 @@ pub fn bench_corr_std(data: &[f32], mean: &[f32], stddev: &mut [f32], m: u32, n:
         let mean_j = mean[j as usize];
         let mut i: u32 = 0;
         while i < n {
-            let diff = data[(i * m + j) as usize] - mean_j;
+            let diff = data[(i * m + j) as usize].ldcs() - mean_j;
             sum += diff * diff;
             i += 1;
         }
@@ -460,7 +467,7 @@ pub fn bench_corr_corr(data: &[f32], symmat: &mut [f32], m: u32, n: u32) {
         let mut sum = 0.0f32;
         let mut i: u32 = 0;
         while i < n {
-            sum += data[(i * m + j1) as usize] * data[(i * m + j2) as usize];
+            sum += data[(i * m + j1) as usize].ldcs() * data[(i * m + j2) as usize].ldcs();
             i += 1;
         }
         symmat[(0, 0)] = sum;
@@ -478,7 +485,7 @@ pub fn bench_covar_mean(data: &[f32], mean: &mut [f32], m: u32, n: u32) {
         let mut sum = 0.0f32;
         let mut i: u32 = 0;
         while i < n {
-            sum += data[(i * m + j) as usize];
+            sum += data[(i * m + j) as usize].ldcs();
             i += 1;
         }
         mean[0] = sum / COVAR_FLOAT_N;
@@ -504,7 +511,7 @@ pub fn bench_covar_covar(data: &[f32], symmat: &mut [f32], m: u32, n: u32) {
         let mut sum = 0.0f32;
         let mut i: u32 = 0;
         while i < n {
-            sum += data[(i * m + j1) as usize] * data[(i * m + j2) as usize];
+            sum += data[(i * m + j1) as usize].ldcs() * data[(i * m + j2) as usize].ldcs();
             i += 1;
         }
         symmat[(0, 0)] = sum;

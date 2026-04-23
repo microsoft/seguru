@@ -7,8 +7,10 @@ pub fn atax_kernel1(a: &[f32], x: &[f32], tmp: &mut [f32], nx: u32, ny: u32) {
     if i < nx {
         let mut sum = 0.0f32;
         let a_row: &[f32] = &a[(i * ny) as usize..((i + 1) * ny) as usize];
-        for (j_idx, a_val) in a_row.iter().enumerate() {
-            sum += a_val * x[j_idx];
+        let mut j_idx: usize = 0;
+        while j_idx < ny as usize {
+            sum += a_row[j_idx] * x[j_idx];
+            j_idx += 1;
         }
         tmp[0] = sum;
     }

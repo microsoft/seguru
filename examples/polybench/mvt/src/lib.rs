@@ -7,8 +7,10 @@ pub fn mvt_kernel1(a: &[f32], x1: &mut [f32], y1: &[f32], n: u32) {
     if i < n {
         let mut sum = x1[0];
         let a_row: &[f32] = &a[(i * n) as usize..((i + 1) * n) as usize];
-        for (j_idx, a_val) in a_row.iter().enumerate() {
-            sum += a_val * y1[j_idx];
+        let mut j_idx: usize = 0;
+        while j_idx < n as usize {
+            sum += a_row[j_idx] * y1[j_idx];
+            j_idx += 1;
         }
         x1[0] = sum;
     }

@@ -22,8 +22,10 @@ pub fn bicg_kernel2(a: &[f32], p: &[f32], q: &mut [f32], nx: u32, ny: u32) {
     if i < nx {
         let mut sum = 0.0f32;
         let a_row: &[f32] = &a[(i * ny) as usize..((i + 1) * ny) as usize];
-        for (j_idx, a_val) in a_row.iter().enumerate() {
-            sum += a_val * p[j_idx];
+        let mut j_idx: usize = 0;
+        while j_idx < ny as usize {
+            sum += a_row[j_idx] * p[j_idx];
+            j_idx += 1;
         }
         q[0] = sum;
     }

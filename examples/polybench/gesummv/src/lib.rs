@@ -18,9 +18,11 @@ pub fn gesummv_kernel(
         let mut y_val: f32 = 0.0;
         let a_row: &[f32] = &a[(i * n) as usize..((i + 1) * n) as usize];
         let b_row: &[f32] = &b[(i * n) as usize..((i + 1) * n) as usize];
-        for j_idx in 0..n as usize {
+        let mut j_idx: usize = 0;
+        while j_idx < n as usize {
             tmp_val += a_row[j_idx] * x[j_idx];
             y_val += b_row[j_idx] * x[j_idx];
+            j_idx += 1;
         }
         y[0] = alpha * tmp_val + beta * y_val;
     }

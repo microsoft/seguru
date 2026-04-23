@@ -1,4 +1,5 @@
 use gpu::prelude::*;
+use gpu::CacheStreamLoadStore;
 
 const FLOAT_N: f32 = 3214212.01;
 
@@ -17,7 +18,7 @@ pub fn covar_mean_kernel(
         let mut sum = 0.0f32;
         let mut i: u32 = 0;
         while i < n {
-            sum += data[(i * m + j) as usize];
+            sum += data[(i * m + j) as usize].ldcs();
             i += 1;
         }
         mean[0] = sum / FLOAT_N;
@@ -57,7 +58,7 @@ pub fn covar_kernel(
         let mut sum = 0.0f32;
         let mut i: u32 = 0;
         while i < n {
-            sum += data[(i * m + j1) as usize] * data[(i * m + j2) as usize];
+            sum += data[(i * m + j1) as usize].ldcs() * data[(i * m + j2) as usize].ldcs();
             i += 1;
         }
         symmat[(0, 0)] = sum;

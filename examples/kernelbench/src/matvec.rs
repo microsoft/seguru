@@ -11,6 +11,15 @@ pub fn matvec_forward(a: &[f32], x: &[f32], y: &mut [f32], m: u32, n: u32) {
         let a_row = &a[tid as usize * n_us..(tid as usize + 1) * n_us];
         let mut sum = 0.0f32;
         let mut idx = 0u32;
+        let n4 = n & !3;
+        while idx < n4 {
+            let i = idx as usize;
+            sum += a_row[i] * x[i]
+                + a_row[i + 1] * x[i + 1]
+                + a_row[i + 2] * x[i + 2]
+                + a_row[i + 3] * x[i + 3];
+            idx += 4;
+        }
         while idx < n {
             sum += a_row[idx as usize] * x[idx as usize];
             idx += 1;
@@ -60,6 +69,14 @@ pub fn tensor3d_matmul(
         let a_row = &a[a_off + row_us * k_us..a_off + (row_us + 1) * k_us];
         let mut sum = 0.0f32;
         let mut i = 0usize;
+        let k_us_4 = k_us & !3;
+        while i < k_us_4 {
+            sum += a_row[i] * b[b_off + i * n_us + col_us]
+                + a_row[i + 1] * b[b_off + (i + 1) * n_us + col_us]
+                + a_row[i + 2] * b[b_off + (i + 2) * n_us + col_us]
+                + a_row[i + 3] * b[b_off + (i + 3) * n_us + col_us];
+            i += 4;
+        }
         while i < k_us {
             sum += a_row[i] * b[b_off + i * n_us + col_us];
             i += 1;

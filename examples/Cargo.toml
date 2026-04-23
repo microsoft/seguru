@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "kernelbench",
     "hello",
     "histogram",
     "llm-rs-gpu",

@@ -538,3 +538,71 @@ pub fn layernorm_vectorized(
 
 Source: `examples/bench-layernorm/` (all three variants + host harness); CUDA
 reference at `benchmarks/cuda/layernorm_pytorch.cu`.
+
+## Case Study: KernelBench L1 skill-doc stress test
+
+Five KernelBench Level-1 problems were ported to SeGuRu using **only patterns
+documented above**. All five compiled on the first attempt and produced correct
+output. Performance vs PyTorch (A100):
+
+| Problem | Shape | SeGuRu | PyTorch | Ratio |
+|---|---|---|---|---|
+| 19_ReLU | 4096×16384 | 350 µs | 325 µs | **1.08×** |
+| 21_Sigmoid | 4096×16384 | 353 µs | 325 µs | **1.09×** |
+| 23_Softmax (dim=1) | 4096×4096 | 208 µs | 98 µs | 2.12× |
+| 40_LayerNorm (vectorized variant) | 8192×1024 | 66 µs | — | 1.05× vs CUDA ref |
+| 1_SquareMatmul | 4096×4096 | 31510 µs | 7308 µs | 4.31× |
+
+### What worked
+
+- **Elementwise kernels reach PyTorch parity** with the documented
+  `chunk_mut(MapContinuousLinear::new(1))` + bounds-guarded global-thread-id
+  pattern. No shared memory, no vectorization, no idiom tricks — just the
+  basic elementwise template.
+- **All correctness checks passed** on the first build — sync analysis,
+  bounds guards, and chunk-based writes caught nothing the author had missed,
+  meaning the documented rules suffice to produce compilable code for these
+  patterns.
+
+### Gaps surfaced
+
+**Gap 1 — fused multi-pass reductions** (softmax at 2.12×, layernorm-idiomatic
+at 1.43×): the doc now has a "port the algorithm first" note in the LayerNorm
+case study, but the general lesson is worth stating once as a Golden Rule:
+*any reduction pattern (max+sum, mean+var, logsumexp) should be fused into a
+single pass over global memory*. The 3-pass "natural translation" landing
+around 2× is predictable.
+
+**Gap 2 — register tiling for GEMM** (matmul at 4.31×). The skill doc's
+GEMM-family guidance stops at the 16×16 shared-memory tile pattern. Reaching
+competitive GEMM performance requires:
+- Larger block tiles (e.g., 128×128) with each thread computing a **register
+  tile** (e.g., 8×8 outputs held in registers across the K-loop).
+- Double-buffered shared-memory loads (software pipelining).
+- For f32, `tf32` via WMMA/tensor cores to approach cuBLAS.
+
+None of this is in the doc. The existing `bench_gemm_tiled` in
+`examples/bench/src/main.rs` has a comment: *"Register tiling (each thread
+computes NxM outputs) is the next optimization axis"* — that axis is
+undocumented.
+
+**Practical rule for now:** For large dense f32 matmul, the doc already points
+at cuBLAS via `cublasSgemm_v2`. Use it. Treat user-written SeGuRu matmul as
+appropriate only for small sizes or non-standard shapes where cuBLAS doesn't
+fit. The 4.3× gap is structural, not a skill-doc failure — but the doc should
+say so explicitly instead of implying a 1.7-2.0× tile-only ratio is tight.
+
+### Revised Golden Rule
+
+> **Port the algorithm before the idioms.**
+> Fuse multi-pass reductions (max+sum, mean+var, logsumexp) into one pass.
+> Choose a vector width (Float4/Float8) before writing the loop.
+> Choose a tile size with register tiling *before* writing the GEMM kernel.
+> Then apply SeGuRu's chunk_mut/reshape_map/warp-redux patterns.
+
+### Reproducing
+
+- SeGuRu: `cargo run --release -p kernelbench`
+- PyTorch: `python3 examples/kernelbench/python/run_torch_baseline.py`
+
+Both crates at `examples/kernelbench/`.

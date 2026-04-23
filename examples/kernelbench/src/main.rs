@@ -14,6 +14,8 @@
 use gpu::cg::{CGOperations, ReduxAdd, ReduxMax, ThreadWarpTile, WarpReduceOp};
 use gpu::prelude::*;
 use gpu::CacheStreamLoadStore;
+use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::time::Instant;
 
 // ======================================================================
@@ -200,9 +202,217 @@ fn max_abs_diff(a: &[f32], b: &[f32]) -> f32 {
 }
 
 // ======================================================================
+// CLI mode — invoked when first arg is "run"
+//
+// Usage:
+//   kernelbench run --problem <name> --in-dir <dir> --out-dir <dir>
+//                   --iters <N> --shape <d0,d1,...>
+//
+// Binary file format: raw little-endian f32, no header.
+// Each problem declares which inputs it reads and which output it writes.
+// Problems:
+//   relu     : inputs=x.bin  outputs=y.bin   shape=[N]          (total elems)
+//   sigmoid  : inputs=x.bin  outputs=y.bin   shape=[N]
+//   softmax  : inputs=x.bin  outputs=y.bin   shape=[M, N]       (N must equal SOFTMAX_N)
+//   matmul   : inputs=a.bin,b.bin outputs=c.bin shape=[N]       (square NxN)
+// ======================================================================
+
+#[derive(Default)]
+struct CliArgs {
+    problem: String,
+    in_dir: PathBuf,
+    out_dir: PathBuf,
+    iters: usize,
+    shape: Vec<usize>,
+}
+
+fn parse_cli(args: Vec<String>) -> CliArgs {
+    let mut a = CliArgs { iters: 100, ..Default::default() };
+    let mut it = args.into_iter();
+    while let Some(k) = it.next() {
+        match k.as_str() {
+            "--problem" => a.problem = it.next().expect("--problem needs value"),
+            "--in-dir"  => a.in_dir  = it.next().expect("--in-dir needs value").into(),
+            "--out-dir" => a.out_dir = it.next().expect("--out-dir needs value").into(),
+            "--iters"   => a.iters   = it.next().expect("--iters needs value").parse().unwrap(),
+            "--shape"   => {
+                let s = it.next().expect("--shape needs value");
+                a.shape = s.split(',').map(|t| t.parse().unwrap()).collect();
+            }
+            _ => panic!("unknown arg: {k}"),
+        }
+    }
+    assert!(!a.problem.is_empty(), "--problem required");
+    assert!(!a.shape.is_empty(), "--shape required");
+    a
+}
+
+fn read_bin(path: &PathBuf, n: usize) -> Vec<f32> {
+    let mut f = std::fs::File::open(path).unwrap_or_else(|e| panic!("open {path:?}: {e}"));
+    let mut buf = vec![0u8; n * 4];
+    f.read_exact(&mut buf).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
+    let mut out = vec![0f32; n];
+    for (i, chunk) in buf.chunks_exact(4).enumerate() {
+        out[i] = f32::from_le_bytes(chunk.try_into().unwrap());
+    }
+    out
+}
+
+fn write_bin(path: &PathBuf, data: &[f32]) {
+    std::fs::create_dir_all(path.parent().unwrap()).ok();
+    let mut f = std::fs::File::create(path).unwrap_or_else(|e| panic!("create {path:?}: {e}"));
+    let mut buf = Vec::with_capacity(data.len() * 4);
+    for v in data { buf.extend_from_slice(&v.to_le_bytes()); }
+    f.write_all(&buf).unwrap();
+}
+
+fn run_cli(a: CliArgs) {
+    gpu_host::cuda_ctx(0, |ctx, md| {
+        let (kernel_us, warmup_us) = match a.problem.as_str() {
+            "relu" => {
+                assert_eq!(a.shape.len(), 1, "relu: shape=[N]");
+                let n = a.shape[0];
+                let h_x = read_bin(&a.in_dir.join("x.bin"), n);
+                let mut h_y = vec![0f32; n];
+                let d_x = ctx.new_tensor_view(h_x.as_slice()).unwrap();
+                let mut d_y = ctx.new_tensor_view(h_y.as_mut_slice()).unwrap();
+                let nn = n as u32;
+                let bs: u32 = 256;
+                let gs: u32 = nn.div_ceil(bs);
+                let cfg = gpu_host::gpu_config!(gs, 1, 1, bs, 1, 1, 0);
+                relu_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, nn).unwrap();
+                ctx.sync().unwrap();
+                let warmup_t = Instant::now();
+                for _ in 0..5 {
+                    let cfg = gpu_host::gpu_config!(gs, 1, 1, bs, 1, 1, 0);
+                    relu_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, nn).unwrap();
+                }
+                ctx.sync().unwrap();
+                let warmup = warmup_t.elapsed().as_micros() as f64 / 5.0;
+                let t = Instant::now();
+                for _ in 0..a.iters {
+                    let cfg = gpu_host::gpu_config!(gs, 1, 1, bs, 1, 1, 0);
+                    relu_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, nn).unwrap();
+                }
+                ctx.sync().unwrap();
+                let us = t.elapsed().as_micros() as f64 / a.iters as f64;
+                d_y.copy_to_host(&mut h_y).unwrap();
+                write_bin(&a.out_dir.join("y.bin"), &h_y);
+                (us, warmup)
+            }
+            "sigmoid" => {
+                assert_eq!(a.shape.len(), 1, "sigmoid: shape=[N]");
+                let n = a.shape[0];
+                let h_x = read_bin(&a.in_dir.join("x.bin"), n);
+                let mut h_y = vec![0f32; n];
+                let d_x = ctx.new_tensor_view(h_x.as_slice()).unwrap();
+                let mut d_y = ctx.new_tensor_view(h_y.as_mut_slice()).unwrap();
+                let nn = n as u32;
+                let bs: u32 = 256;
+                let gs: u32 = nn.div_ceil(bs);
+                let cfg = gpu_host::gpu_config!(gs, 1, 1, bs, 1, 1, 0);
+                sigmoid_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, nn).unwrap();
+                ctx.sync().unwrap();
+                let warmup_t = Instant::now();
+                for _ in 0..5 {
+                    let cfg = gpu_host::gpu_config!(gs, 1, 1, bs, 1, 1, 0);
+                    sigmoid_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, nn).unwrap();
+                }
+                ctx.sync().unwrap();
+                let warmup = warmup_t.elapsed().as_micros() as f64 / 5.0;
+                let t = Instant::now();
+                for _ in 0..a.iters {
+                    let cfg = gpu_host::gpu_config!(gs, 1, 1, bs, 1, 1, 0);
+                    sigmoid_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, nn).unwrap();
+                }
+                ctx.sync().unwrap();
+                let us = t.elapsed().as_micros() as f64 / a.iters as f64;
+                d_y.copy_to_host(&mut h_y).unwrap();
+                write_bin(&a.out_dir.join("y.bin"), &h_y);
+                (us, warmup)
+            }
+            "softmax" => {
+                assert_eq!(a.shape.len(), 2, "softmax: shape=[M,N]");
+                let (m, n) = (a.shape[0], a.shape[1]);
+                assert_eq!(n as u32, SOFTMAX_N, "softmax inner dim must equal compile-time SOFTMAX_N={}", SOFTMAX_N);
+                let h_x = read_bin(&a.in_dir.join("x.bin"), m * n);
+                let mut h_y = vec![0f32; m * n];
+                let d_x = ctx.new_tensor_view(h_x.as_slice()).unwrap();
+                let mut d_y = ctx.new_tensor_view(h_y.as_mut_slice()).unwrap();
+                const WPB: u32 = 8;
+                const BDIM: u32 = 32 * WPB;
+                let gs: u32 = (m as u32).div_ceil(WPB);
+                let cfg = gpu_host::gpu_config!(gs, 1, 1, BDIM, 1, 1, 0);
+                softmax_kernel::launch(cfg, ctx, md, &d_x, &mut d_y).unwrap();
+                ctx.sync().unwrap();
+                let warmup_t = Instant::now();
+                for _ in 0..5 {
+                    let cfg = gpu_host::gpu_config!(gs, 1, 1, BDIM, 1, 1, 0);
+                    softmax_kernel::launch(cfg, ctx, md, &d_x, &mut d_y).unwrap();
+                }
+                ctx.sync().unwrap();
+                let warmup = warmup_t.elapsed().as_micros() as f64 / 5.0;
+                let t = Instant::now();
+                for _ in 0..a.iters {
+                    let cfg = gpu_host::gpu_config!(gs, 1, 1, BDIM, 1, 1, 0);
+                    softmax_kernel::launch(cfg, ctx, md, &d_x, &mut d_y).unwrap();
+                }
+                ctx.sync().unwrap();
+                let us = t.elapsed().as_micros() as f64 / a.iters as f64;
+                d_y.copy_to_host(&mut h_y).unwrap();
+                write_bin(&a.out_dir.join("y.bin"), &h_y);
+                (us, warmup)
+            }
+            "matmul" => {
+                assert_eq!(a.shape.len(), 1, "matmul: shape=[N]  (square NxN)");
+                let n = a.shape[0];
+                let h_a = read_bin(&a.in_dir.join("a.bin"), n * n);
+                let h_b = read_bin(&a.in_dir.join("b.bin"), n * n);
+                let mut h_c = vec![0f32; n * n];
+                let d_a = ctx.new_tensor_view(h_a.as_slice()).unwrap();
+                let d_b = ctx.new_tensor_view(h_b.as_slice()).unwrap();
+                let mut d_c = ctx.new_tensor_view(h_c.as_mut_slice()).unwrap();
+                let gs: u32 = (n as u32).div_ceil(16);
+                let cfg = gpu_host::gpu_config!(gs, gs, 1, 16, 16, 1, 0);
+                matmul_tiled::launch(cfg, ctx, md, &d_a, &d_b, &mut d_c, n as u32).unwrap();
+                ctx.sync().unwrap();
+                let warmup_t = Instant::now();
+                for _ in 0..3 {
+                    let cfg = gpu_host::gpu_config!(gs, gs, 1, 16, 16, 1, 0);
+                    matmul_tiled::launch(cfg, ctx, md, &d_a, &d_b, &mut d_c, n as u32).unwrap();
+                }
+                ctx.sync().unwrap();
+                let warmup = warmup_t.elapsed().as_micros() as f64 / 3.0;
+                let t = Instant::now();
+                for _ in 0..a.iters {
+                    let cfg = gpu_host::gpu_config!(gs, gs, 1, 16, 16, 1, 0);
+                    matmul_tiled::launch(cfg, ctx, md, &d_a, &d_b, &mut d_c, n as u32).unwrap();
+                }
+                ctx.sync().unwrap();
+                let us = t.elapsed().as_micros() as f64 / a.iters as f64;
+                d_c.copy_to_host(&mut h_c).unwrap();
+                write_bin(&a.out_dir.join("c.bin"), &h_c);
+                (us, warmup)
+            }
+            other => panic!("unknown problem: {other}"),
+        };
+        println!(
+            "{{\"problem\":\"{}\",\"shape\":{:?},\"iters\":{},\"kernel_us\":{:.3},\"warmup_us\":{:.3}}}",
+            a.problem, a.shape, a.iters, kernel_us, warmup_us
+        );
+    });
+}
+
+// ======================================================================
 // Bench driver
 // ======================================================================
 fn main() {
+    let mut argv: Vec<String> = std::env::args().skip(1).collect();
+    if argv.first().map(|s| s.as_str()) == Some("run") {
+        argv.remove(0);
+        run_cli(parse_cli(argv));
+        return;
+    }
     let iters = 100;
 
     // Shapes

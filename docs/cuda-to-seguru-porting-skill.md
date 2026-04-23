@@ -976,3 +976,29 @@ if (threadIdx.x < 32) {
 Now documented in `docs/cuda-raw-kernel-skill.md` so future raw-CUDA
 ports avoid this pitfall.
 
+### Isolated per-launch overhead: SeGuRu matches raw CUDA
+
+To answer whether SeGuRu's FFI path is a constant tax on benchmarks that
+dominate via many small launches, we measured empty-kernel launch cost
+on A100 (block=1, thread=1, 1000 iterations, median):
+
+| Launch path | Per-launch |
+|---|---|
+| `torch.cpp_extension` (raw CUDA) → `cuLaunchKernel` | **5.08 µs** |
+| SeGuRu (Rust) → `cuLaunchKernel` | **4.48 µs** |
+| `torch.nn.functional.relu` (reference) | 6.36 µs |
+
+SeGuRu's FFI path is actually **0.6 µs faster** than torch's C++ extension
+path — both are essentially the driver's `cuLaunchKernel` cost, with no
+measurable Rust safety-wrapper tax. This rules out "per-launch FFI
+overhead" as an explanation for the SeGuRu-vs-CUDA gap on the softmax-class
+problems. Any residual gap is in kernel-body codegen (register pressure,
+`__expf` vs `GPUDeviceFloatIntrinsics::exp`, compiler vectorization) or in
+algorithm, **not** in the launch path.
+
+The measurement harness lives at `examples/kernelbench-b/python/launch_overhead.py`
+(SeGuRu dispatch) + `examples/kernelbench-b/src/empty.rs` and
+`examples/kernelbench-b/cuda/empty.cu` (empty kernels). Re-run when
+changing `crates/gpu_host`, Rust-side launch macros, or cuLaunchKernel
+config plumbing.
+

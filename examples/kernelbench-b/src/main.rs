@@ -37,6 +37,7 @@ pub mod softmax;
 pub mod layer_norm;
 pub mod sum_dim;
 pub mod l2_norm;
+pub mod empty;
 
 // Parallel set of SeGuRu kernels translated from raw CUDA (not PyTorch).
 pub mod from_cuda;
@@ -124,6 +125,7 @@ fn main() {
             "layer_norm" => layer_norm::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "sum_dim"    => sum_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "l2_norm"    => l2_norm::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "empty"      => empty::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
 
             // from_cuda variants (SeGuRu translated from the raw-CUDA kernel).
             "leaky_relu_fc" => from_cuda::leaky_relu::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),

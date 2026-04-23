@@ -5,7 +5,7 @@ use gpu::prelude::*;
 #[gpu::cuda_kernel]
 pub fn matvec_forward(a: &[f32], x: &[f32], y: &mut [f32], m: u32, n: u32) {
     let tid = block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>();
-    let mut out = chunk_mut(y, MapContinuousLinear::new(1));
+    let mut out = chunk_mut(y, reshape_map!([1] | [block_dim::<DimX>(), grid_dim::<DimX>()] => layout: [i0, t0, t1]));
     if tid < m {
         let row_start = tid as usize * n as usize;
         let mut sum = 0.0f32;
@@ -22,7 +22,7 @@ pub fn matvec_forward(a: &[f32], x: &[f32], y: &mut [f32], m: u32, n: u32) {
 #[gpu::cuda_kernel]
 pub fn scalar_multiply(input: &[f32], output: &mut [f32], s: f32, n: u32) {
     let tid = block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>();
-    let mut out = chunk_mut(output, MapContinuousLinear::new(1));
+    let mut out = chunk_mut(output, reshape_map!([1] | [block_dim::<DimX>(), grid_dim::<DimX>()] => layout: [i0, t0, t1]));
     if tid < n {
         out[0] = input[tid as usize] * s;
     }
@@ -40,7 +40,7 @@ pub fn tensor3d_matmul(
     k: u32,
     batch: u32,
 ) {
-    let mut c = chunk_mut(c, MapContinuousLinear::new(1));
+    let mut c = chunk_mut(c, reshape_map!([1] | [block_dim::<DimX>(), grid_dim::<DimX>()] => layout: [i0, t0, t1]));
     let tid = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let mn = m * n;
     let total = batch * mn;

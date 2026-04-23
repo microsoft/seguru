@@ -95,6 +95,24 @@ pub fn bench_gemm_u32(a: &[f32], b: &[f32], c: &mut [f32], n: u32) {
     }
 }
 
+// GEMM using subslice + iterator pattern (like existing matmul example)
+#[gpu::cuda_kernel]
+pub fn bench_gemm_slice(a: &[f32], b: &[f32], c: &mut [f32], n: usize) {
+    let mut c = chunk_mut(c, Map2D::new(n));
+    let j = (block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>()) as usize;
+    let i = (block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>()) as usize;
+    if i < n && j < n {
+        let mut sum = 0.0f32;
+        let aa: &[f32] = &a[i * n..i * n + n];
+        let mut b_idx = j;
+        for a_val in aa {
+            sum += a_val * b[b_idx];
+            b_idx += n;
+        }
+        c[(0, 0)] = sum;
+    }
+}
+
 // ===== Main benchmark runner =====
 fn main() {
     let iters = 100;
@@ -260,6 +278,25 @@ fn main() {
             let elapsed = start.elapsed();
             println!(
                 "gemm (u32)   SeGuRu: {:.3} us/iter (N={}, {} iters)",
+                elapsed.as_micros() as f64 / iters as f64,
+                n,
+                iters
+            );
+
+            // ----- GEMM slice pattern -----
+            let config = gpu_host::gpu_config!(gx, gy, 1, bx, by, 1, 0);
+            bench_gemm_slice::launch(config, ctx, m, &d_a, &d_b, &mut d_c, n).unwrap();
+            ctx.sync().unwrap();
+
+            let start = Instant::now();
+            for _ in 0..iters {
+                let config = gpu_host::gpu_config!(gx, gy, 1, bx, by, 1, 0);
+                bench_gemm_slice::launch(config, ctx, m, &d_a, &d_b, &mut d_c, n).unwrap();
+            }
+            ctx.sync().unwrap();
+            let elapsed = start.elapsed();
+            println!(
+                "gemm (slice) SeGuRu: {:.3} us/iter (N={}, {} iters)",
                 elapsed.as_micros() as f64 / iters as f64,
                 n,
                 iters

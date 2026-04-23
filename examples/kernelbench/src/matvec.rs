@@ -7,11 +7,12 @@ pub fn matvec_forward(a: &[f32], x: &[f32], y: &mut [f32], m: u32, n: u32) {
     let tid = block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>();
     let mut out = chunk_mut(y, reshape_map!([1] | [block_dim::<DimX>(), grid_dim::<DimX>()] => layout: [i0, t0, t1]));
     if tid < m {
-        let row_start = tid as usize * n as usize;
+        let n_us = n as usize;
+        let a_row = &a[tid as usize * n_us..(tid as usize + 1) * n_us];
         let mut sum = 0.0f32;
         let mut idx = 0u32;
         while idx < n {
-            sum += a[row_start + idx as usize] * x[idx as usize];
+            sum += a_row[idx as usize] * x[idx as usize];
             idx += 1;
         }
         out[0] = sum;
@@ -49,18 +50,18 @@ pub fn tensor3d_matmul(
         let rem = tid % mn;
         let row = rem / n;
         let col = rem % n;
-        let mut sum = 0.0f32;
         let row_us = row as usize;
         let col_us = col as usize;
         let k_us = k as usize;
-        let m_us = m as usize;
         let n_us = n as usize;
         let b_idx_us = b_idx as usize;
-        let a_off = b_idx_us * m_us * k_us;
+        let a_off = b_idx_us * (m as usize) * k_us;
         let b_off = b_idx_us * k_us * n_us;
+        let a_row = &a[a_off + row_us * k_us..a_off + (row_us + 1) * k_us];
+        let mut sum = 0.0f32;
         let mut i = 0usize;
         while i < k_us {
-            sum += a[a_off + row_us * k_us + i] * b[b_off + i * n_us + col_us];
+            sum += a_row[i] * b[b_off + i * n_us + col_us];
             i += 1;
         }
         c[0] = sum;

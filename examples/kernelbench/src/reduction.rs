@@ -11,10 +11,11 @@ pub fn sum_reduce(input: &[f32], output: &mut [f32], dim: u32) {
     let smem = smem_alloc.alloc::<f32>(bdim as usize);
 
     let row_start = bid * dim;
+    let row = &input[row_start as usize..(row_start + dim) as usize];
     let mut local_sum = 0.0f32;
     let mut idx = tid;
     while idx < dim {
-        local_sum += input[(row_start + idx) as usize];
+        local_sum += row[idx as usize];
         idx += bdim;
     }
 
@@ -53,10 +54,11 @@ pub fn mean_reduce(input: &[f32], output: &mut [f32], dim: u32) {
     let smem = smem_alloc.alloc::<f32>(bdim as usize);
 
     let row_start = bid * dim;
+    let row = &input[row_start as usize..(row_start + dim) as usize];
     let mut local_sum = 0.0f32;
     let mut idx = tid;
     while idx < dim {
-        local_sum += input[(row_start + idx) as usize];
+        local_sum += row[idx as usize];
         idx += bdim;
     }
 
@@ -95,10 +97,11 @@ pub fn max_reduce(input: &[f32], output: &mut [f32], dim: u32) {
     let smem = smem_alloc.alloc::<f32>(bdim as usize);
 
     let row_start = bid * dim;
+    let row = &input[row_start as usize..(row_start + dim) as usize];
     let mut local_max = -3.4028235e38_f32;
     let mut idx = tid;
     while idx < dim {
-        let val = input[(row_start + idx) as usize];
+        let val = row[idx as usize];
         if val > local_max {
             local_max = val;
         }
@@ -142,10 +145,11 @@ pub fn min_reduce(input: &[f32], output: &mut [f32], dim: u32) {
     let smem = smem_alloc.alloc::<f32>(bdim as usize);
 
     let row_start = bid * dim;
+    let row = &input[row_start as usize..(row_start + dim) as usize];
     let mut local_min = 3.4028235e38_f32;
     let mut idx = tid;
     while idx < dim {
-        let val = input[(row_start + idx) as usize];
+        let val = row[idx as usize];
         if val < local_min {
             local_min = val;
         }

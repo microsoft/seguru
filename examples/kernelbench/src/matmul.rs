@@ -8,14 +8,15 @@ pub fn matmul_forward(a: &[f32], b: &[f32], c: &mut [f32], m: u32, n: u32, k: u3
     let row = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     let col = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if row < m && col < n {
-        let mut sum = 0.0f32;
         let row_us = row as usize;
         let col_us = col as usize;
         let k_us = k as usize;
         let n_us = n as usize;
+        let a_row = &a[row_us * k_us..(row_us + 1) * k_us];
+        let mut sum = 0.0f32;
         let mut idx = 0usize;
         while idx < k_us {
-            sum += a[row_us * k_us + idx] * b[idx * n_us + col_us];
+            sum += a_row[idx] * b[idx * n_us + col_us];
             idx += 1;
         }
         c[0] = sum;
@@ -29,12 +30,12 @@ pub fn matmul_transposed_a(a: &[f32], b: &[f32], c: &mut [f32], m: u32, n: u32, 
     let row = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     let col = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if row < m && col < n {
-        let mut sum = 0.0f32;
         let row_us = row as usize;
         let col_us = col as usize;
         let k_us = k as usize;
         let m_us = m as usize;
         let n_us = n as usize;
+        let mut sum = 0.0f32;
         let mut idx = 0usize;
         while idx < k_us {
             sum += a[idx * m_us + row_us] * b[idx * n_us + col_us];
@@ -51,13 +52,15 @@ pub fn matmul_transposed_b(a: &[f32], b: &[f32], c: &mut [f32], m: u32, n: u32, 
     let row = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     let col = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if row < m && col < n {
-        let mut sum = 0.0f32;
         let row_us = row as usize;
         let col_us = col as usize;
         let k_us = k as usize;
+        let a_row = &a[row_us * k_us..(row_us + 1) * k_us];
+        let b_row = &b[col_us * k_us..(col_us + 1) * k_us];
+        let mut sum = 0.0f32;
         let mut idx = 0usize;
         while idx < k_us {
-            sum += a[row_us * k_us + idx] * b[col_us * k_us + idx];
+            sum += a_row[idx] * b_row[idx];
             idx += 1;
         }
         c[0] = sum;
@@ -71,14 +74,15 @@ pub fn matmul_transposed_both(a: &[f32], b: &[f32], c: &mut [f32], m: u32, n: u3
     let row = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     let col = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if row < m && col < n {
-        let mut sum = 0.0f32;
         let row_us = row as usize;
         let col_us = col as usize;
         let k_us = k as usize;
         let m_us = m as usize;
+        let b_row = &b[col_us * k_us..(col_us + 1) * k_us];
+        let mut sum = 0.0f32;
         let mut idx = 0usize;
         while idx < k_us {
-            sum += a[idx * m_us + row_us] * b[col_us * k_us + idx];
+            sum += a[idx * m_us + row_us] * b_row[idx];
             idx += 1;
         }
         c[0] = sum;
@@ -106,18 +110,18 @@ pub fn matmul_batched(
         let rem = tid % mn;
         let row = rem / n;
         let col = rem % n;
-        let mut sum = 0.0f32;
         let row_us = row as usize;
         let col_us = col as usize;
         let k_us = k as usize;
-        let m_us = m as usize;
         let n_us = n as usize;
         let b_idx_us = b_idx as usize;
-        let a_off = b_idx_us * m_us * k_us;
+        let a_off = b_idx_us * (m as usize) * k_us;
         let b_off = b_idx_us * k_us * n_us;
+        let a_row = &a[a_off + row_us * k_us..a_off + (row_us + 1) * k_us];
+        let mut sum = 0.0f32;
         let mut i = 0usize;
         while i < k_us {
-            sum += a[a_off + row_us * k_us + i] * b[b_off + i * n_us + col_us];
+            sum += a_row[i] * b[b_off + i * n_us + col_us];
             i += 1;
         }
         c[0] = sum;

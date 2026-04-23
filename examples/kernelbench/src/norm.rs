@@ -11,12 +11,13 @@ pub fn rms_norm_forward(input: &[f32], output: &mut [f32], dim: u32, eps: f32) {
     let gdim = grid_dim::<DimX>();
     let smem = smem_alloc.alloc::<f32>(bdim as usize);
     let row_start = bid * dim;
+    let row = &input[row_start as usize..(row_start + dim) as usize];
 
     // Pass 1: reduce x*x per row
     let mut local_sum = 0.0f32;
     let mut i = tid;
     while i < dim {
-        let v = input[(row_start + i) as usize];
+        let v = row[i as usize];
         local_sum += v * v;
         i += bdim;
     }
@@ -46,7 +47,7 @@ pub fn rms_norm_forward(input: &[f32], output: &mut [f32], dim: u32, eps: f32) {
     i = tid;
     let mut iter_idx = 0u32;
     while i < dim {
-        out[iter_idx] = input[(row_start + i) as usize] / rms;
+        out[iter_idx] = row[i as usize] / rms;
         i += bdim;
         iter_idx += 1;
     }
@@ -100,12 +101,13 @@ pub fn l1_norm_forward(input: &[f32], output: &mut [f32], dim: u32) {
     let gdim = grid_dim::<DimX>();
     let smem = smem_alloc.alloc::<f32>(bdim as usize);
     let row_start = bid * dim;
+    let row = &input[row_start as usize..(row_start + dim) as usize];
 
     // Pass 1: reduce |x| per row
     let mut local_sum = 0.0f32;
     let mut i = tid;
     while i < dim {
-        let v = input[(row_start + i) as usize];
+        let v = row[i as usize];
         if v < 0.0 {
             local_sum += -v;
         } else {
@@ -139,7 +141,7 @@ pub fn l1_norm_forward(input: &[f32], output: &mut [f32], dim: u32) {
     i = tid;
     let mut iter_idx = 0u32;
     while i < dim {
-        out[iter_idx] = input[(row_start + i) as usize] / sum_abs;
+        out[iter_idx] = row[i as usize] / sum_abs;
         i += bdim;
         iter_idx += 1;
     }
@@ -155,12 +157,13 @@ pub fn l2_norm_forward(input: &[f32], output: &mut [f32], dim: u32) {
     let gdim = grid_dim::<DimX>();
     let smem = smem_alloc.alloc::<f32>(bdim as usize);
     let row_start = bid * dim;
+    let row = &input[row_start as usize..(row_start + dim) as usize];
 
     // Pass 1: reduce x*x per row
     let mut local_sum = 0.0f32;
     let mut i = tid;
     while i < dim {
-        let v = input[(row_start + i) as usize];
+        let v = row[i as usize];
         local_sum += v * v;
         i += bdim;
     }
@@ -190,7 +193,7 @@ pub fn l2_norm_forward(input: &[f32], output: &mut [f32], dim: u32) {
     i = tid;
     let mut iter_idx = 0u32;
     while i < dim {
-        out[iter_idx] = input[(row_start + i) as usize] / l2;
+        out[iter_idx] = row[i as usize] / l2;
         i += bdim;
         iter_idx += 1;
     }
@@ -206,12 +209,13 @@ pub fn layer_norm_forward(input: &[f32], output: &mut [f32], dim: u32, eps: f32)
     let gdim = grid_dim::<DimX>();
     let smem = smem_alloc.alloc::<f32>(bdim as usize);
     let row_start = bid * dim;
+    let row = &input[row_start as usize..(row_start + dim) as usize];
 
     // Pass 1: compute mean
     let mut local_sum = 0.0f32;
     let mut i = tid;
     while i < dim {
-        local_sum += input[(row_start + i) as usize];
+        local_sum += row[i as usize];
         i += bdim;
     }
     let mut sc = smem.chunk_mut(MapLinear::new(1));
@@ -235,7 +239,7 @@ pub fn layer_norm_forward(input: &[f32], output: &mut [f32], dim: u32, eps: f32)
     let mut local_var = 0.0f32;
     i = tid;
     while i < dim {
-        let diff = input[(row_start + i) as usize] - mean;
+        let diff = row[i as usize] - mean;
         local_var += diff * diff;
         i += bdim;
     }
@@ -265,7 +269,7 @@ pub fn layer_norm_forward(input: &[f32], output: &mut [f32], dim: u32, eps: f32)
     i = tid;
     let mut iter_idx = 0u32;
     while i < dim {
-        out[iter_idx] = (input[(row_start + i) as usize] - mean) * inv_std;
+        out[iter_idx] = (row[i as usize] - mean) * inv_std;
         i += bdim;
         iter_idx += 1;
     }

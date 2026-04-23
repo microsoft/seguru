@@ -11,12 +11,13 @@ pub fn softmax_forward(input: &[f32], output: &mut [f32], dim: u32) {
     let gdim = grid_dim::<DimX>();
     let smem = smem_alloc.alloc::<f32>(bdim as usize);
     let row_start = bid * dim;
+    let row = &input[row_start as usize..(row_start + dim) as usize];
 
     // Pass 1: find row max
     let mut local_max = -3.4028235e38_f32;
     let mut i = tid;
     while i < dim {
-        let v = input[(row_start + i) as usize];
+        let v = row[i as usize];
         if v > local_max {
             local_max = v;
         }
@@ -45,7 +46,7 @@ pub fn softmax_forward(input: &[f32], output: &mut [f32], dim: u32) {
     let mut local_sum = 0.0f32;
     i = tid;
     while i < dim {
-        local_sum += (input[(row_start + i) as usize] - row_max).exp();
+        local_sum += (row[i as usize] - row_max).exp();
         i += bdim;
     }
     let mut sc = smem.chunk_mut(MapLinear::new(1));
@@ -74,7 +75,7 @@ pub fn softmax_forward(input: &[f32], output: &mut [f32], dim: u32) {
     i = tid;
     let mut iter_idx = 0u32;
     while i < dim {
-        out[iter_idx] = (input[(row_start + i) as usize] - row_max).exp() / row_sum;
+        out[iter_idx] = (row[i as usize] - row_max).exp() / row_sum;
         i += bdim;
         iter_idx += 1;
     }
@@ -90,12 +91,13 @@ pub fn log_softmax_forward(input: &[f32], output: &mut [f32], dim: u32) {
     let gdim = grid_dim::<DimX>();
     let smem = smem_alloc.alloc::<f32>(bdim as usize);
     let row_start = bid * dim;
+    let row = &input[row_start as usize..(row_start + dim) as usize];
 
     // Pass 1: find row max
     let mut local_max = -3.4028235e38_f32;
     let mut i = tid;
     while i < dim {
-        let v = input[(row_start + i) as usize];
+        let v = row[i as usize];
         if v > local_max {
             local_max = v;
         }
@@ -124,7 +126,7 @@ pub fn log_softmax_forward(input: &[f32], output: &mut [f32], dim: u32) {
     let mut local_sum = 0.0f32;
     i = tid;
     while i < dim {
-        local_sum += (input[(row_start + i) as usize] - row_max).exp();
+        local_sum += (row[i as usize] - row_max).exp();
         i += bdim;
     }
     let mut sc = smem.chunk_mut(MapLinear::new(1));
@@ -153,7 +155,7 @@ pub fn log_softmax_forward(input: &[f32], output: &mut [f32], dim: u32) {
     i = tid;
     let mut iter_idx = 0u32;
     while i < dim {
-        out[iter_idx] = (input[(row_start + i) as usize] - row_max) - log_sum;
+        out[iter_idx] = (row[i as usize] - row_max) - log_sum;
         i += bdim;
         iter_idx += 1;
     }

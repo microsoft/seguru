@@ -7,6 +7,7 @@ use gpu::prelude::*;
 pub fn cumsum_forward(input: &[f32], output: &mut [f32], dim: u32) {
     let bid = block_id::<DimX>();
     let row_start = bid * dim;
+    let row = &input[row_start as usize..(row_start + dim) as usize];
 
     let iters = dim;
     let gdim = grid_dim::<DimX>();
@@ -19,7 +20,7 @@ pub fn cumsum_forward(input: &[f32], output: &mut [f32], dim: u32) {
     let mut acc = 0.0f32;
     let mut i = 0u32;
     while i < dim {
-        acc += input[(row_start + i) as usize];
+        acc += row[i as usize];
         out[i] = acc;
         i += 1;
     }
@@ -30,6 +31,7 @@ pub fn cumsum_forward(input: &[f32], output: &mut [f32], dim: u32) {
 pub fn cumprod_forward(input: &[f32], output: &mut [f32], dim: u32) {
     let bid = block_id::<DimX>();
     let row_start = bid * dim;
+    let row = &input[row_start as usize..(row_start + dim) as usize];
 
     let iters = dim;
     let gdim = grid_dim::<DimX>();
@@ -42,7 +44,7 @@ pub fn cumprod_forward(input: &[f32], output: &mut [f32], dim: u32) {
     let mut acc = 1.0f32;
     let mut i = 0u32;
     while i < dim {
-        acc *= input[(row_start + i) as usize];
+        acc *= row[i as usize];
         out[i] = acc;
         i += 1;
     }
@@ -53,6 +55,7 @@ pub fn cumprod_forward(input: &[f32], output: &mut [f32], dim: u32) {
 pub fn cumsum_reverse_forward(input: &[f32], output: &mut [f32], dim: u32) {
     let bid = block_id::<DimX>();
     let row_start = bid * dim;
+    let row = &input[row_start as usize..(row_start + dim) as usize];
 
     let iters = dim;
     let gdim = grid_dim::<DimX>();
@@ -66,7 +69,7 @@ pub fn cumsum_reverse_forward(input: &[f32], output: &mut [f32], dim: u32) {
     let mut i = dim;
     while i > 0 {
         i -= 1;
-        acc += input[(row_start + i) as usize];
+        acc += row[i as usize];
         out[i] = acc;
     }
 }
@@ -76,6 +79,7 @@ pub fn cumsum_reverse_forward(input: &[f32], output: &mut [f32], dim: u32) {
 pub fn cumsum_exclusive_forward(input: &[f32], output: &mut [f32], dim: u32) {
     let bid = block_id::<DimX>();
     let row_start = bid * dim;
+    let row = &input[row_start as usize..(row_start + dim) as usize];
 
     let iters = dim;
     let gdim = grid_dim::<DimX>();
@@ -89,7 +93,7 @@ pub fn cumsum_exclusive_forward(input: &[f32], output: &mut [f32], dim: u32) {
     let mut i = 0u32;
     while i < dim {
         out[i] = acc;
-        acc += input[(row_start + i) as usize];
+        acc += row[i as usize];
         i += 1;
     }
 }

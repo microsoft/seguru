@@ -13,11 +13,12 @@ pub fn argmax_reduce(input: &[f32], output: &mut [u32], dim: u32) {
     let smem_idxs = smem_alloc.alloc::<u32>(bdim as usize);
 
     let row_start = bid * dim;
+    let row = &input[row_start as usize..(row_start + dim) as usize];
     let mut local_max = -3.4028235e38_f32;
     let mut local_idx = 0u32;
     let mut i = tid;
     while i < dim {
-        let v = input[(row_start + i) as usize];
+        let v = row[i as usize];
         if v > local_max {
             local_max = v;
             local_idx = i;
@@ -68,11 +69,12 @@ pub fn argmin_reduce(input: &[f32], output: &mut [u32], dim: u32) {
     let smem_idxs = smem_alloc.alloc::<u32>(bdim as usize);
 
     let row_start = bid * dim;
+    let row = &input[row_start as usize..(row_start + dim) as usize];
     let mut local_min = 3.4028235e38_f32;
     let mut local_idx = 0u32;
     let mut i = tid;
     while i < dim {
-        let v = input[(row_start + i) as usize];
+        let v = row[i as usize];
         if v < local_min {
             local_min = v;
             local_idx = i;

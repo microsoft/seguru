@@ -1,7 +1,7 @@
 //! FFI bindings to CUDA reference benchmark kernels.
 //! Used by the bench binary, not included in lib.rs (which is no_std).
 
-extern "C" {
+unsafe extern "C" {
     // Elementwise (11)
     pub fn bench_relu_forward(input: *const f32, output: *mut f32, n: i32, grid: i32, block: i32, warmup: i32, iters: i32) -> f32;
     pub fn bench_leaky_relu_forward(input: *const f32, output: *mut f32, n: i32, alpha: f32, grid: i32, block: i32, warmup: i32, iters: i32) -> f32;

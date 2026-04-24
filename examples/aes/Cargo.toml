@@ -12,3 +12,8 @@ rand = "0.9"
 
 [features]
 bench = []
+
+[[bin]]
+name = "bench"
+path = "src/bin/bench.rs"
+required-features = ["bench"]

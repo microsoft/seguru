@@ -625,26 +625,38 @@ extern "C" void aes128_ecb_decrypt_ttable_host(
 }
 
 // ============================================================
-// Benchmark wrappers (data already on GPU)
+// Benchmark wrappers (host pointers, handles device allocation)
+// Returns average kernel time in microseconds
 // ============================================================
-extern "C" float bench_aes128_ecb_encrypt_textbook(
-    const uint8_t* d_input, uint8_t* d_output,
-    const uint32_t* d_round_keys, uint32_t num_blocks)
+
+extern "C" float bench_aes128_encrypt_textbook(
+    const uint8_t* host_input, uint8_t* host_output,
+    const uint32_t* host_round_keys, uint32_t num_blocks,
+    int warmup, int iters)
 {
+    uint32_t data_size = num_blocks * 16;
     uint32_t block_size = 256;
     uint32_t grid_size = (num_blocks + block_size - 1) / block_size;
+
+    uint8_t *d_in, *d_out;
+    uint32_t *d_rk;
+    cudaMalloc(&d_in, data_size);
+    cudaMalloc(&d_out, data_size);
+    cudaMalloc(&d_rk, 44 * sizeof(uint32_t));
+    cudaMemcpy(d_in, host_input, data_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_rk, host_round_keys, 44 * sizeof(uint32_t), cudaMemcpyHostToDevice);
+
+    for (int i = 0; i < warmup; i++) {
+        aes128_ecb_encrypt_textbook_kernel<<<grid_size, block_size>>>(d_in, d_out, d_rk, num_blocks);
+        cudaDeviceSynchronize();
+    }
 
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
-
-    // Warmup
-    aes128_ecb_encrypt_textbook_kernel<<<grid_size, block_size>>>(d_input, d_output, d_round_keys, num_blocks);
-    cudaDeviceSynchronize();
-
     cudaEventRecord(start);
-    for (int i = 0; i < 100; i++) {
-        aes128_ecb_encrypt_textbook_kernel<<<grid_size, block_size>>>(d_input, d_output, d_round_keys, num_blocks);
+    for (int i = 0; i < iters; i++) {
+        aes128_ecb_encrypt_textbook_kernel<<<grid_size, block_size>>>(d_in, d_out, d_rk, num_blocks);
     }
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
@@ -653,28 +665,81 @@ extern "C" float bench_aes128_ecb_encrypt_textbook(
     cudaEventElapsedTime(&ms, start, stop);
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
-    return ms / 100.0f;
+    cudaMemcpy(host_output, d_out, data_size, cudaMemcpyDeviceToHost);
+    cudaFree(d_in); cudaFree(d_out); cudaFree(d_rk);
+    return (ms * 1000.0f) / (float)iters;
 }
 
-extern "C" float bench_aes128_ecb_encrypt_ttable(
-    const uint8_t* d_input, uint8_t* d_output,
-    const uint32_t* d_round_keys, uint32_t num_blocks)
+extern "C" float bench_aes128_decrypt_textbook(
+    const uint8_t* host_input, uint8_t* host_output,
+    const uint32_t* host_round_keys, uint32_t num_blocks,
+    int warmup, int iters)
+{
+    uint32_t data_size = num_blocks * 16;
+    uint32_t block_size = 256;
+    uint32_t grid_size = (num_blocks + block_size - 1) / block_size;
+
+    uint8_t *d_in, *d_out;
+    uint32_t *d_rk;
+    cudaMalloc(&d_in, data_size);
+    cudaMalloc(&d_out, data_size);
+    cudaMalloc(&d_rk, 44 * sizeof(uint32_t));
+    cudaMemcpy(d_in, host_input, data_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_rk, host_round_keys, 44 * sizeof(uint32_t), cudaMemcpyHostToDevice);
+
+    for (int i = 0; i < warmup; i++) {
+        aes128_ecb_decrypt_textbook_kernel<<<grid_size, block_size>>>(d_in, d_out, d_rk, num_blocks);
+        cudaDeviceSynchronize();
+    }
+
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord(start);
+    for (int i = 0; i < iters; i++) {
+        aes128_ecb_decrypt_textbook_kernel<<<grid_size, block_size>>>(d_in, d_out, d_rk, num_blocks);
+    }
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+
+    float ms = 0;
+    cudaEventElapsedTime(&ms, start, stop);
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
+    cudaMemcpy(host_output, d_out, data_size, cudaMemcpyDeviceToHost);
+    cudaFree(d_in); cudaFree(d_out); cudaFree(d_rk);
+    return (ms * 1000.0f) / (float)iters;
+}
+
+extern "C" float bench_aes128_encrypt_ttable(
+    const uint8_t* host_input, uint8_t* host_output,
+    const uint32_t* host_round_keys, uint32_t num_blocks,
+    int warmup, int iters)
 {
     init_tables();
+    uint32_t data_size = num_blocks * 16;
     uint32_t block_size = 256;
     uint32_t grid_size = (num_blocks + block_size - 1) / block_size;
+
+    uint8_t *d_in, *d_out;
+    uint32_t *d_rk;
+    cudaMalloc(&d_in, data_size);
+    cudaMalloc(&d_out, data_size);
+    cudaMalloc(&d_rk, 44 * sizeof(uint32_t));
+    cudaMemcpy(d_in, host_input, data_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_rk, host_round_keys, 44 * sizeof(uint32_t), cudaMemcpyHostToDevice);
+
+    for (int i = 0; i < warmup; i++) {
+        aes128_ecb_encrypt_ttable_kernel<<<grid_size, block_size>>>(d_in, d_out, d_rk, num_blocks);
+        cudaDeviceSynchronize();
+    }
 
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
-
-    // Warmup
-    aes128_ecb_encrypt_ttable_kernel<<<grid_size, block_size>>>(d_input, d_output, d_round_keys, num_blocks);
-    cudaDeviceSynchronize();
-
     cudaEventRecord(start);
-    for (int i = 0; i < 100; i++) {
-        aes128_ecb_encrypt_ttable_kernel<<<grid_size, block_size>>>(d_input, d_output, d_round_keys, num_blocks);
+    for (int i = 0; i < iters; i++) {
+        aes128_ecb_encrypt_ttable_kernel<<<grid_size, block_size>>>(d_in, d_out, d_rk, num_blocks);
     }
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
@@ -683,55 +748,40 @@ extern "C" float bench_aes128_ecb_encrypt_ttable(
     cudaEventElapsedTime(&ms, start, stop);
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
-    return ms / 100.0f;
+    cudaMemcpy(host_output, d_out, data_size, cudaMemcpyDeviceToHost);
+    cudaFree(d_in); cudaFree(d_out); cudaFree(d_rk);
+    return (ms * 1000.0f) / (float)iters;
 }
 
-extern "C" float bench_aes128_ecb_decrypt_textbook(
-    const uint8_t* d_input, uint8_t* d_output,
-    const uint32_t* d_round_keys, uint32_t num_blocks)
-{
-    uint32_t block_size = 256;
-    uint32_t grid_size = (num_blocks + block_size - 1) / block_size;
-
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-
-    aes128_ecb_decrypt_textbook_kernel<<<grid_size, block_size>>>(d_input, d_output, d_round_keys, num_blocks);
-    cudaDeviceSynchronize();
-
-    cudaEventRecord(start);
-    for (int i = 0; i < 100; i++) {
-        aes128_ecb_decrypt_textbook_kernel<<<grid_size, block_size>>>(d_input, d_output, d_round_keys, num_blocks);
-    }
-    cudaEventRecord(stop);
-    cudaEventSynchronize(stop);
-
-    float ms = 0;
-    cudaEventElapsedTime(&ms, start, stop);
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
-    return ms / 100.0f;
-}
-
-extern "C" float bench_aes128_ecb_decrypt_ttable(
-    const uint8_t* d_input, uint8_t* d_output,
-    const uint32_t* d_round_keys, uint32_t num_blocks)
+extern "C" float bench_aes128_decrypt_ttable(
+    const uint8_t* host_input, uint8_t* host_output,
+    const uint32_t* host_round_keys, uint32_t num_blocks,
+    int warmup, int iters)
 {
     init_tables();
+    uint32_t data_size = num_blocks * 16;
     uint32_t block_size = 256;
     uint32_t grid_size = (num_blocks + block_size - 1) / block_size;
+
+    uint8_t *d_in, *d_out;
+    uint32_t *d_rk;
+    cudaMalloc(&d_in, data_size);
+    cudaMalloc(&d_out, data_size);
+    cudaMalloc(&d_rk, 44 * sizeof(uint32_t));
+    cudaMemcpy(d_in, host_input, data_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_rk, host_round_keys, 44 * sizeof(uint32_t), cudaMemcpyHostToDevice);
+
+    for (int i = 0; i < warmup; i++) {
+        aes128_ecb_decrypt_ttable_kernel<<<grid_size, block_size>>>(d_in, d_out, d_rk, num_blocks);
+        cudaDeviceSynchronize();
+    }
 
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
-
-    aes128_ecb_decrypt_ttable_kernel<<<grid_size, block_size>>>(d_input, d_output, d_round_keys, num_blocks);
-    cudaDeviceSynchronize();
-
     cudaEventRecord(start);
-    for (int i = 0; i < 100; i++) {
-        aes128_ecb_decrypt_ttable_kernel<<<grid_size, block_size>>>(d_input, d_output, d_round_keys, num_blocks);
+    for (int i = 0; i < iters; i++) {
+        aes128_ecb_decrypt_ttable_kernel<<<grid_size, block_size>>>(d_in, d_out, d_rk, num_blocks);
     }
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
@@ -740,5 +790,7 @@ extern "C" float bench_aes128_ecb_decrypt_ttable(
     cudaEventElapsedTime(&ms, start, stop);
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
-    return ms / 100.0f;
+    cudaMemcpy(host_output, d_out, data_size, cudaMemcpyDeviceToHost);
+    cudaFree(d_in); cudaFree(d_out); cudaFree(d_rk);
+    return (ms * 1000.0f) / (float)iters;
 }

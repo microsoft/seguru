@@ -2,6 +2,7 @@
 members = [
     "kernelbench",
     "kernelbench-b",
+    "kernelbench-c",
     "hello",
     "histogram",
     "llm-rs-gpu",

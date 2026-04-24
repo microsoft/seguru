@@ -213,6 +213,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "kernelbench-c"
+version = "0.1.0"
+dependencies = [
+ "crunchy",
+ "gpu",
+ "gpu_host",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.174"
 source = "registry+https://github.com/rust-lang/crates.io-index"

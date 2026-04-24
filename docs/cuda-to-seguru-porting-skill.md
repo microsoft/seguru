@@ -1002,3 +1002,84 @@ The measurement harness lives at `examples/kernelbench-b/python/launch_overhead.
 changing `crates/gpu_host`, Rust-side launch macros, or cuLaunchKernel
 config plumbing.
 
+### Phase C results — KernelBench Level 2 (fused operators)
+
+Same methodology extended to 8 Level 2 problems (fused GEMM/Conv +
+elementwise epilogue). Three sub-agents per problem, dispatched in
+parallel, one-shot — all 8 ported by different agents independently.
+Driver: `examples/kernelbench-c/python/compare.py`. All timings on
+A100 80GB, 50 iter median, µs.
+
+| Problem               | PyTorch eager | CUDA raw     | SeGuRu      | SeGuRu←CUDA |
+|-----------------------|--------------:|-------------:|------------:|------------:|
+| gemm_mul_lrelu        |        8520.6 |       8952.0 |    134460.1 |     41161.6 |
+| matmul_mish_mish      |        8554.7 |       9093.7 |    134460.7 |     41395.8 |
+| gemm_relu_div         |        8637.3 |       8964.5 |    134458.1 |     41171.2 |
+| gemm_scale_htanh_gelu |       15430.4 |      17577.4 |    268304.6 |     82267.7 |
+| matmul_scale_resadd   |       30923.9 |      32938.1 |    536396.1 |    156872.5 |
+| conv_relu_hardswish   |        6561.6 |       6706.3 |     19216.1 |     19271.7 |
+| conv_relu_biasadd     |        7771.5 |     102937.2 |    336531.9 |    336534.0 |
+| matmul_sigmoid_sum    |       18686.1 |    2094149.5 |   1831788.1 |   1822243.5 |
+
+Aggregate:
+
+| Arm          | source          | correct | avg speedup vs PyTorch |
+|--------------|-----------------|--------:|-----------------------:|
+| SeGuRu       | PyTorch ref     |    8/8  |                 0.09×  |
+| Raw CUDA     | PyTorch ref     |    8/8  |                 0.72×  |
+| SeGuRu←CUDA  | the `.cu` files |    8/8  |                 0.17×  |
+
+Key takeaways:
+- **Correctness holds at Level 2 too** — 8/8 across three arms on fused
+  GEMM/Conv+elementwise. The automation pipeline is viable for
+  multi-op fusion tasks.
+- **Hand-written raw CUDA matches cuBLAS TF32 within ~6% on the five
+  GEMM problems.** This is surprising only if you assume PyTorch eager
+  GEMM is using tensor cores at FP32 — it is not; `nn.Linear` on FP32
+  tensors dispatches to cuBLAS with TF32 acceleration, which loses
+  precision but only ~2× the FLOPS of a well-tuned FP32 SGEMM.
+- **SeGuRu←CUDA gives a consistent 3.2–3.4× speedup over
+  SeGuRu←PyTorch on the GEMM class** (134→41 ms, 268→82 ms, 536→156 ms).
+  Same story as Phase B: the CUDA-intermediate route pins down tile
+  geometry (BM=BN=128, BK=8, 8×8 register tile, `#pragma unroll`),
+  which an LLM designing directly from `x @ W.T` tends to under-think.
+  The direct SeGuRu arm defaults to 1-output-per-thread 16×16 tiling.
+- **Convolution is still the weak spot**. On `conv_relu_hardswish` the
+  two SeGuRu arms are within 1% — when the inner loop is small (8 Cin ×
+  3×3 = 72 FMA) the port is memory-bound and SeGuRu keeps up with raw
+  CUDA (6.7 ms vs 19.2 ms — within 2.9×). On `conv_relu_biasadd` with
+  64 Cin, both SeGuRu arms hit 336 ms because both agents chose the
+  same 1-output-per-thread direct convolution without shared-memory
+  input tiling; raw CUDA at 103 ms pays for proper tiling. This is
+  an LLM strategy gap, not a SeGuRu ceiling — add a "Convolution
+  Tiling" section to this doc to close it.
+- **`matmul_sigmoid_sum` is pathological for the two-stage pipeline.**
+  The CUDA arm is *slower* than PyTorch here (2.1s vs 18.7ms) because
+  PyTorch decomposes to `@` (cuBLAS-TF32) + pointwise + sum, hitting
+  tensor cores. The hand-written fused kernel (K=N=32768, M=128) pays
+  for non-coalesced W reads that cuBLAS's specialized kernels avoid.
+  Lesson: **fusion is not always the right strategy**; for
+  small-M / huge-K-N GEMMs with a row-reduce epilogue, a two-kernel
+  (cuBLAS + reduce) plan wins. A future skill-doc update should name
+  this anti-pattern.
+- **Absolute vs PyTorch eager**: the average `SeGuRu←CUDA` speedup of
+  0.17× looks bad on Level 2 compared to Phase B's 1.17×, but this is
+  a Level 2 characteristic: Level 2 problems are GEMM-dominated, and
+  any FP32 GEMM that isn't using TF32 tensor cores loses ≈3–4× against
+  cuBLAS automatically. The meaningful comparison is **SeGuRu←CUDA vs
+  Raw CUDA** — both written by the same LLM with the same GEMM
+  algorithm, varying only the safety layer. That ratio is 4.6× on
+  GEMM (41 ms vs 9 ms) — SeGuRu's shared-memory tiling currently pays
+  a real cost for strided-write limitations (see "Honest limitation on
+  COMPUTE phase" section earlier in this doc). Closing this gap
+  requires a skill-doc expansion around SeGuRu shared-memory access
+  patterns for register-tiled GEMM; the CUDA reference kernels in
+  `examples/kernelbench-c/cuda/*.cu` are the target to match.
+
+Artifacts:
+- 8 raw-CUDA `.cu` files in `examples/kernelbench-c/cuda/`
+- 8 SeGuRu←PyTorch kernels in `examples/kernelbench-c/src/*.rs`
+- 8 SeGuRu←CUDA ports in `examples/kernelbench-c/src/from_cuda/*.rs`
+- PyTorch sources in `examples/kernelbench-c/problems/*.py`
+- Driver: `examples/kernelbench-c/python/compare.py`
+

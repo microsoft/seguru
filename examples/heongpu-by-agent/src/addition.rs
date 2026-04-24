@@ -212,6 +212,620 @@ pub fn multiply_elementwise_kernel(
 }
 
 // ---------------------------------------------------------------------------
+// CPU reference functions: BFV plaintext addition/subtraction
+// ---------------------------------------------------------------------------
+
+/// BFV plaintext addition to ciphertext (out-of-place with cipher_count dimension).
+///
+/// For `idz == 0`: encodes the plaintext coefficient with the delta scaling
+/// `coeffdiv_plain` and correction factor, then adds to ciphertext.
+/// For `idz != 0`: copies ciphertext unchanged.
+pub fn addition_plain_bfv_poly_cpu(
+    cipher: &[u64],
+    plain: &[u64],
+    output: &mut [u64],
+    moduli: &[Modulus64],
+    plain_mod: &Modulus64,
+    q_mod_t: u64,
+    upper_threshold: u64,
+    coeffdiv_plain: &[u64],
+    n_power: u32,
+    rns_count: usize,
+    cipher_count: usize,
+) {
+    let ring_size = 1usize << n_power;
+    for idz in 0..cipher_count {
+        for idy in 0..rns_count {
+            for idx in 0..ring_size {
+                let loc = idx + (idy << n_power) + ((rns_count * idz) << n_power);
+                if idz == 0 {
+                    let message = plain[idx];
+                    let ciphertext = cipher[loc];
+                    let fix = message * q_mod_t;
+                    let fix = fix + upper_threshold;
+                    let fix = fix / plain_mod.value;
+                    let result = mod_mul(message, coeffdiv_plain[idy], &moduli[idy]);
+                    let result = mod_add(result, fix, &moduli[idy]);
+                    let result = mod_add(result, ciphertext, &moduli[idy]);
+                    output[loc] = result;
+                } else {
+                    output[loc] = cipher[loc];
+                }
+            }
+        }
+    }
+}
+
+/// BFV plaintext addition to ciphertext (inplace, no cipher_count dimension).
+pub fn addition_plain_bfv_poly_inplace_cpu(
+    cipher: &[u64],
+    plain: &[u64],
+    output: &mut [u64],
+    moduli: &[Modulus64],
+    plain_mod: &Modulus64,
+    q_mod_t: u64,
+    upper_threshold: u64,
+    coeffdiv_plain: &[u64],
+    n_power: u32,
+    rns_count: usize,
+) {
+    let ring_size = 1usize << n_power;
+    for idy in 0..rns_count {
+        for idx in 0..ring_size {
+            let loc = idx + (idy << n_power);
+            let message = plain[idx];
+            let ciphertext = cipher[loc];
+            let fix = message * q_mod_t;
+            let fix = fix + upper_threshold;
+            let fix = fix / plain_mod.value;
+            let result = mod_mul(message, coeffdiv_plain[idy], &moduli[idy]);
+            let result = mod_add(result, fix, &moduli[idy]);
+            let result = mod_add(result, ciphertext, &moduli[idy]);
+            output[loc] = result;
+        }
+    }
+}
+
+/// BFV plaintext subtraction from ciphertext (out-of-place with cipher_count dimension).
+pub fn subtraction_plain_bfv_poly_cpu(
+    cipher: &[u64],
+    plain: &[u64],
+    output: &mut [u64],
+    moduli: &[Modulus64],
+    plain_mod: &Modulus64,
+    q_mod_t: u64,
+    upper_threshold: u64,
+    coeffdiv_plain: &[u64],
+    n_power: u32,
+    rns_count: usize,
+    cipher_count: usize,
+) {
+    let ring_size = 1usize << n_power;
+    for idz in 0..cipher_count {
+        for idy in 0..rns_count {
+            for idx in 0..ring_size {
+                let loc = idx + (idy << n_power) + ((rns_count * idz) << n_power);
+                if idz == 0 {
+                    let message = plain[idx];
+                    let ciphertext = cipher[loc];
+                    let fix = message * q_mod_t;
+                    let fix = fix + upper_threshold;
+                    let fix = fix / plain_mod.value;
+                    let result = mod_mul(message, coeffdiv_plain[idy], &moduli[idy]);
+                    let result = mod_add(result, fix, &moduli[idy]);
+                    let result = mod_sub(ciphertext, result, &moduli[idy]);
+                    output[loc] = result;
+                } else {
+                    output[loc] = cipher[loc];
+                }
+            }
+        }
+    }
+}
+
+/// BFV plaintext subtraction from ciphertext (inplace, no cipher_count dimension).
+pub fn subtraction_plain_bfv_poly_inplace_cpu(
+    cipher: &[u64],
+    plain: &[u64],
+    output: &mut [u64],
+    moduli: &[Modulus64],
+    plain_mod: &Modulus64,
+    q_mod_t: u64,
+    upper_threshold: u64,
+    coeffdiv_plain: &[u64],
+    n_power: u32,
+    rns_count: usize,
+) {
+    let ring_size = 1usize << n_power;
+    for idy in 0..rns_count {
+        for idx in 0..ring_size {
+            let loc = idx + (idy << n_power);
+            let message = plain[idx];
+            let ciphertext = cipher[loc];
+            let fix = message * q_mod_t;
+            let fix = fix + upper_threshold;
+            let fix = fix / plain_mod.value;
+            let result = mod_mul(message, coeffdiv_plain[idy], &moduli[idy]);
+            let result = mod_add(result, fix, &moduli[idy]);
+            let result = mod_sub(ciphertext, result, &moduli[idy]);
+            output[loc] = result;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CPU reference functions: CKKS plaintext addition/subtraction
+// ---------------------------------------------------------------------------
+
+/// CKKS plaintext addition to ciphertext.
+///
+/// For `idz == 0`: modular add of ciphertext + plaintext.
+/// For `idz != 0`: copies ciphertext unchanged.
+pub fn addition_plain_ckks_poly_cpu(
+    in1: &[u64],
+    in2: &[u64],
+    out: &mut [u64],
+    moduli: &[Modulus64],
+    n_power: u32,
+    rns_count: usize,
+    cipher_count: usize,
+) {
+    let ring_size = 1usize << n_power;
+    for idz in 0..cipher_count {
+        for idy in 0..rns_count {
+            for idx in 0..ring_size {
+                let loc = idx + (idy << n_power) + ((rns_count * idz) << n_power);
+                if idz == 0 {
+                    out[loc] = mod_add(in1[loc], in2[loc], &moduli[idy]);
+                } else {
+                    out[loc] = in1[loc];
+                }
+            }
+        }
+    }
+}
+
+/// CKKS plaintext subtraction from ciphertext.
+pub fn subtraction_plain_ckks_poly_cpu(
+    in1: &[u64],
+    in2: &[u64],
+    out: &mut [u64],
+    moduli: &[Modulus64],
+    n_power: u32,
+    rns_count: usize,
+    cipher_count: usize,
+) {
+    let ring_size = 1usize << n_power;
+    for idz in 0..cipher_count {
+        for idy in 0..rns_count {
+            for idx in 0..ring_size {
+                let loc = idx + (idy << n_power) + ((rns_count * idz) << n_power);
+                if idz == 0 {
+                    out[loc] = mod_sub(in1[loc], in2[loc], &moduli[idy]);
+                } else {
+                    out[loc] = in1[loc];
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CPU-only: CKKS constant plaintext addition/subtraction
+// (requires f64 → u64 conversion not available on GPU)
+// ---------------------------------------------------------------------------
+
+/// Reduce a 128-bit value (`low + high * 2^64`) modulo `modulus`.
+fn reduce_u128_mod(low: u64, high: u64, modulus: &Modulus64) -> u64 {
+    let val = (low as u128) | ((high as u128) << 64);
+    (val % (modulus.value as u128)) as u64
+}
+
+// CPU-only: requires f64 → u64 conversion not available on GPU
+/// CKKS constant plaintext addition: adds a rounded double `in2` to ciphertext.
+///
+/// Converts the double to a 128-bit integer, reduces mod each RNS prime,
+/// then performs modular addition on the `idz == 0` component.
+pub fn addition_constant_plain_ckks_poly_cpu(
+    in1: &[u64],
+    in2: f64,
+    out: &mut [u64],
+    moduli: &[Modulus64],
+    two_pow_64: f64,
+    n_power: u32,
+    rns_count: usize,
+    cipher_count: usize,
+) {
+    let ring_size = 1usize << n_power;
+    for idz in 0..cipher_count {
+        for idy in 0..rns_count {
+            for idx in 0..ring_size {
+                let loc = idx + (idy << n_power) + ((rns_count * idz) << n_power);
+                if idz == 0 {
+                    let coeff_double = in2.round();
+                    let is_negative = coeff_double.is_sign_negative();
+                    let coeff_double = coeff_double.abs();
+
+                    let coeff_low = (coeff_double % two_pow_64) as u64;
+                    let coeff_high = (coeff_double / two_pow_64) as u64;
+
+                    let mut pt = reduce_u128_mod(coeff_low, coeff_high, &moduli[idy]);
+                    if is_negative {
+                        pt = mod_sub(moduli[idy].value, pt, &moduli[idy]);
+                    }
+
+                    out[loc] = mod_add(in1[loc], pt, &moduli[idy]);
+                } else {
+                    out[loc] = in1[loc];
+                }
+            }
+        }
+    }
+}
+
+// CPU-only: requires f64 → u64 conversion not available on GPU
+/// CKKS constant plaintext subtraction: subtracts a rounded double `in2` from ciphertext.
+pub fn subtraction_constant_plain_ckks_poly_cpu(
+    in1: &[u64],
+    in2: f64,
+    out: &mut [u64],
+    moduli: &[Modulus64],
+    two_pow_64: f64,
+    n_power: u32,
+    rns_count: usize,
+    cipher_count: usize,
+) {
+    let ring_size = 1usize << n_power;
+    for idz in 0..cipher_count {
+        for idy in 0..rns_count {
+            for idx in 0..ring_size {
+                let loc = idx + (idy << n_power) + ((rns_count * idz) << n_power);
+                if idz == 0 {
+                    let coeff_double = in2.round();
+                    let is_negative = coeff_double.is_sign_negative();
+                    let coeff_double = coeff_double.abs();
+
+                    let coeff_low = (coeff_double % two_pow_64) as u64;
+                    let coeff_high = (coeff_double / two_pow_64) as u64;
+
+                    let mut pt = reduce_u128_mod(coeff_low, coeff_high, &moduli[idy]);
+                    if is_negative {
+                        pt = mod_sub(moduli[idy].value, pt, &moduli[idy]);
+                    }
+
+                    out[loc] = mod_sub(in1[loc], pt, &moduli[idy]);
+                } else {
+                    out[loc] = in1[loc];
+                }
+            }
+        }
+    }
+}
+
+/// Zero all elements of a ciphertext (used to clear higher cipher components in CKKS).
+///
+/// In the CUDA version this zeros all elements unconditionally. The CPU
+/// reference mirrors this: every location is set to 0.
+pub fn set_zero_cipher_ckks_poly_cpu(
+    data: &mut [u64],
+    n_power: u32,
+    rns_count: usize,
+    cipher_count: usize,
+) {
+    let ring_size = 1usize << n_power;
+    for idz in 0..cipher_count {
+        for idy in 0..rns_count {
+            for idx in 0..ring_size {
+                let loc = idx + (idy << n_power) + ((rns_count * idz) << n_power);
+                data[loc] = 0;
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GPU kernels: BFV plaintext addition/subtraction
+// ---------------------------------------------------------------------------
+
+/// GPU kernel: BFV plaintext addition to ciphertext.
+///
+/// Flattened 1D launch over `ring_size * rns_count * cipher_count` elements.
+/// Thread computes `idz` from the global index to decide add-path vs copy-path.
+#[gpu::cuda_kernel]
+pub fn addition_plain_bfv_poly_kernel(
+    cipher: &[u64],
+    plain: &[u64],
+    output: &mut [u64],
+    mod_values: &[u64],
+    mod_bits: &[u64],
+    mod_mus: &[u64],
+    plain_mod_value: u64,
+    q_mod_t: u64,
+    upper_threshold: u64,
+    coeffdiv_plain: &[u64],
+    n_power: u32,
+    rns_count: u32,
+) {
+    let gid = block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>();
+    let idx = (gid & ((1u32 << n_power) - 1)) as usize;
+    let idy = ((gid >> n_power) % rns_count) as usize;
+    let idz = (gid >> n_power) / rns_count;
+
+    let mut out = chunk_mut(output, MapLinear::new(1));
+
+    if idz == 0 {
+        let message = plain[idx];
+        let ciphertext = cipher[gid as usize];
+
+        let fix = message * q_mod_t;
+        let fix = fix + upper_threshold;
+        let fix = fix / plain_mod_value;
+
+        // Barrett multiply: message * coeffdiv_plain[idy] mod modulus
+        let mod_val = mod_values[idy];
+        let bit = mod_bits[idy];
+        let mu = mod_mus[idy];
+
+        let z = (message as u128) * (coeffdiv_plain[idy] as u128);
+        let w = z >> (bit as u32 - 2);
+        let w = (w * (mu as u128)) >> (bit as u32 + 3);
+        let w = w * (mod_val as u128);
+        let mut result = (z - w) as u64;
+        if result >= mod_val {
+            result -= mod_val;
+        }
+
+        // result + fix mod modulus
+        let sum = result + fix;
+        result = if sum >= mod_val { sum - mod_val } else { sum };
+
+        // result + ciphertext mod modulus
+        let sum = result + ciphertext;
+        result = if sum >= mod_val { sum - mod_val } else { sum };
+
+        out[0] = result;
+    } else {
+        out[0] = cipher[gid as usize];
+    }
+}
+
+/// GPU kernel: BFV plaintext addition to ciphertext (inplace, no cipher_count).
+#[gpu::cuda_kernel]
+pub fn addition_plain_bfv_poly_inplace_kernel(
+    cipher: &[u64],
+    plain: &[u64],
+    output: &mut [u64],
+    mod_values: &[u64],
+    mod_bits: &[u64],
+    mod_mus: &[u64],
+    plain_mod_value: u64,
+    q_mod_t: u64,
+    upper_threshold: u64,
+    coeffdiv_plain: &[u64],
+    n_power: u32,
+    rns_count: u32,
+) {
+    let gid = block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>();
+    let idx = (gid & ((1u32 << n_power) - 1)) as usize;
+    let idy = ((gid >> n_power) % rns_count) as usize;
+
+    let message = plain[idx];
+    let ciphertext = cipher[gid as usize];
+
+    let fix = message * q_mod_t;
+    let fix = fix + upper_threshold;
+    let fix = fix / plain_mod_value;
+
+    let mod_val = mod_values[idy];
+    let bit = mod_bits[idy];
+    let mu = mod_mus[idy];
+
+    let z = (message as u128) * (coeffdiv_plain[idy] as u128);
+    let w = z >> (bit as u32 - 2);
+    let w = (w * (mu as u128)) >> (bit as u32 + 3);
+    let w = w * (mod_val as u128);
+    let mut result = (z - w) as u64;
+    if result >= mod_val {
+        result -= mod_val;
+    }
+
+    let sum = result + fix;
+    result = if sum >= mod_val { sum - mod_val } else { sum };
+
+    let sum = result + ciphertext;
+    result = if sum >= mod_val { sum - mod_val } else { sum };
+
+    let mut out = chunk_mut(output, MapLinear::new(1));
+    out[0] = result;
+}
+
+/// GPU kernel: BFV plaintext subtraction from ciphertext.
+#[gpu::cuda_kernel]
+pub fn subtraction_plain_bfv_poly_kernel(
+    cipher: &[u64],
+    plain: &[u64],
+    output: &mut [u64],
+    mod_values: &[u64],
+    mod_bits: &[u64],
+    mod_mus: &[u64],
+    plain_mod_value: u64,
+    q_mod_t: u64,
+    upper_threshold: u64,
+    coeffdiv_plain: &[u64],
+    n_power: u32,
+    rns_count: u32,
+) {
+    let gid = block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>();
+    let idx = (gid & ((1u32 << n_power) - 1)) as usize;
+    let idy = ((gid >> n_power) % rns_count) as usize;
+    let idz = (gid >> n_power) / rns_count;
+
+    let mut out = chunk_mut(output, MapLinear::new(1));
+
+    if idz == 0 {
+        let message = plain[idx];
+        let ciphertext = cipher[gid as usize];
+
+        let fix = message * q_mod_t;
+        let fix = fix + upper_threshold;
+        let fix = fix / plain_mod_value;
+
+        let mod_val = mod_values[idy];
+        let bit = mod_bits[idy];
+        let mu = mod_mus[idy];
+
+        let z = (message as u128) * (coeffdiv_plain[idy] as u128);
+        let w = z >> (bit as u32 - 2);
+        let w = (w * (mu as u128)) >> (bit as u32 + 3);
+        let w = w * (mod_val as u128);
+        let mut result = (z - w) as u64;
+        if result >= mod_val {
+            result -= mod_val;
+        }
+
+        // result + fix mod modulus
+        let sum = result + fix;
+        result = if sum >= mod_val { sum - mod_val } else { sum };
+
+        // ciphertext - result mod modulus
+        let dif = ciphertext + mod_val - result;
+        result = if dif >= mod_val { dif - mod_val } else { dif };
+
+        out[0] = result;
+    } else {
+        out[0] = cipher[gid as usize];
+    }
+}
+
+/// GPU kernel: BFV plaintext subtraction from ciphertext (inplace, no cipher_count).
+#[gpu::cuda_kernel]
+pub fn subtraction_plain_bfv_poly_inplace_kernel(
+    cipher: &[u64],
+    plain: &[u64],
+    output: &mut [u64],
+    mod_values: &[u64],
+    mod_bits: &[u64],
+    mod_mus: &[u64],
+    plain_mod_value: u64,
+    q_mod_t: u64,
+    upper_threshold: u64,
+    coeffdiv_plain: &[u64],
+    n_power: u32,
+    rns_count: u32,
+) {
+    let gid = block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>();
+    let idx = (gid & ((1u32 << n_power) - 1)) as usize;
+    let idy = ((gid >> n_power) % rns_count) as usize;
+
+    let message = plain[idx];
+    let ciphertext = cipher[gid as usize];
+
+    let fix = message * q_mod_t;
+    let fix = fix + upper_threshold;
+    let fix = fix / plain_mod_value;
+
+    let mod_val = mod_values[idy];
+    let bit = mod_bits[idy];
+    let mu = mod_mus[idy];
+
+    let z = (message as u128) * (coeffdiv_plain[idy] as u128);
+    let w = z >> (bit as u32 - 2);
+    let w = (w * (mu as u128)) >> (bit as u32 + 3);
+    let w = w * (mod_val as u128);
+    let mut result = (z - w) as u64;
+    if result >= mod_val {
+        result -= mod_val;
+    }
+
+    let sum = result + fix;
+    result = if sum >= mod_val { sum - mod_val } else { sum };
+
+    let dif = ciphertext + mod_val - result;
+    result = if dif >= mod_val { dif - mod_val } else { dif };
+
+    let mut out = chunk_mut(output, MapLinear::new(1));
+    out[0] = result;
+}
+
+// ---------------------------------------------------------------------------
+// GPU kernels: CKKS plaintext addition/subtraction
+// ---------------------------------------------------------------------------
+
+/// GPU kernel: CKKS plaintext addition to ciphertext.
+///
+/// For `idz == 0`: modular add of ciphertext + plaintext.
+/// For `idz != 0`: copies ciphertext unchanged.
+#[gpu::cuda_kernel]
+pub fn addition_plain_ckks_poly_kernel(
+    in1: &[u64],
+    in2: &[u64],
+    output: &mut [u64],
+    mod_values: &[u64],
+    n_power: u32,
+    rns_count: u32,
+) {
+    let gid = block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>();
+    let idy = ((gid >> n_power) % rns_count) as usize;
+    let idz = (gid >> n_power) / rns_count;
+
+    let mut out = chunk_mut(output, MapLinear::new(1));
+
+    if idz == 0 {
+        let mod_val = mod_values[idy];
+        let a = in1[gid as usize];
+        let b = in2[gid as usize];
+        let sum = a + b;
+        out[0] = if sum >= mod_val { sum - mod_val } else { sum };
+    } else {
+        out[0] = in1[gid as usize];
+    }
+}
+
+/// GPU kernel: CKKS plaintext subtraction from ciphertext.
+#[gpu::cuda_kernel]
+pub fn subtraction_plain_ckks_poly_kernel(
+    in1: &[u64],
+    in2: &[u64],
+    output: &mut [u64],
+    mod_values: &[u64],
+    n_power: u32,
+    rns_count: u32,
+) {
+    let gid = block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>();
+    let idy = ((gid >> n_power) % rns_count) as usize;
+    let idz = (gid >> n_power) / rns_count;
+
+    let mut out = chunk_mut(output, MapLinear::new(1));
+
+    if idz == 0 {
+        let mod_val = mod_values[idy];
+        let a = in1[gid as usize];
+        let b = in2[gid as usize];
+        let dif = a + mod_val - b;
+        out[0] = if dif >= mod_val { dif - mod_val } else { dif };
+    } else {
+        out[0] = in1[gid as usize];
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GPU kernel: set_zero_cipher_ckks_poly
+// ---------------------------------------------------------------------------
+
+/// GPU kernel: zeros all elements of a ciphertext polynomial.
+///
+/// The CUDA kernel writes 0 to every location unconditionally.
+#[gpu::cuda_kernel]
+pub fn set_zero_cipher_ckks_poly_kernel(
+    data: &mut [u64],
+) {
+    let _gid = block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>();
+
+    let mut out = chunk_mut(data, MapLinear::new(1));
+    out[0] = 0;
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

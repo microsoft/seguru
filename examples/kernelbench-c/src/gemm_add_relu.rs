@@ -25,14 +25,13 @@ const BDIM_Y: u32 = 16;
 pub fn gemm_add_relu_kernel(
     x:   &[Float4],
     w:   &[Float4],
-    bias: &[f32],
-    y:   &mut [f32],
+    bias: &[Float4],
+    y:   &mut [Float4],
     M: u32,
     N: u32,
     K: u32,
 ) {
     let _ = M;
-    let _ = N;
 
     let tx = thread_id::<DimX>();
     let ty = thread_id::<DimY>();
@@ -54,16 +53,6 @@ pub fn gemm_add_relu_kernel(
     let a_col4 = a_col >> 2;
 
     let load_map = reshape_map!([4] | [16, 16] => layout: [i0, t0, t1]);
-
-    let out_map = reshape_map!(
-        [8, 8] | [16, grid_dim::<DimX>(), 16, grid_dim::<DimY>()]
-        => layout: [i0, t0, t1, i1, t2, t3]
-    );
-    let y_thread_chunk = chunk_mut(y, out_map);
-    // open_tile precomputes `&mut y[thread_base]` as a 64-bit pointer so the
-    // 64 unrolled epilogue stores only pay lid-side address-arith (reduces
-    // regs/thread from 168 → target ≤128 → 2 blocks/SM occupancy).
-    let mut y_thread = y_thread_chunk.open_tile();
 
     let mut acc = [[0.0f32; TN as usize]; TM as usize];
 
@@ -119,18 +108,38 @@ pub fn gemm_add_relu_kernel(
         tstep += 1;
     }
 
-    // ---- Epilogue: fused bias + custom op.
-    let mut bias_reg = [0.0f32; TN as usize];
-    unroll! { for j in 0..8 {
-        bias_reg[j] = bias[(bn + tx * TN) as usize + j];
-    }}
+    // ---- Epilogue: fused bias + relu, written as Float4 (st.global.v4.f32).
+    // bias reinterpreted as &[Float4]; each thread needs 2 Float4 of bias.
+    let bn4 = bn >> 2;
+    let col4_base = bn4 + tx * 2;
+    let b0: Float4 = bias[col4_base as usize];
+    let b1: Float4 = bias[(col4_base + 1) as usize];
+
+    // y as &mut [Float4] with [M][N/4] row-major. Per-thread chunk is 2 Float4 × 8 rows.
+    // stride check: i0=col4 inner (stride 1), t0=tx (stride TN/4=2), t1=bid_x (stride BN/4=32),
+    //               i1=row inner (stride N/4), t2=ty (stride TM*N/4), t3=bid_y (stride BM*N/4).
+    let _ = N;
+    let out_map = reshape_map!(
+        [2, 8] | [16, grid_dim::<DimX>(), 16, grid_dim::<DimY>()]
+        => layout: [i0, t0, t1, i1, t2, t3]
+    );
+    let mut y_chunk = chunk_mut(y, out_map);
 
     unroll! { for i in 0..8 {
-        unroll! { for j in 0..8 {
-            let mut v = acc[i][j] + bias_reg[j];
+        let mut o0 = Float4::default();
+        let mut o1 = Float4::default();
+        unroll! { for j in 0..4 {
+            let mut v = acc[i][j] + b0[j];
             if v < 0.0 { v = 0.0; }
-            y_thread[(j as u32, i as u32)] = v;
+            o0[j] = v;
         }}
+        unroll! { for j in 0..4 {
+            let mut v = acc[i][j + 4] + b1[j];
+            if v < 0.0 { v = 0.0; }
+            o1[j] = v;
+        }}
+        y_chunk[(0u32, i as u32)] = o0;
+        y_chunk[(1u32, i as u32)] = o1;
     }}
 }
 
@@ -167,6 +176,7 @@ pub fn run(
     // K must be a multiple of 4 (asserted above: k % BK == 0, BK=8).
     let d_x4 = unsafe { &*(&d_x as *const _ as *const gpu_host::TensorView<'_, [Float4]>) };
     let d_w4 = unsafe { &*(&d_w as *const _ as *const gpu_host::TensorView<'_, [Float4]>) };
+    let d_b4 = unsafe { &*(&d_b as *const _ as *const gpu_host::TensorView<'_, [Float4]>) };
 
     let mm = m as u32;
     let nn = n as u32;
@@ -177,7 +187,8 @@ pub fn run(
 
     {
         let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
-        gemm_add_relu_kernel::launch(cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk)
+        let d_y4 = unsafe { &mut *(&mut d_y as *mut _ as *mut gpu_host::TensorViewMut<'_, [Float4]>) };
+        gemm_add_relu_kernel::launch(cfg, ctx, md, d_x4, d_w4, d_b4, d_y4, mm, nn, kk)
             .unwrap();
     }
     ctx.sync().unwrap();
@@ -186,7 +197,8 @@ pub fn run(
     let wt = Instant::now();
     for _ in 0..warmup_iters {
         let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
-        gemm_add_relu_kernel::launch(cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk)
+        let d_y4 = unsafe { &mut *(&mut d_y as *mut _ as *mut gpu_host::TensorViewMut<'_, [Float4]>) };
+        gemm_add_relu_kernel::launch(cfg, ctx, md, d_x4, d_w4, d_b4, d_y4, mm, nn, kk)
             .unwrap();
     }
     ctx.sync().unwrap();
@@ -195,7 +207,8 @@ pub fn run(
     let t = Instant::now();
     for _ in 0..iters {
         let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
-        gemm_add_relu_kernel::launch(cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk)
+        let d_y4 = unsafe { &mut *(&mut d_y as *mut _ as *mut gpu_host::TensorViewMut<'_, [Float4]>) };
+        gemm_add_relu_kernel::launch(cfg, ctx, md, d_x4, d_w4, d_b4, d_y4, mm, nn, kk)
             .unwrap();
     }
     ctx.sync().unwrap();

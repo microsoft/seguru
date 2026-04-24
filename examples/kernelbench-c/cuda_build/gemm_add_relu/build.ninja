@@ -2,9 +2,9 @@ ninja_required_version = 1.3
 cxx = c++
 nvcc = /usr/local/cuda-13.2/bin/nvcc
 
-cflags = -DTORCH_EXTENSION_NAME=gemm_add_relu -DTORCH_API_INCLUDE_EXTENSION_H -isystem /home/sanghle/.local/lib/python3.11/site-packages/torch/include -isystem /home/sanghle/.local/lib/python3.11/site-packages/torch/include/torch/csrc/api/include -isystem /usr/local/cuda-13.2/include -isystem /usr/include/python3.11 -fPIC -std=c++17
+cflags = -DTORCH_EXTENSION_NAME=kbcu_gemm_add_relu -DTORCH_API_INCLUDE_EXTENSION_H -isystem /home/sanghle/.local/lib/python3.11/site-packages/torch/include -isystem /home/sanghle/.local/lib/python3.11/site-packages/torch/include/torch/csrc/api/include -isystem /usr/local/cuda-13.2/include -isystem /usr/include/python3.11 -fPIC -std=c++17
 post_cflags = 
-cuda_cflags = -DTORCH_EXTENSION_NAME=gemm_add_relu -DTORCH_API_INCLUDE_EXTENSION_H -isystem /home/sanghle/.local/lib/python3.11/site-packages/torch/include -isystem /home/sanghle/.local/lib/python3.11/site-packages/torch/include/torch/csrc/api/include -isystem /usr/local/cuda-13.2/include -isystem /usr/include/python3.11 -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__ -D__CUDA_NO_BFLOAT16_CONVERSIONS__ -D__CUDA_NO_HALF2_OPERATORS__ --expt-relaxed-constexpr --compiler-options '-fPIC' -O3 -arch=sm_80 -std=c++17
+cuda_cflags = -DTORCH_EXTENSION_NAME=kbcu_gemm_add_relu -DTORCH_API_INCLUDE_EXTENSION_H -isystem /home/sanghle/.local/lib/python3.11/site-packages/torch/include -isystem /home/sanghle/.local/lib/python3.11/site-packages/torch/include/torch/csrc/api/include -isystem /usr/local/cuda-13.2/include -isystem /usr/include/python3.11 -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__ -D__CUDA_NO_BFLOAT16_CONVERSIONS__ -D__CUDA_NO_HALF2_OPERATORS__ --expt-relaxed-constexpr --compiler-options '-fPIC' -O3 --use_fast_math -arch=sm_80 -std=c++17
 cuda_post_cflags = 
 cuda_dlink_post_cflags = 
 sycl_dlink_post_cflags = 
@@ -33,6 +33,6 @@ build gemm_add_relu.cuda.o: cuda_compile /home/sanghle/work/seguru/examples/kern
 
 
 
-build gemm_add_relu.so: link gemm_add_relu.cuda.o
+build kbcu_gemm_add_relu.so: link gemm_add_relu.cuda.o
 
-default gemm_add_relu.so
+default kbcu_gemm_add_relu.so

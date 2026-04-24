@@ -19,6 +19,7 @@ const BDIM_X: u32 = 16;
 const BDIM_Y: u32 = 16;
 
 #[gpu::cuda_kernel]
+#[gpu::attr(nvvm_launch_bound(16, 16, 1, 2))]
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::needless_range_loop)]
 pub fn gemm_add_relu_kernel(

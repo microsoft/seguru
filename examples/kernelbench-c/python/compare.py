@@ -244,6 +244,83 @@ def _conv_relu_biasadd():
                 in_shape=[B, Cin, H, W, Cout, Kh, Kw], out_shape=[B, Cout, Ho, Wo], atol=5e-3)
 
 
+def _matmul_sub_mul_relu():
+    M, K, N = 1024, 8192, 8192
+    sub_val, mul_val = 2.0, 1.5
+    def make_inputs():
+        torch.manual_seed(0)
+        x = torch.rand(M, K, device="cuda")
+        lim = 1.0 / (K ** 0.5)
+        W = (torch.rand(N, K, device="cuda") * 2 - 1) * lim
+        b = (torch.rand(N, device="cuda") * 2 - 1) * lim
+        return dict(x=x, W=W, b=b)
+    def torch_fn(ins):
+        y = ins["x"] @ ins["W"].T + ins["b"]
+        y = y - sub_val
+        y = y * mul_val
+        return F.relu(y)
+    def cuda_run(mod, ins):
+        return mod.run(ins["x"], ins["W"], ins["b"], sub_val, mul_val)
+    return dict(make_inputs=make_inputs, torch_fn=torch_fn, cuda_run=cuda_run,
+                in_shape=[M, K, N], out_shape=[M, N], atol=5e-3)
+
+def _gemm_add_relu():
+    M, K, N = 1024, 8192, 8192
+    def make_inputs():
+        torch.manual_seed(0)
+        x = torch.rand(M, K, device="cuda")
+        lim = 1.0 / (K ** 0.5)
+        W = (torch.rand(N, K, device="cuda") * 2 - 1) * lim
+        # Reference: Linear bias=False, then add extra bias of shape [N] sampled from randn.
+        b = torch.randn(N, device="cuda")
+        return dict(x=x, W=W, b=b)
+    def torch_fn(ins):
+        y = ins["x"] @ ins["W"].T + ins["b"]
+        return F.relu(y)
+    def cuda_run(mod, ins):
+        return mod.run(ins["x"], ins["W"], ins["b"])
+    return dict(make_inputs=make_inputs, torch_fn=torch_fn, cuda_run=cuda_run,
+                in_shape=[M, K, N], out_shape=[M, N], atol=5e-3)
+
+def _matmul_div_gelu():
+    M, K, N = 1024, 8192, 8192
+    divisor = 10.0
+    def make_inputs():
+        torch.manual_seed(0)
+        x = torch.rand(M, K, device="cuda")
+        lim = 1.0 / (K ** 0.5)
+        W = (torch.rand(N, K, device="cuda") * 2 - 1) * lim
+        b = (torch.rand(N, device="cuda") * 2 - 1) * lim
+        return dict(x=x, W=W, b=b)
+    def torch_fn(ins):
+        y = ins["x"] @ ins["W"].T + ins["b"]
+        y = y / divisor
+        return F.gelu(y, approximate="tanh")
+    def cuda_run(mod, ins):
+        return mod.run(ins["x"], ins["W"], ins["b"], divisor)
+    return dict(make_inputs=make_inputs, torch_fn=torch_fn, cuda_run=cuda_run,
+                in_shape=[M, K, N], out_shape=[M, N], atol=5e-3)
+
+def _matmul_min_subtract():
+    M, K, N = 128, 16384, 16384
+    constant = 2.0
+    def make_inputs():
+        torch.manual_seed(0)
+        x = torch.rand(M, K, device="cuda")
+        lim = 1.0 / (K ** 0.5)
+        W = (torch.rand(N, K, device="cuda") * 2 - 1) * lim
+        b = (torch.rand(N, device="cuda") * 2 - 1) * lim
+        return dict(x=x, W=W, b=b)
+    def torch_fn(ins):
+        y = ins["x"] @ ins["W"].T + ins["b"]
+        y = torch.clamp(y, max=constant)
+        return y - constant
+    def cuda_run(mod, ins):
+        return mod.run(ins["x"], ins["W"], ins["b"], constant)
+    return dict(make_inputs=make_inputs, torch_fn=torch_fn, cuda_run=cuda_run,
+                in_shape=[M, K, N], out_shape=[M, N], atol=5e-3)
+
+
 PROBLEMS = {
     "gemm_mul_lrelu": _gemm_mul_lrelu(),
     "conv_relu_hardswish": _conv_relu_hardswish(),
@@ -253,6 +330,10 @@ PROBLEMS = {
     "matmul_sigmoid_sum": _matmul_sigmoid_sum(),
     "gemm_relu_div": _gemm_relu_div(),
     "conv_relu_biasadd": _conv_relu_biasadd(),
+    "matmul_sub_mul_relu": _matmul_sub_mul_relu(),
+    "gemm_add_relu": _gemm_add_relu(),
+    "matmul_div_gelu": _matmul_div_gelu(),
+    "matmul_min_subtract": _matmul_min_subtract(),
 }
 
 

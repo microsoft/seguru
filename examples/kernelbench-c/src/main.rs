@@ -33,6 +33,10 @@ pub mod gemm_scale_htanh_gelu;  // 53
 pub mod matmul_sigmoid_sum;     // 56
 pub mod gemm_relu_div;          // 63
 pub mod conv_relu_biasadd;      // 1
+pub mod matmul_sub_mul_relu;    // 9
+pub mod gemm_add_relu;          // 76
+pub mod matmul_div_gelu;        // 86
+pub mod matmul_min_subtract;    // 68
 
 pub mod from_cuda;
 
@@ -109,6 +113,10 @@ fn main() {
             "matmul_sigmoid_sum"     => matmul_sigmoid_sum::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "gemm_relu_div"          => gemm_relu_div::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "conv_relu_biasadd"      => conv_relu_biasadd::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "matmul_sub_mul_relu"    => matmul_sub_mul_relu::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "gemm_add_relu"          => gemm_add_relu::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "matmul_div_gelu"        => matmul_div_gelu::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "matmul_min_subtract"    => matmul_min_subtract::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "gemm_mul_lrelu_fc"      => from_cuda::gemm_mul_lrelu::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "conv_relu_hardswish_fc" => from_cuda::conv_relu_hardswish::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "matmul_mish_mish_fc"       => from_cuda::matmul_mish_mish::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
@@ -117,6 +125,10 @@ fn main() {
             "matmul_sigmoid_sum_fc"     => from_cuda::matmul_sigmoid_sum::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "gemm_relu_div_fc"          => from_cuda::gemm_relu_div::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "conv_relu_biasadd_fc"      => from_cuda::conv_relu_biasadd::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "matmul_sub_mul_relu_fc"    => from_cuda::matmul_sub_mul_relu::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "gemm_add_relu_fc"          => from_cuda::gemm_add_relu::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "matmul_div_gelu_fc"        => from_cuda::matmul_div_gelu::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "matmul_min_subtract_fc"    => from_cuda::matmul_min_subtract::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             other => panic!("unknown problem: {other}"),
         };
         println!(

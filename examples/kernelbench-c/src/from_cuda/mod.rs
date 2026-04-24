@@ -6,3 +6,7 @@ pub mod gemm_scale_htanh_gelu;
 pub mod matmul_sigmoid_sum;
 pub mod gemm_relu_div;
 pub mod conv_relu_biasadd;
+pub mod matmul_sub_mul_relu;
+pub mod gemm_add_relu;
+pub mod matmul_div_gelu;
+pub mod matmul_min_subtract;

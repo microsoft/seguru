@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "hello",
+    "heongpu-by-agent",
     "llm-rs-gpu",
     "matrix/matmul-gpu",
     "matrix/matmul-host",

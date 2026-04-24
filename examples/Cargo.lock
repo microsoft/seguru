@@ -156,6 +156,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "heongpu-gpu"
+version = "0.1.0"
+dependencies = [
+ "gpu",
+ "gpu_host",
+ "rand",
+]
+
+[[package]]
 name = "itertools"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

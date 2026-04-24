@@ -1,3 +1,6 @@
 [submodule "llm-rs"]
 	path = llm-rs
 	url = git@github.com:MSRSSP/llm-rs.git
+[submodule "examples/heongpu-by-agent/HEonGPU"]
+	path = examples/heongpu-by-agent/HEonGPU
+	url = https://github.com/Alisah-Ozcan/HEonGPU.git

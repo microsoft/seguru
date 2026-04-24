@@ -1,11 +1,11 @@
 # AES-128 ECB GPU Performance Report
 
-## SeGuRu (Rust) vs CUDA C++ — T-table Implementation
+## SeGuRu (Rust) vs CUDA C++ vs CPU — T-table Implementation
 
 **Date**: 2026-04-24
 **Hardware**: NVIDIA GPU with CUDA 13.0
 **Block size**: 256 threads/block
-**Methodology**: 3 warmup iterations, 100 timed iterations, median reported
+**Methodology**: 3 warmup iterations, 100 timed iterations, median reported. CPU uses single-threaded Rust with 10-second timeout + extrapolation for large sizes.
 
 ---
 
@@ -13,57 +13,73 @@
 
 ### Encrypt (T-table, shared memory)
 
-| Data Size | AES Blocks | SeGuRu (µs) | CUDA C++ (µs) | Ratio | SeGuRu GB/s | CUDA GB/s |
-|-----------|-----------|-------------|---------------|-------|-------------|-----------|
-| 16 KB     | 1,024     | 14.19       | 8.67          | 1.64× | 1.15        | 1.89      |
-| 64 KB     | 4,096     | 14.21       | 8.84          | 1.61× | 4.61        | 7.42      |
-| 256 KB    | 16,384    | 13.89       | 9.31          | 1.49× | 18.88       | 28.16     |
-| 1 MB      | 65,536    | 21.03       | 17.72         | 1.19× | 49.86       | 59.19     |
-| 4 MB      | 262,144   | 43.03       | 42.83         | 1.00× | 97.47       | 97.92     |
-| 16 MB     | 1,048,576 | 133.79      | 148.05        | **0.90×** | **125.40** | 113.32 |
+| Data Size | AES Blocks | SeGuRu (µs) | CUDA C++ (µs) | CPU (µs) | SG/CUDA | GPU Speedup | SeGuRu GB/s | CUDA GB/s | CPU GB/s |
+|-----------|-----------|-------------|---------------|----------|---------|-------------|-------------|-----------|----------|
+| 16 KB     | 1,024     | 13.66       | 8.72          | 61       | 1.57×   | 4.5×        | 1.20        | 1.88      | 0.27     |
+| 64 KB     | 4,096     | 14.52       | 8.87          | 201      | 1.64×   | 13.8×       | 4.51        | 7.39      | 0.33     |
+| 256 KB    | 16,384    | 14.84       | 9.39          | 860      | 1.58×   | 57.9×       | 17.67       | 27.92     | 0.30     |
+| 1 MB      | 65,536    | 20.88       | 17.78         | 3,626    | 1.17×   | 173.7×      | 50.22       | 58.99     | 0.29     |
+| 4 MB      | 262,144   | 43.95       | 42.84         | 15,494   | 1.03×   | 352.5×      | 95.43       | 97.90     | 0.27     |
+| 16 MB     | 1,048,576 | 134.17      | 148.12        | 56,856   | **0.91×** | **423.8×** | 125.04      | 113.27    | 0.30     |
+| 64 MB     | 4,194,304 | 501.41      | 572.75        | 240,941  | **0.88×** | **480.5×** | 133.84      | 117.17    | 0.28     |
+| 256 MB    | 16,777,216| 1,963.60    | 2,267.86      | 909,942  | **0.87×** | **463.4×** | 136.71      | 118.36    | 0.30     |
+| 1 GB      | 67,108,864| 7,812.44    | 9,029.93      | 3,628,517| **0.87×** | **464.5×** | 137.44      | 118.91    | 0.30     |
 
 ### Decrypt (T-table, shared memory)
 
-| Data Size | AES Blocks | SeGuRu (µs) | CUDA C++ (µs) | Ratio | SeGuRu GB/s | CUDA GB/s |
-|-----------|-----------|-------------|---------------|-------|-------------|-----------|
-| 16 KB     | 1,024     | 14.57       | 8.07          | 1.81× | 1.12        | 2.03      |
-| 64 KB     | 4,096     | 14.62       | 8.24          | 1.77× | 4.48        | 7.95      |
-| 256 KB    | 16,384    | 14.14       | 8.55          | 1.65× | 18.54       | 30.66     |
-| 1 MB      | 65,536    | 20.77       | 16.37         | 1.27× | 50.49       | 64.04     |
-| 4 MB      | 262,144   | 44.00       | 37.55         | 1.17× | 95.32       | 111.70    |
-| 16 MB     | 1,048,576 | 134.03      | 127.63        | 1.05× | 125.17      | 131.45    |
+| Data Size | AES Blocks | SeGuRu (µs) | CUDA C++ (µs) | CPU (µs) | SG/CUDA | GPU Speedup | SeGuRu GB/s | CUDA GB/s | CPU GB/s |
+|-----------|-----------|-------------|---------------|----------|---------|-------------|-------------|-----------|----------|
+| 16 KB     | 1,024     | 14.17       | 8.12          | 63       | 1.74×   | 4.5×        | 1.16        | 2.02      | 0.26     |
+| 64 KB     | 4,096     | 14.57       | 8.31          | 220      | 1.75×   | 15.1×       | 4.50        | 7.88      | 0.30     |
+| 256 KB    | 16,384    | 15.16       | 8.58          | 1,008    | 1.77×   | 66.5×       | 17.29       | 30.55     | 0.26     |
+| 1 MB      | 65,536    | 21.62       | 16.36         | 4,017    | 1.32×   | 185.8×      | 48.50       | 64.08     | 0.26     |
+| 4 MB      | 262,144   | 44.30       | 37.68         | 14,763   | 1.18×   | 333.2×      | 94.67       | 111.30    | 0.28     |
+| 16 MB     | 1,048,576 | 134.69      | 127.70        | 60,696   | 1.05×   | 450.6×      | 124.56      | 131.38    | 0.28     |
+| 64 MB     | 4,194,304 | 500.09      | 491.56        | 242,928  | 1.02×   | 485.8×      | 134.19      | 136.52    | 0.28     |
+| 256 MB    | 16,777,216| 1,954.22    | 1,937.93      | 942,398  | 1.01×   | 482.2×      | 137.36      | 138.52    | 0.28     |
+| 1 GB      | 67,108,864| 7,771.84    | 7,723.75      | 3,784,135| 1.01×   | 486.9×      | 138.16      | 139.02    | 0.28     |
 
 ### Summary
 
-| Metric               | Encrypt | Decrypt | Combined |
-|----------------------|---------|---------|----------|
-| Best ratio           | **0.90×** (faster) | 1.05×  | 0.90×    |
-| Worst ratio          | 1.64×   | 1.81×   | 1.81×    |
-| Average ratio        | 1.30×   | 1.45×   | **1.38×** |
-| Peak throughput (GB/s) | 125.40 | 125.17  | —        |
+| Metric                     | Encrypt     | Decrypt     | Combined    |
+|----------------------------|-------------|-------------|-------------|
+| Best SG/CUDA ratio         | **0.87×** (13% faster) | 1.01×  | 0.87×       |
+| Worst SG/CUDA ratio        | 1.64×       | 1.77×       | 1.77×       |
+| Average SG/CUDA ratio      | 1.11×       | 1.32×       | **1.24×**   |
+| Peak throughput (GB/s)      | 137.44      | 138.16      | —           |
+| Peak GPU speedup vs CPU     | **464.5×**  | **486.9×**  | —           |
+| Average GPU speedup vs CPU  | 270.5×      | 279.0×      | **274.7×**  |
 
 ---
 
 ## Key Findings
 
-### 1. SeGuRu beats CUDA at large data sizes (encrypt)
+### 1. GPU delivers up to 487× speedup over CPU
 
-At 1M blocks (16 MB), SeGuRu encrypt is **10% faster** than hand-written CUDA C++. This demonstrates that Rust + MLIR codegen can match or exceed nvcc for compute-bound workloads when the GPU is fully saturated.
+Single-threaded CPU AES-128 peaks at ~0.30 GB/s. At 1 GB data size, SeGuRu GPU achieves **137–138 GB/s**, a **465–487× speedup**. Even at the smallest size (1K blocks), GPU is 4.5× faster despite launch overhead.
 
-### 2. Shared memory is critical for decrypt performance
+### 2. SeGuRu beats CUDA C++ at large data sizes (encrypt)
+
+At ≥1M blocks, SeGuRu encrypt is **9–13% faster** than hand-written CUDA C++. This demonstrates that Rust + MLIR codegen can match or exceed nvcc for compute-bound workloads when the GPU is fully saturated. SeGuRu uses dynamic shared memory for T-tables while CUDA uses `__constant__` memory — shared memory provides lower latency at high occupancy.
+
+### 3. Decrypt reaches parity at scale
+
+SeGuRu decrypt converges to **1.01×** CUDA at 1 GB, essentially identical performance. The remaining gap at small sizes is pure launch overhead.
+
+### 4. Shared memory is critical for decrypt performance
 
 | Decrypt Variant          | Ratio @ 1M blocks | Ratio @ 256K blocks |
 |--------------------------|-------------------|---------------------|
 | Global memory T-tables   | 1.98×             | 1.99×               |
-| **Shared memory T-tables** | **1.05×**       | **1.17×**           |
+| **Shared memory T-tables** | **1.05×**       | **1.18×**           |
 
 Switching from global to shared memory T-table reads cut the decrypt overhead from ~2× to ~1.05×.
 
-### 3. Launch overhead dominates at small sizes
+### 5. Launch overhead dominates at small sizes
 
 At ≤16K blocks, SeGuRu has ~14 µs baseline latency vs CUDA's ~8 µs. This ~6 µs gap is fixed launch overhead from SeGuRu's runtime (module loading, bounds-check setup). It becomes negligible at large sizes where compute dominates.
 
-### 4. Encrypt vs decrypt asymmetry
+### 6. Encrypt vs decrypt asymmetry
 
 Decrypt is slightly slower than encrypt across both implementations because the last AES round requires inv_sbox lookups from global memory (16 lookups per thread), while encrypt extracts S-box values directly from the TE0 table already in shared memory.
 
@@ -123,7 +139,8 @@ if tid < num_blocks {
 | Version | Change | Decrypt @ 1M | Encrypt @ 1M |
 |---------|--------|-------------|-------------|
 | v1      | Global memory T-tables (decrypt) | 1.98× | 0.90× |
-| **v2**  | **Shared memory T-tables (decrypt)** | **1.05×** | **0.90×** |
+| v2      | Shared memory T-tables (decrypt) | 1.05× | 0.90× |
+| **v3**  | **Extended to 1 GB + CPU baseline** | **1.01×** | **0.87×** |
 
 ---
 
@@ -137,5 +154,5 @@ cd crates && cargo build
 cd examples && cargo test -p aes-gpu --lib --release
 
 # Run benchmarks (requires GPU)
-cd examples && cargo run --bin bench --features bench --release -p aes-gpu
+cd examples && cargo run --bin aes-bench --features bench --release -p aes-gpu
 ```

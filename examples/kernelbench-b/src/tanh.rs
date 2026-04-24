@@ -8,9 +8,9 @@
 //!     (Memory Write Patterns / Golden Rule #3).
 //!   - `u32` kernel parameters and global-thread-id with bounds guard
 //!     (Golden Rules #1, #5; "Grid-stride loops DO NOT work").
-//!   - Device intrinsic `.tanh()` from `GPUDeviceFloatIntrinsics`
-//!     (re-exported via `gpu::prelude::*`). A naive Rust `f32::tanh` would
-//!     not work inside a `#[gpu::cuda_kernel]`.
+//!   - Device intrinsic `GPUDeviceFloatIntrinsics::tanh(v)` fully qualified
+//!     (skill-doc bf493b79: the `{exp,log,log1p,tanh}` intrinsics should be
+//!     written fully qualified to avoid ambiguity with core `f32` methods).
 
 use std::path::Path;
 use std::time::Instant;
@@ -23,7 +23,7 @@ pub fn tanh_kernel(x: &[f32], y: &mut [f32], n: u32) {
     let idx = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if idx < n {
         let v = x[idx as usize];
-        y_chunk[0] = v.tanh();
+        y_chunk[0] = GPUDeviceFloatIntrinsics::tanh(v);
     }
 }
 

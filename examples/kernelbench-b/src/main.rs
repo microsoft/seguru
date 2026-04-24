@@ -38,6 +38,16 @@ pub mod layer_norm;
 pub mod sum_dim;
 pub mod l2_norm;
 pub mod empty;
+pub mod log_softmax;
+pub mod swish;
+pub mod softplus;
+pub mod l1_norm;
+pub mod max_pool1d;
+pub mod mean_dim;
+pub mod max_dim;
+pub mod argmax_dim;
+pub mod cumsum;
+pub mod mse_loss;
 
 // Parallel set of SeGuRu kernels translated from raw CUDA (not PyTorch).
 pub mod from_cuda;
@@ -59,6 +69,14 @@ pub fn write_bin(path: &Path, data: &[f32]) {
     std::fs::create_dir_all(path.parent().unwrap()).ok();
     let mut f = std::fs::File::create(path).unwrap_or_else(|e| panic!("create {path:?}: {e}"));
     let mut buf = Vec::with_capacity(data.len() * 4);
+    for v in data { buf.extend_from_slice(&v.to_le_bytes()); }
+    f.write_all(&buf).unwrap();
+}
+
+pub fn write_bin_i64(path: &Path, data: &[i64]) {
+    std::fs::create_dir_all(path.parent().unwrap()).ok();
+    let mut f = std::fs::File::create(path).unwrap_or_else(|e| panic!("create {path:?}: {e}"));
+    let mut buf = Vec::with_capacity(data.len() * 8);
     for v in data { buf.extend_from_slice(&v.to_le_bytes()); }
     f.write_all(&buf).unwrap();
 }
@@ -126,6 +144,26 @@ fn main() {
             "sum_dim"    => sum_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "l2_norm"    => l2_norm::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "empty"      => empty::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "log_softmax" => log_softmax::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "swish"       => swish::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "softplus"    => softplus::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "l1_norm"     => l1_norm::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "max_pool1d"  => max_pool1d::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "mean_dim"    => mean_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "max_dim"     => max_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "argmax_dim"  => argmax_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "cumsum"      => cumsum::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "mse_loss"    => mse_loss::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "log_softmax_fc" => from_cuda::log_softmax::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "swish_fc"       => from_cuda::swish::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "softplus_fc"    => from_cuda::softplus::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "l1_norm_fc"     => from_cuda::l1_norm::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "max_pool1d_fc"  => from_cuda::max_pool1d::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "mean_dim_fc"    => from_cuda::mean_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "max_dim_fc"     => from_cuda::max_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "argmax_dim_fc"  => from_cuda::argmax_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "cumsum_fc"      => from_cuda::cumsum::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "mse_loss_fc"    => from_cuda::mse_loss::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
 
             // from_cuda variants (SeGuRu translated from the raw-CUDA kernel).
             "leaky_relu_fc" => from_cuda::leaky_relu::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),

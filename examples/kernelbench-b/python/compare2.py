@@ -152,6 +152,81 @@ PROBLEMS = {
         cuda_run=lambda mod, x: mod.run(x),
         atol=1e-5,
     ),
+    "log_softmax": dict(
+        torch_fn=lambda x: F.log_softmax(x, dim=-1),
+        make_x=_rand(4096, 8192),
+        in_shape=[4096, 8192], out_shape=[4096, 8192],
+        cuda_run=lambda mod, x: mod.run(x),
+        atol=1e-4,
+    ),
+    "swish": dict(
+        torch_fn=lambda x: x * torch.sigmoid(x),
+        make_x=_rand(2048, 65536),
+        in_shape=[2048, 65536], out_shape=[2048, 65536],
+        cuda_run=lambda mod, x: mod.run(x),
+        atol=1e-5,
+    ),
+    "softplus": dict(
+        torch_fn=lambda x: F.softplus(x),
+        make_x=_rand(2048, 65536),
+        in_shape=[2048, 65536], out_shape=[2048, 65536],
+        cuda_run=lambda mod, x: mod.run(x),
+        atol=1e-5,
+    ),
+    "l1_norm": dict(
+        torch_fn=lambda x: x / (x.abs().sum(dim=-1, keepdim=True) + 1e-12),
+        make_x=_rand(4096, 8192),
+        in_shape=[4096, 8192], out_shape=[4096, 8192],
+        cuda_run=lambda mod, x: mod.run(x),
+        atol=1e-5,
+    ),
+    "max_pool1d": dict(
+        torch_fn=lambda x: F.max_pool1d(x, 4, 4),
+        make_x=_rand(128, 64, 65536),
+        in_shape=[128, 64, 65536], out_shape=[128, 64, 16384],
+        cuda_run=lambda mod, x: mod.run(x),
+        atol=0,
+    ),
+    "mean_dim": dict(
+        torch_fn=lambda x: x.mean(dim=-1),
+        make_x=_rand(4096, 16384),
+        in_shape=[4096, 16384], out_shape=[4096],
+        cuda_run=lambda mod, x: mod.run(x),
+        atol=1e-2,
+    ),
+    "max_dim": dict(
+        torch_fn=lambda x: x.max(dim=-1).values,
+        make_x=_rand(4096, 16384),
+        in_shape=[4096, 16384], out_shape=[4096],
+        cuda_run=lambda mod, x: mod.run(x),
+        atol=0,
+    ),
+    "argmax_dim": dict(
+        torch_fn=lambda x: x.argmax(dim=-1).to(torch.int64),
+        make_x=_rand(4096, 16384),
+        in_shape=[4096, 16384], out_shape=[4096],
+        cuda_run=lambda mod, x: mod.run(x),
+        atol=0,
+        out_dtype="int64",
+    ),
+    "cumsum": dict(
+        torch_fn=lambda x: torch.cumsum(x, dim=-1),
+        make_x=_rand(1024, 4096),
+        in_shape=[1024, 4096], out_shape=[1024, 4096],
+        cuda_run=lambda mod, x: mod.run(x),
+        atol=1e-3,
+    ),
+    "mse_loss": dict(
+        torch_fn=lambda ab: F.mse_loss(ab[0], ab[1]),
+        make_x=lambda: (
+            (torch.rand(4096, 4096, device="cuda") * 2 - 1).contiguous(),
+            (torch.rand(4096, 4096, device="cuda") * 2 - 1).contiguous(),
+        ),
+        in_shape=[4096, 4096], out_shape=[1],
+        cuda_run=lambda mod, ab: mod.run(ab[0], ab[1]),
+        atol=1e-3,
+        inputs=["a", "b"],
+    ),
 }
 
 
@@ -162,7 +237,29 @@ def run_one(name):
     ref = p["torch_fn"](x)
     torch_us = time_fn(lambda: p["torch_fn"](x))
 
-    # torch.compile arm — DISABLED: hangs on some problems and TypeError on lambdas
+    inputs = p.get("inputs", ["x"])
+    out_dtype = p.get("out_dtype", "float32")
+    out_np_dtype = np.int64 if out_dtype == "int64" else np.float32
+
+    def dump_all(in_dir):
+        if len(inputs) == 1:
+            dump_bin(in_dir / f"{inputs[0]}.bin", x)
+        else:
+            for name_i, xi in zip(inputs, x):
+                dump_bin(in_dir / f"{name_i}.bin", xi)
+
+    def load_out(path, shape):
+        arr = np.fromfile(path, dtype=out_np_dtype)
+        if len(shape) > 0:
+            arr = arr.reshape(shape)
+        return arr
+
+    def compare(y, ref_):
+        if out_dtype == "int64":
+            return float((y.long() - ref_.long()).abs().max())
+        return float((y - ref_).abs().max())
+
+    # torch.compile arm — DISABLED
     tc_us, tc_err, tc_error = float("inf"), float("inf"), "disabled"
 
     # SeGuRu arm
@@ -170,23 +267,25 @@ def run_one(name):
     try:
         with tempfile.TemporaryDirectory() as td:
             tmp = pathlib.Path(td); (tmp / "in").mkdir(); (tmp / "out").mkdir()
-            dump_bin(tmp / "in/x.bin", x)
+            dump_all(tmp / "in")
             sg = run_seguru(name, tmp / "in", tmp / "out", iters=50, shape=p["in_shape"])
-            y_sg = torch.from_numpy(load_bin(tmp / "out/y.bin", tuple(p["out_shape"]))).cuda()
-            sg_err = float((y_sg - ref).abs().max())
+            y_sg_np = load_out(tmp / "out/y.bin", tuple(p["out_shape"]))
+            y_sg = torch.from_numpy(y_sg_np).cuda()
+            sg_err = compare(y_sg, ref)
             sg_us = sg["kernel_us"]
     except Exception as exc:
         sg_error = f"{type(exc).__name__}: {str(exc)[:80]}"
 
-    # SeGuRu-from-CUDA arm (same SeGuRu runtime, translated from the raw CUDA arm)
+    # SeGuRu-from-CUDA arm
     fc_us, fc_err, fc_error = float("inf"), float("inf"), ""
     try:
         with tempfile.TemporaryDirectory() as td:
             tmp = pathlib.Path(td); (tmp / "in").mkdir(); (tmp / "out").mkdir()
-            dump_bin(tmp / "in/x.bin", x)
+            dump_all(tmp / "in")
             fc = run_seguru(f"{name}_fc", tmp / "in", tmp / "out", iters=50, shape=p["in_shape"])
-            y_fc = torch.from_numpy(load_bin(tmp / "out/y.bin", tuple(p["out_shape"]))).cuda()
-            fc_err = float((y_fc - ref).abs().max())
+            y_fc_np = load_out(tmp / "out/y.bin", tuple(p["out_shape"]))
+            y_fc = torch.from_numpy(y_fc_np).cuda()
+            fc_err = compare(y_fc, ref)
             fc_us = fc["kernel_us"]
     except Exception as exc:
         fc_error = f"{type(exc).__name__}: {str(exc)[:80]}"
@@ -199,7 +298,7 @@ def run_one(name):
     else:
         try:
             y_cu = p["cuda_run"](mod, x)
-            cu_err = float((y_cu - ref).abs().max())
+            cu_err = compare(y_cu, ref)
             cu_us = time_fn(lambda: p["cuda_run"](mod, x))
         except Exception as exc:
             cu_error = f"{type(exc).__name__}: {str(exc)[:80]}"

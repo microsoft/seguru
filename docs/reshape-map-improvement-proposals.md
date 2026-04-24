@@ -68,51 +68,48 @@ is preserved.
 
 ---
 
-## Proposal 2 — Two-pass smem epilogue (*standard CUDA idiom*)
+## Proposal 2 — Two-pass smem epilogue (*WITHDRAWN — see §2.x*)
 
-**Idea:** write the 8×8 tile to shared memory in **per-thread-contiguous**
-order (stride-4 within thread, amortizes perfectly), then drain smem to
-global memory in **warp-coalesced** order.
+**Original idea:** write the 8×8 tile to shared memory in
+**per-thread-contiguous** order (amortizes), then drain smem to global in
+**warp-coalesced** order.
 
-```rust
-let mut smem_tile = gpu::GpuShared::<[f32; 128*128]>::zero();
-// ...main matmul fills acc[i][j]...
+### Why it does not work at the skill-doc level
 
-// Phase 1: thread writes own 8×8 to smem with stride 1 per store
-let smem_base = ty * TM * 128 + tx * TN;
-unroll! { for i in 0..8 {
-    unroll! { for j in 0..8 {
-        smem_tile[smem_base + i * 128 + j] = acc[i][j] + bias_reg[j];
-    }}
-}}
-sync_threads();
+On closer analysis this proposal fails the capacity and amortization tests
+both. The full block output is 128×128 f32 = **64 KB per block**, which
+exceeds the default 48 KB static smem budget on sm_86 and cannot coexist
+with the existing `tile_a` + `tile_b` smem (8 KB).
 
-// Phase 2: warp-coalesced copy smem → y (chunk_mut as today)
-let out_map = reshape_map!(...);  // existing coalesced layout
-let mut y_thread = chunk_mut(y, out_map);
-// stride-1 reads from smem + stride-huge writes to gmem
-// smem reads are free; gmem writes are coalesced
-```
+A per-row streaming variant (one of 8 tile rows at a time, 8 KB staging
+buffer) fits but changes nothing about the critical path:
 
-**Wins:**
-- 64 stores to smem become `st.shared.f32 [ptr+0..+28]` (immediate
-  offsets, stride 4). Per-thread: 1 base computation + 8 row advances.
-- gmem writes still coalesced by reshape_map (unchanged).
-- Standard CUDA pattern — cuBLAS, CUTLASS all do this.
+| phase                         | instruction count | amortizable?       |
+|-------------------------------|-------------------|--------------------|
+| A: reg → smem (per-thread)    | 64 st.shared      | **yes** (immediate offsets) |
+| sync_threads × 8              | cheap             | —                  |
+| B: smem → gmem via reshape_map | 64 st.global     | **no** (same as baseline) |
 
-**Cost:**
-- Extra ~64 KB smem usage for a 128×128 block tile (may exceed per-block
-  limit; need fp16 or smaller block).
-- Extra `sync_threads()` (cheap: ~20 cycles).
+Phase B still routes every store through `reshape_map`, which is exactly
+the code path whose amortization is blocked. Staging only adds 64 smem
+stores, 8 syncs, and 8 KB pressure to the critical path — strictly worse.
 
-**Risk:** Medium. Needs careful sizing so smem stays under 48 KB / 96 KB
-per-SM limit. Half-warp variant (drain 32 rows at a time) avoids this.
+### Why CUTLASS's "smem epilogue" is not this
 
-**Estimated speedup:** 1.3×–1.8× on GEMM epilogues.
+The CUTLASS smem-epilogue idiom helps in two specific cases:
+1. **Tensor-core fragments** — `mma.sync` output is in a fragment layout
+   that does not match gmem row-major; a smem swizzle is required.
+2. **Type conversion / packing** — fp32 accumulators need to be packed into
+   fp16 with coalesced stores; smem makes this cheap.
 
-**Meta:** This can be shipped TODAY at the skill-doc level as a recommended
-kernel pattern, with no compiler changes. Proposal 1 makes it unnecessary;
-proposal 2 works around the codegen limitation.
+Neither applies to `gemm_add_relu`'s plain-f32 pointwise epilogue. CUTLASS
+in that case writes registers→gmem **directly** and relies on the compiler
+to amortize. Exactly the code path SG uses, except SG's reshape_map blocks
+compiler amortization.
+
+**Bottom line:** the gap cannot be closed at the kernel-source level
+without bypassing `reshape_map`. Since `reshape_map` is load-bearing for
+memory safety, the fix must be in the codegen (Proposals 1, 3, or 4).
 
 ---
 
@@ -175,14 +172,16 @@ fold better with const parameters).
 
 ## Recommendation
 
-1. **First**, ship Proposal 2 as a skill-doc pattern — zero compiler work,
-   validates the upper-bound win. If the measured speedup matches nvcc
-   (0.85×+), that's evidence for investing in Proposal 1.
-2. **Then**, build Proposal 1 as the principled long-term fix. It
-   generalizes beyond GEMM and removes a cross-cutting inefficiency.
-3. Skip Proposal 3 unless Proposal 1 ships and proves insufficient.
-4. Consider Proposal 4 as a stopgap if Proposal 1 stalls — the sugar is
-   useful even after Proposal 1 lands.
+1. **Skill-doc-level fixes are insufficient** (see Proposal 2 §2.x). The
+   gap cannot be closed without codegen changes because it is created by
+   `reshape_map!`'s composition of warp-coalescing and per-thread access
+   into one non-amortizable index expression.
+2. **Proposal 1 is the principled long-term fix.** It is additive
+   (existing `reshape_map!` use unchanged, preserves all memory-safety
+   guarantees) and generalizes to every kernel using the macro.
+3. **Proposal 4 is a defensible stopgap** if Proposal 1 takes long. Uses
+   existing APIs + a macro + one new `store_const_offset` method.
+4. Skip Proposal 3 unless Proposal 1 ships and proves insufficient.
 
 ## Validation plan (applies to all proposals)
 

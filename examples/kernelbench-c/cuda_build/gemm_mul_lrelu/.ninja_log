@@ -1,0 +1,5 @@
+# ninja log v7
+0	47941	1776996429337588739	gemm_mul_lrelu.cuda.o	a248d697ffad54df
+47947	48169	1776996477284839202	kbcu_gemm_mul_lrelu.so	a09978bce0f4b9
+18	84568	1777047992757318136	gemm_mul_lrelu.cuda.o	ade7fceccbed1bed
+84569	84795	1777048077308742537	kbcu_gemm_mul_lrelu.so	c2b242185ffb56af

@@ -146,29 +146,79 @@ contiguously per-thread and let nvcc figure out warp-level scheduling. SG's
 `reshape_map!` bakes the warp-coalescing layout into the thread's index
 computation, which is cleaner abstractly but costs amortization.
 
+## 6.5. LLVM IR evidence (2026-04-25, this session)
+
+Final pre-PTX LLVM IR inspected for `gemm_add_relu_kernel` at
+`target/release/deps/gpu/libkernelbench_c-*gpu.gpu.gpu.gpu.bc`.
+
+Two adjacent unrolled stores in the epilogue look like:
+
+```llvm
+; store (i, j=0):
+%402 = or disjoint i32 %401, %392         ; thread + col_base  (%401, %392 already hoisted)
+%403 = add i32 %402, %396                 ; + i*row_stride      (%396 per-row, hoisted)
+%404 = zext i32 %403 to i64               ; <-- FRESH per store
+%405 = shl nuw nsw i64 %404, 2            ; <-- FRESH per store (*4 bytes)
+%406 = getelementptr i8, ptr %6, i64 %405 ; <-- FRESH per store
+store float %.sroa.01133.0, ptr %406
+
+; store (i, j=1):
+%409 = or disjoint i32 %392, %396
+%410 = or disjoint i32 %401, 1            ; lid j-offset
+%411 = add i32 %410, %409
+%412 = zext i32 %411 to i64               ; <-- FRESH per store
+%413 = shl nuw nsw i64 %412, 2            ; <-- FRESH per store
+%414 = getelementptr i8, ptr %6, i64 %413
+store float %.sroa.01132.0, ptr %414
+```
+
+Crucial correction to §4: **LLVM does CSE correctly.** The shared i32 values
+(`%401` thread-base, `%392` column tile-base, `%396` row-stride contribution)
+are hoisted. What it fails to do is share the `zext → shl → gep` chain across
+adjacent stores, because each store's i32 offset differs (by the compile-time
+`j`), and without a loop induction variable LLVM never synthesizes a pointer
+chain.
+
+nvcc sidesteps this entirely: it materializes a 64-bit row pointer
+(`add.s64 rd_row, rd_base, rd_row_stride`) once per `i` and then emits
+`st.global.f32 [rd_row + j*4]` with `j` as a PTX immediate. This is what the
+5.5× difference in `add.s64` counts reflects.
+
 ## 7. Actual fix options (all substantial)
 
-- **(a)** Change `reshape_map!` semantics / add a new macro that emits
-  per-thread contiguous tile writes with explicit warp-shuffle or global
-  scatter at the end. This is a new kernel idiom.
+- **(a)** Add an `open_tile()` / `row_mut()` primitive on `GlobalGroupChunk`
+  that returns a pre-offset 1D sub-chunk whose base is a 64-bit pointer.
+  Within the unroll, each store then becomes `st.global [row_base + imm*4]`.
+  Requires: new chunk type, new `ScopeUniqueMap` split method, macro-level
+  support to emit `map_thread` and `map_local` separately. Memory safety is
+  preserved because the split is equivalent to today's `map(lid, tid)`.
 - **(b)** Preserve loop structure through MLIR lowering so LLVM LSR can fire
   on still-rolled IR. Requires changing how the GPU-code iteration macros
   lower — they currently produce fully unrolled scf/linalg ops.
 - **(c)** Custom MLIR pass that recognizes the affine stride pattern of
   adjacent SSA indices produced by `reshape_map!` + full unrolling and
   rewrites them into a single base + strided stores.
-- **(d)** Codegen-level CSE in
-  `rustc_codegen_gpu/src/builder/mod.rs:686` (`inbounds_gep_op`) that shares
-  base-pointer computations where GEP expressions share a common term.
+- **(d)** Codegen-level peephole in
+  `rustc_codegen_gpu/src/builder/mod.rs:686` (`inbounds_gep_op`) that, when
+  it sees N adjacent GEPs with shared i32 offsets differing only by
+  compile-time constants, emits a shared 64-bit base + immediate-offset
+  stores.
 
 All four are substantial codegen work with regression risk across the entire
 codebase. The fast iteration loop is also prohibitive: a full
 `cargo clean -p kernelbench-c && cargo build --release` cycle is ~12 min.
 
-Given the current performance floor (0.42× torch for pure GEMM) is within
-3× of hand-written CUDA and the Float4 fix already closed the largest gap,
-further codegen-level optimization is deferred until there is dedicated
-compiler-team bandwidth.
+**ROI estimate (2026-04-25):** The address-arith bloat is concentrated in the
+unrolled epilogue (64 stores). Total per-thread work in `gemm_add_relu` is
+~512 FMAs (main loop) + 64 stores (epilogue); stores take roughly 2-4× FMA
+latency, so the epilogue is ~15% of runtime. Fully eliminating epilogue
+address-arith cost would yield ≤15% speedup, insufficient to close the 2.5×
+gap to torch. The remaining gap must live in the main loop (register
+pressure, shared-memory bank conflicts, occupancy) rather than epilogue
+addressing.
+
+Decision: **defer this work.** Next investigation target is the main loop
+and occupancy, not further epilogue codegen.
 
 ## 8. Artifacts
 
@@ -180,11 +230,19 @@ compiler-team bandwidth.
 - Float4 fix that delivered the bulk of the available win:
   commit `b38e99e5` on branch `kernelbench-skill-test`.
 
-## 9. Honest note on prior session
+## 9. Honest note on prior sessions
 
 An earlier session turn proposed "narrow indexing to 32-bit" as a ~10–15%
-speedup. This report supersedes that: the proposal was based on counting
-`add.s64` instructions without tracing them to their MLIR origin. Once the
-experiment was run, PTX was unchanged. The real gap is that SG's
-`reshape_map!` pattern forces per-thread stride-256+ stores, which PTX
-cannot fold into immediate-offset form regardless of compiler effort.
+speedup. That proposal was based on counting `add.s64` instructions without
+tracing them to their MLIR origin. The `index-bitwidth=32` experiment in §5.1
+produced byte-identical PTX, disproving it.
+
+A subsequent turn claimed "PTX cannot fold ... regardless of compiler effort"
+because `reshape_map!` composes warp-coalescing and per-thread addressing.
+§6.5's LLVM IR inspection corrects this: LLVM CSE does share the thread/row
+portions correctly; the remaining cost is per-store 32→64 widening that would
+disappear if the 64-bit row pointer were hoisted. That would require an
+`open_tile()`-style API change, now documented as option 7(a).
+
+Based on the ROI estimate in §7 (~15% ceiling, insufficient for the 2.5× gap),
+this work is deferred and the investigation focus pivots to the main loop.

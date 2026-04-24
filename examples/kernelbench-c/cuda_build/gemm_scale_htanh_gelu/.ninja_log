@@ -1,0 +1,5 @@
+# ninja log v7
+0	48397	1776996672680856350	gemm_scale_htanh_gelu.cuda.o	9cfa2111dd5ee6bd
+48404	48634	1776996721084107760	kbcu_gemm_scale_htanh_gelu.so	ca256ef7347782bd
+17	86889	1777048364311147418	gemm_scale_htanh_gelu.cuda.o	71ada504d1631c39
+86890	87112	1777048451184573975	kbcu_gemm_scale_htanh_gelu.so	95bfc6effa737780

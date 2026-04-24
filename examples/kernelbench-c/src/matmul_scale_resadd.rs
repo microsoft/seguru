@@ -37,6 +37,7 @@ const BDIM_Y: u32 = 16;
 const SCALING: f32 = 0.5;
 
 #[gpu::cuda_kernel]
+#[gpu::attr(nvvm_launch_bound(16, 16, 1, 2))]
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::needless_range_loop)]
 pub fn matmul_scale_resadd_kernel(

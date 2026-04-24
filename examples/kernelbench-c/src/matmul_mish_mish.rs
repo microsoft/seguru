@@ -41,6 +41,7 @@ fn mish(v: f32) -> f32 {
 }
 
 #[gpu::cuda_kernel]
+#[gpu::attr(nvvm_launch_bound(16, 16, 1, 2))]
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::needless_range_loop)]
 pub fn matmul_mish_mish_kernel(

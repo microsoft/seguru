@@ -55,6 +55,7 @@ const GELU_K0: f32 = 0.7978845608028654; // sqrt(2/pi)
 const GELU_K1: f32 = 0.044715;
 
 #[gpu::cuda_kernel]
+#[gpu::attr(nvvm_launch_bound(16, 16, 1, 2))]
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::needless_range_loop)]
 pub fn gemm_scale_htanh_gelu_kernel(

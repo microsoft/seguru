@@ -53,6 +53,7 @@ const BDIM_X: u32 = 16; // threads per block along x (n dim)
 const BDIM_Y: u32 = 16; // threads per block along y (m dim)
 
 #[gpu::cuda_kernel]
+#[gpu::attr(nvvm_launch_bound(16, 16, 1, 2))]
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::needless_range_loop)]
 pub fn gemm_mul_lrelu_kernel(

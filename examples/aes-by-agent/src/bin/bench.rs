@@ -57,6 +57,9 @@ fn main() {
         ("64K", 65536),
         ("256K", 262144),
         ("1M", 1048576),
+        ("4M", 4194304),
+        ("16M", 16777216),
+        ("64M", 67108864), // 1 GB of data (64M blocks × 16 bytes)
     ];
 
     let mut results: Vec<BenchResult> = Vec::new();

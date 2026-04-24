@@ -6,10 +6,15 @@ This skill documents battle-tested strategies for porting CUDA C++ GPU kernels t
 
 ## Performance Summary
 
-With idiomatic patterns applied:
-- **5/19 benchmarks at or below CUDA parity** (≤1.0×)
-- **10/19 within 2× of CUDA**
-- **Geometric mean overhead: ~1.6×** across all benchmarks
+With idiomatic patterns applied, across the three case-study suites in this doc:
+
+| Suite | Reference | Scope | SeGuRu result |
+|---|---|---|---|
+| PolybenchGPU (21 kernels) | hand-written CUDA | mix of compute + memory bound | geomean **~1.6×** CUDA; 5/19 ≤ 1.0×, 10/19 ≤ 2.0× |
+| KernelBench Level 1 Phase B.10 (10 kernels) | PyTorch eager / raw CUDA | elementwise, softmax, norms, reductions | avg **1.19×** PyTorch (same as `SeGuRu←CUDA` two-stage arm, after skill-doc updates) |
+| KernelBench Level 2 Phase C (8 kernels) | cuBLAS-TF32 via PyTorch | fused GEMM/Conv + epilogue | GEMM class: `SeGuRu v2` matches `SeGuRu←CUDA` within 1%; Conv: ~2.6× gap remains |
+
+See the Case Study sections at the end of this doc for per-kernel numbers and methodology.
 
 ## Golden Rules
 
@@ -20,6 +25,8 @@ With idiomatic patterns applied:
 5. **Tests must use helper functions** — don't put `cuda_ctx` closure directly in `#[test]` fns (causes `{}` in MLIR symbol names)
 6. **`chunk_mut` uses LOCAL indices** — write `c[0]`, not `c[global_idx]`
 7. **Row reductions need block- or warp-per-row, not 1-thread-per-row** — reusing the elementwise template (`gs=B.div_ceil(bs)`, `if row<B`) for `sum(x,dim=-1)`-style kernels underutilizes the GPU by 10–20×. See "Row-Reduction Strategy".
+8. **Host-side readback is NOT automatic** — after a kernel writes to a `TensorViewMut<[T]>` backed by a host vector, you must call `d_out.copy_to_host(&mut h_out).unwrap()` before reading or persisting `h_out`. Dropping the view does not trigger readback. Silent all-zeros output otherwise. See "Host-Side Patterns".
+9. **Port the algorithm before the idioms** — fuse multi-pass reductions (max+sum, mean+var, logsumexp) into one pass; pick vector width (Float4) before writing the loop; pick the tile size with register tiling before writing GEMM. Only then apply SeGuRu's chunk_mut / reshape_map / warp-redux patterns. A clean SeGuRu rendering of a bad algorithm will not reach parity.
 
 ## Kernel Signature Translation
 
@@ -293,11 +300,21 @@ pub fn sum_dim_kernel(x: &[Float4], y: &mut [f32], D4: u32) {
 }
 ```
 
-**Host side**: cast the tensor view via `as_tensor_view_float4()` or pass
-through `TensorViewFloat4` (see `examples/kernelbench-b/src/from_cuda/sum_dim.rs`
-for a complete working template). The precondition is just `D % 4 == 0`
-and the base pointer must be 16-byte aligned (CUDA guarantees this for
-`cudaMalloc`-allocated tensors).
+**Host side**: repack the f32 input into `Vec<Float4>` before constructing the
+tensor view (no `unsafe` transmute needed — SeGuRu has no
+`as_tensor_view_float4()` helper; `chunks_exact(4)` is the canonical path):
+
+```rust
+let h_x4: Vec<Float4> = h_x
+    .chunks_exact(4)
+    .map(|c| Float4::new([c[0], c[1], c[2], c[3]]))
+    .collect();
+let d_x = ctx.new_tensor_view(h_x4.as_slice()).unwrap();
+```
+
+See `examples/kernelbench-b/src/from_cuda/sum_dim.rs` for a complete working
+template. Preconditions: `D % 4 == 0` and the base pointer must be 16-byte
+aligned (CUDA guarantees this for `cudaMalloc`-allocated tensors).
 
 **When not to use Float4**:
 - `D % 4 != 0` — falls back to a scalar tail, rarely worth the extra code.
@@ -459,24 +476,37 @@ Note: `SharedAtomic::new` takes `&mut GpuShared<[T]>` (from `smem_alloc.alloc`),
 
 ## Vectorized Access (Float4)
 
-For memory-bandwidth-bound kernels, use `Float4` for coalesced 128-bit loads (from llm-rs):
+`Float4` performs coalesced 128-bit loads/stores. For memory-bound kernels with
+contiguous stride-1 access and `D % 4 == 0`, switching the kernel signature
+from `&[f32]` to `&[Float4]` (and `D` → `D4 = D/4`) cuts the inner-loop
+load-instruction count 4×.
+
 ```rust
 use gpu::Float4;
 
 #[gpu::cuda_kernel]
-pub fn kernel(out: &mut [Float4], inp: &[Float4], C: u32) {
+pub fn kernel(inp: &[Float4], out: &mut [Float4], N4: u32) {
     let mut out = chunk_mut(out, MapContinuousLinear::new(1));
     let idx = block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>();
-    if idx < N {
-        out[0] = inp[idx as usize].add(wpe[(t * C4 + c4) as usize]);
+    if idx < N4 {
+        let v = inp[idx as usize];
+        out[0] = Float4::new([v[0] + 1.0, v[1] + 1.0, v[2] + 1.0, v[3] + 1.0]);
     }
 }
 ```
 
-Host-side: cast `TensorView<[f32]>` to `TensorView<[Float4]>`:
-```rust
-let inp = unsafe { &*(inp as *const _ as *const TensorView<'_, [Float4]>) };
-```
+**Lane access**: `v[0]..v[3]` (or `.x / .y / .z / .w` if the wider SeGuRu prelude is in scope).
+
+**Host pattern**: see `### Always vectorize when D % 4 == 0 (Float4 loads)`
+inside the Row-Reduction Strategy section above for the canonical f32→Float4
+repack. Used verbatim by `examples/kernelbench-b/src/from_cuda/sum_dim.rs`,
+`layer_norm.rs`, `l2_norm.rs`, and the LayerNorm case study kernel.
+
+**When not to use** — see the "When not to use Float4" bullets in Row-Reduction
+Strategy. The short version: online algorithms with sequential per-element
+state (softmax max+sum, Welford) cannot vectorize the state update (only the
+outer accumulators). Compute-bound kernels reading smem (GEMM inner loop)
+are already not memory-bound, so Float4 on the smem load does not help.
 
 ## Cache Hints
 
@@ -527,11 +557,11 @@ gpu_host::cuda_ctx(0, |ctx, m| {
     let mut d_out = ctx.new_tensor_view(h_out.as_mut_slice()).unwrap();
     let config = gpu_host::gpu_config!(grid, 1, 1, block, 1, 1, 0);
     kernel::launch(config, ctx, m, &d_inp, &mut d_out, n as u32).unwrap();
-    d_out.copy_to_host(&mut h_out).unwrap();  // ← REQUIRED, see Golden Rule #7
+    d_out.copy_to_host(&mut h_out).unwrap();  // ← REQUIRED, see Golden Rule #8
 });
 ```
 
-### Golden Rule #7 (host-side) — readback is NOT automatic
+### Golden Rule #8 (host-side) — readback is NOT automatic
 
 > `new_tensor_view(h_vec.as_mut_slice())` snapshots the host buffer to device
 > at construction. After a kernel writes to that `TensorViewMut`, you **must**
@@ -652,6 +682,9 @@ Note: `gpu_config!` returns a non-Copy type — recreate it before each `launch`
 | `gpu_config!` reuse in loop | Compile error (not Copy) | Recreate before each `launch` |
 | Aliased read+write same array | Need separate params | Pass as both `a_read: &[f32]` and `a_write: &mut [f32]` |
 | Using iterators everywhere | Can be 20% slower (see llm-rs note) | Benchmark both; use `while` loop if iterator is slower |
+| 1-thread-per-row reduction | 10–20× slower than raw CUDA on small-B reductions | Use 1-block-per-row (or 1-warp-per-row when D ≤ 1024); see "Row-Reduction Strategy" |
+| `chunk_mut(y, MapContinuousLinear::new(1))` for per-block scalar output | `CUDA_ERROR_ILLEGAL_ADDRESS` at launch | Chain Grid→Block→Thread scope via `chunk_to_scope`; see "one scalar per block output scope" pitfall |
+| Missing `d_out.copy_to_host(&mut h_out)` | All-zeros output, no warning | Add the call before reading/persisting `h_out`; Golden Rule #8 |
 
 ## Performance Expectations (A100, naive kernels)
 
@@ -665,6 +698,244 @@ Note: `gpu_config!` returns a non-Copy type — recreate it before each `launch`
 | Column-heavy reductions (corr, covar) | **~2.3×** | Column-stride access; `.ldcs()` helps significantly |
 | Iterative with many launches | **1.9×** | Launch overhead (4.7 vs 2.0 µs) accumulates |
 | Mechanical 1:1 port of memory-bound kernel | **1.3-1.5×** | See LayerNorm case study — port the algorithm, not syntax |
+
+## GEMM / Matmul Recipe
+
+For dense FP32 matmul `y[M, N] = x[M, K] · W[N, K]ᵀ` (or equivalent). Recipe
+validated at scale by `examples/kernelbench-c/src/from_cuda/gemm_mul_lrelu.rs`
+and the four sibling GEMM+epilogue ports. After adding this recipe, the
+direct-from-PyTorch SeGuRu arm collapsed to match the two-stage `SeGuRu←CUDA`
+arm within 1% on all 5 Phase-C GEMM problems (~3.3× speedup from the prior
+1-output-per-thread baseline).
+
+**Tile parameters (the defaults that work for `M, N, K` all multiples of 128/128/8):**
+
+```
+BM = BN = 128       // output tile per block
+BK = 8              // K-dimension chunk per shared-load
+TM = TN = 8         // register-tile per thread (8×8 = 64 accumulators)
+blockDim = (16, 16) // 256 threads = 16 tiles of size TM × TN along each axis
+```
+
+Each thread owns an 8×8 output sub-tile: **64 FMAs per pair of shared-memory
+loads**, which amortizes the bounds-checked broadcast reads that SeGuRu's
+disjoint-partition model forces in the compute phase (see "Honest limitation
+on COMPUTE phase" above).
+
+**Signature and skeleton**:
+
+```rust
+const BM: u32 = 128; const BN: u32 = 128; const BK: u32 = 8;
+const TM: u32 = 8;   const TN: u32 = 8;
+const BDIM_X: u32 = 16; const BDIM_Y: u32 = 16;
+
+#[gpu::cuda_kernel]
+pub fn gemm_kernel(x: &[f32], w: &[f32], y: &mut [f32], K: u32) {
+    let tx = thread_id::<DimX>();  let ty = thread_id::<DimY>();
+    let bm = block_id::<DimY>() * BM;
+    let bn = block_id::<DimX>() * BN;
+    let tid = ty * BDIM_X + tx;                 // 0..256
+    let a_row = tid >> 1;                       // 0..128 (2 threads per row)
+    let a_col = (tid & 1) << 2;                 // 0 or 4 — 4-wide K slice
+
+    let mut tile_a = GpuShared::<[f32; (BM * BK) as usize]>::zero(); // 128*8=1024
+    let mut tile_b = GpuShared::<[f32; (BN * BK) as usize]>::zero();
+
+    // Per-thread disjoint 4-slot partition of each 1024-slot tile.
+    let load_map = reshape_map!([4] | [16, 16] => layout: [i0, t0, t1]);
+
+    // Per-thread disjoint 8×8 slot of the output. Decompose linear index
+    // fastest→slowest: [j (stride 1), tx, bid_x, i, ty, bid_y].
+    let out_map = reshape_map!(
+        [8, 8] | [16, grid_dim::<DimX>(), 16, grid_dim::<DimY>()]
+        => layout: [i0, t0, t1, i1, t2, t3]
+    );
+    let mut y_thread = chunk_mut(y, out_map);
+
+    let mut acc = [[0.0f32; TN as usize]; TM as usize];
+
+    let mut tstep = 0u32;
+    while tstep < K / BK {
+        let k_base = tstep * BK;
+        {
+            let mut ca = tile_a.chunk_mut(load_map);
+            let base = (bm + a_row) * K + k_base + a_col;
+            ca[0] = x[base as usize];
+            ca[1] = x[(base + 1) as usize];
+            ca[2] = x[(base + 2) as usize];
+            ca[3] = x[(base + 3) as usize];
+        }
+        { /* same pattern for tile_b from `w` */ }
+        sync_threads();
+
+        // Compute — fully `unroll!`ed so the 64-wide accumulator stays in regs.
+        let row_off = (ty * TM) as usize;
+        let col_off = (tx * TN) as usize;
+        unroll! { for kk in 0..8 {
+            let mut a_reg = [0.0f32; 8];
+            let mut b_reg = [0.0f32; 8];
+            for ii in 0..8usize { a_reg[ii] = tile_a[(row_off + ii) * 8 + kk]; }
+            for jj in 0..8usize { b_reg[jj] = tile_b[(col_off + jj) * 8 + kk]; }
+            unroll! { for ii in 0..8 {
+                let ai = a_reg[ii];
+                unroll! { for jj in 0..8 {
+                    acc[ii][jj] += ai * b_reg[jj];
+                }}
+            }}
+        }}
+        sync_threads();
+        tstep += 1;
+    }
+
+    // Epilogue (fused bias/activation/etc.) and store via y_thread[(j, i)].
+    unroll! { for i in 0..8 { unroll! { for j in 0..8 {
+        y_thread[(j as u32, i as u32)] = /* acc[i][j] + epilogue */;
+    }}}}
+}
+
+// Host launch
+let gx = (N as u32) / BN;
+let gy = (M as u32) / BM;
+let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
+```
+
+**Non-negotiables**:
+
+1. **Non-transposed shared tiles** — `As[m_local, k_local]`, `Bs[n_local, k_local]`.
+   Each thread's 4 tile writes land in 4 *contiguous* slots (`tid*4 + 0..3`),
+   which is exactly what the `reshape_map!([4] | [16, 16] => [i0, t0, t1])`
+   partition expresses → zero bounds checks on the LOAD phase. A transposed
+   layout would require per-thread strided writes that `chunk_mut` cannot
+   prove disjoint.
+2. **`unroll!` the kk / ii / jj loops** so the 64 accumulators + 8-wide
+   `a_reg` / `b_reg` stay in registers. Without `unroll!` they spill to
+   local memory and you lose the whole point of register tiling.
+3. **Compute reads remain scalar `tile_a[idx]`** — multiple threads reading
+   the same slot (broadcast) cannot be expressed as a disjoint partition, so
+   these keep their `setp+selp` bounds check. The 8×8 register tile amortizes
+   this cost (64 FMAs per shared load).
+
+**When to deviate**:
+
+- **Non-multiples of 128/128/8**: either pad on the host or write a guarded
+  tail kernel. The Recipe as stated assumes aligned shapes.
+- **Smaller problems (M, N ≤ 256)**: fall back to a 32×32 tile with 4×4
+  register tile — 128×128 tiles waste SMs when `gridDim < 2 × num_SMs`.
+- **Use cuBLAS**. For pure dense FP32 matmul at meaningful sizes, cuBLAS
+  with TF32 acceleration beats any hand-written FP32 kernel by ~3–4× because
+  it uses tensor cores. User-written SeGuRu matmul is appropriate only when
+  fused with a non-standard epilogue, for small sizes, or when precise FP32
+  is required.
+
+**Measured**: this recipe puts SeGuRu at ~4.6× vs raw CUDA on Phase C
+GEMM problems (41 ms vs 9 ms on the K=N=8192 shape). The residual gap is
+structural — SeGuRu's bounds checks on smem compute reads — and matches
+the ~1.8× overhead measured on naive GEMM at N=512 ("Shared Memory Tiling"
+section above).
+
+## Convolution Recipe
+
+For 2-D convolution `y[B, Cout, Ho, Wo] = conv2d(x[B, Cin, H, W], W[Cout, Cin, Kh, Kw])`.
+Recipe validated by `examples/kernelbench-c/src/from_cuda/conv_relu_biasadd.rs`.
+Adding this recipe closed 25% of the gap on `conv_relu_biasadd` (336→268 ms);
+further closing requires adding register tiling on top (not yet in this doc).
+
+**Tile parameters (for 3×3 kernel, Ho = Wo = 126, Cin = 64):**
+
+```
+TILE_OUT = 14                       // output pixels per block side
+PATCH    = TILE_OUT + Kh - 1 = 16   // input patch side per block
+BDIM_X = BDIM_Y = 16                // 256 threads/block (8 warps)
+CIN_CHUNK = 4                       // channel slab per smem refill
+```
+
+- `14 × 9 = 126 = Ho = Wo` → a 9×9 grid per `(bi, co)` cleanly partitions the
+  output with **no mid-tile masking**. Choose `TILE_OUT` so that
+  `TILE_OUT × gridDim.y == Ho`.
+- Only the inner `14 × 14 = 196` threads write output; the outer 60 threads
+  participate only in the cooperative smem load.
+- Patch smem size = `CIN_CHUNK × PATCH × PATCH × 4B = 4 KB/block` — leaves
+  headroom for multiple resident blocks per SM.
+- `256 × 4 = 1024 = PATCH_VOL` exactly, so the same
+  `reshape_map!([4] | [16, 16] => [i0, t0, t1])` from the GEMM Recipe works
+  verbatim for the patch load — each thread gets 4 contiguous smem slots.
+
+**Skeleton**:
+
+```rust
+let co = block_id::<DimZ>() % Cout;
+let bi = block_id::<DimZ>() / Cout;
+let h0 = block_id::<DimY>() * TILE_OUT;   // first output row
+let w0 = block_id::<DimX>() * TILE_OUT;   // first output col
+
+let mut smem_patch = GpuShared::<[f32; PATCH_VOL as usize]>::zero();
+let load_map = reshape_map!([4] | [16, 16] => layout: [i0, t0, t1]);
+
+let mut acc = 0.0f32; // per thread, one output pixel per inner iteration
+
+let num_refills = Cin / CIN_CHUNK;
+let mut rf: u32 = 0;
+while rf < num_refills {
+    let ci_base = rf * CIN_CHUNK;
+
+    // Cooperative load: fill [CIN_CHUNK × PATCH × PATCH] patch into smem.
+    {
+        let mut sp = smem_patch.chunk_mut(load_map);
+        // Each thread (tid = ty*16 + tx) loads 4 adjacent f32 of the patch.
+        // Compute global (ci, py, px) for the thread's 4-slot window and
+        // read 4 coalesced f32 from x. Patch is always inside [H, W] for
+        // the shape above — branchless load.
+        sp[0] = x[/* base       */];
+        sp[1] = x[/* base +  1  */];
+        sp[2] = x[/* base +  2  */];
+        sp[3] = x[/* base +  3  */];
+    }
+    sync_threads();
+
+    // Compute: each of the 14×14 active threads does CIN_CHUNK × Kh × Kw FMAs.
+    if ty < TILE_OUT && tx < TILE_OUT {
+        unroll! { for ci_off in 0..4usize {
+            unroll! { for kh in 0..3usize {
+                unroll! { for kw in 0..3usize {
+                    let xv = smem_patch[
+                        ci_off * PATCH_AREA as usize
+                        + (ty as usize + kh) * PATCH as usize
+                        + (tx as usize + kw)
+                    ];
+                    let wv = w[/* (co, ci_base + ci_off, kh, kw) */];
+                    acc += xv * wv;
+                }}
+            }}
+        }}
+    }
+
+    sync_threads();
+    rf += 1;
+}
+
+// Epilogue: fused relu/bias/… then store exactly one output per active thread.
+```
+
+**Non-negotiables**:
+
+1. **`TILE_OUT × gridDim == Ho/Wo`** (choose `TILE_OUT` to divide `Ho` evenly).
+   OOB-guarded threads work, but force the patch load onto a branchful path.
+2. **Patch size = `TILE_OUT + Kh − 1`**. Smaller gives OOB reads; larger
+   wastes smem.
+3. **`BDIM_X * BDIM_Y * 4 == PATCH_VOL`** so that the 4-slot
+   `reshape_map!([4] | [16, 16] => [i0, t0, t1])` partitions the patch
+   exactly. For other `TILE_OUT` values, re-derive the split and map.
+4. **Weight reads come from gmem, not smem** — `w[co, ci, kh, kw]` is
+   broadcast across the block per refill so L1/L2 serves them. Putting W
+   in smem too wastes space without reuse benefit.
+5. **`unroll!` the kh / kw / ci_off inner loops** so the FMA chain becomes
+   a straight-line sequence.
+
+**Remaining gap to raw CUDA**: ~2.6× as of Phase C.2. The next optimization
+is register tiling on the output side (each thread computes an N×M patch of
+outputs instead of 1), reusing each patch load across multiple output pixels.
+Not yet documented here; follow the GEMM Recipe's register-tile pattern,
+adapted to the conv access pattern.
 
 ## Softmax Recipe
 
@@ -1144,11 +1415,7 @@ say so explicitly instead of implying a 1.7-2.0× tile-only ratio is tight.
 
 ### Revised Golden Rule
 
-> **Port the algorithm before the idioms.**
-> Fuse multi-pass reductions (max+sum, mean+var, logsumexp) into one pass.
-> Choose a vector width (Float4/Float8) before writing the loop.
-> Choose a tile size with register tiling *before* writing the GEMM kernel.
-> Then apply SeGuRu's chunk_mut/reshape_map/warp-redux patterns.
+Promoted to the top-level rules list as **Rule #9** ("Port the algorithm before the idioms"). See the top of this doc.
 
 ### Reproducing
 
@@ -1188,7 +1455,7 @@ warning. The skill doc does show the right pattern in "Host-Side Patterns /
 Basic launch" but it's a one-line comment-less call in a code block; LLMs
 focused on kernel design missed it.
 
-**Golden Rule #7 (host-side):**
+**Golden Rule #8 (host-side):**
 
 > After a kernel writes to a `TensorViewMut<[T]>` backed by a host vector,
 > you **must** call `d_out.copy_to_host(&mut h_out).unwrap()` before reading
@@ -1335,22 +1602,9 @@ Recommended usage:
   ~1.0× PyTorch on average; works well for elementwise, lags on
   reductions unless the skill doc explicitly addresses strategy.
 
-- **Correctness parity holds at scale.** Both arms 10/10 on a one-shot
-  prompt — the skill docs are sufficient context for an LLM to produce
-  numerically-correct kernels across all four op categories tested.
-- **Memory-bound elementwise (6 problems)**: SeGuRu sits at 0.91–0.94×
-  PyTorch, raw CUDA at 0.96–1.00×. The safety layer's ~5% overhead is
-  consistent and small enough to not change `fast_N` rankings.
-- **Reductions and softmax**: SeGuRu lags more (0.71–0.77× on softmax /
-  layer_norm). On `sum_dim` and `l2_norm` the LLM picked a 1-thread/row
-  pattern in SeGuRu vs a 1-block/row warp-shuffle pattern in CUDA — that
-  is an LLM strategy choice, not a SeGuRu ceiling. With a follow-up port
-  using SeGuRu's shared-memory reduce primitives the gap should close.
-- **rms_norm**: both arms beat PyTorch significantly (1.46× / 1.83×) —
-  PyTorch eager pays a large general-purpose dispatch tax on small norms.
-- **`torch.compile` baseline disabled** in this run (TypeError on lambda
-  wrap under our torch version). Re-enable in a follow-up by wrapping
-  problems in `nn.Module` instead of `lambda`.
+Methodology note: `torch.compile` baseline disabled in this run (TypeError
+on lambda wrap under our torch version). Re-enable in a follow-up by
+wrapping problems in `nn.Module` instead of `lambda`.
 
 ### CUDA gotcha learned: `__shfl_down_sync` partial masks deadlock
 

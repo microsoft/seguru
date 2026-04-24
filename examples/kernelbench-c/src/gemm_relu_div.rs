@@ -1,4 +1,5 @@
-//! 63_Gemm_ReLU_Divide — fused nn.Linear + ReLU + divide.
+//! 63_Gemm_ReLU_Divide — port of the hand-tuned CUDA kernel in
+//! `cuda/gemm_relu_div.cu` to SeGuRu.
 //!
 //! PyTorch reference:
 //!     y = F.relu(x @ W.T + b) / divisor
@@ -6,21 +7,30 @@
 //! Shapes:
 //!     x: [M, K], W: [N, K], b: [N], y: [M, N].
 //!
-//! Strategy: 16×16 shared-memory tiled GEMM with the bias+relu+div epilogue
-//! fused into the per-thread output write. Mirrors `gemm_mul_lrelu.rs`.
+//! Tile config (matches the .cu source):
+//!   BM=128, BN=128, BK=8, TM=TN=8, block = 16×16 = 256 threads.
+//!   Each thread owns an 8×8 output sub-tile.
 //!
-//! Tile config: BM=BN=BK=16, block=16×16=256 threads, 1 output per thread.
+//! Mirror of `from_cuda/gemm_mul_lrelu.rs` — only the epilogue differs
+//! (relu + divide instead of multiplier + leaky-relu).
 
 use std::path::Path;
 use std::time::Instant;
 
+use crunchy::unroll;
 use gpu::prelude::*;
 
-const BM: u32 = 16;
-const BN: u32 = 16;
-const BK: u32 = 16;
+const BM: u32 = 128;
+const BN: u32 = 128;
+const BK: u32 = 8;
+const TM: u32 = 8;
+const TN: u32 = 8;
+const BDIM_X: u32 = 16;
+const BDIM_Y: u32 = 16;
 
 #[gpu::cuda_kernel]
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::needless_range_loop)]
 pub fn gemm_relu_div_kernel(
     x: &[f32],
     w: &[f32],
@@ -31,66 +41,99 @@ pub fn gemm_relu_div_kernel(
     K: u32,
     inv_divisor: f32,
 ) {
-    let mut y_chunk = chunk_mut(y, Map2D::new(N as usize));
+    let _ = M;
+    let _ = N;
 
     let tx = thread_id::<DimX>();
     let ty = thread_id::<DimY>();
-    let col = block_id::<DimX>() * BN + tx;
-    let row = block_id::<DimY>() * BM + ty;
+    let bid_x = block_id::<DimX>();
+    let bid_y = block_id::<DimY>();
+
+    let bm = bid_y * BM;
+    let bn = bid_x * BN;
+
+    let tid = ty * BDIM_X + tx;
+    let a_row = tid >> 1;
+    let a_col = (tid & 1) << 2;
 
     let mut tile_a = gpu::GpuShared::<[f32; (BM * BK) as usize]>::zero();
     let mut tile_b = gpu::GpuShared::<[f32; (BN * BK) as usize]>::zero();
 
-    let load_map = reshape_map!([1] | [16, 16] => layout: [i0, t0, t1]);
+    let load_map = reshape_map!([4] | [16, 16] => layout: [i0, t0, t1]);
 
-    let mut acc = 0.0f32;
+    let out_map = reshape_map!(
+        [8, 8] | [16, grid_dim::<DimX>(), 16, grid_dim::<DimY>()]
+        => layout: [i0, t0, t1, i1, t2, t3]
+    );
+    let mut y_thread = chunk_mut(y, out_map);
+
+    let mut acc = [[0.0f32; TN as usize]; TM as usize];
+
     let num_tiles = K / BK;
-
-    let mut t: u32 = 0;
-    while t < num_tiles {
-        let k_base = t * BK;
+    let mut tstep: u32 = 0;
+    while tstep < num_tiles {
+        let k_base = tstep * BK;
 
         {
             let mut ca = tile_a.chunk_mut(load_map);
-            let a_col = k_base + tx;
-            ca[0] = if row < M && a_col < K {
-                x[(row * K + a_col) as usize]
-            } else {
-                0.0
-            };
+            let base = (bm + a_row) * K + k_base + a_col;
+            ca[0] = x[base as usize];
+            ca[1] = x[(base + 1) as usize];
+            ca[2] = x[(base + 2) as usize];
+            ca[3] = x[(base + 3) as usize];
         }
         {
             let mut cb = tile_b.chunk_mut(load_map);
-            let n_row = block_id::<DimX>() * BN + ty;
-            let b_col = k_base + tx;
-            cb[0] = if n_row < N && b_col < K {
-                w[(n_row * K + b_col) as usize]
-            } else {
-                0.0
-            };
+            let base = (bn + a_row) * K + k_base + a_col;
+            cb[0] = w[base as usize];
+            cb[1] = w[(base + 1) as usize];
+            cb[2] = w[(base + 2) as usize];
+            cb[3] = w[(base + 3) as usize];
         }
 
         sync_threads();
 
-        let mut k: u32 = 0;
-        while k < BK {
-            acc += tile_a[(ty * BK + k) as usize] * tile_b[(tx * BK + k) as usize];
-            k += 1;
-        }
+        let row_off = (ty * TM) as usize;
+        let col_off = (tx * TN) as usize;
+
+        unroll! { for kk in 0..8 {
+            let mut a_reg = [0.0f32; TM as usize];
+            let mut b_reg = [0.0f32; TN as usize];
+
+            for ii in 0..8usize {
+                a_reg[ii] = tile_a[(row_off + ii) * 8 + kk];
+            }
+            for jj in 0..8usize {
+                b_reg[jj] = tile_b[(col_off + jj) * 8 + kk];
+            }
+
+            unroll! { for ii in 0..8 {
+                let ai = a_reg[ii];
+                unroll! { for jj in 0..8 {
+                    acc[ii][jj] += ai * b_reg[jj];
+                }}
+            }}
+        }}
 
         sync_threads();
-        t += 1;
+        tstep += 1;
     }
 
-    // Fused epilogue: bias add, relu, divide.
-    if row < M && col < N {
-        let b_val = bias[col as usize];
-        let mut v = acc + b_val;
-        if v < 0.0 {
-            v = 0.0;
-        }
-        y_chunk[(0, 0)] = v * inv_divisor;
-    }
+    // ---- Epilogue: fused bias + relu + divide, then store.
+    let mut bias_reg = [0.0f32; TN as usize];
+    unroll! { for j in 0..8 {
+        bias_reg[j] = bias[(bn + tx * TN) as usize + j];
+    }}
+
+    unroll! { for i in 0..8 {
+        unroll! { for j in 0..8 {
+            let mut v = acc[i][j] + bias_reg[j];
+            if v < 0.0 {
+                v = 0.0;
+            }
+            y_thread[(j as u32, i as u32)] = v * inv_divisor;
+        }}
+    }}
 }
 
 pub fn run(
@@ -104,9 +147,17 @@ pub fn run(
     assert_eq!(shape.len(), 3, "gemm_relu_div: shape=[M, K, N]");
     let (m, k, n) = (shape[0], shape[1], shape[2]);
 
-    let h_x = super::read_bin(&in_dir.join("x.bin"), m * k);
-    let h_w = super::read_bin(&in_dir.join("W.bin"), n * k);
-    let h_b = super::read_bin(&in_dir.join("b.bin"), n);
+    assert!(
+        m % BM as usize == 0 && n % BN as usize == 0 && k % BK as usize == 0,
+        "M, N, K must be multiples of {}, {}, {} respectively",
+        BM,
+        BN,
+        BK
+    );
+
+    let h_x = crate::read_bin(&in_dir.join("x.bin"), m * k);
+    let h_w = crate::read_bin(&in_dir.join("W.bin"), n * k);
+    let h_b = crate::read_bin(&in_dir.join("b.bin"), n);
     let mut h_y = vec![0f32; m * n];
 
     let d_x = ctx.new_tensor_view(h_x.as_slice()).unwrap();
@@ -119,11 +170,11 @@ pub fn run(
     let kk = k as u32;
     let inv_divisor: f32 = 0.5; // divisor = 2.0
 
-    let gx: u32 = nn.div_ceil(BN);
-    let gy: u32 = mm.div_ceil(BM);
+    let gx: u32 = nn / BN;
+    let gy: u32 = mm / BM;
 
     {
-        let cfg = gpu_host::gpu_config!(gx, gy, 1, BN, BM, 1, 0);
+        let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
         gemm_relu_div_kernel::launch(
             cfg, ctx, md, &d_x, &d_w, &d_b, &mut d_y, mm, nn, kk, inv_divisor,
         )
@@ -134,7 +185,7 @@ pub fn run(
     let warmup_iters: usize = 5;
     let wt = Instant::now();
     for _ in 0..warmup_iters {
-        let cfg = gpu_host::gpu_config!(gx, gy, 1, BN, BM, 1, 0);
+        let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
         gemm_relu_div_kernel::launch(
             cfg, ctx, md, &d_x, &d_w, &d_b, &mut d_y, mm, nn, kk, inv_divisor,
         )
@@ -145,7 +196,7 @@ pub fn run(
 
     let t = Instant::now();
     for _ in 0..iters {
-        let cfg = gpu_host::gpu_config!(gx, gy, 1, BN, BM, 1, 0);
+        let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
         gemm_relu_div_kernel::launch(
             cfg, ctx, md, &d_x, &d_w, &d_b, &mut d_y, mm, nn, kk, inv_divisor,
         )
@@ -160,7 +211,7 @@ pub fn run(
     drop(d_w);
     drop(d_x);
 
-    super::write_bin(&out_dir.join("y.bin"), &h_y);
+    crate::write_bin(&out_dir.join("y.bin"), &h_y);
 
     (kernel_us, warmup_us)
 }

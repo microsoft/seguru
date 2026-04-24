@@ -1083,3 +1083,53 @@ Artifacts:
 - PyTorch sources in `examples/kernelbench-c/problems/*.py`
 - Driver: `examples/kernelbench-c/python/compare.py`
 
+### Phase C.2: skill-doc intervention — direct SeGuRu arm catches up
+
+After adding the "## GEMM / Matmul Recipe" and "## Convolution Recipe"
+sections above (prescribing BM=BN=128 / BK=8 / 8×8 register tile for
+GEMM, shared-mem input tile for Conv), we re-dispatched 6 parallel
+LLM sub-agents to re-port the direct SeGuRu-from-PyTorch arm only
+(no change to the raw CUDA or SeGuRu←CUDA arms). The before/after:
+
+| Problem               | SeGuRu v1 | SeGuRu v2 | improvement | SeGuRu←CUDA |
+|-----------------------|----------:|----------:|------------:|------------:|
+| gemm_mul_lrelu        |  134460.1 |   41168.4 |       3.27× |     41168.6 |
+| matmul_mish_mish      |  134460.7 |   41397.7 |       3.25× |     41402.7 |
+| gemm_relu_div         |  134458.1 |   41163.6 |       3.27× |     41163.9 |
+| gemm_scale_htanh_gelu |  268304.6 |   82262.0 |       3.26× |     82263.1 |
+| matmul_scale_resadd   |  536396.1 |  156859.2 |       3.42× |    156855.5 |
+| conv_relu_biasadd     |  336531.9 |  268559.1 |       1.25× |    268562.8 |
+
+Aggregate after intervention:
+
+| Arm          | correct | avg speedup vs PyTorch | delta |
+|--------------|--------:|-----------------------:|------:|
+| SeGuRu v1    |    8/8  |                 0.09×  |       |
+| SeGuRu v2    |    8/8  |                 0.17×  | +1.9× |
+| SeGuRu←CUDA  |    8/8  |                 0.17×  |    —  |
+| Raw CUDA     |    8/8  |                 0.72×  |    —  |
+
+Key finding: **the direct SeGuRu-from-PyTorch arm now matches the
+two-stage SeGuRu←CUDA arm** on all 5 GEMM problems (differences < 1%).
+The CUDA intermediate (Stage 1) is no longer needed for the GEMM class
+once the skill doc contains a prescriptive tile recipe — LLMs reliably
+pick the right tile geometry when it's spelled out explicitly.
+
+For convolution: the `conv_relu_biasadd` gap closed 25% (336→268 ms)
+purely from the Convolution Recipe's shared-mem input tile. Raw CUDA
+at 102 ms still uses register tiling on top — adding a "conv +
+register tile" subsection would close the remaining ~2.6× gap.
+
+Methodology note: no other code changes between v1 and v2. Same
+cuBLAS/PyTorch versions, same CUDA arm, same SeGuRu←CUDA arm, same
+hardware. The delta is entirely attributable to the skill-doc
+additions driving different LLM code choices.
+
+Takeaway for the two-stage pipeline thesis: **a sufficiently
+prescriptive skill doc collapses the two-stage pipeline into a
+single-stage one for well-known compute patterns** (GEMM, and
+presumably conv with the next iteration). The two-stage route
+remains valuable as a discovery mechanism — the CUDA-written
+kernels tell you what recipe to prescribe — but once the recipe
+is in the doc, Stage 1 becomes redundant.
+

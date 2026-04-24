@@ -7,22 +7,29 @@
 //!
 //! Fused form:  y[m, n] = (Σ_k x[m,k] · W[n,k] + b[n]) * (1 + scaling).
 //!
-//! Structure mirrors `gemm_mul_lrelu` (16×16 shared-memory tiled GEMM, one
-//! output per thread, fused epilogue). The only change is the per-element
-//! epilogue: scale by `(1 + scaling)`.
+//! Tile config (per docs/cuda-to-seguru-porting-skill.md "GEMM / Matmul Recipe"):
+//!   BM=128, BN=128, BK=8, TM=TN=8, block = 16×16 = 256 threads,
+//!   non-transposed shared-memory tiles, 8×8 register output tile.
 
 use std::path::Path;
 use std::time::Instant;
 
+use crunchy::unroll;
 use gpu::prelude::*;
 
-const BM: u32 = 16;
-const BN: u32 = 16;
-const BK: u32 = 16;
+const BM: u32 = 128;
+const BN: u32 = 128;
+const BK: u32 = 8;
+const TM: u32 = 8;
+const TN: u32 = 8;
+const BDIM_X: u32 = 16;
+const BDIM_Y: u32 = 16;
 
 const SCALING: f32 = 0.5;
 
 #[gpu::cuda_kernel]
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::needless_range_loop)]
 pub fn matmul_scale_resadd_kernel(
     x: &[f32],
     w: &[f32],
@@ -33,62 +40,96 @@ pub fn matmul_scale_resadd_kernel(
     K: u32,
     scale1p: f32,
 ) {
-    let mut y_chunk = chunk_mut(y, Map2D::new(N as usize));
+    let _ = M;
+    let _ = N;
 
     let tx = thread_id::<DimX>();
     let ty = thread_id::<DimY>();
-    let col = block_id::<DimX>() * BN + tx; // n-index
-    let row = block_id::<DimY>() * BM + ty; // m-index
+    let bid_x = block_id::<DimX>();
+    let bid_y = block_id::<DimY>();
+
+    let bm = bid_y * BM;
+    let bn = bid_x * BN;
+
+    let tid = ty * BDIM_X + tx;
+    let a_row = tid >> 1;
+    let a_col = (tid & 1) << 2;
 
     let mut tile_a = gpu::GpuShared::<[f32; (BM * BK) as usize]>::zero();
     let mut tile_b = gpu::GpuShared::<[f32; (BN * BK) as usize]>::zero();
 
-    let load_map = reshape_map!([1] | [16, 16] => layout: [i0, t0, t1]);
+    let load_map = reshape_map!([4] | [16, 16] => layout: [i0, t0, t1]);
 
-    let mut acc = 0.0f32;
+    let out_map = reshape_map!(
+        [8, 8] | [16, grid_dim::<DimX>(), 16, grid_dim::<DimY>()]
+        => layout: [i0, t0, t1, i1, t2, t3]
+    );
+    let mut y_thread = chunk_mut(y, out_map);
+
+    let mut acc = [[0.0f32; TN as usize]; TM as usize];
+
     let num_tiles = K / BK;
-
-    let mut t: u32 = 0;
-    while t < num_tiles {
-        let k_base = t * BK;
+    let mut tstep: u32 = 0;
+    while tstep < num_tiles {
+        let k_base = tstep * BK;
 
         {
             let mut ca = tile_a.chunk_mut(load_map);
-            let a_col = k_base + tx;
-            ca[0] = if row < M && a_col < K {
-                x[(row * K + a_col) as usize]
-            } else {
-                0.0
-            };
+            let base = (bm + a_row) * K + k_base + a_col;
+            ca[0] = x[base as usize];
+            ca[1] = x[(base + 1) as usize];
+            ca[2] = x[(base + 2) as usize];
+            ca[3] = x[(base + 3) as usize];
         }
         {
             let mut cb = tile_b.chunk_mut(load_map);
-            let n_row = block_id::<DimX>() * BN + ty;
-            let b_col = k_base + tx;
-            cb[0] = if n_row < N && b_col < K {
-                w[(n_row * K + b_col) as usize]
-            } else {
-                0.0
-            };
+            let base = (bn + a_row) * K + k_base + a_col;
+            cb[0] = w[base as usize];
+            cb[1] = w[(base + 1) as usize];
+            cb[2] = w[(base + 2) as usize];
+            cb[3] = w[(base + 3) as usize];
         }
 
         sync_threads();
 
-        let mut k: u32 = 0;
-        while k < BK {
-            acc += tile_a[(ty * BK + k) as usize] * tile_b[(tx * BK + k) as usize];
-            k += 1;
-        }
+        let row_off = (ty * TM) as usize;
+        let col_off = (tx * TN) as usize;
+
+        unroll! { for kk in 0..8 {
+            let mut a_reg = [0.0f32; TM as usize];
+            let mut b_reg = [0.0f32; TN as usize];
+
+            for ii in 0..8usize {
+                a_reg[ii] = tile_a[(row_off + ii) * 8 + kk];
+            }
+            for jj in 0..8usize {
+                b_reg[jj] = tile_b[(col_off + jj) * 8 + kk];
+            }
+
+            unroll! { for ii in 0..8 {
+                let ai = a_reg[ii];
+                unroll! { for jj in 0..8 {
+                    acc[ii][jj] += ai * b_reg[jj];
+                }}
+            }}
+        }}
 
         sync_threads();
-        t += 1;
+        tstep += 1;
     }
 
-    if row < M && col < N {
-        let b_val = bias[col as usize];
-        let v = (acc + b_val) * scale1p;
-        y_chunk[(0, 0)] = v;
-    }
+    // Fused epilogue: bias + (1 + scaling) scale.
+    let mut bias_reg = [0.0f32; TN as usize];
+    unroll! { for j in 0..8 {
+        bias_reg[j] = bias[(bn + tx * TN) as usize + j];
+    }}
+
+    unroll! { for i in 0..8 {
+        unroll! { for j in 0..8 {
+            let v = (acc[i][j] + bias_reg[j]) * scale1p;
+            y_thread[(j as u32, i as u32)] = v;
+        }}
+    }}
 }
 
 pub fn run(
@@ -101,6 +142,14 @@ pub fn run(
 ) -> (f64, f64) {
     assert_eq!(shape.len(), 3, "matmul_scale_resadd: shape=[M, K, N]");
     let (m, k, n) = (shape[0], shape[1], shape[2]);
+
+    assert!(
+        m % BM as usize == 0 && n % BN as usize == 0 && k % BK as usize == 0,
+        "M, N, K must be multiples of {}, {}, {} respectively",
+        BM,
+        BN,
+        BK
+    );
 
     let h_x = super::read_bin(&in_dir.join("x.bin"), m * k);
     let h_w = super::read_bin(&in_dir.join("W.bin"), n * k);
@@ -117,11 +166,11 @@ pub fn run(
     let kk = k as u32;
     let scale1p: f32 = 1.0 + SCALING;
 
-    let gx: u32 = nn.div_ceil(BN);
-    let gy: u32 = mm.div_ceil(BM);
+    let gx: u32 = nn / BN;
+    let gy: u32 = mm / BM;
 
     {
-        let cfg = gpu_host::gpu_config!(gx, gy, 1, BN, BM, 1, 0);
+        let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
         matmul_scale_resadd_kernel::launch(
             cfg, ctx, md, &d_x, &d_w, &d_b, &mut d_y, mm, nn, kk, scale1p,
         )
@@ -132,7 +181,7 @@ pub fn run(
     let warmup_iters: usize = 5;
     let wt = Instant::now();
     for _ in 0..warmup_iters {
-        let cfg = gpu_host::gpu_config!(gx, gy, 1, BN, BM, 1, 0);
+        let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
         matmul_scale_resadd_kernel::launch(
             cfg, ctx, md, &d_x, &d_w, &d_b, &mut d_y, mm, nn, kk, scale1p,
         )
@@ -143,7 +192,7 @@ pub fn run(
 
     let t = Instant::now();
     for _ in 0..iters {
-        let cfg = gpu_host::gpu_config!(gx, gy, 1, BN, BM, 1, 0);
+        let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
         matmul_scale_resadd_kernel::launch(
             cfg, ctx, md, &d_x, &d_w, &d_b, &mut d_y, mm, nn, kk, scale1p,
         )

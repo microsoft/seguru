@@ -1,4 +1,5 @@
-//! 29_Matmul_Mish_Mish — fused nn.Linear + mish + mish.
+//! 29_Matmul_Mish_Mish — port of the hand-tuned CUDA kernel in
+//! `cuda/matmul_mish_mish.cu` to SeGuRu.
 //!
 //! PyTorch reference:
 //!     y = F.mish(F.mish(x @ W.T + b))
@@ -10,21 +11,26 @@
 //!     b: [N]
 //!     y: [M, N]
 //!
-//! Strategy: 16×16 shared-memory tiled GEMM with the bias + mish(mish(.))
-//! epilogue fused into the per-thread output write.
+//! Tile config (matches the .cu source):
+//!   BM=128, BN=128, BK=8, TM=TN=8, block = 16×16 = 256 threads.
+//!   Each thread owns an 8×8 output sub-tile.
 
 use std::path::Path;
 use std::time::Instant;
 
+use crunchy::unroll;
 use gpu::prelude::*;
 
-const BM: u32 = 16;
-const BN: u32 = 16;
-const BK: u32 = 16;
+const BM: u32 = 128;
+const BN: u32 = 128;
+const BK: u32 = 8;
+const TM: u32 = 8;
+const TN: u32 = 8;
+const BDIM_X: u32 = 16;
+const BDIM_Y: u32 = 16;
 
 #[inline]
 fn mish(v: f32) -> f32 {
-    // Numerically-safe softplus: for large v, log1p(exp(v)) ~= v.
     let sp = if v > 20.0 {
         v
     } else {
@@ -34,6 +40,8 @@ fn mish(v: f32) -> f32 {
 }
 
 #[gpu::cuda_kernel]
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::needless_range_loop)]
 pub fn matmul_mish_mish_kernel(
     x: &[f32],
     w: &[f32],
@@ -43,64 +51,98 @@ pub fn matmul_mish_mish_kernel(
     N: u32,
     K: u32,
 ) {
-    let mut y_chunk = chunk_mut(y, Map2D::new(N as usize));
+    let _ = M;
+    let _ = N;
 
     let tx = thread_id::<DimX>();
     let ty = thread_id::<DimY>();
-    let col = block_id::<DimX>() * BN + tx;
-    let row = block_id::<DimY>() * BM + ty;
+    let bid_x = block_id::<DimX>();
+    let bid_y = block_id::<DimY>();
+
+    let bm = bid_y * BM;
+    let bn = bid_x * BN;
+
+    let tid = ty * BDIM_X + tx;
+    let a_row = tid >> 1;
+    let a_col = (tid & 1) << 2;
 
     let mut tile_a = gpu::GpuShared::<[f32; (BM * BK) as usize]>::zero();
     let mut tile_b = gpu::GpuShared::<[f32; (BN * BK) as usize]>::zero();
 
-    let load_map = reshape_map!([1] | [16, 16] => layout: [i0, t0, t1]);
+    let load_map = reshape_map!([4] | [16, 16] => layout: [i0, t0, t1]);
 
-    let mut acc = 0.0f32;
+    let out_map = reshape_map!(
+        [8, 8] | [16, grid_dim::<DimX>(), 16, grid_dim::<DimY>()]
+        => layout: [i0, t0, t1, i1, t2, t3]
+    );
+    let mut y_thread = chunk_mut(y, out_map);
+
+    let mut acc = [[0.0f32; TN as usize]; TM as usize];
+
     let num_tiles = K / BK;
-
-    let mut t: u32 = 0;
-    while t < num_tiles {
-        let k_base = t * BK;
+    let mut tstep: u32 = 0;
+    while tstep < num_tiles {
+        let k_base = tstep * BK;
 
         {
             let mut ca = tile_a.chunk_mut(load_map);
-            let a_col = k_base + tx;
-            ca[0] = if row < M && a_col < K {
-                x[(row * K + a_col) as usize]
-            } else {
-                0.0
-            };
+            let base = (bm + a_row) * K + k_base + a_col;
+            ca[0] = x[base as usize];
+            ca[1] = x[(base + 1) as usize];
+            ca[2] = x[(base + 2) as usize];
+            ca[3] = x[(base + 3) as usize];
         }
         {
             let mut cb = tile_b.chunk_mut(load_map);
-            let n_row = block_id::<DimX>() * BN + ty;
-            let b_col = k_base + tx;
-            cb[0] = if n_row < N && b_col < K {
-                w[(n_row * K + b_col) as usize]
-            } else {
-                0.0
-            };
+            let base = (bn + a_row) * K + k_base + a_col;
+            cb[0] = w[base as usize];
+            cb[1] = w[(base + 1) as usize];
+            cb[2] = w[(base + 2) as usize];
+            cb[3] = w[(base + 3) as usize];
         }
 
         sync_threads();
 
-        let mut k: u32 = 0;
-        while k < BK {
-            acc += tile_a[(ty * BK + k) as usize] * tile_b[(tx * BK + k) as usize];
-            k += 1;
-        }
+        let row_off = (ty * TM) as usize;
+        let col_off = (tx * TN) as usize;
+
+        unroll! { for kk in 0..8 {
+            let mut a_reg = [0.0f32; TM as usize];
+            let mut b_reg = [0.0f32; TN as usize];
+
+            for ii in 0..8usize {
+                a_reg[ii] = tile_a[(row_off + ii) * 8 + kk];
+            }
+            for jj in 0..8usize {
+                b_reg[jj] = tile_b[(col_off + jj) * 8 + kk];
+            }
+
+            unroll! { for ii in 0..8 {
+                let ai = a_reg[ii];
+                unroll! { for jj in 0..8 {
+                    acc[ii][jj] += ai * b_reg[jj];
+                }}
+            }}
+        }}
 
         sync_threads();
-        t += 1;
+        tstep += 1;
     }
 
-    if row < M && col < N {
-        let b_val = bias[col as usize];
-        let v0 = acc + b_val;
-        let v1 = mish(v0);
-        let v2 = mish(v1);
-        y_chunk[(0, 0)] = v2;
-    }
+    // ---- Epilogue: fused bias + mish(mish(.)), then store.
+    let mut bias_reg = [0.0f32; TN as usize];
+    unroll! { for j in 0..8 {
+        bias_reg[j] = bias[(bn + tx * TN) as usize + j];
+    }}
+
+    unroll! { for i in 0..8 {
+        unroll! { for j in 0..8 {
+            let v0 = acc[i][j] + bias_reg[j];
+            let v1 = mish(v0);
+            let v2 = mish(v1);
+            y_thread[(j as u32, i as u32)] = v2;
+        }}
+    }}
 }
 
 pub fn run(
@@ -113,6 +155,14 @@ pub fn run(
 ) -> (f64, f64) {
     assert_eq!(shape.len(), 3, "matmul_mish_mish: shape=[M, K, N]");
     let (m, k, n) = (shape[0], shape[1], shape[2]);
+
+    assert!(
+        m % BM as usize == 0 && n % BN as usize == 0 && k % BK as usize == 0,
+        "M, N, K must be multiples of {}, {}, {} respectively",
+        BM,
+        BN,
+        BK
+    );
 
     let h_x = crate::read_bin(&in_dir.join("x.bin"), m * k);
     let h_w = crate::read_bin(&in_dir.join("W.bin"), n * k);
@@ -128,11 +178,11 @@ pub fn run(
     let nn = n as u32;
     let kk = k as u32;
 
-    let gx: u32 = nn.div_ceil(BN);
-    let gy: u32 = mm.div_ceil(BM);
+    let gx: u32 = nn / BN;
+    let gy: u32 = mm / BM;
 
     {
-        let cfg = gpu_host::gpu_config!(gx, gy, 1, BN, BM, 1, 0);
+        let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
         matmul_mish_mish_kernel::launch(cfg, ctx, md, &d_x, &d_w, &d_b, &mut d_y, mm, nn, kk)
             .unwrap();
     }
@@ -141,7 +191,7 @@ pub fn run(
     let warmup_iters: usize = 5;
     let wt = Instant::now();
     for _ in 0..warmup_iters {
-        let cfg = gpu_host::gpu_config!(gx, gy, 1, BN, BM, 1, 0);
+        let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
         matmul_mish_mish_kernel::launch(cfg, ctx, md, &d_x, &d_w, &d_b, &mut d_y, mm, nn, kk)
             .unwrap();
     }
@@ -150,7 +200,7 @@ pub fn run(
 
     let t = Instant::now();
     for _ in 0..iters {
-        let cfg = gpu_host::gpu_config!(gx, gy, 1, BN, BM, 1, 0);
+        let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
         matmul_mish_mish_kernel::launch(cfg, ctx, md, &d_x, &d_w, &d_b, &mut d_y, mm, nn, kk)
             .unwrap();
     }

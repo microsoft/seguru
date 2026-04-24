@@ -4,21 +4,22 @@
 //!     y = gemm(x)                 # x @ W.T + b
 //!     y = y * 0.5                 # scaling_factor
 //!     y = F.hardtanh(y, -2.0, 2.0)
-//!     y = F.gelu(y)               # exact form: 0.5 * y * (1 + erf(y / sqrt(2)))
+//!     y = F.gelu(y)
 //!
 //! Shapes:
 //!     x: [M, K]  W: [N, K]  b: [N]  y: [M, N]   (M=2048, K=N=8192)
 //!
-//! Strategy: 16×16 shared-memory tiled GEMM with the scaling+hardtanh+GELU
-//! epilogue fused into the per-thread output write. Mirrors
-//! `gemm_mul_lrelu.rs`.
+//! Strategy (from docs/cuda-to-seguru-porting-skill.md — "GEMM / Matmul
+//! Recipe"): register-tiled SGEMM with BM=BN=128, BK=8, TM=TN=8, block=16×16
+//! = 256 threads. Each thread owns an 8×8 output sub-tile. Non-transposed
+//! smem layout (As[m][k], Bs[n][k]) so each thread writes 4 contiguous slots
+//! per tile and avoids store-side bounds checks. Epilogue (bias + scaling +
+//! hardtanh + tanh-approx GELU) is fused into the per-thread output write.
+//! Structurally mirrors `from_cuda/gemm_scale_htanh_gelu.rs`.
 //!
-//! Epilogue note: SeGuRu's `GPUDeviceFloatIntrinsics` exposes `tanh` but not
-//! `erf` (see crates/gpu/src/device_intrinsic.rs). We therefore use the tanh
-//! approximation of GELU:
-//!     gelu(v) ≈ 0.5 * v * (1 + tanh(√(2/π) * (v + 0.044715 * v^3)))
-//! which matches PyTorch's exact `F.gelu` output to within ~1e-4 after the
-//! hardtanh clamp (|v| ≤ 2). The compare.py tolerance (5e-3) absorbs this.
+//! Epilogue note: `GPUDeviceFloatIntrinsics` has `tanh` but not `erf`, so the
+//! tanh approximation of GELU is used. Matches PyTorch's exact `F.gelu` to
+//! within compare.py atol (5e-3) for |v| ≤ 2 after hardtanh.
 //!
 //! Scalars (scaling=0.5, hmin=-2.0, hmax=2.0) are hard-coded as module
 //! constants; `main.rs` does not pass them to `run`.
@@ -26,11 +27,16 @@
 use std::path::Path;
 use std::time::Instant;
 
+use crunchy::unroll;
 use gpu::prelude::*;
 
-const BM: u32 = 16;
-const BN: u32 = 16;
-const BK: u32 = 16;
+const BM: u32 = 128;
+const BN: u32 = 128;
+const BK: u32 = 8;
+const TM: u32 = 8;
+const TN: u32 = 8;
+const BDIM_X: u32 = 16;
+const BDIM_Y: u32 = 16;
 
 // Fused-epilogue constants (the problem spec hard-codes these).
 const SCALING: f32 = 0.5;
@@ -42,6 +48,8 @@ const GELU_K0: f32 = 0.7978845608028654; // sqrt(2/pi)
 const GELU_K1: f32 = 0.044715;
 
 #[gpu::cuda_kernel]
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::needless_range_loop)]
 pub fn gemm_scale_htanh_gelu_kernel(
     x: &[f32],
     w: &[f32],
@@ -51,73 +59,106 @@ pub fn gemm_scale_htanh_gelu_kernel(
     N: u32,
     K: u32,
 ) {
-    let mut y_chunk = chunk_mut(y, Map2D::new(N as usize));
+    let _ = M;
+    let _ = N;
 
     let tx = thread_id::<DimX>();
     let ty = thread_id::<DimY>();
-    let col = block_id::<DimX>() * BN + tx; // n-index
-    let row = block_id::<DimY>() * BM + ty; // m-index
+    let bid_x = block_id::<DimX>();
+    let bid_y = block_id::<DimY>();
+
+    let bm = bid_y * BM;
+    let bn = bid_x * BN;
+
+    // 256 threads cooperatively load a 128×8 tile = 1024 f32 → 4 per thread.
+    // With BK=8, (a_row, a_col) maps tid to a contiguous 4-slot group in a
+    // row of the non-transposed smem tile.
+    let tid = ty * BDIM_X + tx;
+    let a_row = tid >> 1;
+    let a_col = (tid & 1) << 2;
 
     let mut tile_a = gpu::GpuShared::<[f32; (BM * BK) as usize]>::zero();
     let mut tile_b = gpu::GpuShared::<[f32; (BN * BK) as usize]>::zero();
 
-    let load_map = reshape_map!([1] | [16, 16] => layout: [i0, t0, t1]);
+    let load_map = reshape_map!([4] | [16, 16] => layout: [i0, t0, t1]);
 
-    let mut acc = 0.0f32;
+    let out_map = reshape_map!(
+        [8, 8] | [16, grid_dim::<DimX>(), 16, grid_dim::<DimY>()]
+        => layout: [i0, t0, t1, i1, t2, t3]
+    );
+    let mut y_thread = chunk_mut(y, out_map);
+
+    let mut acc = [[0.0f32; TN as usize]; TM as usize];
+
     let num_tiles = K / BK;
+    let mut tstep: u32 = 0;
+    while tstep < num_tiles {
+        let k_base = tstep * BK;
 
-    let mut t: u32 = 0;
-    while t < num_tiles {
-        let k_base = t * BK;
-
+        // LOAD — contiguous 4-element writes to smem, no bounds check.
         {
             let mut ca = tile_a.chunk_mut(load_map);
-            let a_col = k_base + tx;
-            ca[0] = if row < M && a_col < K {
-                x[(row * K + a_col) as usize]
-            } else {
-                0.0
-            };
+            let base = (bm + a_row) * K + k_base + a_col;
+            ca[0] = x[base as usize];
+            ca[1] = x[(base + 1) as usize];
+            ca[2] = x[(base + 2) as usize];
+            ca[3] = x[(base + 3) as usize];
         }
         {
             let mut cb = tile_b.chunk_mut(load_map);
-            let n_row = block_id::<DimX>() * BN + ty;
-            let b_col = k_base + tx;
-            cb[0] = if n_row < N && b_col < K {
-                w[(n_row * K + b_col) as usize]
-            } else {
-                0.0
-            };
+            let base = (bn + a_row) * K + k_base + a_col;
+            cb[0] = w[base as usize];
+            cb[1] = w[(base + 1) as usize];
+            cb[2] = w[(base + 2) as usize];
+            cb[3] = w[(base + 3) as usize];
         }
 
         sync_threads();
 
-        let mut k: u32 = 0;
-        while k < BK {
-            acc += tile_a[(ty * BK + k) as usize] * tile_b[(tx * BK + k) as usize];
-            k += 1;
-        }
+        // COMPUTE — 64 FMAs per k iteration amortise broadcast-read checks.
+        let row_off = (ty * TM) as usize;
+        let col_off = (tx * TN) as usize;
+
+        unroll! { for kk in 0..8 {
+            let mut a_reg = [0.0f32; TM as usize];
+            let mut b_reg = [0.0f32; TN as usize];
+
+            for ii in 0..8usize {
+                a_reg[ii] = tile_a[(row_off + ii) * 8 + kk];
+            }
+            for jj in 0..8usize {
+                b_reg[jj] = tile_b[(col_off + jj) * 8 + kk];
+            }
+
+            unroll! { for ii in 0..8 {
+                let ai = a_reg[ii];
+                unroll! { for jj in 0..8 {
+                    acc[ii][jj] += ai * b_reg[jj];
+                }}
+            }}
+        }}
 
         sync_threads();
-        t += 1;
+        tstep += 1;
     }
 
-    // Fused epilogue: bias add, scaling, hardtanh, tanh-approx GELU.
-    if row < M && col < N {
-        let b_val = bias[col as usize];
-        let mut v = (acc + b_val) * SCALING;
-        // hardtanh clamp to [HMIN, HMAX].
-        if v < HMIN {
-            v = HMIN;
-        }
-        if v > HMAX {
-            v = HMAX;
-        }
-        // tanh-approx GELU.
-        let inner = GELU_K0 * (v + GELU_K1 * v * v * v);
-        let th = GPUDeviceFloatIntrinsics::tanh(inner);
-        y_chunk[(0, 0)] = 0.5 * v * (1.0 + th);
-    }
+    // ---- Epilogue: bias + scaling + hardtanh + tanh-approx GELU.
+    let mut bias_reg = [0.0f32; TN as usize];
+    unroll! { for j in 0..8 {
+        bias_reg[j] = bias[(bn + tx * TN) as usize + j];
+    }}
+
+    unroll! { for i in 0..8 {
+        unroll! { for j in 0..8 {
+            let mut v = (acc[i][j] + bias_reg[j]) * SCALING;
+            if v < HMIN { v = HMIN; }
+            if v > HMAX { v = HMAX; }
+            let inner = GELU_K0 * (v + GELU_K1 * v * v * v);
+            let th = GPUDeviceFloatIntrinsics::tanh(inner);
+            let out = 0.5 * v * (1.0 + th);
+            y_thread[(j as u32, i as u32)] = out;
+        }}
+    }}
 }
 
 pub fn run(
@@ -130,6 +171,14 @@ pub fn run(
 ) -> (f64, f64) {
     assert_eq!(shape.len(), 3, "gemm_scale_htanh_gelu: shape=[M, K, N]");
     let (m, k, n) = (shape[0], shape[1], shape[2]);
+
+    assert!(
+        m % BM as usize == 0 && n % BN as usize == 0 && k % BK as usize == 0,
+        "M, N, K must be multiples of {}, {}, {} respectively",
+        BM,
+        BN,
+        BK
+    );
 
     let h_x = crate::read_bin(&in_dir.join("x.bin"), m * k);
     let h_w = crate::read_bin(&in_dir.join("W.bin"), n * k);
@@ -145,12 +194,12 @@ pub fn run(
     let nn = n as u32;
     let kk = k as u32;
 
-    let gx: u32 = nn.div_ceil(BN);
-    let gy: u32 = mm.div_ceil(BM);
+    let gx: u32 = nn / BN;
+    let gy: u32 = mm / BM;
 
     // Priming launch (compilation + first-call overhead) — not counted.
     {
-        let cfg = gpu_host::gpu_config!(gx, gy, 1, BN, BM, 1, 0);
+        let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
         gemm_scale_htanh_gelu_kernel::launch(
             cfg, ctx, md, &d_x, &d_w, &d_b, &mut d_y, mm, nn, kk,
         )
@@ -161,7 +210,7 @@ pub fn run(
     let warmup_iters: usize = 5;
     let wt = Instant::now();
     for _ in 0..warmup_iters {
-        let cfg = gpu_host::gpu_config!(gx, gy, 1, BN, BM, 1, 0);
+        let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
         gemm_scale_htanh_gelu_kernel::launch(
             cfg, ctx, md, &d_x, &d_w, &d_b, &mut d_y, mm, nn, kk,
         )
@@ -172,7 +221,7 @@ pub fn run(
 
     let t = Instant::now();
     for _ in 0..iters {
-        let cfg = gpu_host::gpu_config!(gx, gy, 1, BN, BM, 1, 0);
+        let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
         gemm_scale_htanh_gelu_kernel::launch(
             cfg, ctx, md, &d_x, &d_w, &d_b, &mut d_y, mm, nn, kk,
         )

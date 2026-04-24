@@ -1,4 +1,5 @@
 use gpu::prelude::*;
+use gpu::CacheStreamLoadStore;
 
 #[gpu::cuda_kernel]
 pub fn mvt_kernel1(a: &[f32], x1: &mut [f32], y1: &[f32], n: u32) {
@@ -24,7 +25,7 @@ pub fn mvt_kernel2(a: &[f32], x2: &mut [f32], y2: &[f32], n: u32) {
         let mut sum = x2[0];
         let mut j: u32 = 0;
         while j < n {
-            sum += a[(j * n + i) as usize] * y2[j as usize];
+            sum += a[(j * n + i) as usize].ldcs() * y2[j as usize];
             j += 1;
         }
         x2[0] = sum;

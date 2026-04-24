@@ -1,4 +1,5 @@
 use gpu::prelude::*;
+use gpu::CacheStreamLoadStore;
 
 #[gpu::cuda_kernel]
 pub fn atax_kernel1(a: &[f32], x: &[f32], tmp: &mut [f32], nx: u32, ny: u32) {
@@ -24,7 +25,7 @@ pub fn atax_kernel2(a: &[f32], tmp: &[f32], y: &mut [f32], nx: u32, ny: u32) {
         let mut sum = 0.0f32;
         let mut i: u32 = 0;
         while i < nx {
-            sum += a[(i * ny + j) as usize] * tmp[i as usize];
+            sum += a[(i * ny + j) as usize].ldcs() * tmp[i as usize];
             i += 1;
         }
         y[0] = sum;

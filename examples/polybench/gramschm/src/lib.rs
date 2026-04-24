@@ -1,4 +1,5 @@
 use gpu::prelude::*;
+use gpu::CacheStreamLoadStore;
 
 // kernel2: q[i*nj+k] = a[i*nj+k] / r_kk
 // Launch full ni*nj grid, only column k threads write
@@ -37,7 +38,7 @@ pub fn gramschm_kernel3a(
         let mut sum = 0.0f32;
         let mut i: u32 = 0;
         while i < ni {
-            sum += q[(i * nj + k) as usize] * a[(i * nj + j) as usize];
+            sum += q[(i * nj + k) as usize].ldcs() * a[(i * nj + j) as usize].ldcs();
             i += 1;
         }
         r[(0, 0)] = sum;

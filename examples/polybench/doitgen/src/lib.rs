@@ -1,4 +1,5 @@
 use gpu::prelude::*;
+use gpu::CacheStreamLoadStore;
 
 // sum[r*(nq*np) + q*np + p] = sum_s(A[r*(nq*np) + q*np + s] * C4[s*np + p])
 // Pack r,q into Y dimension: qr = r*nq + q
@@ -21,7 +22,7 @@ pub fn doitgen_kernel1(
         let a_row: &[f32] = &a[(r * (nq * np) + q * np) as usize..(r * (nq * np) + q * np + np) as usize];
         let mut c4_idx = p as usize;
         for a_val in a_row {
-            val += a_val * c4[c4_idx];
+            val += a_val * c4[c4_idx].ldcs();
             c4_idx += np as usize;
         }
         sum_arr[0] = val;

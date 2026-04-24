@@ -1,4 +1,5 @@
 use gpu::prelude::*;
+use gpu::CacheStreamLoadStore;
 
 #[gpu::cuda_kernel]
 pub fn gemm_kernel(
@@ -20,7 +21,7 @@ pub fn gemm_kernel(
         let a_row: &[f32] = &a[(i * nk) as usize..((i + 1) * nk) as usize];
         let mut b_idx = j as usize;
         for a_val in a_row {
-            val += alpha * a_val * b[b_idx];
+            val += alpha * a_val * b[b_idx].ldcs();
             b_idx += nj as usize;
         }
         c[(0, 0)] = val;

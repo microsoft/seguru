@@ -1,4 +1,5 @@
 use gpu::prelude::*;
+use gpu::CacheStreamLoadStore;
 
 // kernel1: tmp = alpha * A * B
 #[gpu::cuda_kernel]
@@ -20,7 +21,7 @@ pub fn mm2_kernel1(
         let a_row: &[f32] = &a[(i * nk) as usize..((i + 1) * nk) as usize];
         let mut b_idx = j as usize;
         for a_val in a_row {
-            val += alpha * a_val * b[b_idx];
+            val += alpha * a_val * b[b_idx].ldcs();
             b_idx += nj as usize;
         }
         tmp[(0, 0)] = val;
@@ -47,7 +48,7 @@ pub fn mm2_kernel2(
         let tmp_row: &[f32] = &tmp[(i * nj) as usize..((i + 1) * nj) as usize];
         let mut c_idx = j as usize;
         for t_val in tmp_row {
-            val += t_val * c[c_idx];
+            val += t_val * c[c_idx].ldcs();
             c_idx += nl as usize;
         }
         d[(0, 0)] = val;

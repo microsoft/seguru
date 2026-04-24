@@ -1,4 +1,5 @@
 use gpu::prelude::*;
+use gpu::CacheStreamLoadStore;
 
 #[gpu::cuda_kernel]
 pub fn bicg_kernel1(a: &[f32], r: &[f32], s: &mut [f32], nx: u32, ny: u32) {
@@ -8,7 +9,7 @@ pub fn bicg_kernel1(a: &[f32], r: &[f32], s: &mut [f32], nx: u32, ny: u32) {
         let mut sum = 0.0f32;
         let mut i: u32 = 0;
         while i < nx {
-            sum += r[i as usize] * a[(i * ny + j) as usize];
+            sum += r[i as usize] * a[(i * ny + j) as usize].ldcs();
             i += 1;
         }
         s[0] = sum;

@@ -85,6 +85,8 @@ must run before full unrolling.
 
 ## 5. Experiment run (this branch)
 
+### 5.1 `convert-index-to-llvm{index-bitwidth=32}`
+
 One-line change tested: `convert-index-to-llvm{index-bitwidth=32}` in the
 MLIR→LLVM lowering pipeline
 (`crates/mlir-compile/src/lib.rs:169`).
@@ -98,22 +100,68 @@ already materialized as i32/i64. The flag changes nothing about this kernel.
 
 This rules out "promotion width" as the cause.
 
-## 6. Why a fix is out of scope for this workstream
+### 5.2 Swap inner/outer loop order in epilogue
 
-A correct fix requires one of:
+Current code uses `y_thread[(j, i)]` with `for i outer, for j inner` where
+`y_thread` is `chunk_mut(y, out_map)` with layout
+`[i0, t0, t1, i1, t2, t3]`. User index 0 (= j) maps to i0 (outermost, stride
+524288); user index 1 (= i) maps to i1 (middle, stride 256).
 
-- **(a)** Preserve loop structure through MLIR lowering so LLVM LSR can fire
-  on still-rolled IR. Requires changing how `reshape_map!` and the GPU-code
-  iteration macros lower — they currently produce unrolled scf/linalg ops.
-- **(b)** Add a custom LSR-like pass that operates on unrolled straight-line
-  code, recognizing the affine stride pattern of adjacent SSA indices and
-  rewriting them into base+immediate-offset form. This is a nontrivial new
-  pass to maintain.
-- **(c)** Change codegen in `rustc_codegen_gpu/src/builder/mod.rs:686`
-  (`inbounds_gep_op`) to emit shared base-pointer computations where the
-  index expressions share a common term (manual CSE before lowering).
+Hypothesis: swap to `y_thread[(i, j)]` so that inner loop walks i1's smaller
+stride, potentially exposing the affine pattern to LLVM.
 
-All three are substantial codegen work with regression risk across the entire
+Result: PTX total instruction count unchanged (71 add.s64, 69 mul.wide.u32,
+64 st.global.f32 — identical to baseline). More importantly, **correctness
+broken**: output elements landed at wrong addresses because the layout is
+asymmetric in user indices. The `(j, i)` convention is load-bearing for
+coalesced writes across the warp.
+
+### 5.3 Direct `y[...]` indexing with hoisted row base
+
+Attempted to bypass `y_thread` and write to `y` directly with a computed flat
+offset.
+
+Result: **blocked by the type system.** `GpuGlobal<'_, [f32]>` explicitly
+disallows `Deref` (`crates/gpu/src/global.rs:102`) by design, so direct
+slicing is unavailable. All writes must go through `chunk_mut`.
+
+## 6. Why the problem is fundamental to the reshape_map pattern
+
+The three experiments together reveal the structural issue. `reshape_map!` is
+designed so that adjacent threads in a warp write to adjacent memory
+locations (coalescing), which forces each thread's 8×8 tile to be
+non-contiguous in memory. The stride between any two stores within a single
+thread's epilogue is at least 256 (one block-y worth), and typically much
+larger for the outer dimension.
+
+PTX `st.global.f32 [ptr+imm]` immediate-offset addressing only amortizes
+pointer arithmetic for **stride-4-byte adjacent** stores (the nvcc inner
+`[rd26+0 .. rd26+28]` pattern). Any larger stride requires a fresh pointer
+computation. Thus even with a perfect loop-order or CSE pass, the
+reshape_map'd thread tile **cannot** compress to nvcc's epilogue pattern
+without sacrificing per-warp coalescing — which would be much worse overall.
+
+**nvcc gets both** because CUDA C programmers write their 8×8 tile
+contiguously per-thread and let nvcc figure out warp-level scheduling. SG's
+`reshape_map!` bakes the warp-coalescing layout into the thread's index
+computation, which is cleaner abstractly but costs amortization.
+
+## 7. Actual fix options (all substantial)
+
+- **(a)** Change `reshape_map!` semantics / add a new macro that emits
+  per-thread contiguous tile writes with explicit warp-shuffle or global
+  scatter at the end. This is a new kernel idiom.
+- **(b)** Preserve loop structure through MLIR lowering so LLVM LSR can fire
+  on still-rolled IR. Requires changing how the GPU-code iteration macros
+  lower — they currently produce fully unrolled scf/linalg ops.
+- **(c)** Custom MLIR pass that recognizes the affine stride pattern of
+  adjacent SSA indices produced by `reshape_map!` + full unrolling and
+  rewrites them into a single base + strided stores.
+- **(d)** Codegen-level CSE in
+  `rustc_codegen_gpu/src/builder/mod.rs:686` (`inbounds_gep_op`) that shares
+  base-pointer computations where GEP expressions share a common term.
+
+All four are substantial codegen work with regression risk across the entire
 codebase. The fast iteration loop is also prohibitive: a full
 `cargo clean -p kernelbench-c && cargo build --release` cycle is ~12 min.
 
@@ -122,20 +170,21 @@ Given the current performance floor (0.42× torch for pure GEMM) is within
 further codegen-level optimization is deferred until there is dedicated
 compiler-team bandwidth.
 
-## 7. Artifacts
+## 8. Artifacts
 
-- PTX before/after (identical): `/tmp/sg_gar.ptx` and
-  `/tmp/sg_gar_narrow_pt.ptx` (regenerable by rebuilding `kernelbench-c`).
-- nvcc baseline: `/tmp/nvcc_gemm.ptx` (from
-  `nvcc -ptx examples/kernelbench-c/cuda/gemm_add_relu.cu`).
+- PTX before/after width experiment (identical): `/tmp/sg_gar.ptx` and
+  `/tmp/sg_gar_narrow_pt.ptx`.
+- PTX after loop-order swap (identical totals, wrong output):
+  `/tmp/sg_gar_swap_pt.ptx`.
+- nvcc baseline: `/tmp/nvcc_gemm.ptx`.
 - Float4 fix that delivered the bulk of the available win:
   commit `b38e99e5` on branch `kernelbench-skill-test`.
 
-## 8. Honest note on prior session
+## 9. Honest note on prior session
 
 An earlier session turn proposed "narrow indexing to 32-bit" as a ~10–15%
 speedup. This report supersedes that: the proposal was based on counting
 `add.s64` instructions without tracing them to their MLIR origin. Once the
-experiment was run, PTX was unchanged. The real gap is LSR-not-firing on
-fully-unrolled code, which is a much larger structural change than a single
-pipeline flag.
+experiment was run, PTX was unchanged. The real gap is that SG's
+`reshape_map!` pattern forces per-thread stride-256+ stores, which PTX
+cannot fold into immediate-offset form regardless of compiler effort.

@@ -103,11 +103,11 @@ pub fn aes128_encrypt_ttable_kernel(
 }
 
 // ============================================================
-// T-table AES-128 ECB decrypt kernel (no shared memory, reads T-tables from global memory)
+// T-table AES-128 ECB decrypt kernel (shared memory T-tables)
 // ============================================================
 // td_tables: concatenated [TD0(256) | TD1(256) | TD2(256) | TD3(256)] = 1024 u32
 // inv_sbox_packed: 256 inv_sbox bytes packed as 64 u32 (big-endian)
-#[gpu::cuda_kernel]
+#[gpu::cuda_kernel(dynamic_shared)]
 pub fn aes128_decrypt_ttable_kernel(
     input: &[u32],
     output: &mut [u32],
@@ -118,111 +118,128 @@ pub fn aes128_decrypt_ttable_kernel(
 ) {
     let bdim = block_dim::<DimX>();
     let tid = bdim * block_id::<DimX>() + thread_id::<DimX>();
-    if tid >= num_blocks {
-        return;
+    let ltid = thread_id::<DimX>();
+
+    // Shared memory allocation BEFORE any divergent code
+    let smem = smem_alloc.alloc::<u32>(1024);
+
+    // Cooperative load: all threads load 4 entries each (block_size must be 256)
+    let mut sc = smem.chunk_mut(MapLinear::new(4));
+    let base = (ltid * 4) as usize;
+    sc[0] = td_tables[base];
+    sc[1] = td_tables[base + 1];
+    sc[2] = td_tables[base + 2];
+    sc[3] = td_tables[base + 3];
+    sync_threads();
+
+    // Guard: only threads with valid AES blocks proceed to compute
+    if tid < num_blocks {
+        let off = (tid * 4) as usize;
+        let in_slice = &input[off..off + 4];
+        let mut s0 = in_slice[0] ^ inv_round_keys[40];
+        let mut s1 = in_slice[1] ^ inv_round_keys[41];
+        let mut s2 = in_slice[2] ^ inv_round_keys[42];
+        let mut s3 = in_slice[3] ^ inv_round_keys[43];
+
+        // Rounds 9..1: T-table lookups from shared memory
+        let mut r: u32 = 9;
+        while r >= 1 {
+            let rk_off = (4 * r) as usize;
+            let t0 = *smem[((s0 >> 24) & 0xff) as usize]
+                ^ *smem[256 + ((s3 >> 16) & 0xff) as usize]
+                ^ *smem[512 + ((s2 >> 8) & 0xff) as usize]
+                ^ *smem[768 + (s1 & 0xff) as usize]
+                ^ inv_round_keys[rk_off];
+            let t1 = *smem[((s1 >> 24) & 0xff) as usize]
+                ^ *smem[256 + ((s0 >> 16) & 0xff) as usize]
+                ^ *smem[512 + ((s3 >> 8) & 0xff) as usize]
+                ^ *smem[768 + (s2 & 0xff) as usize]
+                ^ inv_round_keys[rk_off + 1];
+            let t2 = *smem[((s2 >> 24) & 0xff) as usize]
+                ^ *smem[256 + ((s1 >> 16) & 0xff) as usize]
+                ^ *smem[512 + ((s0 >> 8) & 0xff) as usize]
+                ^ *smem[768 + (s3 & 0xff) as usize]
+                ^ inv_round_keys[rk_off + 2];
+            let t3 = *smem[((s3 >> 24) & 0xff) as usize]
+                ^ *smem[256 + ((s2 >> 16) & 0xff) as usize]
+                ^ *smem[512 + ((s1 >> 8) & 0xff) as usize]
+                ^ *smem[768 + (s0 & 0xff) as usize]
+                ^ inv_round_keys[rk_off + 3];
+            s0 = t0;
+            s1 = t1;
+            s2 = t2;
+            s3 = t3;
+            r -= 1;
+        }
+
+        // Round 0: InvShiftRows + InvSubBytes + AddRoundKey
+        // Read inv_sbox from global memory (only 16 lookups per thread)
+        let isb00 = (inv_sbox_packed[((s0 >> 24) & 0xff) as usize >> 2]
+            >> (8 * (3 - (((s0 >> 24) & 0xff) & 3))))
+            & 0xff;
+        let isb01 = (inv_sbox_packed[((s3 >> 16) & 0xff) as usize >> 2]
+            >> (8 * (3 - (((s3 >> 16) & 0xff) & 3))))
+            & 0xff;
+        let isb02 = (inv_sbox_packed[((s2 >> 8) & 0xff) as usize >> 2]
+            >> (8 * (3 - (((s2 >> 8) & 0xff) & 3))))
+            & 0xff;
+        let isb03 = (inv_sbox_packed[(s1 & 0xff) as usize >> 2]
+            >> (8 * (3 - ((s1 & 0xff) & 3))))
+            & 0xff;
+
+        let isb10 = (inv_sbox_packed[((s1 >> 24) & 0xff) as usize >> 2]
+            >> (8 * (3 - (((s1 >> 24) & 0xff) & 3))))
+            & 0xff;
+        let isb11 = (inv_sbox_packed[((s0 >> 16) & 0xff) as usize >> 2]
+            >> (8 * (3 - (((s0 >> 16) & 0xff) & 3))))
+            & 0xff;
+        let isb12 = (inv_sbox_packed[((s3 >> 8) & 0xff) as usize >> 2]
+            >> (8 * (3 - (((s3 >> 8) & 0xff) & 3))))
+            & 0xff;
+        let isb13 = (inv_sbox_packed[(s2 & 0xff) as usize >> 2]
+            >> (8 * (3 - ((s2 & 0xff) & 3))))
+            & 0xff;
+
+        let isb20 = (inv_sbox_packed[((s2 >> 24) & 0xff) as usize >> 2]
+            >> (8 * (3 - (((s2 >> 24) & 0xff) & 3))))
+            & 0xff;
+        let isb21 = (inv_sbox_packed[((s1 >> 16) & 0xff) as usize >> 2]
+            >> (8 * (3 - (((s1 >> 16) & 0xff) & 3))))
+            & 0xff;
+        let isb22 = (inv_sbox_packed[((s0 >> 8) & 0xff) as usize >> 2]
+            >> (8 * (3 - (((s0 >> 8) & 0xff) & 3))))
+            & 0xff;
+        let isb23 = (inv_sbox_packed[(s3 & 0xff) as usize >> 2]
+            >> (8 * (3 - ((s3 & 0xff) & 3))))
+            & 0xff;
+
+        let isb30 = (inv_sbox_packed[((s3 >> 24) & 0xff) as usize >> 2]
+            >> (8 * (3 - (((s3 >> 24) & 0xff) & 3))))
+            & 0xff;
+        let isb31 = (inv_sbox_packed[((s2 >> 16) & 0xff) as usize >> 2]
+            >> (8 * (3 - (((s2 >> 16) & 0xff) & 3))))
+            & 0xff;
+        let isb32 = (inv_sbox_packed[((s1 >> 8) & 0xff) as usize >> 2]
+            >> (8 * (3 - (((s1 >> 8) & 0xff) & 3))))
+            & 0xff;
+        let isb33 = (inv_sbox_packed[(s0 & 0xff) as usize >> 2]
+            >> (8 * (3 - ((s0 & 0xff) & 3))))
+            & 0xff;
+
+        let t0 = (isb00 << 24) | (isb01 << 16) | (isb02 << 8) | isb03;
+        let t1 = (isb10 << 24) | (isb11 << 16) | (isb12 << 8) | isb13;
+        let t2 = (isb20 << 24) | (isb21 << 16) | (isb22 << 8) | isb23;
+        let t3 = (isb30 << 24) | (isb31 << 16) | (isb32 << 8) | isb33;
+
+        let mut c = chunk_mut(
+            output,
+            reshape_map!([4] | [num_blocks] => layout: [i0, t0]),
+        );
+        c[0] = t0 ^ inv_round_keys[0];
+        c[1] = t1 ^ inv_round_keys[1];
+        c[2] = t2 ^ inv_round_keys[2];
+        c[3] = t3 ^ inv_round_keys[3];
     }
-
-    let off = (tid * 4) as usize;
-    let in_slice = &input[off..off + 4];
-    let mut s0 = in_slice[0] ^ inv_round_keys[40];
-    let mut s1 = in_slice[1] ^ inv_round_keys[41];
-    let mut s2 = in_slice[2] ^ inv_round_keys[42];
-    let mut s3 = in_slice[3] ^ inv_round_keys[43];
-
-    // Rounds 9..1: T-table lookups from global memory
-    let mut r: u32 = 9;
-    while r >= 1 {
-        let rk_off = (4 * r) as usize;
-        let t0 = td_tables[((s0 >> 24) & 0xff) as usize]
-            ^ td_tables[256 + ((s3 >> 16) & 0xff) as usize]
-            ^ td_tables[512 + ((s2 >> 8) & 0xff) as usize]
-            ^ td_tables[768 + (s1 & 0xff) as usize]
-            ^ inv_round_keys[rk_off];
-        let t1 = td_tables[((s1 >> 24) & 0xff) as usize]
-            ^ td_tables[256 + ((s0 >> 16) & 0xff) as usize]
-            ^ td_tables[512 + ((s3 >> 8) & 0xff) as usize]
-            ^ td_tables[768 + (s2 & 0xff) as usize]
-            ^ inv_round_keys[rk_off + 1];
-        let t2 = td_tables[((s2 >> 24) & 0xff) as usize]
-            ^ td_tables[256 + ((s1 >> 16) & 0xff) as usize]
-            ^ td_tables[512 + ((s0 >> 8) & 0xff) as usize]
-            ^ td_tables[768 + (s3 & 0xff) as usize]
-            ^ inv_round_keys[rk_off + 2];
-        let t3 = td_tables[((s3 >> 24) & 0xff) as usize]
-            ^ td_tables[256 + ((s2 >> 16) & 0xff) as usize]
-            ^ td_tables[512 + ((s1 >> 8) & 0xff) as usize]
-            ^ td_tables[768 + (s0 & 0xff) as usize]
-            ^ inv_round_keys[rk_off + 3];
-        s0 = t0;
-        s1 = t1;
-        s2 = t2;
-        s3 = t3;
-        r -= 1;
-    }
-
-    // Round 0: InvShiftRows + InvSubBytes + AddRoundKey
-    // Read inv_sbox from global memory
-    let isb00 = (inv_sbox_packed[((s0 >> 24) & 0xff) as usize >> 2]
-        >> (8 * (3 - (((s0 >> 24) & 0xff) & 3))))
-        & 0xff;
-    let isb01 = (inv_sbox_packed[((s3 >> 16) & 0xff) as usize >> 2]
-        >> (8 * (3 - (((s3 >> 16) & 0xff) & 3))))
-        & 0xff;
-    let isb02 = (inv_sbox_packed[((s2 >> 8) & 0xff) as usize >> 2]
-        >> (8 * (3 - (((s2 >> 8) & 0xff) & 3))))
-        & 0xff;
-    let isb03 =
-        (inv_sbox_packed[(s1 & 0xff) as usize >> 2] >> (8 * (3 - ((s1 & 0xff) & 3)))) & 0xff;
-
-    let isb10 = (inv_sbox_packed[((s1 >> 24) & 0xff) as usize >> 2]
-        >> (8 * (3 - (((s1 >> 24) & 0xff) & 3))))
-        & 0xff;
-    let isb11 = (inv_sbox_packed[((s0 >> 16) & 0xff) as usize >> 2]
-        >> (8 * (3 - (((s0 >> 16) & 0xff) & 3))))
-        & 0xff;
-    let isb12 = (inv_sbox_packed[((s3 >> 8) & 0xff) as usize >> 2]
-        >> (8 * (3 - (((s3 >> 8) & 0xff) & 3))))
-        & 0xff;
-    let isb13 =
-        (inv_sbox_packed[(s2 & 0xff) as usize >> 2] >> (8 * (3 - ((s2 & 0xff) & 3)))) & 0xff;
-
-    let isb20 = (inv_sbox_packed[((s2 >> 24) & 0xff) as usize >> 2]
-        >> (8 * (3 - (((s2 >> 24) & 0xff) & 3))))
-        & 0xff;
-    let isb21 = (inv_sbox_packed[((s1 >> 16) & 0xff) as usize >> 2]
-        >> (8 * (3 - (((s1 >> 16) & 0xff) & 3))))
-        & 0xff;
-    let isb22 = (inv_sbox_packed[((s0 >> 8) & 0xff) as usize >> 2]
-        >> (8 * (3 - (((s0 >> 8) & 0xff) & 3))))
-        & 0xff;
-    let isb23 =
-        (inv_sbox_packed[(s3 & 0xff) as usize >> 2] >> (8 * (3 - ((s3 & 0xff) & 3)))) & 0xff;
-
-    let isb30 = (inv_sbox_packed[((s3 >> 24) & 0xff) as usize >> 2]
-        >> (8 * (3 - (((s3 >> 24) & 0xff) & 3))))
-        & 0xff;
-    let isb31 = (inv_sbox_packed[((s2 >> 16) & 0xff) as usize >> 2]
-        >> (8 * (3 - (((s2 >> 16) & 0xff) & 3))))
-        & 0xff;
-    let isb32 = (inv_sbox_packed[((s1 >> 8) & 0xff) as usize >> 2]
-        >> (8 * (3 - (((s1 >> 8) & 0xff) & 3))))
-        & 0xff;
-    let isb33 =
-        (inv_sbox_packed[(s0 & 0xff) as usize >> 2] >> (8 * (3 - ((s0 & 0xff) & 3)))) & 0xff;
-
-    let t0 = (isb00 << 24) | (isb01 << 16) | (isb02 << 8) | isb03;
-    let t1 = (isb10 << 24) | (isb11 << 16) | (isb12 << 8) | isb13;
-    let t2 = (isb20 << 24) | (isb21 << 16) | (isb22 << 8) | isb23;
-    let t3 = (isb30 << 24) | (isb31 << 16) | (isb32 << 8) | isb33;
-
-    let mut c = chunk_mut(
-        output,
-        reshape_map!([4] | [num_blocks] => layout: [i0, t0]),
-    );
-    c[0] = t0 ^ inv_round_keys[0];
-    c[1] = t1 ^ inv_round_keys[1];
-    c[2] = t2 ^ inv_round_keys[2];
-    c[3] = t3 ^ inv_round_keys[3];
 }
 
 // ============================================================
@@ -372,7 +389,7 @@ mod tests {
             let block_size: u32 = 256;
             let grid_size: u32 = (num_aes_blocks + block_size - 1) / block_size;
             let shared_enc: u32 = 1024 * 4; // encrypt: 1024 u32
-            let shared_dec: u32 = 0; // decrypt: no shared memory (global T-tables)
+            let shared_dec: u32 = 1024 * 4; // decrypt: 1024 u32 (T-tables in shared mem)
             let n_words = (num_aes_blocks * 4) as usize;
 
             // Encrypt

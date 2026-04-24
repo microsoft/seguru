@@ -22,10 +22,10 @@ const BDIM_Y: u32 = 16;
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::needless_range_loop)]
 pub fn gemm_add_relu_kernel(
-    x: &[f32],
-    w: &[f32],
+    x:   &[Float4],
+    w:   &[Float4],
     bias: &[f32],
-    y: &mut [f32],
+    y:   &mut [f32],
     M: u32,
     N: u32,
     K: u32,
@@ -48,6 +48,10 @@ pub fn gemm_add_relu_kernel(
     let mut tile_a = gpu::GpuShared::<[f32; (BM * BK) as usize]>::zero();
     let mut tile_b = gpu::GpuShared::<[f32; (BN * BK) as usize]>::zero();
 
+    // K in Float4 units; scale per-row stride and per-iteration step.
+    let k4 = K >> 2;
+    let a_col4 = a_col >> 2;
+
     let load_map = reshape_map!([4] | [16, 16] => layout: [i0, t0, t1]);
 
     let out_map = reshape_map!(
@@ -61,23 +65,25 @@ pub fn gemm_add_relu_kernel(
     let num_tiles = K / BK;
     let mut tstep: u32 = 0;
     while tstep < num_tiles {
-        let k_base = tstep * BK;
+        let k_base4 = tstep * (BK >> 2);
 
         {
             let mut ca = tile_a.chunk_mut(load_map);
-            let base = (bm + a_row) * K + k_base + a_col;
-            ca[0] = x[base as usize];
-            ca[1] = x[(base + 1) as usize];
-            ca[2] = x[(base + 2) as usize];
-            ca[3] = x[(base + 3) as usize];
+            let idx_x = ((bm + a_row) * k4 + k_base4 + a_col4) as usize;
+            let v: Float4 = x[idx_x];
+            ca[0] = v[0];
+            ca[1] = v[1];
+            ca[2] = v[2];
+            ca[3] = v[3];
         }
         {
             let mut cb = tile_b.chunk_mut(load_map);
-            let base = (bn + a_row) * K + k_base + a_col;
-            cb[0] = w[base as usize];
-            cb[1] = w[(base + 1) as usize];
-            cb[2] = w[(base + 2) as usize];
-            cb[3] = w[(base + 3) as usize];
+            let idx_w = ((bn + a_row) * k4 + k_base4 + a_col4) as usize;
+            let v: Float4 = w[idx_w];
+            cb[0] = v[0];
+            cb[1] = v[1];
+            cb[2] = v[2];
+            cb[3] = v[3];
         }
 
         sync_threads();
@@ -152,6 +158,11 @@ pub fn run(
     let d_b = ctx.new_tensor_view(h_b.as_slice()).unwrap();
     let mut d_y = ctx.new_tensor_view(h_y.as_mut_slice()).unwrap();
 
+    // Reinterpret X and W as &[Float4] device views to emit ld.global.v4.f32.
+    // K must be a multiple of 4 (asserted above: k % BK == 0, BK=8).
+    let d_x4 = unsafe { &*(&d_x as *const _ as *const gpu_host::TensorView<'_, [Float4]>) };
+    let d_w4 = unsafe { &*(&d_w as *const _ as *const gpu_host::TensorView<'_, [Float4]>) };
+
     let mm = m as u32;
     let nn = n as u32;
     let kk = k as u32;
@@ -161,7 +172,7 @@ pub fn run(
 
     {
         let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
-        gemm_add_relu_kernel::launch(cfg, ctx, md, &d_x, &d_w, &d_b, &mut d_y, mm, nn, kk)
+        gemm_add_relu_kernel::launch(cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk)
             .unwrap();
     }
     ctx.sync().unwrap();
@@ -170,7 +181,7 @@ pub fn run(
     let wt = Instant::now();
     for _ in 0..warmup_iters {
         let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
-        gemm_add_relu_kernel::launch(cfg, ctx, md, &d_x, &d_w, &d_b, &mut d_y, mm, nn, kk)
+        gemm_add_relu_kernel::launch(cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk)
             .unwrap();
     }
     ctx.sync().unwrap();
@@ -179,7 +190,7 @@ pub fn run(
     let t = Instant::now();
     for _ in 0..iters {
         let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
-        gemm_add_relu_kernel::launch(cfg, ctx, md, &d_x, &d_w, &d_b, &mut d_y, mm, nn, kk)
+        gemm_add_relu_kernel::launch(cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk)
             .unwrap();
     }
     ctx.sync().unwrap();

@@ -51,8 +51,8 @@ const BDIM_Y: u32 = 16; // threads per block along y (m dim)
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::needless_range_loop)]
 pub fn gemm_mul_lrelu_kernel(
-    x: &[f32],
-    w: &[f32],
+    x: &[Float4],
+    w: &[Float4],
     bias: &[f32],
     y: &mut [f32],
     M: u32,
@@ -108,25 +108,19 @@ pub fn gemm_mul_lrelu_kernel(
     let num_tiles = K / BK;
     let mut tstep: u32 = 0;
     while tstep < num_tiles {
-        let k_base = tstep * BK;
+        let k_base4 = tstep * (BK >> 2);
 
         // ---- Load 4 consecutive K-lanes of X into tile_a.
         {
             let mut ca = tile_a.chunk_mut(load_map);
-            let base = (bm + a_row) * K + k_base + a_col;
-            ca[0] = x[base as usize];
-            ca[1] = x[(base + 1) as usize];
-            ca[2] = x[(base + 2) as usize];
-            ca[3] = x[(base + 3) as usize];
+            let v: Float4 = x[((bm + a_row) * (K >> 2) + k_base4 + (a_col >> 2)) as usize];
+            ca[0] = v[0]; ca[1] = v[1]; ca[2] = v[2]; ca[3] = v[3];
         }
         // ---- Load 4 consecutive K-lanes of W into tile_b.
         {
             let mut cb = tile_b.chunk_mut(load_map);
-            let base = (bn + a_row) * K + k_base + a_col;
-            cb[0] = w[base as usize];
-            cb[1] = w[(base + 1) as usize];
-            cb[2] = w[(base + 2) as usize];
-            cb[3] = w[(base + 3) as usize];
+            let v: Float4 = w[((bn + a_row) * (K >> 2) + k_base4 + (a_col >> 2)) as usize];
+            cb[0] = v[0]; cb[1] = v[1]; cb[2] = v[2]; cb[3] = v[3];
         }
 
         sync_threads();
@@ -209,6 +203,9 @@ pub fn run(
     let d_b = ctx.new_tensor_view(h_b.as_slice()).unwrap();
     let mut d_y = ctx.new_tensor_view(h_y.as_mut_slice()).unwrap();
 
+    let d_x4 = unsafe { &*(&d_x as *const _ as *const gpu_host::TensorView<'_, [Float4]>) };
+    let d_w4 = unsafe { &*(&d_w as *const _ as *const gpu_host::TensorView<'_, [Float4]>) };
+
     let mm = m as u32;
     let nn = n as u32;
     let kk = k as u32;
@@ -223,7 +220,7 @@ pub fn run(
     {
         let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
         gemm_mul_lrelu_kernel::launch(
-            cfg, ctx, md, &d_x, &d_w, &d_b, &mut d_y, mm, nn, kk, multiplier, negative_slope,
+            cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk, multiplier, negative_slope,
         )
         .unwrap();
     }
@@ -235,7 +232,7 @@ pub fn run(
     for _ in 0..warmup_iters {
         let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
         gemm_mul_lrelu_kernel::launch(
-            cfg, ctx, md, &d_x, &d_w, &d_b, &mut d_y, mm, nn, kk, multiplier, negative_slope,
+            cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk, multiplier, negative_slope,
         )
         .unwrap();
     }
@@ -247,7 +244,7 @@ pub fn run(
     for _ in 0..iters {
         let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
         gemm_mul_lrelu_kernel::launch(
-            cfg, ctx, md, &d_x, &d_w, &d_b, &mut d_y, mm, nn, kk, multiplier, negative_slope,
+            cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk, multiplier, negative_slope,
         )
         .unwrap();
     }

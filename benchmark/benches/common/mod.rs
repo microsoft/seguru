@@ -179,12 +179,24 @@ pub fn bench_llm_rs<'a, N: gpu_host::GpuCtxSpace, B: KernelRunner<'a>>(
                 // Run actual benchmark
                 // add wbound or wobound depending on DISABLE_GPU_BOUND_CHECK env var.
                 #[cfg(feature = "seguru")]
-                group.bench_function(format!("{}_{}", if std::env::var("DISABLE_GPU_BOUND_CHECK").is_ok() { "rsnobound" } else { "rs" }, config_str).as_str(), |b| {
-                    b.iter(|| {
-                        mybench.rs_fn(ctx, m);
-                        let _ = ctx.sync();
-                    })
-                });
+                let disable_gpu_bound_check = std::env::var("DISABLE_GPU_BOUND_CHECK")
+                    .map(|value| value == "true")
+                    .unwrap_or(false);
+                #[cfg(feature = "seguru")]
+                group.bench_function(
+                    format!(
+                        "{}_{}",
+                        if disable_gpu_bound_check { "rsnobound" } else { "rs" },
+                        config_str
+                    )
+                    .as_str(),
+                    |b| {
+                        b.iter(|| {
+                            mybench.rs_fn(ctx, m);
+                            let _ = ctx.sync();
+                        })
+                    },
+                );
                 #[cfg(any(feature = "nvvm", feature = "llvm"))]
                 group.bench_function(format!("{}_{}", c_prefix, config_str).as_str(), |b| {
                     b.iter(|| {

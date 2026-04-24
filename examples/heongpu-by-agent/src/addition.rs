@@ -5,7 +5,7 @@
 ///   `location = idx + (idy << n_power) + ((rns_count * idz) << n_power)`
 /// where `n_power = log2(ring_size)`.
 
-use crate::modular::{mod_add, mod_sub, Modulus64};
+use crate::modular::{mod_add, mod_mul, mod_sub, Modulus64};
 use gpu::prelude::*;
 
 // ---------------------------------------------------------------------------
@@ -69,6 +69,27 @@ pub fn negation_cpu(
             for idx in 0..ring_size {
                 let loc = idx + (idy << n_power) + ((rns_count * idz) << n_power);
                 out[loc] = mod_sub(0, in1[loc], &moduli[idy]);
+            }
+        }
+    }
+}
+
+/// Element-wise Barrett modular multiplication on flat RNS polynomial arrays.
+pub fn multiply_elementwise_cpu(
+    in1: &[u64],
+    in2: &[u64],
+    out: &mut [u64],
+    moduli: &[Modulus64],
+    n_power: u32,
+    rns_count: usize,
+    cipher_count: usize,
+) {
+    let ring_size = 1usize << n_power;
+    for idz in 0..cipher_count {
+        for idy in 0..rns_count {
+            for idx in 0..ring_size {
+                let loc = idx + (idy << n_power) + ((rns_count * idz) << n_power);
+                out[loc] = mod_mul(in1[loc], in2[loc], &moduli[idy]);
             }
         }
     }
@@ -149,6 +170,45 @@ pub fn negation_kernel(
 
     let mut out = chunk_mut(output, MapLinear::new(1));
     out[0] = result;
+}
+
+/// GPU kernel: element-wise Barrett modular multiplication.
+///
+/// Uses u128 intermediates for the Barrett reduction. Each thread computes
+/// one element: `output[gid] = (in1[gid] * in2[gid]) mod modulus`.
+#[gpu::cuda_kernel]
+pub fn multiply_elementwise_kernel(
+    in1: &[u64],
+    in2: &[u64],
+    output: &mut [u64],
+    mod_values: &[u64],
+    mod_bits: &[u64],
+    mod_mus: &[u64],
+    n_power: u32,
+    rns_count: u32,
+) {
+    let gid = block_dim::<DimX>() * block_id::<DimX>() + thread_id::<DimX>();
+    let idy = ((gid >> n_power) % rns_count) as usize;
+
+    let a = in1[gid as usize];
+    let b = in2[gid as usize];
+
+    // Inline Barrett multiplication
+    let mod_val = mod_values[idy];
+    let bit = mod_bits[idy];
+    let mu = mod_mus[idy];
+
+    let z = (a as u128) * (b as u128);
+    let w = z >> (bit as u32 - 2);
+    let w = (w * (mu as u128)) >> (bit as u32 + 3);
+    let w = w * (mod_val as u128);
+    let mut r = (z - w) as u64;
+    if r >= mod_val {
+        r -= mod_val;
+    }
+
+    let mut out = chunk_mut(output, MapLinear::new(1));
+    out[0] = r;
 }
 
 // ---------------------------------------------------------------------------
@@ -395,5 +455,82 @@ mod tests {
         });
 
         assert_eq!(gpu_out, cpu_out, "GPU negation mismatch");
+    }
+
+    #[test]
+    fn test_gpu_multiply() {
+        let n_power = 12u32;
+        let ring_size = 1usize << n_power;
+        let rns_count = 2usize;
+        let cipher_count = 1usize;
+        let total = ring_size * rns_count * cipher_count;
+
+        // Use primes from the task spec
+        let moduli = vec![
+            Modulus64::new(1152921504606846883),
+            Modulus64::new(1152921504606846819),
+        ];
+
+        // Deterministic LCG for reproducibility
+        let mut rng_state: u64 = 0xdeadbeef;
+        let lcg_next = |state: &mut u64| -> u64 {
+            *state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            *state
+        };
+        let a: Vec<u64> = (0..total)
+            .map(|i| {
+                let idy = (i >> n_power) % rns_count;
+                lcg_next(&mut rng_state) % moduli[idy].value
+            })
+            .collect();
+        let b: Vec<u64> = (0..total)
+            .map(|i| {
+                let idy = (i >> n_power) % rns_count;
+                lcg_next(&mut rng_state) % moduli[idy].value
+            })
+            .collect();
+
+        // CPU reference
+        let mut cpu_out = vec![0u64; total];
+        multiply_elementwise_cpu(
+            &a, &b, &mut cpu_out, &moduli, n_power, rns_count, cipher_count,
+        );
+
+        // GPU
+        let mv: Vec<u64> = moduli.iter().map(|m| m.value).collect();
+        let mb: Vec<u64> = moduli.iter().map(|m| m.bit).collect();
+        let mm: Vec<u64> = moduli.iter().map(|m| m.mu).collect();
+        let mut gpu_out = vec![0u64; total];
+        let block_size = 256u32;
+        let grid_size = (total as u32 + block_size - 1) / block_size;
+
+        cuda_ctx(0, |ctx, m| {
+            let d_a = ctx.new_tensor_view(a.as_slice()).expect("alloc");
+            let d_b = ctx.new_tensor_view(b.as_slice()).expect("alloc");
+            let mut d_out = ctx
+                .new_tensor_view(gpu_out.as_mut_slice())
+                .expect("alloc");
+            let d_mv = ctx.new_tensor_view(mv.as_slice()).expect("alloc");
+            let d_mb = ctx.new_tensor_view(mb.as_slice()).expect("alloc");
+            let d_mm = ctx.new_tensor_view(mm.as_slice()).expect("alloc");
+            let config = gpu_host::gpu_config!(grid_size, 1, 1, block_size, 1, 1, 0);
+            multiply_elementwise_kernel::launch(
+                config,
+                ctx,
+                m,
+                &d_a,
+                &d_b,
+                &mut d_out,
+                &d_mv,
+                &d_mb,
+                &d_mm,
+                n_power,
+                rns_count as u32,
+            )
+            .expect("kernel launch");
+            d_out.copy_to_host(&mut gpu_out).expect("copy");
+        });
+
+        assert_eq!(gpu_out, cpu_out, "GPU multiply mismatch");
     }
 }

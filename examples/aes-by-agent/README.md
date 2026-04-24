@@ -2,7 +2,7 @@
 
 AES-128 ECB encryption and decryption on NVIDIA GPUs using the [T-table optimization](https://en.wikipedia.org/wiki/AES_key_schedule#T-tables). Each GPU thread processes one 16-byte AES block independently, making ECB mode embarrassingly parallel.
 
-This crate includes both a **SeGuRu (Rust)** implementation and a **CUDA C++** reference, with benchmarks comparing the two.
+This crate includes a **SeGuRu (Rust)** implementation, a **CUDA C++** reference, and a **CPU baseline**, with benchmarks comparing all three.
 
 ## Quick Start
 
@@ -13,8 +13,8 @@ cd crates && cargo build
 # Run tests (5 tests: key expansion, NIST vector, CPU roundtrip, GPU encrypt, GPU roundtrip)
 cd examples && cargo test -p aes-gpu --lib --release
 
-# Run benchmarks (SeGuRu vs CUDA C++)
-cd examples && cargo run --bin bench --features bench --release -p aes-gpu
+# Run benchmarks (SeGuRu vs CUDA C++ vs CPU)
+cd examples && cargo run --bin aes-bench --features bench --release -p aes-gpu
 ```
 
 ## What's Implemented
@@ -24,21 +24,24 @@ cd examples && cargo run --bin bench --features bench --release -p aes-gpu
 | T-table (SeGuRu) | ✅ | ✅ | 4 KB (TE0–TE3 / TD0–TD3) |
 | T-table (CUDA C++) | ✅ | ✅ | `__constant__` memory |
 | Textbook S-box (CUDA C++) | ✅ | ✅ | S-box in shared memory |
+| CPU reference (Rust) | ✅ | ✅ | N/A |
 
 The SeGuRu kernels use the T-table variant (4 precomputed 256-entry lookup tables) for all 10 AES rounds, with S-box values extracted from TE0 for the final encrypt round and inv_sbox read from global memory for the final decrypt round.
 
 ## Performance
 
-SeGuRu vs CUDA C++ (T-table, median of 100 iterations):
+Benchmarked from 16 KB to 1 GB (median of 100 GPU iterations, CPU with 10s timeout + extrapolation):
 
-| Data Size | Encrypt Ratio | Decrypt Ratio |
-|-----------|:------------:|:------------:|
-| 16 KB     | 1.64×        | 1.81×        |
-| 1 MB      | 1.19×        | 1.27×        |
-| 4 MB      | 1.00×        | 1.17×        |
-| 16 MB     | **0.90×** ✨  | 1.05×        |
+| Data Size | SG/CUDA (Encrypt) | SG/CUDA (Decrypt) | GPU Speedup vs CPU |
+|-----------|:-----------------:|:-----------------:|:------------------:|
+| 16 KB     | 1.57×             | 1.74×             | 4.5×               |
+| 1 MB      | 1.17×             | 1.32×             | 174–186×           |
+| 16 MB     | **0.91×** ✨       | 1.05×             | 424–451×           |
+| 64 MB     | **0.88×** ✨       | 1.02×             | 481–486×           |
+| 1 GB      | **0.87×** ✨       | 1.01×             | 465–487×           |
 
-> **0.90×** = SeGuRu is 10% *faster* than hand-written CUDA at 16 MB.
+> **0.87×** = SeGuRu is 13% *faster* than hand-written CUDA at 1 GB.
+> Peak throughput: **138 GB/s** (GPU) vs **0.30 GB/s** (CPU) — up to **487× speedup**.
 > Overhead at small sizes is fixed launch latency (~6 µs), not kernel compute.
 
 See [REPORT.md](REPORT.md) for full results and analysis.
@@ -46,13 +49,13 @@ See [REPORT.md](REPORT.md) for full results and analysis.
 ## Project Structure
 
 ```
-aes/
+aes-by-agent/
 ├── src/
 │   ├── lib.rs           # GPU kernels + tests
 │   ├── aes_common.rs    # AES-128 constants, key expansion, CPU reference
 │   ├── cuda_ffi.rs      # FFI bindings to CUDA bench functions
 │   └── bin/
-│       └── bench.rs     # Benchmark binary (SeGuRu vs CUDA)
+│       └── bench.rs     # Benchmark binary (SeGuRu vs CUDA vs CPU)
 ├── cuda/
 │   ├── aes_kernels.cu   # CUDA C++ reference (textbook + T-table)
 │   └── aes_kernels.h    # C header for FFI

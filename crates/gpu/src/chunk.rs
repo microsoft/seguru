@@ -55,6 +55,43 @@ pub(crate) trait ScopeUniqueMapProvidedMethods<CS: ChunkScope>: ScopeUniqueMap<C
 
 impl<T: ScopeUniqueMap<CS>, CS: ChunkScope> ScopeUniqueMapProvidedMethods<CS> for T {}
 
+/// Companion to ScopeUniqueMap for Maps that can split the linear-offset
+/// computation into a thread-invariant "tile base" and a per-access lid offset.
+///
+/// # Purpose
+/// When kernels unroll a per-thread tile, the thread-portion of the index is
+/// invariant across all unrolled accesses. The default `map` path re-computes
+/// the full i32 offset + zext + shl + gep per access, which inflates the
+/// register footprint of kernels and lowers occupancy. A Map implementing
+/// `MapWithLidOffset` lets `GlobalGroupChunk::open_tile` materialize the tile
+/// base as a 64-bit pointer once and pay only compile-time-constant pointer
+/// arithmetic per access.
+///
+/// # Safety
+/// Implementors must ensure:
+/// ```text
+/// forall lid, tid:
+///     map(lid, tid).1 == map(<lid=0>, tid).1 + map_lid_offset(lid).1
+/// ```
+/// i.e. the lid and tid contributions to the linear offset are independent
+/// and additive, and `map_lid_offset` includes no thread-dependent terms.
+/// The validity flag returned by `map_lid_offset` must match the lid-portion
+/// of bounds checks in `map`.
+pub unsafe trait MapWithLidOffset<CS: ChunkScope>: ScopeUniqueMap<CS> {
+    #[gpu_codegen::device]
+    fn map_lid_offset(&self, idx: Self::IndexType) -> (bool, Self::GlobalIndexType);
+
+    /// Thread-invariant portion of the linear index, including the struct's
+    /// base offset. By contract:
+    ///   `map(lid, tid).1 == thread_base(tid).1 + map_lid_offset(lid).1`
+    /// and `thread_base(tid).0 == (tid-portion of map's validity)`.
+    #[gpu_codegen::device]
+    fn thread_base(
+        &self,
+        thread_ids: [u32; crate::chunk_scope::TID_MAX_LEN],
+    ) -> (bool, Self::GlobalIndexType);
+}
+
 /// Represent a chunk of global memory that is uniquely mapped to each thread group.
 /// It supports both continuous and non-continuous mapping strategies.
 /// - T: element type
@@ -138,6 +175,14 @@ impl<'a, T, CS: ChunkScope, Map: ScopeUniqueMap<CS>> GlobalGroupChunk<'a, T, CS,
         idx: <Map as ScopeUniqueMap<CS>>::IndexType,
     ) -> Map::GlobalIndexType {
         self.map_params.local_to_global_index(idx).1
+    }
+
+    /// Raw mutable pointer to the underlying slice. Used by `open_tile` in
+    /// `tile.rs` to derive a per-thread pre-offset pointer.
+    #[gpu_codegen::device]
+    #[inline(always)]
+    pub(crate) fn data_ptr_mut(&mut self) -> *mut T {
+        self.data.as_mut_ptr()
     }
 }
 

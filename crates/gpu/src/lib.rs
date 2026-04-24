@@ -30,6 +30,7 @@ pub mod prelude;
 mod print;
 mod shared;
 pub mod sync;
+pub mod tile;
 pub mod vector;
 
 pub use prelude::*;

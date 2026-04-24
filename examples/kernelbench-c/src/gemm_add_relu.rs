@@ -58,7 +58,11 @@ pub fn gemm_add_relu_kernel(
         [8, 8] | [16, grid_dim::<DimX>(), 16, grid_dim::<DimY>()]
         => layout: [i0, t0, t1, i1, t2, t3]
     );
-    let mut y_thread = chunk_mut(y, out_map);
+    let y_thread_chunk = chunk_mut(y, out_map);
+    // open_tile precomputes `&mut y[thread_base]` as a 64-bit pointer so the
+    // 64 unrolled epilogue stores only pay lid-side address-arith (reduces
+    // regs/thread from 168 → target ≤128 → 2 blocks/SM occupancy).
+    let mut y_thread = y_thread_chunk.open_tile();
 
     let mut acc = [[0.0f32; TN as usize]; TM as usize];
 

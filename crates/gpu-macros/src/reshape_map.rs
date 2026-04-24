@@ -281,6 +281,159 @@ pub(crate) fn map_reshape_params(tokens: TokenStream) -> TokenStream {
         #gen_global_id
         #valid &= #remain_tid == 0;
     };
+
+    // === Companion: gen_lid_offset computes ONLY the lid-portion of the index.
+    // This is the same per-dim arithmetic as above, but restricted to i < local_id_len
+    // (skipping tid dims). Used by OpenedTile to cache a pre-offset 64-bit pointer
+    // so per-access only pays compile-time-const offset arithmetic.
+    let lid_offset_ident = Ident::new("lid_offset", span);
+    let lid_valid_ident = Ident::new("lid_valid", span);
+    let mut gen_lid_offset = quote_spanned! {span =>
+        let mut #lid_offset_ident: u32 = 0;
+        let mut #lid_valid_ident: bool = true;
+    };
+    for (i, &is_reversed) in reversed.iter().enumerate().take(local_id_len) {
+        let span = all_sizes.elems[i].span();
+        let old_s_i = Ident::new(&format!("lo_old_s_{}", i), span);
+        let new_s_i = Ident::new(&format!("lo_new_s_{}", i), span);
+        let current_lid = if local_id_len == 1 {
+            quote_spanned! { span => #lid }
+        } else {
+            let mi = syn::Member::from(i);
+            quote_spanned! { span => #lid.#mi }
+        };
+        let id_i = if is_reversed {
+            Expr::Verbatim(quote_spanned! { span =>
+                (#new_s_i - 1 - #current_lid)
+            })
+        } else {
+            Expr::Verbatim(quote_spanned! { span =>
+                #current_lid
+            })
+        };
+        let get_non_dynamic_expr = |e: &Expr| match e {
+            Expr::Lit(_) => Some(e.clone()),
+            Expr::Group(ExprGroup { expr, .. }) => match &**expr {
+                Expr::Lit(_) => Some(e.clone()),
+                _ => None,
+            },
+            Expr::Call(call_expr) if call_expr.args.is_empty() => Some(e.clone()),
+            Expr::Const(_) => Some(e.clone()),
+            _ => None,
+        };
+        let old_size = get_non_dynamic_expr(&old_sizes[i]);
+        let new_size = get_non_dynamic_expr(&new_sizes[i]);
+        gen_lid_offset = new_size.map_or(
+            quote_spanned! { span =>
+                #gen_lid_offset
+                let #new_s_i = #self_ident.new_sizes[#i];
+            },
+            |new_size| {
+                quote_spanned! { span =>
+                    #gen_lid_offset
+                    let #new_s_i = #new_size;
+                }
+            },
+        );
+        gen_lid_offset = old_size.map_or(
+            quote_spanned! { span =>
+                #gen_lid_offset
+                let #old_s_i = #self_ident.old_sizes[#i];
+            },
+            |old_size| {
+                quote_spanned! { span =>
+                    #gen_lid_offset
+                    let #old_s_i = #old_size;
+                }
+            },
+        );
+        gen_lid_offset = quote_spanned! { span =>
+            #gen_lid_offset
+            #lid_offset_ident += #id_i * #weights[#i];
+            #lid_valid_ident &= (#id_i < #new_s_i) && (#id_i < #old_s_i);
+        };
+    }
+
+    // === Companion: gen_thread_base computes `struct_offset + sum(tid-dim contributions)`.
+    // By construction: `map(lid, tid).1 == thread_base(tid).1 + map_lid_offset(lid).1`.
+    let tb_offset_ident = Ident::new("tb_offset", span);
+    let tb_valid_ident = Ident::new("tb_valid", span);
+    let tb_remain_ident = Ident::new("tb_remain", span);
+    let tb_tid_ident = Ident::new("tb_tid", span);
+    let mut gen_thread_base = quote_spanned! {span =>
+        let mut #tb_offset_ident: u32 = #self_ident.offset;
+        let mut #tb_valid_ident: bool = true;
+        let #tb_remain_ident = #tb_tid_ident;
+    };
+    for (i, &is_reversed) in reversed.iter().enumerate() {
+        if i < local_id_len {
+            continue;
+        }
+        let span = all_sizes.elems[i].span();
+        let old_s_i = Ident::new(&format!("tb_old_s_{}", i), span);
+        let new_s_i = Ident::new(&format!("tb_new_s_{}", i), span);
+        let current_id = if i < len - 1 {
+            quote_spanned! { span => (#tb_remain_ident % #old_s_i) }
+        } else {
+            quote_spanned! { span => (#tb_remain_ident) }
+        };
+        let id_i = if is_reversed {
+            Expr::Verbatim(quote_spanned! { span =>
+                (#new_s_i - 1 - #current_id)
+            })
+        } else {
+            Expr::Verbatim(quote_spanned! { span =>
+                #current_id
+            })
+        };
+        let get_non_dynamic_expr = |e: &Expr| match e {
+            Expr::Lit(_) => Some(e.clone()),
+            Expr::Group(ExprGroup { expr, .. }) => match &**expr {
+                Expr::Lit(_) => Some(e.clone()),
+                _ => None,
+            },
+            Expr::Call(call_expr) if call_expr.args.is_empty() => Some(e.clone()),
+            Expr::Const(_) => Some(e.clone()),
+            _ => None,
+        };
+        let old_size = get_non_dynamic_expr(&old_sizes[i]);
+        let new_size = get_non_dynamic_expr(&new_sizes[i]);
+        gen_thread_base = new_size.map_or(
+            quote_spanned! { span =>
+                #gen_thread_base
+                let #new_s_i = #self_ident.new_sizes[#i];
+            },
+            |new_size| {
+                quote_spanned! { span =>
+                    #gen_thread_base
+                    let #new_s_i = #new_size;
+                }
+            },
+        );
+        gen_thread_base = old_size.map_or(
+            quote_spanned! { span =>
+                #gen_thread_base
+                let #old_s_i = #self_ident.old_sizes[#i];
+            },
+            |old_size| {
+                quote_spanned! { span =>
+                    #gen_thread_base
+                    let #old_s_i = #old_size;
+                }
+            },
+        );
+        gen_thread_base = quote_spanned! { span =>
+            #gen_thread_base
+            #tb_offset_ident += #id_i * #weights[#i];
+            #tb_valid_ident &= (#id_i < #new_s_i) && (#id_i < #old_s_i);
+            let #tb_remain_ident = #tb_remain_ident / #old_s_i;
+        };
+    }
+    gen_thread_base = quote_spanned! { span =>
+        #gen_thread_base
+        #tb_valid_ident &= #tb_remain_ident == 0;
+    };
+
     let gpu_crate = args.gpu_crate;
     let unit_index_ty = quote_spanned! { span => u32 };
     let index_type = if local_id_len == 1 {
@@ -314,6 +467,29 @@ pub(crate) fn map_reshape_params(tokens: TokenStream) -> TokenStream {
             let #weights = #self_ident.cached_weights;
             #gen_global_id
             (#valid, #global_idx)
+        }
+    }
+    unsafe impl<CS: #gpu_crate::chunk_scope::ChunkScope> #gpu_crate::chunk::MapWithLidOffset<CS> for PrivateMapReshapeShuffle {
+        // Companion to `map`: returns ONLY the lid-portion of the linear offset
+        // (no struct offset, no thread contribution). Used by `open_tile` to let
+        // unrolled tile accesses reduce to `tile_ptr + const_offset` without
+        // re-materializing the thread base on every access.
+        //
+        // Safety invariant (per trait contract):
+        //   map(lid, tid).1 == map(<lid=0>, tid).1 + map_lid_offset(lid).1
+        fn map_lid_offset(&#self_ident, #lid: #index_type) -> (bool, u32) {
+            let #weights = #self_ident.cached_weights;
+            #gen_lid_offset
+            (#lid_valid_ident, #lid_offset_ident)
+        }
+
+        fn thread_base(&#self_ident, thread_ids: [u32; #gpu_crate::chunk_scope::TID_MAX_LEN]) -> (bool, u32) {
+            let #tb_tid_ident = CS::global_id_x(thread_ids)
+                + CS::global_dim_x()
+                    * (CS::global_id_y(thread_ids) + CS::global_dim_y() * CS::global_id_z(thread_ids));
+            let #weights = #self_ident.cached_weights;
+            #gen_thread_base
+            (#tb_valid_ident, #tb_offset_ident)
         }
     }
     #[allow(clippy::identity_op)]

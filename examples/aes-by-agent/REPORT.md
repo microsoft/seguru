@@ -156,3 +156,77 @@ cd examples && cargo test -p aes-gpu --lib --release
 # Run benchmarks (requires GPU)
 cd examples && cargo run --bin aes-bench --features bench --release -p aes-gpu
 ```
+
+---
+
+## Porting Effort Summary
+
+### Coverage
+
+| Component | CUDA C++ | SeGuRu (Rust) | Notes |
+|-----------|----------|---------------|-------|
+| T-table encrypt kernel | ✅ | ✅ GPU kernel | Shared memory T-tables |
+| T-table decrypt kernel | ✅ | ✅ GPU kernel | Shared memory T-tables |
+| Textbook encrypt kernel | ✅ | — | CUDA-only reference |
+| Textbook decrypt kernel | ✅ | — | CUDA-only reference |
+| Key expansion | ✅ (host) | ✅ CPU | FIPS 197 compliant |
+| AES constants (S-box, T-tables) | ✅ | ✅ | Compile-time arrays |
+| CPU encrypt/decrypt reference | — | ✅ | Single-threaded Rust |
+| Benchmark harness | ✅ (via FFI) | ✅ | SeGuRu vs CUDA vs CPU |
+
+### LOC Comparison
+
+| Metric | CUDA C++ | Rust (SeGuRu) |
+|--------|----------|---------------|
+| Kernel source | 796 LOC (`.cu`) | 450 LOC (`lib.rs`) |
+| Constants + CPU ref | — | 504 LOC (`aes_common.rs`) |
+| FFI bindings | 37 LOC (`.h`) | 37 LOC (`cuda_ffi.rs`) |
+| Benchmark binary | (in .cu) | 271 LOC (`bench.rs`) |
+| Build script | — | 27 LOC (`build.rs`) |
+| **Total** | **833 LOC** | **1,262 LOC** |
+| **Ratio** | 1.0× | 1.52× |
+
+Rust is ~52% more lines due to: CPU reference implementation, explicit type
+annotations, doc comments, inline tests, and the benchmark binary being separate.
+
+### Tests
+
+| Test | Type | What it verifies |
+|------|------|-----------------|
+| `test_key_expansion` | CPU | AES-128 key schedule against FIPS 197 |
+| `test_nist_encrypt` | CPU | Encrypt against NIST test vector |
+| `test_roundtrip` | CPU | Encrypt → decrypt roundtrip |
+| `test_aes_encrypt_nist_ttable` | GPU | GPU encrypt matches NIST test vector |
+| `test_aes_roundtrip_ttable` | GPU | GPU encrypt → decrypt roundtrip (64 blocks) |
+
+### Timeline
+
+| Phase | Commit | Time |
+|-------|--------|------|
+| 1. Scaffold + AES constants | `4ed9b76` | T+0 min |
+| 2. CUDA C++ reference kernels | `79f7609` | T+3 min |
+| 3. SeGuRu GPU kernels (encrypt + decrypt) | `2492a7c` | T+16 min |
+| 4. CUDA FFI + benchmark binary | `e6cfe8a` | T+5 hr (next session) |
+| 5. Shared memory decrypt optimization | `b666dd1` | T+5 min |
+| 6. Documentation | `a94575f` | T+2 min |
+| 7. Rename + bench extensions | `943777f`–`35b8d8b` | T+15 min |
+| 8. CPU baseline + 1 GB results | `95dd880`–`9b0b025` | T+9 min |
+
+Total AI-assisted implementation: ~50 min across two sessions.
+
+### Key Technical Decisions
+
+1. **T-table over textbook**: T-tables reduce 16 S-box lookups + ShiftRows +
+   MixColumns to 4 table lookups + XOR per round. Critical for GPU throughput.
+
+2. **Dynamic shared memory**: SeGuRu uses `smem_alloc.alloc::<u32>(1024)` for
+   T-tables (4 KB). CUDA uses `__constant__` memory (16 KB). Shared memory
+   provides lower latency at high occupancy, explaining SeGuRu's advantage at
+   large sizes.
+
+3. **Big-endian u32 layout**: Matches AES specification directly. Each 16-byte
+   block = 4 u32 in big-endian order.
+
+4. **Inv S-box in global memory**: The final decrypt round needs inv_sbox (256
+   bytes). Packed into 64 u32 and read from global memory since shared memory
+   is fully used by TD0–TD3 tables.

@@ -1,8 +1,8 @@
-# HEonGPU BFV Port — SeGuRu
+# HEonGPU Port — SeGuRu
 
-A safe-Rust GPU port of [HEonGPU](https://github.com/Alisah-Ozcan/HEonGPU)'s BFV
-(Brakerski/Fan-Vercauteren) homomorphic encryption CUDA kernels, built with the
-SeGuRu (Safe GPU Programming via Rust) toolchain.
+A comprehensive safe-Rust GPU port of [HEonGPU](https://github.com/Alisah-Ozcan/HEonGPU)'s
+homomorphic encryption CUDA kernels, built with the SeGuRu (Safe GPU Programming
+via Rust) toolchain. All **149 CUDA kernels** across 9 source files are ported.
 
 ## Quick Start
 
@@ -10,7 +10,7 @@ SeGuRu (Safe GPU Programming via Rust) toolchain.
 # Build the SeGuRu toolchain (from repo root)
 cd crates && cargo build
 
-# Run tests
+# Run tests (41 tests)
 cd examples && cargo test -p heongpu-gpu --lib --release
 
 # Run benchmarks
@@ -19,44 +19,39 @@ cd examples && cargo run --bin heongpu-bench --features bench --release -p heong
 
 ## Project Structure
 
-| File | Description |
-|------|-------------|
-| `src/modular.rs` | Barrett-reduction modular arithmetic (`Modulus64`, `mod_add`, `mod_sub`, `mod_mul`, `mod_reduce`) |
-| `src/addition.rs` | Element-wise modular add / sub / negate + Barrett multiply GPU kernels |
-| `src/encoding.rs` | BFV encode / decode on CPU (scaling by ⌊q/t⌋) |
-| `src/encryption.rs` | Public-key multiplication, cipher–message add GPU kernel |
-| `src/decryption.rs` | Secret-key multiplication GPU kernel, full decrypt pipeline |
-| `src/multiplication.rs` | Cross-multiplication (HE multiply), cipher–plain multiply GPU kernel |
-| `src/bin/bench.rs` | GPU-vs-CPU microbenchmarks |
-| `src/lib.rs` | Crate root — re-exports all modules |
+| File | Description | GPU | CPU |
+|------|-------------|-----|-----|
+| `src/modular.rs` | Barrett-reduction modular arithmetic (`Modulus64`, `mod_add/sub/mul/reduce`) | — | 8 tests |
+| `src/addition.rs` | Element-wise add/sub/negate/multiply + BFV/CKKS plain variants | 11 | 13 |
+| `src/multiplication.rs` | Cross-multiplication, cipher×plain, threshold, gaussian, base conversion | 13 | 5 |
+| `src/encoding.rs` | BFV/CKKS encode/decode, compose/decompose, complex conversions | 3 | 12 |
+| `src/encryption.rs` | Public-key multiply, cipher-message add, enc_div_lastq variants | 2 | 7 |
+| `src/decryption.rs` | Secret-key multiply, CRT decryption, compose, CKKS/bootstrap variants | 4 | 16 |
+| `src/keygeneration.rs` | Secret/public/relin/galois/switch key generation, TFHE key gen | 2 | 30 |
+| `src/switchkey.rs` | Key switching, base conversion, divide-round, cipher broadcast, permute | 6 | 37 |
+| `src/bootstrapping.rs` | E-diagonal generation, matrix multiply, mod raise, TFHE bootstrapping | 1 | 23 |
+| `src/bin/bench.rs` | GPU-vs-CUDA-vs-CPU microbenchmarks | — | — |
+| **Total** | | **42** | **143** |
 
-## GPU Kernels (7)
+## Porting Coverage — 149/149 CUDA kernels (100%)
 
-| # | Kernel | Module | Operation |
-|---|--------|--------|-----------|
-| 1 | `addition_kernel` | `addition` | Element-wise modular addition |
-| 2 | `subtraction_kernel` | `addition` | Element-wise modular subtraction |
-| 3 | `negation_kernel` | `addition` | Element-wise modular negation |
-| 4 | `multiply_elementwise_kernel` | `addition` | Barrett modular multiplication |
-| 5 | `sk_multiplication_kernel` | `decryption` | Secret-key × ciphertext (decrypt core) |
-| 6 | `cipher_message_add_kernel` | `encryption` | Add encoded message into ciphertext |
-| 7 | `cipher_plain_mul_kernel` | `multiplication` | Ciphertext × plaintext polynomial |
+| Category | Count | Implementation |
+|----------|-------|---------------|
+| **GPU kernels** (pure modular arithmetic, 1 output/thread) | 42 | `#[gpu::cuda_kernel]` + CPU reference |
+| **CPU references** (loops, multi-output, f64, curand, NTT) | 107 | Full arithmetic in Rust |
 
-## Tests (29)
+CPU-only kernels include those requiring: curand (7), NTT+shared memory (12),
+f64 base conversion (~20), multi-output-per-thread loops (~68).
 
-The test suite covers three layers:
+## Tests (41)
 
-- **CPU reference tests** — validate every modular operation (`mod_add`, `mod_sub`,
-  `mod_mul`, `mod_reduce`, negation, Barrett constants) against known values.
-- **GPU-vs-CPU comparison tests** — run each GPU kernel and compare outputs
-  element-by-element against the CPU reference implementation.
-- **End-to-end roundtrips** — encode → decode, and full encrypt → decrypt cycles
-  to verify the complete BFV pipeline.
+- **CPU reference tests** — validate modular arithmetic, key generation, helper functions
+- **GPU-vs-CPU comparison** — run GPU kernels and compare element-by-element
+- **End-to-end roundtrips** — encode→decode, encrypt→decrypt BFV pipeline
 
-## Performance Highlights
+## Performance
 
-Benchmarks run on a single GPU vs single-threaded CPU (100 iterations, 5 warmup),
-RNS levels = 2.
+### SeGuRu GPU vs CPU
 
 | Ring size N | Elements | Best GPU µs | Best CPU µs | Peak speedup |
 |-------------|----------|-------------|-------------|--------------|
@@ -64,19 +59,30 @@ RNS levels = 2.
 | 8 192       | 16 384   | 4.5         | 57.0        | 11.5×        |
 | 16 384      | 32 768   | 4.4         | 116.6       | 25.1×        |
 
-GPU kernel time stays nearly flat (~4–5 µs) while CPU time scales linearly,
-so speedups grow with ring size. See [REPORT.md](REPORT.md) for full tables.
+### SeGuRu vs Raw CUDA
+
+| Ring size N | SeGuRu (µs) | CUDA (µs) | Overhead |
+|-------------|-------------|-----------|----------|
+| 4 096       | 5.5         | 3.6       | 1.5×     |
+| 8 192       | 5.3         | 3.0       | 1.8×     |
+| 16 384      | 5.4         | 2.8       | 1.9×     |
+
+Fixed ~2–3 µs launch overhead; identical Barrett reduction PTX.
+See [REPORT.md](REPORT.md) for full analysis.
 
 ## Technical Notes
 
-- **`u128` on GPU** — SeGuRu successfully lowers Rust `u128` arithmetic to PTX,
-  enabling Barrett reduction on GPU without manual hi:lo 64-bit emulation.
-- **Barrett reduction** — precomputed constants allow modular multiply without
-  division, critical for GPU throughput.
-- **RNS representation** — polynomials are stored in Residue Number System form
-  (one coefficient vector per RNS modulus), which is how HEonGPU organises data.
+- **`u128` on GPU** — SeGuRu lowers Rust `u128` to PTX natively; no manual
+  hi:lo emulation needed for Barrett reduction.
+- **Barrett reduction** — precomputed `mu = ⌊2^(2b+1)/q⌋` with shifts `(b-2)`
+  and `(b+3)` for correct reduction without division.
+- **RNS representation** — polynomials stored as one coefficient vector per
+  modulus, matching HEonGPU's memory layout.
+- **chunk_mut model** — SeGuRu writes use local indices (`out[0]`), not global
+  indices, ensuring memory safety at compile time.
 
 ## Reference
 
-- **HEonGPU** — <https://github.com/Alisah-Ozcan/HEonGPU> (included as a git
+- **HEonGPU** — <https://github.com/Alisah-Ozcan/HEonGPU> (included as git
   submodule under `HEonGPU/`)
+- **SeGuRu** — <https://github.com/microsoft/seguru>

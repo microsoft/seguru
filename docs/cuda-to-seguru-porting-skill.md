@@ -258,6 +258,83 @@ for a working template using `warp.subgroup_id()` to index within the block.
 If you wrote a reduction kernel that compiles and passes correctness but
 looks suspiciously similar to your elementwise template, re-read this section.
 
+### Always vectorize when `D % 4 == 0` (Float4 loads)
+
+Reduction kernels are memory-bound. A cooperative row-reduction that reads
+scalars via `x_row[i]` in the inner loop emits one `ld.global.f32` per
+element. Switching the kernel signature to take `x: &[Float4]` (with `D4 = D/4`)
+cuts the instruction count 4× and measurably closes the gap to raw CUDA:
+
+| Kernel     | Scalar load time | Float4 load time | Speedup |
+|------------|-----------------:|-----------------:|--------:|
+| `sum_dim`  | 225 µs           | 163 µs           | 1.38×   |
+| `layer_norm` | 299 µs         | 243 µs           | 1.23×   |
+| `l2_norm`  | 299 µs           | 243 µs           | 1.23×   |
+
+(Softmax is an exception: the online max+sum state can't be vectorized
+because each lane's `(local_max, local_sum)` pair depends sequentially
+on every element it sees.)
+
+**Recipe**:
+
+```rust
+#[gpu::cuda_kernel]
+pub fn sum_dim_kernel(x: &[Float4], y: &mut [f32], D4: u32) {
+    // ...
+    let x_row = &x[(row * D4 as usize)..((row + 1) * D4 as usize)];
+    let mut acc = 0.0f32;
+    let mut i = tid;
+    while i < D4 {
+        let v = x_row[i as usize];
+        acc += v.x + v.y + v.z + v.w;
+        i += block_dim::<DimX>();
+    }
+    // ... block reduce as before
+}
+```
+
+**Host side**: cast the tensor view via `as_tensor_view_float4()` or pass
+through `TensorViewFloat4` (see `examples/kernelbench-b/src/from_cuda/sum_dim.rs`
+for a complete working template). The precondition is just `D % 4 == 0`
+and the base pointer must be 16-byte aligned (CUDA guarantees this for
+`cudaMalloc`-allocated tensors).
+
+**When not to use Float4**:
+- `D % 4 != 0` — falls back to a scalar tail, rarely worth the extra code.
+- Inner loop has nonlinear dependencies between the 4 lanes (online softmax,
+  online Welford — but the outer `sum`/`sumsq` accumulators are still
+  vectorizable component-wise as `acc += v.x+v.y+v.z+v.w`; it's the
+  *exp/update* that can't be).
+- Kernel already compute-bound (GEMM inner loop reading smem) — Float4
+  helps memory-bound kernels, not compute-bound ones.
+
+### Pitfall: "one scalar per block" output scope
+
+When the output is `y: [B]` (one scalar per row/block), `chunk_mut(y, MapContinuousLinear::new(1))`
+is **wrong**. The default scope is `Thread`, which creates
+`gridDim * blockDim = B * 256 ≈ 1M` slots — but `y` has only `B` elements.
+Result: `CUDA_ERROR_ILLEGAL_ADDRESS` at launch.
+
+**Correct pattern** — chain Grid→Block→Thread scope so every thread sees
+the block's single slot:
+
+```rust
+let grid2block = build_chunk_scope(Grid, Block);
+let block2thread = build_chunk_scope(Block, Thread);
+// ...
+let mut y_chunk = y
+    .chunk_to_scope(grid2block, MapContinuousLinear::new(1))
+    .chunk_to_scope(block2thread, MapContinuousLinear::new(1));
+if tid == 0 {
+    y_chunk[0] = block_sum;
+}
+```
+
+This is used whenever the kernel writes one value per block — reduction
+scalars (`sum`, `max`, `argmax`), row statistics (`row_max`, `row_sum` in
+a 2-pass softmax), etc. See `examples/kernelbench-b/src/from_cuda/softmax.rs`
+for the canonical example.
+
 ## Shared Memory Tiling: The Key to CUDA Parity
 
 **This is the most important pattern for compute-bound kernels.**
@@ -588,6 +665,328 @@ Note: `gpu_config!` returns a non-Copy type — recreate it before each `launch`
 | Column-heavy reductions (corr, covar) | **~2.3×** | Column-stride access; `.ldcs()` helps significantly |
 | Iterative with many launches | **1.9×** | Launch overhead (4.7 vs 2.0 µs) accumulates |
 | Mechanical 1:1 port of memory-bound kernel | **1.3-1.5×** | See LayerNorm case study — port the algorithm, not syntax |
+
+## Softmax Recipe
+
+Softmax over a row of length D (tensor shape `[B, D]`, softmax over dim=1).
+This is the pattern for any row-wise normalizing reduction (softmax,
+log_softmax, masked attention softmax, etc.). Empirically softmax was the
+weakest point of phase-B (SeGuRu 0.71× PyTorch). The recipe below produces
+CUDA-parity kernels.
+
+**Non-negotiables (correctness)**:
+
+1. **Subtract the row max before `exp()`.** Never compute `exp(x)` directly.
+   Raw exp overflows for `x > 88.7` (fp32) and saturates to `+inf`. The
+   identity `softmax(x) = softmax(x - max(x))` is free and mandatory.
+2. **Accumulate `max` and `sum` in fp32** even if input is fp16/bf16.
+   Convert on load, convert on store.
+3. **Identity for max-reduction is `f32::NEG_INFINITY`**, not `0.0`. Threads
+   with `idx >= D` in the tail must contribute `-inf` to the max and `0.0`
+   to the sum (already handled if you use the online-softmax loop below).
+4. **Masked softmax fully-masked row** (all positions masked → sum=0 after
+   exp) produces NaN. Decide explicitly: output zeros, uniform `1/D`, or NaN.
+   Document the choice.
+
+**Use the single-kernel online (Milakov-Gimelshein) formulation** — it's
+strictly better than the 2-kernel stats-then-apply split. Single-kernel
+saves one kernel launch plus the round-trip through `row_max[]` and
+`row_sum[]` global buffers. See `examples/kernelbench-b/src/from_cuda/softmax.rs`.
+
+**Decomposition**:
+
+- Row length `D <= 32`: one warp per row. `blockDim = (32, num_rows, 1)`.
+  No smem needed; warp reductions handle everything.
+- Row length `32 < D <= 1024`: one block per row, `blockDim = 256`
+  (or 128 for low-D). Grid = `(B, 1, 1)`. Uses one smem slot per warp
+  (`num_warps = blockDim / 32`).
+- Row length `D > 1024`: split-row, multi-block reduction. Two-stage
+  kernel (partial max+sum per chunk, then combine). Rare in practice —
+  attention seqlens ≤ 4096 fit a single block with `blockDim=256` and
+  stride loop.
+
+**Canonical SeGuRu shape (one block per row, `BLOCK=256`)**:
+
+```rust
+#[gpu::cuda_kernel]
+pub fn softmax_kernel(x: &[f32], y: &mut [f32], D: u32) {
+    let warp = ThreadWarpTile::<32>;
+    let block2warp = build_chunk_scope(Block, warp);
+    let warp2thread = build_chunk_scope(warp, Thread);
+
+    let tid = thread_id::<DimX>();
+    let lane_id = warp.thread_rank();
+    let num_warps = warp.meta_group_size(); // BLOCK / 32
+
+    // Reserve 32 slots (max warps for BLOCK=1024). Unused slots padded with identity.
+    let mut smem_max = GpuShared::<[f32; 32]>::zero();
+    let mut smem_sum = GpuShared::<[f32; 32]>::zero();
+
+    // Golden Rule #6: subslice the row for O(1) row-read bounds checks.
+    let row = block_id::<DimX>() as usize;
+    let x_row = &x[(row * D as usize)..((row + 1) * D as usize)];
+
+    // --- Pass 1: online max+sum (one read of x_row per thread, strided) ---
+    let mut local_max = f32::NEG_INFINITY;  // identity for max
+    let mut local_sum = 0.0f32;              // identity for sum
+    let mut i = tid;
+    while i < D {
+        let v = x_row[i as usize];
+        let old_max = local_max;
+        local_max = local_max.max(v);
+        // Rescale running sum when max grows, then add new exp term.
+        local_sum *= GPUDeviceFloatIntrinsics::exp(old_max - local_max);
+        local_sum += GPUDeviceFloatIntrinsics::exp(v - local_max);
+        i += block_dim::<DimX>();
+    }
+
+    // --- Block-wide max reduce: warp → smem → all-lanes block_max ---
+    let warp_max = warp.redux(ReduxMax, local_max);
+    {
+        let mut s = smem_max
+            .chunk_to_scope(block2warp, MapContinuousLinear::new(1))
+            .chunk_to_scope(warp2thread, MapContinuousLinear::new(1));
+        if lane_id == 0 { s[0] = warp_max; }
+    }
+    sync_threads();
+    // All warps load the `num_warps` warp-maxes, pad rest with -inf,
+    // run another XOR-butterfly. Every lane ends up with block_max.
+    let sv = if lane_id < num_warps { smem_max[lane_id as usize] }
+             else { f32::NEG_INFINITY };
+    let block_max = warp.redux(ReduxMax, sv);
+
+    // Rescale each thread's partial sum from local_max → block_max.
+    local_sum *= GPUDeviceFloatIntrinsics::exp(local_max - block_max);
+
+    // --- Block-wide sum reduce (same shape, identity = 0.0) ---
+    let warp_sum = warp.redux(ReduxAdd, local_sum);
+    {
+        let mut s = smem_sum
+            .chunk_to_scope(block2warp, MapContinuousLinear::new(1))
+            .chunk_to_scope(warp2thread, MapContinuousLinear::new(1));
+        if lane_id == 0 { s[0] = warp_sum; }
+    }
+    sync_threads();
+    let sv = if lane_id < num_warps { smem_sum[lane_id as usize] } else { 0.0f32 };
+    let block_sum = warp.redux(ReduxAdd, sv);
+
+    let inv_sum = 1.0f32 / block_sum;
+
+    // --- Pass 2: write normalized output (re-read x_row — cheap, in L1/L2) ---
+    let out_map = reshape_map!(
+        [D / block_dim::<DimX>()]
+            | [block_dim::<DimX>(), grid_dim::<DimX>()]
+            => layout: [t0, i0, t1]
+    );
+    let mut y_chunk = chunk_mut(y, out_map);
+    let mut slot = 0u32;
+    let mut i = tid;
+    while i < D {
+        y_chunk[slot] = GPUDeviceFloatIntrinsics::exp(x_row[i as usize] - block_max) * inv_sum;
+        i += block_dim::<DimX>();
+        slot += 1;
+    }
+}
+```
+
+**Pitfalls to avoid**:
+
+- **Two-kernel split (`stats_kernel` + `apply_kernel`)**: measured ~1.3×
+  slower than single-kernel fused on `[128, 4096]`. Launch overhead + two
+  extra global buffers kills you. Only split if the row must span blocks.
+- **Using `0.0` as max identity**: `max(0, -5) = 0` corrupts the result
+  for all-negative rows. Always `f32::NEG_INFINITY`.
+- **Computing `1.0 / sum` in the inner write loop**: hoist `inv_sum`
+  outside. Scalar division is expensive; multiply is ~4× faster.
+- **Reshape-map output for non-power-of-two D**: the `[t0, i0, t1]` layout
+  above requires `D % BLOCK == 0`. For arbitrary D, fall back to
+  `chunk_mut(y, MapContinuousLinear::new(1))` with explicit index
+  `row * D + i`.
+- **`log_softmax`**: drop the division, subtract `ln(sum)` instead.
+  `y[i] = (x[i] - max) - ln_f32(sum)`. Same single-kernel structure.
+
+**Masked softmax**: apply the mask in pass 1 before updating `local_max`:
+```rust
+let v = if mask_row[i as usize] != 0.0 {
+    x_row[i as usize] - f32::INFINITY  // mask → -inf contributes 0 to exp
+} else {
+    x_row[i as usize]
+};
+```
+Fully-masked row produces `block_sum == 0`. Guard `inv_sum`:
+```rust
+let inv_sum = if block_sum > 0.0 { 1.0 / block_sum } else { 0.0 };
+```
+
+## Launch Config & Occupancy
+
+SeGuRu kernels inherit CUDA's SIMT execution model; the same occupancy and
+block-size rules apply. You don't get to set `__launch_bounds__` directly,
+but the compiler-chosen tile / block dim still have to respect these.
+
+**Defaults that almost always work**:
+
+- **1-D elementwise / reductions**: `blockDim = 256`, grid =
+  `ceil_div(N, 256)`. Move to 128 if the kernel spills registers; move
+  to 512 only if measured better (rare).
+- **2-D tile kernels (GEMM, conv)**: `blockDim = (16, 16) = 256` or
+  `(32, 8) = 256`. Innermost (`threadIdx.x`) must map to the stride-1
+  memory dimension.
+- **One-warp-per-row**: only for rows ≤ 32. Above that, a full block
+  (8 warps) gives much better latency hiding.
+- **Avoid `blockDim = 1024`**: max 2 resident blocks/SM → scheduler has
+  only 2 block-state machines → poor latency hiding on memory-bound
+  kernels. Prefer 256 or 512.
+- **Always a multiple of 32.** A 48-thread block wastes half of the last
+  warp (fp32 throughput drops to 48/64 = 75%) and confuses
+  `warp.thread_rank()` arithmetic.
+
+**Check register spills** (SeGuRu emits PTX at
+`target/release/deps/gpu/*.ptx` after `cargo build --release`):
+
+```bash
+grep -E "\.local|st\.local" target/release/deps/gpu/<crate>.ptx | wc -l
+```
+
+Any `.local` stores = register spill. Fix by:
+1. Reducing tile size (e.g., 128×128 → 64×64 for GEMM),
+2. Reducing per-thread register footprint (fewer accumulators),
+3. Splitting the kernel.
+
+Compare with `nvcc -ptx -arch=sm_80 ref.cu` to see baseline register
+usage for the same algorithm. Target ≤ 32 registers/thread for 100%
+occupancy at `blockDim=256`; ≤ 64 for 50%.
+
+**Tail-block guard** — every elementwise kernel must have:
+
+```rust
+let idx = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+if idx < N { ... }   // or use reshape_map! which encodes this
+```
+
+Skipping the guard on the tail block silently writes past the end of
+`y[]`; SeGuRu's bounds checks catch it but cost a branch per thread.
+`reshape_map!` lets the compiler prove the bound away.
+
+**Tail effects (launch overhead)**: when `gridDim < 4 × num_SMs`, the tail
+block dominates total time. For small problems (N < 100K elements),
+launch overhead (~5–20 µs) may exceed kernel time — consider fusing
+neighbouring kernels or batching.
+
+## Shared-Memory Bank Conflicts
+
+SeGuRu's `GpuShared::<[T; N]>` maps to CUDA's `__shared__` with the same
+32-bank, 4-byte-wide layout. Bank index for element `smem[i]` with
+`sizeof(T) = 4`: `i % 32`.
+
+**When bank conflicts bite**:
+
+- A 32×32 fp32 tile accessed both row-wise (consecutive threads → stride 1
+  → bank `i % 32`, all different → 0 conflict) and column-wise (consecutive
+  threads → stride 32 → bank `(i*32) % 32 = 0` for all threads → 32-way
+  conflict, 32× slowdown for that access).
+- GEMM kernels that store a *transposed* tile in smem for the inner loop.
+
+**Fix**: pad the row by 1 element.
+
+```rust
+let mut smem_a = GpuShared::<[[f32; TILE_K + 1]; TILE_M]>::zero();
+//                                  ^^^^^^^^^ pad
+```
+
+Effect: element `smem_a[row][col]` now maps to bank
+`(row * (TILE_K + 1) + col) % 32`. When 32 threads access `[0..32][col]`
+(column-wise), the rows shift by `(TILE_K+1) % 32 != 0`, breaking the
+periodic conflict.
+
+**When you do NOT need padding**:
+
+- **Row-major smem with stride-1 reads** (our GEMM Recipe uses this) —
+  no padding needed. The `+1` pad is for the *transposed* access.
+- **fp16 smem** — two fp16 per bank means padding must be 2, not 1.
+  Prefer storing `half2` pairs to avoid this.
+
+**Verification**: `ncu --metrics l1tex__data_bank_conflicts_pipe_lsu_mem_shared.sum`
+should read ≤ 5% of smem transactions. If it doesn't, your pad is
+wrong-dimension or wrong-size.
+
+## Warp Divergence
+
+SIMT: all 32 lanes of a warp execute the same instruction per cycle. When
+lanes take different branches, the hardware executes each branch serially
+with the inactive lanes masked off — cost = sum of both paths.
+
+**Classify every branch in the inner loop**:
+
+| Class | Example | Cost | Action |
+|---|---|---|---|
+| Warp-uniform | `if blockIdx.x == 0` | 0 | none |
+| Geometry | `if lane_id < num_warps` | ≤ 1 cycle (mask-based) | none |
+| Data-dependent | `if x[i] > 0 { ... } else { ... }` | sum of both paths | consider restructure |
+| Boundary | `if idx < N` (tail guard) | ≤ 1 cycle on non-tail warps | keep; it's correctness |
+
+**Rule of thumb**: don't spend time on divergence in a memory-bound
+kernel — memory latency dominates. Softmax/reduction kernels gain < 5%
+from divergence optimization. Compute-bound kernels (GEMM, elementwise
+transcendentals) can see 20–40%.
+
+**Boundary divergence trick — loop peeling**: split the loop into
+"full-warp" iterations (no bounds check) and a tail (with bounds check):
+
+```rust
+let n_full = N - (N % 32);
+let mut i = tid;
+while i < n_full { /* no guard */ ...; i += block_dim::<DimX>(); }
+while i < N { /* with guard */ ...; i += block_dim::<DimX>(); }
+```
+
+For stride-B loops this is usually not worth it — the tail is one warp.
+
+## Debugging Checklist
+
+When a SeGuRu kernel produces wrong output, work through this before
+chasing performance or compiler bugs:
+
+1. **Reproduce on the smallest failing input.** Try sizes `{31, 63, 64,
+   65, 127, 128, 129}` — power-of-two hides boundary bugs.
+2. **Classify the error pattern.**
+   - All elements off by a constant factor → epilogue bug (wrong scale,
+     missing epsilon, wrong dtype cast).
+   - Last few rows/cols wrong → tail-block bounds guard missing.
+   - Random scatter of wrong values → race condition (missing
+     `sync_threads()` after smem write).
+   - NaN → division by zero (empty reduction, fully-masked softmax) or
+     `sqrt`/`log` of negative.
+   - Inf → forgot max-subtraction in softmax.
+3. **Sentinel-fill the output buffer** before launch — use `f32::NAN`,
+   not `0.0`. Kernels that forget to write an element silently return 0
+   otherwise, hiding the bug.
+4. **Write the index formula on paper** for every global memory access.
+   Most indexing bugs are mechanical stride/row/col confusion.
+5. **Single-block isolation**: guard `if block_id::<DimX>() != 0 { return; }`
+   at the kernel top. Removes all inter-block ordering effects. If output
+   is still wrong, it's a single-block issue.
+6. **Run under `compute-sanitizer`**:
+   ```bash
+   compute-sanitizer --tool memcheck target/release/examples/<bin>
+   ```
+   Catches OOB reads/writes, uninitialized smem reads, misaligned vector
+   loads. Mandatory for non-deterministic bugs.
+7. **Compare against a minimal-CUDA or CPU reference** element-by-element
+   for the smallest failing input. Use `fp64` CPU if numerical-drift is
+   suspected.
+8. **After fix**: test at sizes `{31, 32, 33, 63, 64, 65, 127, 128, 129,
+   255, 256, 257, 1023, 1024, 1025}` before declaring done. Partial-tile
+   bugs love powers-of-two adjacency.
+
+Common SeGuRu-specific traps:
+- Forgetting `d_out.copy_to_host(&mut h_out)` before reading (silent
+  all-zeros output — see host-side gotcha memory).
+- Using `blockDim.x` in the Rust host launcher but thread-reading `D` in
+  the kernel with a different stride.
+- `reshape_map!` silently clipping output to `BLOCK * GRID` elements
+  when `D % BLOCK != 0` — use `MapContinuousLinear::new(1)` + explicit
+  index for non-divisible D.
 
 ## Case Study: PyTorch LayerNorm (algorithm > idioms)
 
@@ -1132,4 +1531,46 @@ presumably conv with the next iteration). The two-stage route
 remains valuable as a discovery mechanism — the CUDA-written
 kernels tell you what recipe to prescribe — but once the recipe
 is in the doc, Stage 1 becomes redundant.
+
+### Phase C.3: skill-doc intervention — reduction-class
+
+Same methodology applied to the KernelBench Phase B reduction-class
+problems (`softmax`, `layer_norm`, `sum_dim`, `l2_norm`). New sections
+added to this doc:
+
+- `## Softmax Recipe` — single-kernel fused online softmax, explicit
+  step-by-step template, list of anti-patterns (2-kernel stats+apply).
+- `## Row-Reduction Strategy` → "Always vectorize when D % 4 == 0
+  (Float4 loads)" subsection with before/after timings per kernel.
+- `## Row-Reduction Strategy` → "one scalar per block output" pitfall
+  (Grid→Block→Thread scope chain for per-block scalar writes).
+- `## Launch Config & Occupancy`, `## Shared-Memory Bank Conflicts`,
+  `## Warp Divergence`, `## Debugging Checklist` — systematic
+  coverage imported from the KrxGu CUDA skill repo.
+
+Re-dispatched one agent per problem; each agent read ONLY the updated
+skill doc and the PyTorch source spec (not the `from_cuda/` reference).
+
+| Problem    | SeGuRu baseline | SeGuRu v3 | speedup | SeGuRu←CUDA |
+|------------|----------------:|----------:|--------:|------------:|
+| softmax    |         324.3 µs|  308.1 µs |   1.05× |    308.1 µs |
+| layer_norm |         337.9 µs|  243.3 µs |   1.39× |    243.1 µs |
+| sum_dim    |         225.4 µs|  163.6 µs |   1.38× |    163.6 µs |
+| l2_norm    |         299.6 µs|  243.1 µs |   1.23× |    243.4 µs |
+
+Aggregate direct-SeGuRu speedup vs PyTorch eager: **1.02× → 1.19×**,
+exactly matching the SeGuRu←CUDA arm (1.19×). The two-stage pipeline
+has now been collapsed to one stage for the entire reduction class,
+reproducing the Phase C.2 result seen earlier for GEMM.
+
+Key driver of the reduction improvements: **Float4 loads**. All
+from_cuda reduction ports used Float4; none of the direct-PyTorch
+ports did until the doc made it the default. Softmax is the one
+exception where Float4 doesn't help (the online max+sum state update
+is sequential per element), which is why softmax closed the 5% gap
+with just the Softmax Recipe while the other three needed Float4.
+
+Residual gap (raw CUDA still ~15–20% faster than SeGuRu): intrinsic
+SeGuRu codegen overhead (u32 vs usize, ptxas optimizations, etc.),
+not an LLM/skill-doc issue.
 

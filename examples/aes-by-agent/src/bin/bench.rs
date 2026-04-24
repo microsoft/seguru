@@ -24,11 +24,15 @@ struct BenchResult {
     num_blocks: u32,
     seguru_us: f64,
     cuda_us: f64,
+    cpu_us: f64,
 }
 
 impl BenchResult {
     fn ratio(&self) -> f64 {
         self.seguru_us / self.cuda_us
+    }
+    fn speedup_vs_cpu(&self) -> f64 {
+        self.cpu_us / self.seguru_us
     }
     fn throughput_gbps(&self, us: f64) -> f64 {
         let bytes = self.num_blocks as f64 * 16.0;
@@ -65,7 +69,7 @@ fn main() {
     let mut results: Vec<BenchResult> = Vec::new();
 
     // Print CSV header
-    println!("kernel,size,num_blocks,seguru_us,cuda_us,ratio,seguru_gbps,cuda_gbps");
+    println!("kernel,size,num_blocks,seguru_us,cuda_us,cpu_us,gpu_cuda_ratio,gpu_cpu_speedup,seguru_gbps,cuda_gbps,cpu_gbps");
 
     cuda_ctx(0, |ctx, m| {
         for &(label, num_blocks) in &sizes {
@@ -118,12 +122,30 @@ fn main() {
                 ) as f64
             };
 
+            // CPU encrypt (single-threaded, timeout after 10s)
+            let cpu_enc_us: f64;
+            let cpu_start = Instant::now();
+            let mut cpu_blocks_done: u32 = 0;
+            for blk in 0..num_blocks {
+                let off = (blk as usize) * 16;
+                let block: [u8; 16] = plaintext[off..off + 16].try_into().unwrap();
+                let _ = aes_common::aes128_encrypt_block(&block, &enc_keys);
+                cpu_blocks_done += 1;
+                if cpu_blocks_done % 4096 == 0 && cpu_start.elapsed().as_secs() >= 10 {
+                    break;
+                }
+            }
+            let elapsed_us = cpu_start.elapsed().as_nanos() as f64 / 1000.0;
+            // Extrapolate if timed out
+            cpu_enc_us = elapsed_us * (num_blocks as f64 / cpu_blocks_done as f64);
+
             results.push(BenchResult {
                 kernel: "encrypt_ttable".into(),
                 size_label: label.into(),
                 num_blocks,
                 seguru_us: seguru_enc_us,
                 cuda_us: cuda_enc_us,
+                cpu_us: cpu_enc_us,
             });
 
             // ── SeGuRu T-table decrypt ──
@@ -173,12 +195,29 @@ fn main() {
                 ) as f64
             };
 
+            // CPU decrypt (single-threaded, timeout after 10s)
+            let cpu_dec_us: f64;
+            let cpu_start = Instant::now();
+            let mut cpu_blocks_done: u32 = 0;
+            for blk in 0..num_blocks {
+                let off = (blk as usize) * 16;
+                let block: [u8; 16] = encrypted_bytes[off..off + 16].try_into().unwrap();
+                let _ = aes_common::aes128_decrypt_block(&block, &dec_keys);
+                cpu_blocks_done += 1;
+                if cpu_blocks_done % 4096 == 0 && cpu_start.elapsed().as_secs() >= 10 {
+                    break;
+                }
+            }
+            let elapsed_us = cpu_start.elapsed().as_nanos() as f64 / 1000.0;
+            cpu_dec_us = elapsed_us * (num_blocks as f64 / cpu_blocks_done as f64);
+
             results.push(BenchResult {
                 kernel: "decrypt_ttable".into(),
                 size_label: label.into(),
                 num_blocks,
                 seguru_us: seguru_dec_us,
                 cuda_us: cuda_dec_us,
+                cpu_us: cpu_dec_us,
             });
         }
     });
@@ -186,40 +225,47 @@ fn main() {
     // Print CSV results
     for r in &results {
         println!(
-            "{},{},{},{:.2},{:.2},{:.4},{:.2},{:.2}",
+            "{},{},{},{:.2},{:.2},{:.2},{:.4},{:.1},{:.2},{:.2},{:.4}",
             r.kernel,
             r.size_label,
             r.num_blocks,
             r.seguru_us,
             r.cuda_us,
+            r.cpu_us,
             r.ratio(),
+            r.speedup_vs_cpu(),
             r.throughput_gbps(r.seguru_us),
             r.throughput_gbps(r.cuda_us),
+            r.throughput_gbps(r.cpu_us),
         );
     }
 
     // Print summary table to stderr
-    eprintln!("\n{:-<90}", "");
+    eprintln!("\n{:-<120}", "");
     eprintln!(
-        "{:<20} {:>8} {:>12} {:>12} {:>8} {:>12} {:>12}",
-        "Kernel", "Blocks", "SeGuRu(µs)", "CUDA(µs)", "Ratio", "SeGuRu GB/s", "CUDA GB/s"
+        "{:<18} {:>8} {:>12} {:>12} {:>12} {:>8} {:>10} {:>10} {:>10} {:>10}",
+        "Kernel", "Blocks", "SeGuRu(µs)", "CUDA(µs)", "CPU(µs)", "SG/CUDA", "CPU→SG×", "SG GB/s", "CUDA GB/s", "CPU GB/s"
     );
-    eprintln!("{:-<90}", "");
+    eprintln!("{:-<120}", "");
     for r in &results {
         eprintln!(
-            "{:<20} {:>8} {:>12.2} {:>12.2} {:>8.4} {:>12.2} {:>12.2}",
+            "{:<18} {:>8} {:>12.2} {:>12.2} {:>12.0} {:>8.4} {:>10.1} {:>10.2} {:>10.2} {:>10.4}",
             r.kernel,
             r.num_blocks,
             r.seguru_us,
             r.cuda_us,
+            r.cpu_us,
             r.ratio(),
+            r.speedup_vs_cpu(),
             r.throughput_gbps(r.seguru_us),
             r.throughput_gbps(r.cuda_us),
+            r.throughput_gbps(r.cpu_us),
         );
     }
-    eprintln!("{:-<90}", "");
+    eprintln!("{:-<120}", "");
 
-    // Average ratio
     let avg_ratio: f64 = results.iter().map(|r| r.ratio()).sum::<f64>() / results.len() as f64;
+    let avg_speedup: f64 = results.iter().map(|r| r.speedup_vs_cpu()).sum::<f64>() / results.len() as f64;
     eprintln!("Average SeGuRu/CUDA ratio: {:.4}×", avg_ratio);
+    eprintln!("Average GPU speedup vs CPU: {:.1}×", avg_speedup);
 }

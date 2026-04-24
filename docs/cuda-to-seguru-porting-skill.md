@@ -323,7 +323,12 @@ aligned (CUDA guarantees this for `cudaMalloc`-allocated tensors).
   vectorizable component-wise as `acc += v.x+v.y+v.z+v.w`; it's the
   *exp/update* that can't be).
 - Kernel already compute-bound (GEMM inner loop reading smem) — Float4
-  helps memory-bound kernels, not compute-bound ones.
+  helps memory-bound kernels, not compute-bound ones. Caveat: GEMM's
+  *global*-memory tile loads benefit from Float4 even though the compute
+  is bound by smem/FMA — see the GEMM Recipe "Non-negotiable #4" for the
+  measured ~14% win. "Compute-bound" here means the **smem `tile_a[idx]`
+  broadcast reads** inside the kk-loop, which `reshape_map!([4]|…)` already
+  compiles to `ld.shared.v4.f32`; those should stay scalar-indexed.
 
 ### Pitfall: "one scalar per block" output scope
 
@@ -724,13 +729,20 @@ on COMPUTE phase" above).
 
 **Signature and skeleton**:
 
+Kernel takes `x` / `w` as `&[Float4]` (not `&[f32]`). Each thread's 4-wide
+K slice — `a_col = (tid & 1) << 2` — is always 16-byte aligned because
+`BK=8` and `K` is a multiple of `BK`. Using `&[Float4]` makes the codegen
+emit `ld.global.v4.f32` for the tile load (one 128-bit load replaces four
+scalar 32-bit loads). Measured: ~14% end-to-end on every fused-GEMM in
+Phase C. See "Non-negotiables" #4 below.
+
 ```rust
 const BM: u32 = 128; const BN: u32 = 128; const BK: u32 = 8;
 const TM: u32 = 8;   const TN: u32 = 8;
 const BDIM_X: u32 = 16; const BDIM_Y: u32 = 16;
 
 #[gpu::cuda_kernel]
-pub fn gemm_kernel(x: &[f32], w: &[f32], y: &mut [f32], K: u32) {
+pub fn gemm_kernel(x: &[Float4], w: &[Float4], y: &mut [f32], K: u32) {
     let tx = thread_id::<DimX>();  let ty = thread_id::<DimY>();
     let bm = block_id::<DimY>() * BM;
     let bn = block_id::<DimX>() * BN;
@@ -756,16 +768,14 @@ pub fn gemm_kernel(x: &[f32], w: &[f32], y: &mut [f32], K: u32) {
 
     let mut tstep = 0u32;
     while tstep < K / BK {
-        let k_base = tstep * BK;
+        // K_f4 = K/4 (row stride in Float4 units), k_base4 = tstep*(BK/4).
+        let k_base4 = tstep * (BK >> 2);
         {
             let mut ca = tile_a.chunk_mut(load_map);
-            let base = (bm + a_row) * K + k_base + a_col;
-            ca[0] = x[base as usize];
-            ca[1] = x[(base + 1) as usize];
-            ca[2] = x[(base + 2) as usize];
-            ca[3] = x[(base + 3) as usize];
+            let v: Float4 = x[((bm + a_row) * (K >> 2) + k_base4 + (a_col >> 2)) as usize];
+            ca[0] = v[0]; ca[1] = v[1]; ca[2] = v[2]; ca[3] = v[3];
         }
-        { /* same pattern for tile_b from `w` */ }
+        { /* same pattern for tile_b from `w`, with bn instead of bm */ }
         sync_threads();
 
         // Compute — fully `unroll!`ed so the 64-wide accumulator stays in regs.
@@ -797,6 +807,10 @@ pub fn gemm_kernel(x: &[f32], w: &[f32], y: &mut [f32], K: u32) {
 let gx = (N as u32) / BN;
 let gy = (M as u32) / BM;
 let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
+// Reinterpret f32 device views as Float4 views (one-liner, no realloc).
+let d_x4 = unsafe { &*(&d_x as *const _ as *const gpu_host::TensorView<'_, [Float4]>) };
+let d_w4 = unsafe { &*(&d_w as *const _ as *const gpu_host::TensorView<'_, [Float4]>) };
+gemm_kernel::launch(cfg, ctx, md, d_x4, d_w4, &mut d_y, kk).unwrap();
 ```
 
 **Non-negotiables**:
@@ -814,6 +828,16 @@ let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
    the same slot (broadcast) cannot be expressed as a disjoint partition, so
    these keep their `setp+selp` bounds check. The 8×8 register tile amortizes
    this cost (64 FMAs per shared load).
+4. **Take `x`/`w` as `&[Float4]`, not `&[f32]`** — four consecutive scalar
+   `ld.global.f32` per thread per K-tile will **not** be auto-coalesced into
+   a `ld.global.v4.f32` by the current SeGuRu codegen (tensor-view indexing
+   forces u32→u64 promotion per element, breaking the peephole). Using
+   `&[Float4]` emits the 128-bit load directly and drops the tile-load
+   `ld.global` count from 8 scalar to 2 vector ops — exactly matching
+   nvcc's PTX. This alone is ~14% end-to-end on every fused-GEMM port
+   (measured on Phase C: `gemm_add_relu` 22.9ms → 20.0ms, same for the
+   8 sibling kernels). The host-side reinterpret is zero-cost (no realloc,
+   no H2D copy); the device pointer is identical.
 
 **When to deviate**:
 
@@ -827,11 +851,15 @@ let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
   fused with a non-standard epilogue, for small sizes, or when precise FP32
   is required.
 
-**Measured**: this recipe puts SeGuRu at ~4.6× vs raw CUDA on Phase C
-GEMM problems (41 ms vs 9 ms on the K=N=8192 shape). The residual gap is
-structural — SeGuRu's bounds checks on smem compute reads — and matches
-the ~1.8× overhead measured on naive GEMM at N=512 ("Shared Memory Tiling"
-section above).
+**Measured**: with all four non-negotiables applied (incl. Float4 global
+loads), this recipe lands SeGuRu at ~2.2× torch-eager on Phase C GEMM
+problems at `M=1024, K=N=8192` (~20 ms vs ~9 ms for hand-written CUDA
+and ~8.7 ms for torch eager). The residual gap to raw CUDA is
+structural — (a) SeGuRu's bounds checks on smem compute reads, and
+(b) address-arithmetic bloat from tensor-view indexing (SG emits ~70
+`add.s64` per tile iter vs nvcc's ~13). Both are codegen-level and
+uniform across every GEMM-class kernel; they're not something a kernel
+author can shrink further from Rust.
 
 ## Convolution Recipe
 

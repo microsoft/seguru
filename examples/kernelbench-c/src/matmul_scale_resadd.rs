@@ -1,3 +1,12 @@
+//! 40_Matmul_Scaling_ResidualAdd — SeGuRu port of PyTorch reference
+//! `examples/kernelbench-c/problems/40_Matmul_Scaling_ResidualAdd.py`.
+//!
+//! Regenerated against `docs/cuda-to-seguru-porting-skill.md` @ bf493b79
+//! (Phase D.1). GEMM Recipe (128×128×8 register-tiled). PyTorch computes
+//! `y = (x@W.T+b) * scale + (x@W.T+b)`; algebraically this is
+//! `(x@W.T+b) * (1+scale)`, fused as a single scalar multiply in the
+//! epilogue.
+//!
 //! 40_Matmul_Scaling_ResidualAdd — fused nn.Linear + scale + residual-add.
 //!
 //! PyTorch reference:

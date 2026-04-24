@@ -1,3 +1,13 @@
+//! 57_Conv2d_ReLU_HardSwish — SeGuRu port of PyTorch reference
+//! `examples/kernelbench-c/problems/57_Conv2d_ReLU_HardSwish.py`.
+//!
+//! Regenerated against `docs/cuda-to-seguru-porting-skill.md` @ bf493b79
+//! (Phase D.1). NOT using the Convolution Recipe's smem-patch tile: for
+//! Cin=8 each thread does only 72 FMADDs which is below the
+//! smem-amortization threshold (see skill-doc "When NOT to tile"). Uses
+//! direct 1-thread-per-output with Map2D chunk_mut over the flattened
+//! [B*Cout*Ho, Wo] output. ReLU + HardSwish are fused in the final store.
+//!
 //! 57_Conv2d_ReLU_HardSwish — fused nn.Conv2d + ReLU + HardSwish.
 //!
 //! PyTorch reference:

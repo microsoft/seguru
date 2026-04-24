@@ -1,3 +1,12 @@
+//! 1_Conv2D_ReLU_BiasAdd — SeGuRu port of PyTorch reference
+//! `examples/kernelbench-c/problems/1_Conv2D_ReLU_BiasAdd.py`.
+//!
+//! Regenerated against `docs/cuda-to-seguru-porting-skill.md` @ bf493b79
+//! (Phase D.1). Applies the Convolution Recipe (TILE_OUT=14, PATCH=16,
+//! CIN_CHUNK=4, BDIM=16×16, 4-slot reshape_map patch load). The inner
+//! 14×14 threads produce output; outer 60 threads participate only in
+//! the cooperative load. Epilogue fuses relu(acc + b1[co]) + b2[co].
+//!
 //! 1_Conv2D_ReLU_BiasAdd — fused `conv2d -> relu -> +extra_bias`.
 //!
 //! PyTorch reference:

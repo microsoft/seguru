@@ -1,9 +1,10 @@
-//! 29_Matmul_Mish_Mish — port of the hand-tuned CUDA kernel in
-//! `cuda/matmul_mish_mish.cu` to SeGuRu.
+//! 29_Matmul_Mish_Mish — SeGuRu port of PyTorch reference
+//! `examples/kernelbench-c/problems/29_Matmul_Mish_Mish.py`.
 //!
-//! PyTorch reference:
-//!     y = F.mish(F.mish(x @ W.T + b))
-//!     where mish(v) = v * tanh(softplus(v)) = v * tanh(log(1 + exp(v)))
+//! Regenerated against `docs/cuda-to-seguru-porting-skill.md` @ bf493b79
+//! (Phase D.1). GEMM Recipe (128×128×8 register-tiled) with epilogue
+//! `mish(mish(acc + bias))` where `mish(v) = v * tanh(log1p(exp(v)))`
+//! (numerically stable branch for v > 20).
 //!
 //! Shapes:
 //!     x: [M, K]

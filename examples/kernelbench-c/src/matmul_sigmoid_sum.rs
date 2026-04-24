@@ -1,3 +1,14 @@
+//! 56_Matmul_Sigmoid_Sum — SeGuRu port of PyTorch reference
+//! `examples/kernelbench-c/problems/56_Matmul_Sigmoid_Sum.py`.
+//!
+//! Regenerated against `docs/cuda-to-seguru-porting-skill.md` @ bf493b79
+//! (Phase D.1). Uses Row-Reduction Strategy (1-block-per-row) rather than
+//! the GEMM Recipe because the output is `[M, 1]` — materializing `[M, N]`
+//! would cost 16 MB of intermediate traffic. Per-block: TN=4 register
+//! accumulators sweep N in 1024-wide chunks; K is tiled via a 256-slot
+//! smem x-tile; per-row block reduction uses warp.redux(ReduxAdd) + smem
+//! cross-warp (Warp reductions section of skill doc).
+//!
 //! 56_Matmul_Sigmoid_Sum — fused nn.Linear + sigmoid + row-sum.
 //!
 //! PyTorch reference:

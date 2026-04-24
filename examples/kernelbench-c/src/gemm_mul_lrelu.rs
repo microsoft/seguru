@@ -1,5 +1,10 @@
-//! 12_Gemm_Multiply_LeakyReLU — port of the hand-tuned CUDA kernel in
-//! `cuda/gemm_mul_lrelu.cu` to SeGuRu.
+//! 12_Gemm_Multiply_LeakyReLU — SeGuRu port of the PyTorch reference
+//! `examples/kernelbench-c/problems/12_Gemm_Multiply_LeakyReLU.py`.
+//!
+//! Regenerated against `docs/cuda-to-seguru-porting-skill.md` @ bf493b79
+//! (Phase D.1). Body applies the skill doc's GEMM Recipe literally
+//! (BM=BN=128, BK=8, TM=TN=8, non-transposed smem tiles, 4-slot load_map,
+//! 6-axis out_map, fully unrolled compute loops).
 //!
 //! PyTorch reference:
 //!     y = F.leaky_relu((x @ W.T + b) * multiplier, 0.1)

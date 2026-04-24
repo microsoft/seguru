@@ -1,3 +1,10 @@
+//! 53_Gemm_Scaling_Hardtanh_GELU — SeGuRu port of PyTorch reference
+//! `examples/kernelbench-c/problems/53_Gemm_Scaling_Hardtanh_GELU.py`.
+//!
+//! Regenerated against `docs/cuda-to-seguru-porting-skill.md` @ bf493b79
+//! (Phase D.1). GEMM Recipe (128×128×8 register-tiled) with fused
+//! epilogue: scale → hardtanh(min,max) → tanh-approx GELU.
+//!
 //! 53_Gemm_Scaling_Hardtanh_GELU — fused nn.Linear + scaling + hardtanh + GELU.
 //!
 //! PyTorch reference:

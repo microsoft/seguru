@@ -1,8 +1,9 @@
-//! 63_Gemm_ReLU_Divide — port of the hand-tuned CUDA kernel in
-//! `cuda/gemm_relu_div.cu` to SeGuRu.
+//! 63_Gemm_ReLU_Divide — SeGuRu port of PyTorch reference
+//! `examples/kernelbench-c/problems/63_Gemm_ReLU_Divide.py`.
 //!
-//! PyTorch reference:
-//!     y = F.relu(x @ W.T + b) / divisor
+//! Regenerated against `docs/cuda-to-seguru-porting-skill.md` @ bf493b79
+//! (Phase D.1). GEMM Recipe (128×128×8 register-tiled) with epilogue
+//! `relu(acc + bias) * (1/divisor)`.
 //!
 //! Shapes:
 //!     x: [M, K], W: [N, K], b: [N], y: [M, N].

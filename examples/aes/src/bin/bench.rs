@@ -136,7 +136,7 @@ fn main() {
 
             // Warmup
             for _ in 0..WARMUP {
-                let config = gpu_host::gpu_config!(grid_size, 1, 1, block_size, 1, 1, 0);
+                let config = gpu_host::gpu_config!(grid_size, 1, 1, block_size, 1, 1, shared_bytes);
                 aes128_decrypt_ttable_kernel::launch(
                     config, ctx, m, &d_enc_input, &mut d_dec_output,
                     &d_dec_rk, &d_td, &d_inv_sbox, num_blocks,
@@ -145,7 +145,7 @@ fn main() {
             }
             let mut times = Vec::new();
             for _ in 0..ITERS {
-                let config = gpu_host::gpu_config!(grid_size, 1, 1, block_size, 1, 1, 0);
+                let config = gpu_host::gpu_config!(grid_size, 1, 1, block_size, 1, 1, shared_bytes);
                 let start = Instant::now();
                 aes128_decrypt_ttable_kernel::launch(
                     config, ctx, m, &d_enc_input, &mut d_dec_output,

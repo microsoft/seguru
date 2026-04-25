@@ -9,9 +9,11 @@ Correctness counts:
 - before: seguru_fc 12/12 correct, cuda 12/12 correct, hand seguru 12/12 correct
 - after:  seguru_fc 12/12 correct, cuda 12/12 correct, hand seguru 12/12 correct
 
-Geomean seguru_fc / cuda (lower is better):
-- before: 1.0329x
-- after:  1.0082x
+Geomean vs cuda (lower is better):
+- hand seguru before: 0.9968x
+- hand seguru after:  0.9971x
+- seguru_fc before:   1.0329x
+- seguru_fc after:    1.0082x
 
 Top remaining raw-CUDA parity gaps after refresh:
 1. gemm_relu_div:         1.0348x

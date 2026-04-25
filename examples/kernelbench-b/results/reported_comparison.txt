@@ -10,6 +10,7 @@ Summary
 -------
 Metric                                Before        After
 seguru_fc / cuda geomean              1.1497x       1.0077x
+hand seguru / cuda geomean            1.1900x       1.1898x
 seguru_fc correctness                 20/20         20/20
 seguru_fc avg speedup vs torch eager  1.10x         1.17x
 

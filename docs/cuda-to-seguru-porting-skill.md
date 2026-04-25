@@ -10,11 +10,11 @@ Current snapshot on A100 80GB (CUDA 13.2, `DISABLE_GPU_BOUND_CHECK=true`). Ratio
 
 | Suite | Reference | Scope | SeGuRu result |
 |---|---|---|---|
-| PolyBenchGPU (19 overlapping kernels) | `benchmarks/run_polybench_comparison.sh` | classic kernels | geomean **1.35×** including LU/GramSchmidt benchmark-method outliers; **1.13×** excluding them; 9/19 within 5%, 12/19 within 10% |
-| KernelBench-B full | raw custom CUDA | 20 L1 kernels | 20/20 correct; geomean **1.19×** hand SeGuRu, **1.15×** SeGuRu-from-CUDA |
-| KernelBench-C full | raw custom CUDA | 12 fused GEMM/conv/epilogue kernels | 12/12 correct; geomean **0.994×** hand SeGuRu, **1.028×** SeGuRu-from-CUDA |
+| PolyBenchGPU (19 overlapping kernels) | `benchmarks/run_polybench_comparison.sh` | classic kernels | corrected transfer contracts; geomean **1.167x**; 9/19 within 5%, 10/19 within 10% |
+| KernelBench-B full | raw custom CUDA | 20 L1 kernels | 20/20 correct; geomean **1.190x** hand SeGuRu, **1.008x** SeGuRu-from-CUDA |
+| KernelBench-C full | raw custom CUDA | 12 fused GEMM/conv/epilogue kernels | 12/12 correct; geomean **0.997x** hand SeGuRu, **1.008x** SeGuRu-from-CUDA |
 
-Use PyTorch eager as context only when it dispatches to cuBLAS/cuDNN/tensor cores. The primary SeGuRu target is parity with raw custom CUDA using the same algorithm. Current PolyBench raw logs are tracked in `benchmarks/cuda_results.txt` and `benchmarks/seguru_results.txt`; KernelBench summaries are in the Case Study sections below.
+Use PyTorch eager as context only when it dispatches to cuBLAS/cuDNN/tensor cores. The primary SeGuRu target is parity with raw custom CUDA using the same algorithm. Current benchmark summaries are tracked in `benchmarks/polybench_comparison_results.txt`, `examples/kernelbench-b/results/reported_comparison.txt`, and `examples/kernelbench-c/results/reported_comparison.txt`.
 
 ## Golden Rules
 
@@ -871,11 +871,16 @@ shared-memory patch if it changes the launch shape or leaves many threads idle.
 **Validated 3x3 no-padding pattern** (`conv_relu_biasadd`):
 
 - Use `BDIM_X = BDIM_Y = 16`, one output pixel per thread.
-- Launch `(Wo.div_ceil(16), Ho.div_ceil(16), B * Cout)`.
-- Guard edge threads with `wo < Wo && ho < Ho`.
-- Store through a small `ScopeUniqueMap` that maps valid `(x, y, z)` to
-  `(z * Ho + y) * Wo + x` and invalidates the edge tile. This avoids generic
-  `reshape_map` output-address reconstruction.
+- Match raw CUDA's output geometry:
+  - 3-D image grid: launch `(Wo.div_ceil(16), Ho.div_ceil(16), B * Cout)`;
+    `z = blockIdx.z`, `b = z / Cout`, `co = z % Cout`, and output offset is
+    `(z * Ho + ho) * Wo + wo`. Store through a `ScopeUniqueMap` that maps valid
+    `(wo, ho, z)` coordinates and invalidates edge-tile threads.
+  - Flattened row grid: launch `(Wo.div_ceil(16), (B * Cout * Ho).div_ceil(16), 1)`;
+    `row = blockIdx.y * 16 + threadIdx.y`, `bco = row / Ho`, `ho = row % Ho`,
+    `b = bco / Cout`, `co = bco % Cout`, and store with `Map2D::new(Wo)`.
+- Guard edge threads with `wo < Wo` plus either `ho < Ho` for the 3-D grid or
+  `row < B * Cout * Ho` for the flattened grid.
 - In the 3x3 body, row-slice once per input channel:
   `x0 = &x[x_ci..]`, `x1 = &x[x_ci + W..]`, `x2 = &x[x_ci + 2*W..]`, then emit
   the nine FMAs. Avoid recomputing full `((ci * H + ho + kh) * W + wo + kw)`
@@ -886,7 +891,9 @@ shared-memory patch if it changes the launch shape or leaves many threads idle.
 ran 26.6% more blocks. Only 196/256 threads produced outputs, and each channel
 slab added barriers. Replacing it with the direct 16x16 pattern plus row slices
 changed `conv_relu_biasadd` from 1.317x slower than raw CUDA to parity:
-`seguru=101.6 ms`, `cuda=102.0 ms`, `seguru_from_cuda=102.0 ms`.
+`seguru=103.2 ms`, `cuda=102.9 ms`, `seguru_from_cuda=103.5 ms`. Applying the
+same geometry rule to `conv_relu_hardswish` changed the SeGuRu-from-CUDA ratio
+from 1.312x to 0.986x.
 
 Use shared-memory input tiling only after measuring that it improves the raw
 CUDA algorithm you are matching. If it changes occupancy, block count, or active
@@ -1784,7 +1791,7 @@ Residual gap (raw CUDA still ~15–20% faster than SeGuRu): intrinsic
 SeGuRu codegen overhead (u32 vs usize, ptxas optimizations, etc.),
 not an LLM/skill-doc issue.
 
-### Phase R/S refresh: raw-CUDA parity status
+### Phase T refresh: corrected raw-CUDA parity status
 
 Refreshed benchmark command set:
 
@@ -1798,35 +1805,45 @@ Refreshed benchmark command set:
 | Metric | Result |
 |---|---:|
 | Correctly run rows | 19/19 |
-| Geomean SeGuRu/CUDA | 1.35x |
-| Geomean excluding LU + GramSchmidt benchmark-method outliers | 1.13x |
+| Geomean SeGuRu/CUDA | 1.167x |
 | Within 5% of raw CUDA | 9/19 |
-| Within 10% of raw CUDA | 12/19 |
+| Within 10% of raw CUDA | 10/19 |
 
 Tracked raw outputs: `benchmarks/cuda_results.txt` and
-`benchmarks/seguru_results.txt`. Caveat: `lu` is not a pure kernel-body
-comparison because the SeGuRu runner copies the full matrix D2H/H2D after every
-substep; `gramschm` also uses different host/device copy granularity between
-the two runners.
+`benchmarks/seguru_results.txt`; summary table:
+`benchmarks/polybench_comparison_results.txt`. The LU and GramSchmidt transfer
+contracts are now corrected, so the remaining gaps are no longer dismissed as
+host-copy mismatches.
 
-**KernelBench-B/C raw-CUDA parity priorities**:
+**KernelBench-B/C after the from-CUDA refresh**:
 
-| Suite | Problem | Worst SeGuRu/CUDA | Note |
+| Suite | Correct | SeGuRu/CUDA geomean | SeGuRu-from-CUDA/CUDA geomean |
+|---|---:|---:|---:|
+| KernelBench-B | 20/20 | 1.190x | 1.008x |
+| KernelBench-C | 12/12 | 0.997x | 1.008x |
+
+**Remaining raw-CUDA parity targets after Phase T**:
+
+| Suite | Problem | Current ratio vs CUDA | Note |
 |---|---|---:|---|
-| B | mse_loss | 3.859x | largest parity gap; raw CUDA is also much slower than PyTorch |
-| B | argmax_dim | 1.387x | reduction/index output path |
-| B | max_dim | 1.353x | reduction path |
-| C | conv_relu_hardswish | 1.307x | only SeGuRu-from-CUDA is slow; hand SeGuRu is faster than CUDA |
-| B | softmax | 1.243x | softmax-family kernel-body gap |
-| B | log_softmax | 1.232x | softmax-family kernel-body gap |
-| B | rms_norm | 1.179x | hand SeGuRu gap; from-CUDA near parity |
-| B | l2_norm | 1.165x | norm/reduction gap |
-| B | l1_norm | 1.162x | norm/reduction gap |
-| B | softplus | 1.133x | elementwise/transcendental gap |
-| B | layer_norm | 1.132x | norm gap |
+| PolyBench | jacobi1d | 1.838x | long stencil/time-step loop |
+| PolyBench | lu | 1.731x | sequential panel/trailing-update pipeline |
+| PolyBench | gramschm | 1.417x | multi-kernel orthogonalization pipeline |
+| PolyBench | corr | 1.328x | normalization + covariance-style reduction |
+| PolyBench | covar | 1.296x | covariance-style reduction |
+| KernelBench-B | l2_norm | 1.164x | norm/reduction gap |
+| KernelBench-B | l1_norm | 1.160x | norm/reduction gap |
+| KernelBench-B | mse_loss | 1.077x | remaining Float4 reduction gap |
+| KernelBench-B | sum_dim | 1.065x | reduction gap |
+| KernelBench-B | layer_norm | 1.059x | norm gap |
+| KernelBench-C | gemm_relu_div | 1.035x | minor GEMM epilogue/codegen gap |
+| KernelBench-C | matmul_scale_resadd | 1.030x | minor GEMM epilogue/codegen gap |
+| KernelBench-C | gemm_mul_lrelu | 1.030x | minor GEMM epilogue/codegen gap |
+| KernelBench-C | matmul_sub_mul_relu | 1.028x | minor GEMM epilogue/codegen gap |
+| KernelBench-C | gemm_add_relu | 1.027x | minor GEMM epilogue/codegen gap |
 
-KernelBench-C is now essentially at raw-CUDA parity overall: hand SeGuRu
-geomean 0.994x and SeGuRu-from-CUDA geomean 1.028x. The previous
-`conv_relu_biasadd` gap is fixed by the direct 16x16 recipe above:
-`seguru=103.9 ms`, `cuda=104.3 ms`, `seguru_from_cuda=104.1 ms` in the full
-refresh.
+The biggest automation lesson from the refresh is conservative: leave kernels
+that are already near parity alone, and only re-port a kernel when a repeatable
+recipe applies. For KernelBench-B that meant Float4 row/reduction paths; for
+KernelBench-C it meant replacing the stale 14x14 convolution patch tile with the
+direct 16x16 raw-CUDA geometry.

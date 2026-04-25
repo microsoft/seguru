@@ -22,8 +22,11 @@ pub fn radix_scan(pass_hist: &mut [u32], thread_blocks: u32) {
     let digit_offset = bid * thread_blocks;
 
     // Main loop: process full partitions
-    let mut i = tid;
-    while i < partitions_end {
+    // Use uniform loop variable so SeGuRu can verify all threads iterate equally
+    let num_full_partitions = partitions_end / block_dim;
+    let mut partition = 0u32;
+    while partition < num_full_partitions {
+        let i = partition * block_dim + tid;
         // Load from pass_hist into shared memory
         {
             let val = ph[(i + digit_offset) as usize];
@@ -78,8 +81,9 @@ pub fn radix_scan(pass_hist: &mut [u32], thread_blocks: u32) {
         reduction += *smem[(block_dim - 1) as usize];
         sync_threads();
 
-        i += block_dim;
+        partition += 1;
     }
+    let i = partitions_end + tid;
 
     // Tail handling: process remaining partial partition
     if i < thread_blocks {

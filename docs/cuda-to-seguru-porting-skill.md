@@ -2,19 +2,19 @@
 
 ## Overview
 
-This skill documents battle-tested strategies for porting CUDA C++ GPU kernels to SeGuRu (Safe GPU Rust). These patterns were validated by porting all 21 PolybenchGPU benchmarks plus 3 classic kernels, and cross-referenced with the production llm-rs codebase (GPT-2 training/inference in SeGuRu).
+This skill documents battle-tested strategies for porting CUDA C++ GPU kernels to SeGuRu (Safe GPU Rust). These patterns were validated on PolyBenchGPU, KernelBench, and the production llm-rs codebase (GPT-2 training/inference in SeGuRu).
 
 ## Performance Summary
 
-With idiomatic patterns applied, across the three case-study suites in this doc:
+Current snapshot on A100 80GB (CUDA 13.2, `DISABLE_GPU_BOUND_CHECK=true`). Ratios are SeGuRu / raw CUDA; lower is better.
 
 | Suite | Reference | Scope | SeGuRu result |
 |---|---|---|---|
-| PolybenchGPU (21 kernels) | hand-written CUDA | mix of compute + memory bound | geomean **~1.6×** CUDA; 5/19 ≤ 1.0×, 10/19 ≤ 2.0× |
-| KernelBench Level 1 Phase B.10 (10 kernels) | PyTorch eager / raw CUDA | elementwise, softmax, norms, reductions | avg **1.19×** PyTorch (same as `SeGuRu←CUDA` two-stage arm, after skill-doc updates) |
-| KernelBench Level 2 Phase C (8 kernels) | cuBLAS-TF32 via PyTorch | fused GEMM/Conv + epilogue | GEMM class: `SeGuRu v2` matches `SeGuRu←CUDA` within 1%; Conv: ~2.6× gap remains |
+| PolyBenchGPU (19 overlapping kernels) | `benchmarks/run_polybench_comparison.sh` | classic kernels | geomean **1.35×** including LU/GramSchmidt benchmark-method outliers; **1.13×** excluding them; 9/19 within 5%, 12/19 within 10% |
+| KernelBench-B full | raw custom CUDA | 20 L1 kernels | 20/20 correct; geomean **1.19×** hand SeGuRu, **1.15×** SeGuRu-from-CUDA |
+| KernelBench-C full | raw custom CUDA | 12 fused GEMM/conv/epilogue kernels | 12/12 correct; geomean **0.994×** hand SeGuRu, **1.028×** SeGuRu-from-CUDA |
 
-See the Case Study sections at the end of this doc for per-kernel numbers and methodology.
+Use PyTorch eager as context only when it dispatches to cuBLAS/cuDNN/tensor cores. The primary SeGuRu target is parity with raw custom CUDA using the same algorithm. Current PolyBench raw logs are tracked in `benchmarks/cuda_results.txt` and `benchmarks/seguru_results.txt`; KernelBench summaries are in the Case Study sections below.
 
 ## Golden Rules
 
@@ -27,6 +27,7 @@ See the Case Study sections at the end of this doc for per-kernel numbers and me
 7. **Row reductions need block- or warp-per-row, not 1-thread-per-row** — reusing the elementwise template (`gs=B.div_ceil(bs)`, `if row<B`) for `sum(x,dim=-1)`-style kernels underutilizes the GPU by 10–20×. See "Row-Reduction Strategy".
 8. **Host-side readback is NOT automatic** — after a kernel writes to a `TensorViewMut<[T]>` backed by a host vector, you must call `d_out.copy_to_host(&mut h_out).unwrap()` before reading or persisting `h_out`. Dropping the view does not trigger readback. Silent all-zeros output otherwise. See "Host-Side Patterns".
 9. **Port the algorithm before the idioms** — fuse multi-pass reductions (max+sum, mean+var, logsumexp) into one pass; pick vector width (Float4) before writing the loop; pick the tile size with register tiling before writing GEMM. Only then apply SeGuRu's chunk_mut / reshape_map / warp-redux patterns. A clean SeGuRu rendering of a bad algorithm will not reach parity.
+10. **Optimize against raw custom CUDA parity first** — PyTorch eager often measures library dispatch, not a comparable hand-written kernel. Treat PyTorch numbers as context unless the raw CUDA baseline is also fast.
 
 ## Kernel Signature Translation
 
@@ -864,106 +865,32 @@ author can shrink further from Rust.
 ## Convolution Recipe
 
 For 2-D convolution `y[B, Cout, Ho, Wo] = conv2d(x[B, Cin, H, W], W[Cout, Cin, Kh, Kw])`.
-Recipe validated by `examples/kernelbench-c/src/from_cuda/conv_relu_biasadd.rs`.
-Adding this recipe closed 25% of the gap on `conv_relu_biasadd` (336→268 ms);
-further closing requires adding register tiling on top (not yet in this doc).
+First match the raw CUDA kernel's thread geometry. Do not introduce a "safe"
+shared-memory patch if it changes the launch shape or leaves many threads idle.
 
-**Tile parameters (for 3×3 kernel, Ho = Wo = 126, Cin = 64):**
+**Validated 3x3 no-padding pattern** (`conv_relu_biasadd`):
 
-```
-TILE_OUT = 14                       // output pixels per block side
-PATCH    = TILE_OUT + Kh - 1 = 16   // input patch side per block
-BDIM_X = BDIM_Y = 16                // 256 threads/block (8 warps)
-CIN_CHUNK = 4                       // channel slab per smem refill
-```
+- Use `BDIM_X = BDIM_Y = 16`, one output pixel per thread.
+- Launch `(Wo.div_ceil(16), Ho.div_ceil(16), B * Cout)`.
+- Guard edge threads with `wo < Wo && ho < Ho`.
+- Store through a small `ScopeUniqueMap` that maps valid `(x, y, z)` to
+  `(z * Ho + y) * Wo + x` and invalidates the edge tile. This avoids generic
+  `reshape_map` output-address reconstruction.
+- In the 3x3 body, row-slice once per input channel:
+  `x0 = &x[x_ci..]`, `x1 = &x[x_ci + W..]`, `x2 = &x[x_ci + 2*W..]`, then emit
+  the nine FMAs. Avoid recomputing full `((ci * H + ho + kh) * W + wo + kw)`
+  addresses in the innermost loop.
 
-- `14 × 9 = 126 = Ho = Wo` → a 9×9 grid per `(bi, co)` cleanly partitions the
-  output with **no mid-tile masking**. Choose `TILE_OUT` so that
-  `TILE_OUT × gridDim.y == Ho`.
-- Only the inner `14 × 14 = 196` threads write output; the outer 60 threads
-  participate only in the cooperative smem load.
-- Patch smem size = `CIN_CHUNK × PATCH × PATCH × 4B = 4 KB/block` — leaves
-  headroom for multiple resident blocks per SM.
-- `256 × 4 = 1024 = PATCH_VOL` exactly, so the same
-  `reshape_map!([4] | [16, 16] => [i0, t0, t1])` from the GEMM Recipe works
-  verbatim for the patch load — each thread gets 4 contiguous smem slots.
+**Why not the old 14x14 smem patch?** It was memory-safe, but for
+`Ho=Wo=126` it launched a 9x9 block grid instead of raw CUDA's 8x8 grid, so it
+ran 26.6% more blocks. Only 196/256 threads produced outputs, and each channel
+slab added barriers. Replacing it with the direct 16x16 pattern plus row slices
+changed `conv_relu_biasadd` from 1.317x slower than raw CUDA to parity:
+`seguru=101.6 ms`, `cuda=102.0 ms`, `seguru_from_cuda=102.0 ms`.
 
-**Skeleton**:
-
-```rust
-let co = block_id::<DimZ>() % Cout;
-let bi = block_id::<DimZ>() / Cout;
-let h0 = block_id::<DimY>() * TILE_OUT;   // first output row
-let w0 = block_id::<DimX>() * TILE_OUT;   // first output col
-
-let mut smem_patch = GpuShared::<[f32; PATCH_VOL as usize]>::zero();
-let load_map = reshape_map!([4] | [16, 16] => layout: [i0, t0, t1]);
-
-let mut acc = 0.0f32; // per thread, one output pixel per inner iteration
-
-let num_refills = Cin / CIN_CHUNK;
-let mut rf: u32 = 0;
-while rf < num_refills {
-    let ci_base = rf * CIN_CHUNK;
-
-    // Cooperative load: fill [CIN_CHUNK × PATCH × PATCH] patch into smem.
-    {
-        let mut sp = smem_patch.chunk_mut(load_map);
-        // Each thread (tid = ty*16 + tx) loads 4 adjacent f32 of the patch.
-        // Compute global (ci, py, px) for the thread's 4-slot window and
-        // read 4 coalesced f32 from x. Patch is always inside [H, W] for
-        // the shape above — branchless load.
-        sp[0] = x[/* base       */];
-        sp[1] = x[/* base +  1  */];
-        sp[2] = x[/* base +  2  */];
-        sp[3] = x[/* base +  3  */];
-    }
-    sync_threads();
-
-    // Compute: each of the 14×14 active threads does CIN_CHUNK × Kh × Kw FMAs.
-    if ty < TILE_OUT && tx < TILE_OUT {
-        unroll! { for ci_off in 0..4usize {
-            unroll! { for kh in 0..3usize {
-                unroll! { for kw in 0..3usize {
-                    let xv = smem_patch[
-                        ci_off * PATCH_AREA as usize
-                        + (ty as usize + kh) * PATCH as usize
-                        + (tx as usize + kw)
-                    ];
-                    let wv = w[/* (co, ci_base + ci_off, kh, kw) */];
-                    acc += xv * wv;
-                }}
-            }}
-        }}
-    }
-
-    sync_threads();
-    rf += 1;
-}
-
-// Epilogue: fused relu/bias/… then store exactly one output per active thread.
-```
-
-**Non-negotiables**:
-
-1. **`TILE_OUT × gridDim == Ho/Wo`** (choose `TILE_OUT` to divide `Ho` evenly).
-   OOB-guarded threads work, but force the patch load onto a branchful path.
-2. **Patch size = `TILE_OUT + Kh − 1`**. Smaller gives OOB reads; larger
-   wastes smem.
-3. **`BDIM_X * BDIM_Y * 4 == PATCH_VOL`** so that the 4-slot
-   `reshape_map!([4] | [16, 16] => [i0, t0, t1])` partitions the patch
-   exactly. For other `TILE_OUT` values, re-derive the split and map.
-4. **Weight reads come from gmem, not smem** — `w[co, ci, kh, kw]` is
-   broadcast across the block per refill so L1/L2 serves them. Putting W
-   in smem too wastes space without reuse benefit.
-5. **`unroll!` the kh / kw / ci_off inner loops** so the FMA chain becomes
-   a straight-line sequence.
-
-**Remaining gap to raw CUDA**: ~2.6× as of Phase C.2. The next optimization
-is register tiling on the output side (each thread computes an N×M patch of
-outputs instead of 1), reusing each patch load across multiple output pixels.
-Not yet documented here; follow the GEMM Recipe's register-tile pattern,
-adapted to the conv access pattern.
+Use shared-memory input tiling only after measuring that it improves the raw
+CUDA algorithm you are matching. If it changes occupancy, block count, or active
+thread fraction, re-check ptxas/SASS before keeping it.
 
 ## Softmax Recipe
 
@@ -1796,10 +1723,11 @@ The CUDA intermediate (Stage 1) is no longer needed for the GEMM class
 once the skill doc contains a prescriptive tile recipe — LLMs reliably
 pick the right tile geometry when it's spelled out explicitly.
 
-For convolution: the `conv_relu_biasadd` gap closed 25% (336→268 ms)
-purely from the Convolution Recipe's shared-mem input tile. Raw CUDA
-at 102 ms still uses register tiling on top — adding a "conv +
-register tile" subsection would close the remaining ~2.6× gap.
+For convolution (historical C.2): the shared-mem input tile closed 25%
+of the `conv_relu_biasadd` gap (336→268 ms), but still lost badly to raw
+CUDA. This was later superseded by Phase R: matching raw CUDA's direct
+16x16 one-output-per-thread geometry plus row-sliced 3x3 FMAs reached
+raw-CUDA parity.
 
 Methodology note: no other code changes between v1 and v2. Same
 cuBLAS/PyTorch versions, same CUDA arm, same SeGuRu←CUDA arm, same
@@ -1856,3 +1784,49 @@ Residual gap (raw CUDA still ~15–20% faster than SeGuRu): intrinsic
 SeGuRu codegen overhead (u32 vs usize, ptxas optimizations, etc.),
 not an LLM/skill-doc issue.
 
+### Phase R/S refresh: raw-CUDA parity status
+
+Refreshed benchmark command set:
+
+- PolyBench: `benchmarks/run_polybench_comparison.sh`
+- KernelBench L1: `examples/kernelbench/python/driver.py`
+- KernelBench-B: `examples/kernelbench-b/python/compare2.py`
+- KernelBench-C: `examples/kernelbench-c/python/compare.py`
+
+**PolyBenchGPU (19 overlapping CUDA/SeGuRu kernels)**:
+
+| Metric | Result |
+|---|---:|
+| Correctly run rows | 19/19 |
+| Geomean SeGuRu/CUDA | 1.35x |
+| Geomean excluding LU + GramSchmidt benchmark-method outliers | 1.13x |
+| Within 5% of raw CUDA | 9/19 |
+| Within 10% of raw CUDA | 12/19 |
+
+Tracked raw outputs: `benchmarks/cuda_results.txt` and
+`benchmarks/seguru_results.txt`. Caveat: `lu` is not a pure kernel-body
+comparison because the SeGuRu runner copies the full matrix D2H/H2D after every
+substep; `gramschm` also uses different host/device copy granularity between
+the two runners.
+
+**KernelBench-B/C raw-CUDA parity priorities**:
+
+| Suite | Problem | Worst SeGuRu/CUDA | Note |
+|---|---|---:|---|
+| B | mse_loss | 3.859x | largest parity gap; raw CUDA is also much slower than PyTorch |
+| B | argmax_dim | 1.387x | reduction/index output path |
+| B | max_dim | 1.353x | reduction path |
+| C | conv_relu_hardswish | 1.307x | only SeGuRu-from-CUDA is slow; hand SeGuRu is faster than CUDA |
+| B | softmax | 1.243x | softmax-family kernel-body gap |
+| B | log_softmax | 1.232x | softmax-family kernel-body gap |
+| B | rms_norm | 1.179x | hand SeGuRu gap; from-CUDA near parity |
+| B | l2_norm | 1.165x | norm/reduction gap |
+| B | l1_norm | 1.162x | norm/reduction gap |
+| B | softplus | 1.133x | elementwise/transcendental gap |
+| B | layer_norm | 1.132x | norm gap |
+
+KernelBench-C is now essentially at raw-CUDA parity overall: hand SeGuRu
+geomean 0.994x and SeGuRu-from-CUDA geomean 1.028x. The previous
+`conv_relu_biasadd` gap is fixed by the direct 16x16 recipe above:
+`seguru=103.9 ms`, `cuda=104.3 ms`, `seguru_from_cuda=104.1 ms` in the full
+refresh.

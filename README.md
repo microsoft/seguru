@@ -38,6 +38,12 @@ cd crates
 cargo build
 ```
 
+3. Install the tool before running casestudies
+
+```bash
+cargo install --path ./crates/rustc-gpu
+```
+
 Refer to [install](doc/install.md) for more information about how to build the tool.
 
 ## Examples

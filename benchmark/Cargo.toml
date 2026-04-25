@@ -48,7 +48,7 @@ llvm = ["llmc/llvm"]
 
 [dev-dependencies]
 # depends on llvm feature to enable llvm feature
-llmc = {path = "../llm-rs/rust/llmc"}
+llmc = {path = "../casestudies/llm-rs/rust/llmc"}
 llm-rs-gpu = {path = "../examples/llm-rs-gpu"}
 gpu_host = {path = "../crates/gpu-host"}
 gpu = {path = "../crates/gpu"}

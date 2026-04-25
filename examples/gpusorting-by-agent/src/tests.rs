@@ -1,99 +1,164 @@
-extern crate alloc;
+#[cfg(test)]
+mod sort_tests {
+    use gpu_host::cuda_ctx;
 
-use alloc::vec;
-use alloc::vec::Vec;
+    use crate::{
+        DOWNSWEEP_THREADS, PART_SIZE, RADIX, RADIX_LOG, RADIX_PASSES, SCAN_THREADS,
+        UPSWEEP_THREADS, BIN_PART_SIZE,
+    };
 
-use super::*;
-use gpu_host::cuda_ctx;
-use rand::Rng;
+    // ============================================================================
+    // Orchestrator: dispatch_radix_sort (host-side)
+    //
+    // CUDA reference: DeviceRadixSortDispatcher.cuh
+    //   cudaMemset(globalHistogram, 0, sizeof(uint32_t) * RADIX * RADIX_PASSES);
+    //   for (uint32_t radixShift = 0; radixShift < 32; radixShift += RADIX_LOG) {
+    //       Upsweep<<<threadBlocks, 128, ...>>>(sort, globalHist, passHist, size, radixShift);
+    //       Scan<<<RADIX, 128, ...>>>(passHist, threadBlocks);
+    //       DownsweepKeysOnly<<<threadBlocks, 512, ...>>>(sort, alt, globalHist, passHist, ...);
+    //       swap(sort, alt);
+    //   }
+    // ============================================================================
 
-fn run_sort(input: &[u32]) -> Vec<u32> {
-    let n = input.len() as u32;
-    let thread_blocks = (n + PART_SIZE - 1) / PART_SIZE;
-    let hist_size = (RADIX * thread_blocks) as usize;
+    fn run_sort(input: &mut [u32]) {
+        cuda_ctx(0, |ctx, m| {
+            let size = input.len() as u32;
+            let thread_blocks = (size + PART_SIZE - 1) / PART_SIZE;
+            let global_hist_len = (RADIX * RADIX_PASSES) as usize;
+            let pass_hist_len = (RADIX * thread_blocks) as usize;
 
-    let mut result = input.to_vec();
-    let mut alt = vec![0u32; n as usize];
-    let mut global_hist = vec![0u32; (RADIX * RADIX_PASSES) as usize];
-    let mut pass_hist = vec![0u32; hist_size];
+            let mut h_global_hist = vec![0u32; global_hist_len];
+            let mut h_pass_hist = vec![0u32; pass_hist_len];
+            let mut h_alt = vec![0u32; input.len()];
 
-    cuda_ctx(0, |ctx, m| {
-        let mut d_sort = ctx.new_tensor_view(result.as_mut_slice()).expect("alloc sort");
-        let mut d_alt = ctx.new_tensor_view(alt.as_mut_slice()).expect("alloc alt");
-        let mut d_global = ctx.new_tensor_view(global_hist.as_mut_slice()).expect("alloc ghist");
-        let mut d_pass = ctx.new_tensor_view(pass_hist.as_mut_slice()).expect("alloc phist");
+            let mut d_data = ctx.new_tensor_view::<[u32]>(input).expect("alloc data");
+            let mut d_alt = ctx.new_tensor_view::<[u32]>(&h_alt).expect("alloc alt");
+            let mut d_global_hist =
+                ctx.new_tensor_view::<[u32]>(&h_global_hist).expect("alloc global_hist");
+            let mut d_pass_hist =
+                ctx.new_tensor_view::<[u32]>(&h_pass_hist).expect("alloc pass_hist");
 
-        dispatch_radix_sort(ctx, m, &mut d_sort, &mut d_alt, &mut d_global, &mut d_pass, n);
+            for pass in 0..RADIX_PASSES {
+                let radix_shift = pass * RADIX_LOG;
 
-        d_sort.copy_to_host(&mut result).expect("copy back");
-    });
+                // Zero pass histogram each pass
+                h_pass_hist.iter_mut().for_each(|v| *v = 0);
+                let mut d_pass_hist_fresh =
+                    ctx.new_tensor_view::<[u32]>(&h_pass_hist).expect("alloc pass_hist");
 
-    result
-}
+                // Ping-pong: even passes sort→alt, odd passes alt→sort
+                // 1. Upsweep
+                let upsweep_smem = RADIX * 2 * 4; // 2048 bytes
+                let upsweep_config =
+                    gpu_host::gpu_config!(thread_blocks, 1, 1, UPSWEEP_THREADS, 1, 1, upsweep_smem);
+                if pass % 2 == 0 {
+                    crate::upsweep::radix_upsweep::launch(
+                        upsweep_config, ctx, m,
+                        &d_data, &mut d_global_hist, &mut d_pass_hist_fresh, size, radix_shift,
+                    ).expect("upsweep launch failed");
+                } else {
+                    crate::upsweep::radix_upsweep::launch(
+                        upsweep_config, ctx, m,
+                        &d_alt, &mut d_global_hist, &mut d_pass_hist_fresh, size, radix_shift,
+                    ).expect("upsweep launch failed");
+                }
 
-fn is_sorted(data: &[u32]) -> bool {
-    data.windows(2).all(|w| w[0] <= w[1])
-}
+                // 2. Scan
+                let scan_smem = SCAN_THREADS * 4; // 512 bytes
+                let scan_config =
+                    gpu_host::gpu_config!(RADIX, 1, 1, SCAN_THREADS, 1, 1, scan_smem);
+                crate::scan::radix_scan::launch(
+                    scan_config, ctx, m, &mut d_pass_hist_fresh, thread_blocks,
+                ).expect("scan launch failed");
 
-fn is_permutation(a: &[u32], b: &[u32]) -> bool {
-    if a.len() != b.len() {
-        return false;
+                // 3. Downsweep
+                let downsweep_smem = (BIN_PART_SIZE + RADIX) * 4; // 31744 bytes
+                let downsweep_config =
+                    gpu_host::gpu_config!(thread_blocks, 1, 1, DOWNSWEEP_THREADS, 1, 1, downsweep_smem);
+                if pass % 2 == 0 {
+                    crate::downsweep::radix_downsweep::launch(
+                        downsweep_config, ctx, m,
+                        &d_data, &mut d_alt, &d_global_hist, &d_pass_hist_fresh, size, radix_shift,
+                    ).expect("downsweep launch failed");
+                } else {
+                    crate::downsweep::radix_downsweep::launch(
+                        downsweep_config, ctx, m,
+                        &d_alt, &mut d_data, &d_global_hist, &d_pass_hist_fresh, size, radix_shift,
+                    ).expect("downsweep launch failed");
+                }
+
+                d_pass_hist = d_pass_hist_fresh;
+            }
+
+            // After 4 passes (even), result is in d_data
+            d_data.copy_to_host(input).expect("copy back failed");
+        });
     }
-    let mut sa = a.to_vec();
-    let mut sb = b.to_vec();
-    sa.sort();
-    sb.sort();
-    sa == sb
-}
 
-#[test]
-fn test_sort_small_random() {
-    let mut rng = rand::rng();
-    let input: Vec<u32> = (0..PART_SIZE).map(|_| rng.random::<u32>()).collect();
-    let result = run_sort(&input);
-    assert!(is_sorted(&result), "Result is not sorted");
-    assert!(is_permutation(&input, &result), "Not a permutation");
-}
+    #[test]
+    fn test_sort_small_sequential() {
+        let mut data: Vec<u32> = (0..64).rev().collect();
+        let mut expected = data.clone();
+        expected.sort();
+        run_sort(&mut data);
+        assert_eq!(data, expected);
+    }
 
-#[test]
-fn test_sort_already_sorted() {
-    let input: Vec<u32> = (0..PART_SIZE).collect();
-    let result = run_sort(&input);
-    assert!(is_sorted(&result));
-    assert_eq!(result, input);
-}
+    #[test]
+    fn test_sort_small_random() {
+        let mut data: Vec<u32> = vec![
+            42, 17, 93, 5, 67, 31, 88, 12, 55, 73, 1, 99, 23, 45, 8, 76, 34, 61, 0, 50, 28, 85,
+            14, 69, 3, 92, 37, 58, 81, 19, 44, 100,
+        ];
+        let mut expected = data.clone();
+        expected.sort();
+        run_sort(&mut data);
+        assert_eq!(data, expected);
+    }
 
-#[test]
-fn test_sort_reverse() {
-    let input: Vec<u32> = (0..PART_SIZE).rev().collect();
-    let result = run_sort(&input);
-    assert!(is_sorted(&result));
-}
+    #[test]
+    fn test_sort_already_sorted() {
+        let mut data: Vec<u32> = (0..128).collect();
+        let expected = data.clone();
+        run_sort(&mut data);
+        assert_eq!(data, expected);
+    }
 
-#[test]
-fn test_sort_all_same() {
-    let input = vec![42u32; PART_SIZE as usize];
-    let result = run_sort(&input);
-    assert!(is_sorted(&result));
-    assert_eq!(result, input);
-}
+    #[test]
+    fn test_sort_all_same() {
+        let mut data = vec![42u32; 256];
+        let expected = data.clone();
+        run_sort(&mut data);
+        assert_eq!(data, expected);
+    }
 
-#[test]
-fn test_sort_non_multiple_size() {
-    let mut rng = rand::rng();
-    let n = PART_SIZE + 123;
-    let input: Vec<u32> = (0..n).map(|_| rng.random::<u32>()).collect();
-    let result = run_sort(&input);
-    assert!(is_sorted(&result), "Non-multiple: not sorted");
-    assert!(is_permutation(&input, &result), "Non-multiple: not permutation");
-}
+    #[test]
+    fn test_sort_large_random() {
+        let n = 8192;
+        let mut data: Vec<u32> = (0..n as u32).map(|i: u32| i.wrapping_mul(2654435761u32) & 0xFFFF).collect();
+        let mut expected = data.clone();
+        expected.sort();
+        run_sort(&mut data);
+        assert_eq!(data, expected);
+    }
 
-#[test]
-fn test_sort_two_partitions() {
-    let mut rng = rand::rng();
-    let n = PART_SIZE * 2;
-    let input: Vec<u32> = (0..n).map(|_| rng.random::<u32>()).collect();
-    let result = run_sort(&input);
-    assert!(is_sorted(&result), "Two partitions: not sorted");
-    assert!(is_permutation(&input, &result), "Two partitions: not permutation");
+    #[test]
+    fn test_sort_powers_of_two() {
+        let mut data: Vec<u32> = (0..32).map(|i| 1u32 << (i % 32)).collect();
+        let mut expected = data.clone();
+        expected.sort();
+        run_sort(&mut data);
+        assert_eq!(data, expected);
+    }
+
+    #[test]
+    fn test_sort_multi_block() {
+        // 16384 > PART_SIZE(7680), exercises multi-block upsweep/downsweep
+        let n = 16384u32;
+        let mut data: Vec<u32> = (0..n).map(|i| i.wrapping_mul(2654435761u32)).collect();
+        let mut expected = data.clone();
+        expected.sort();
+        run_sort(&mut data);
+        assert_eq!(data, expected);
+    }
 }

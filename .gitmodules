@@ -1,3 +1,6 @@
 [submodule "llm-rs"]
 	path = llm-rs
 	url = git@github.com:MSRSSP/llm-rs.git
+[submodule "examples/gpusorting-by-agent/cuda-ref"]
+	path = examples/gpusorting-by-agent/cuda-ref
+	url = https://github.com/b0nes164/GPUSorting.git

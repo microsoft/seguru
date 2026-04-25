@@ -1,12 +1,29 @@
 use gpu::prelude::*;
 use gpu::CacheStreamLoadStore;
 
-// kernel2: q[i*nj+k] = a[i*nj+k] / r_kk
+// kernel1: r[k*nj+k] = sqrt(sum_i(a[i*nj+k]^2))
+#[gpu::cuda_kernel]
+pub fn gramschm_kernel1(a: &[f32], r_kk: &mut [f32], ni: u32, nj: u32, k: u32) {
+    let mut r_kk = chunk_mut(r_kk, MapContinuousLinear::new(1));
+    let tid = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    if tid == 0 {
+        let mut nrm = 0.0f32;
+        let mut i: u32 = 0;
+        while i < ni {
+            let value = a[(i * nj + k) as usize].ldcs();
+            nrm += value * value;
+            i += 1;
+        }
+        r_kk[0] = nrm.sqrt();
+    }
+}
+
+// kernel2: q[i*nj+k] = a[i*nj+k] / r[k*nj+k]
 // Launch full ni*nj grid, only column k threads write
 #[gpu::cuda_kernel]
 pub fn gramschm_kernel2(
     a: &[f32],
-    r_kk: f32,
+    r: &[f32],
     q: &mut [f32],
     nj: u32,
     ni: u32,
@@ -16,7 +33,7 @@ pub fn gramschm_kernel2(
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i < ni && j == k {
-        q[(0, 0)] = a[(i * nj + k) as usize] / r_kk;
+        q[(0, 0)] = a[(i * nj + k) as usize] / r[(k * nj + k) as usize];
     }
 }
 
@@ -120,18 +137,24 @@ mod tests {
             let block_size: u32 = 16;
 
             for k in 0..nj {
-                // kernel1 on CPU: r[k][k] = sqrt(sum_i(a[i*nj+k]^2))
-                let mut h_a_tmp = vec![0.0f32; ni * nj];
-                d_a.copy_to_host(&mut h_a_tmp).expect("copy a to host");
-                let mut nrm = 0.0f32;
-                for i in 0..ni {
-                    nrm += h_a_tmp[i * nj + k] * h_a_tmp[i * nj + k];
+                // kernel1: r[k][k] = sqrt(sum_i(a[i*nj+k]^2)) on the GPU
+                {
+                    let diag = k * nj + k;
+                    let (_, mut diag_and_after) = d_r.split_at_mut(diag);
+                    let (mut r_kk, _) = diag_and_after.split_at_mut(1);
+                    let config = gpu_host::gpu_config!(1, 1, 1, 1, 1, 1, 0);
+                    gramschm_kernel1::launch(
+                        config,
+                        ctx,
+                        m_module,
+                        &d_a,
+                        &mut r_kk,
+                        ni as u32,
+                        nj as u32,
+                        k as u32,
+                    )
+                    .expect("kernel1 failed");
                 }
-                // Sync h_r_gpu from device to preserve kernel3a results
-                d_r.copy_to_host(&mut h_r_gpu).expect("sync r from device");
-                h_r_gpu[k * nj + k] = nrm.sqrt();
-                d_r.copy_from_host(&h_r_gpu).expect("copy r to device");
-                let r_kk = h_r_gpu[k * nj + k];
 
                 // kernel2: q[:,k] = a[:,k] / r_kk — full ni*nj grid, only col k writes
                 let grid_x = (nj as u32 + block_size - 1) / block_size;
@@ -139,7 +162,7 @@ mod tests {
                 let config =
                     gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
                 gramschm_kernel2::launch(
-                    config, ctx, m_module, &d_a, r_kk, &mut d_q, nj as u32, ni as u32, k as u32,
+                    config, ctx, m_module, &d_a, &d_r, &mut d_q, nj as u32, ni as u32, k as u32,
                 )
                 .expect("kernel2 failed");
 

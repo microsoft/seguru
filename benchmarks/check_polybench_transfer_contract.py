@@ -178,7 +178,7 @@ def match_line_index(block: Block, match: re.Match[str], group: str = "method") 
 
 def lu_benchmark_full_matrix_sync() -> Finding | None:
     path, text = read_source("examples/bench-polybench/src/main.rs")
-    lu_marker = text.index("// --- lu ---")
+    lu_marker = text.index("// --- lu (N=")
     timed_start = text.index("let start = Instant::now();", lu_marker)
     k_loop = require_block(path, text, r"for\s+k\s+in\s+0\.\.n\s*\{", timed_start)
 
@@ -249,7 +249,7 @@ def gramschmidt_cuda_scalar_norm_copy() -> Evidence | None:
 
 def gramschmidt_seguru_benchmark_whole_matrix_norm_copy() -> Evidence | None:
     path, text = read_source("examples/bench-polybench/src/main.rs")
-    gramschm_marker = text.index("// --- gramschm")
+    gramschm_marker = text.index("// --- gramschm (NI=")
     timed_start = text.index("let start = Instant::now();", gramschm_marker)
     iter_loop = require_block(path, text, r"for\s+_\s+in\s+0\.\.iters\s*\{", timed_start)
     k_loop = require_block(path, text, r"for\s+k\s+in\s+0\.\.nj\s*\{", iter_loop.body_start)

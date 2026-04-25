@@ -123,7 +123,7 @@ pub fn gemm_add_relu_kernel(
         [2, 8] | [16, grid_dim::<DimX>(), 16, grid_dim::<DimY>()]
         => layout: [i0, t0, t1, i1, t2, t3]
     );
-    let mut y_chunk = chunk_mut(y, out_map);
+    let mut y_tile = chunk_mut(y, out_map).open_tile();
 
     unroll! { for i in 0..8 {
         let mut o0 = Float4::default();
@@ -138,8 +138,9 @@ pub fn gemm_add_relu_kernel(
             if v < 0.0 { v = 0.0; }
             o1[j] = v;
         }}
-        y_chunk[(0u32, i as u32)] = o0;
-        y_chunk[(1u32, i as u32)] = o1;
+        let mut row = y_tile.row_mut(i as u32);
+        row[0u32] = o0;
+        row[1u32] = o1;
     }}
 }
 

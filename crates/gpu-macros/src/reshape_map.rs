@@ -442,6 +442,97 @@ pub(crate) fn map_reshape_params(tokens: TokenStream) -> TokenStream {
         let tys = vec![quote_spanned! { span => u32 }; local_id_len];
         quote_spanned! { span => (#(#tys),*) }
     };
+    let gen_map_with_rows_impl = if local_id_len == 2 {
+        let row_ident = Ident::new("row", span);
+        let col_ident = Ident::new("col", span);
+        let row_offset_ident = Ident::new("row_offset", span);
+        let row_valid_ident = Ident::new("row_valid", span);
+        let col_offset_ident = Ident::new("col_offset", span);
+        let col_valid_ident = Ident::new("col_valid", span);
+        let gen_lid_split_offset =
+            |i: usize, lid_ident: &Ident, offset_ident: &Ident, valid_ident: &Ident| {
+                let span = all_sizes.elems[i].span();
+                let old_s_i = Ident::new(&format!("split_old_s_{}", i), span);
+                let new_s_i = Ident::new(&format!("split_new_s_{}", i), span);
+                let id_i = if reversed[i] {
+                    Expr::Verbatim(quote_spanned! { span =>
+                        (#new_s_i - 1 - #lid_ident)
+                    })
+                } else {
+                    Expr::Verbatim(quote_spanned! { span =>
+                        #lid_ident
+                    })
+                };
+                let get_non_dynamic_expr = |e: &Expr| match e {
+                    Expr::Lit(_) => Some(e.clone()),
+                    Expr::Group(ExprGroup { expr, .. }) => match &**expr {
+                        Expr::Lit(_) => Some(e.clone()),
+                        _ => None,
+                    },
+                    Expr::Call(call_expr) if call_expr.args.is_empty() => Some(e.clone()),
+                    Expr::Const(_) => Some(e.clone()),
+                    _ => None,
+                };
+                let old_size = get_non_dynamic_expr(&old_sizes[i]);
+                let new_size = get_non_dynamic_expr(&new_sizes[i]);
+                let mut gen_split_offset = quote_spanned! {span =>
+                    let mut #offset_ident: u32 = 0;
+                    let mut #valid_ident: bool = true;
+                };
+                gen_split_offset = new_size.map_or(
+                    quote_spanned! { span =>
+                        #gen_split_offset
+                        let #new_s_i = #self_ident.new_sizes[#i];
+                    },
+                    |new_size| {
+                        quote_spanned! { span =>
+                            #gen_split_offset
+                            let #new_s_i = #new_size;
+                        }
+                    },
+                );
+                gen_split_offset = old_size.map_or(
+                    quote_spanned! { span =>
+                        #gen_split_offset
+                        let #old_s_i = #self_ident.old_sizes[#i];
+                    },
+                    |old_size| {
+                        quote_spanned! { span =>
+                            #gen_split_offset
+                            let #old_s_i = #old_size;
+                        }
+                    },
+                );
+                quote_spanned! { span =>
+                    #gen_split_offset
+                    #offset_ident += #id_i * #weights[#i];
+                    #valid_ident &= (#id_i < #new_s_i) && (#id_i < #old_s_i);
+                }
+            };
+        let gen_row_offset =
+            gen_lid_split_offset(1, &row_ident, &row_offset_ident, &row_valid_ident);
+        let gen_in_row_offset =
+            gen_lid_split_offset(0, &col_ident, &col_offset_ident, &col_valid_ident);
+        quote_spanned! { span =>
+            unsafe impl<CS: #gpu_crate::chunk_scope::ChunkScope> #gpu_crate::chunk::MapWithRows<CS>
+                for PrivateMapReshapeShuffle
+            {
+                fn row_lid_offset(&#self_ident, #row_ident: u32) -> (bool, u32) {
+                    let #weights = #self_ident.cached_weights;
+                    #gen_row_offset
+                    (#row_valid_ident, #row_offset_ident)
+                }
+
+                fn in_row_lid_offset(&#self_ident, #col_ident: u32) -> (bool, u32) {
+                    let #weights = #self_ident.cached_weights;
+                    #gen_in_row_offset
+                    (#col_valid_ident, #col_offset_ident)
+                }
+            }
+        }
+    } else {
+        quote_spanned! { span => }
+    };
     quote_spanned! { span => {
         #[derive(Clone, Copy)]
         #[allow(dead_code)]
@@ -492,6 +583,7 @@ pub(crate) fn map_reshape_params(tokens: TokenStream) -> TokenStream {
             (#tb_valid_ident, #tb_offset_ident)
         }
     }
+    #gen_map_with_rows_impl
     #[allow(clippy::identity_op)]
     PrivateMapReshapeShuffle {
         old_sizes: [#(#old_sizes,)*],

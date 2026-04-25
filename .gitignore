@@ -23,3 +23,7 @@ target/
 
 # Objects
 *.o
+
+# Python cache artifacts
+__pycache__/
+*.pyc

@@ -129,18 +129,64 @@ def require_block(path: Path, text: str, header_pattern: str, start: int = 0) ->
     return block
 
 
+RUST_IDENT = r"[A-Za-z_][A-Za-z0-9_]*"
+
+RUST_COPY_TO_HOST = re.compile(
+    rf"\b(?P<receiver>{RUST_IDENT})\b\s*"
+    rf"\.\s*(?P<method>copy_to_host)\s*"
+    rf"\(\s*&\s*mut\s+(?P<buffer>{RUST_IDENT})\b\s*\)"
+)
+RUST_COPY_FROM_HOST = re.compile(
+    rf"\b(?P<receiver>{RUST_IDENT})\b\s*"
+    rf"\.\s*(?P<method>copy_from_host)\s*"
+    rf"\(\s*&\s*(?P<buffer>{RUST_IDENT})\b\s*\)"
+)
+CUDA_GRAMSCHMIDT_SCALAR_COPY = re.compile(
+    r"cudaMemcpy\s*\(\s*"
+    r"&\s*col\s*\[\s*i\s*\]\s*,\s*"
+    r"&\s*(?:\(\s*\(\s*float\s*\*\s*\)\s*d_a\s*\)|d_a)\s*"
+    r"\[\s*i\s*\*\s*NJ\s*\+\s*k\s*\]\s*,\s*"
+    r"sizeof\s*\(\s*float\s*\)\s*,\s*"
+    r"cudaMemcpyDeviceToHost\s*\)"
+)
+
+
+def find_host_roundtrip_through_same_buffer(block: Block) -> re.Match[str] | None:
+    for d2h in RUST_COPY_TO_HOST.finditer(block.body):
+        for h2d in RUST_COPY_FROM_HOST.finditer(block.body, d2h.end()):
+            if h2d.group("buffer") == d2h.group("buffer"):
+                return d2h
+    return None
+
+
+def find_full_matrix_column_norm_copy(block: Block) -> re.Match[str] | None:
+    for copy in RUST_COPY_TO_HOST.finditer(block.body):
+        buffer_name = re.escape(copy.group("buffer"))
+        column_access = re.compile(
+            rf"\b{buffer_name}\s*\[\s*"
+            rf"(?:{RUST_IDENT}\s*\*\s*nj\s*\+\s*k|k\s*\+\s*{RUST_IDENT}\s*\*\s*nj)"
+            rf"\s*\]"
+        )
+        if column_access.search(block.body, copy.end()):
+            return copy
+    return None
+
+
+def match_line_index(block: Block, match: re.Match[str], group: str = "method") -> int:
+    return block.body_start + match.start(group)
+
+
 def lu_benchmark_full_matrix_sync() -> Finding | None:
     path, text = read_source("examples/bench-polybench/src/main.rs")
     lu_marker = text.index("// --- lu ---")
     timed_start = text.index("let start = Instant::now();", lu_marker)
     k_loop = require_block(path, text, r"for\s+k\s+in\s+0\.\.n\s*\{", timed_start)
 
-    has_full_d2h = "d_a_write.copy_to_host(&mut h_a_gpu)" in k_loop.body
-    has_full_h2d = "d_a_read.copy_from_host(&h_a_gpu)" in k_loop.body
-    if not (has_full_d2h and has_full_h2d):
+    full_sync = find_host_roundtrip_through_same_buffer(k_loop)
+    if full_sync is None:
         return None
 
-    copy_index = text.index("d_a_write.copy_to_host(&mut h_a_gpu)", k_loop.body_start)
+    copy_index = match_line_index(k_loop, full_sync)
     return Finding(
         check="lu-seguru-bench-full-matrix-sync",
         path=path,
@@ -159,12 +205,11 @@ def lu_helper_full_matrix_sync() -> Finding | None:
     gpu_section = text.index("// GPU", run_lu)
     k_loop = require_block(path, text, r"for\s+k\s+in\s+0\.\.n\s*\{", gpu_section)
 
-    has_full_d2h = "d_a_write\n                    .copy_to_host(&mut h_a_gpu)" in k_loop.body
-    has_full_h2d = "d_a_read\n                    .copy_from_host(&h_a_gpu)" in k_loop.body
-    if not (has_full_d2h and has_full_h2d):
+    full_sync = find_host_roundtrip_through_same_buffer(k_loop)
+    if full_sync is None:
         return None
 
-    copy_index = text.index(".copy_to_host(&mut h_a_gpu)", k_loop.body_start)
+    copy_index = match_line_index(k_loop, full_sync)
     return Finding(
         check="lu-helper-full-matrix-sync",
         path=path,
@@ -179,22 +224,22 @@ def lu_helper_full_matrix_sync() -> Finding | None:
 
 def gramschmidt_cuda_scalar_norm_copy() -> Evidence | None:
     path, text = read_source("benchmarks/cuda/bench_gramschm.cu")
-    timed_start = text.index("cudaEventRecord(start);")
-    k_loop = require_block(
-        path,
+    timed_start = text.find("cudaEventRecord(start);")
+    if timed_start == -1:
+        return None
+    k_loop = find_block(
         text,
         r"for\s*\(\s*int\s+k\s*=\s*0\s*;\s*k\s*<\s*NJ\s*;\s*k\+\+\s*\)\s*\{",
         timed_start,
     )
-
-    scalar_copy = "cudaMemcpy(&col[i]" in k_loop.body
-    one_float = "sizeof(float)" in k_loop.body
-    d2h = "cudaMemcpyDeviceToHost" in k_loop.body
-    column_indexed = "i*NJ+k" in k_loop.body
-    if not (scalar_copy and one_float and d2h and column_indexed):
+    if k_loop is None:
         return None
 
-    copy_index = text.index("cudaMemcpy(&col[i]", k_loop.body_start)
+    scalar_copy = CUDA_GRAMSCHMIDT_SCALAR_COPY.search(k_loop.body)
+    if scalar_copy is None:
+        return None
+
+    copy_index = k_loop.body_start + scalar_copy.start()
     return Evidence(
         path=path,
         line=line_number(text, copy_index),
@@ -209,13 +254,11 @@ def gramschmidt_seguru_benchmark_whole_matrix_norm_copy() -> Evidence | None:
     iter_loop = require_block(path, text, r"for\s+_\s+in\s+0\.\.iters\s*\{", timed_start)
     k_loop = require_block(path, text, r"for\s+k\s+in\s+0\.\.nj\s*\{", iter_loop.body_start)
 
-    before_k_loop = text[iter_loop.body_start : k_loop.header_start]
-    whole_matrix_buffer = "vec![0.0f32; ni * nj]" in before_k_loop
-    full_d2h = "d_a.copy_to_host(&mut h_a_tmp)" in k_loop.body
-    if not (whole_matrix_buffer and full_d2h):
+    full_d2h = find_full_matrix_column_norm_copy(k_loop)
+    if full_d2h is None:
         return None
 
-    copy_index = text.index("d_a.copy_to_host(&mut h_a_tmp)", k_loop.body_start)
+    copy_index = match_line_index(k_loop, full_d2h)
     return Evidence(
         path=path,
         line=line_number(text, copy_index),
@@ -229,12 +272,11 @@ def gramschmidt_helper_whole_matrix_norm_copy() -> Evidence | None:
     gpu_section = text.index("// GPU", run_gramschm)
     k_loop = require_block(path, text, r"for\s+k\s+in\s+0\.\.nj\s*\{", gpu_section)
 
-    whole_matrix_buffer = "vec![0.0f32; ni * nj]" in k_loop.body
-    full_d2h = "d_a.copy_to_host(&mut h_a_tmp)" in k_loop.body
-    if not (whole_matrix_buffer and full_d2h):
+    full_d2h = find_full_matrix_column_norm_copy(k_loop)
+    if full_d2h is None:
         return None
 
-    copy_index = text.index("d_a.copy_to_host(&mut h_a_tmp)", k_loop.body_start)
+    copy_index = match_line_index(k_loop, full_d2h)
     return Evidence(
         path=path,
         line=line_number(text, copy_index),
@@ -242,41 +284,49 @@ def gramschmidt_helper_whole_matrix_norm_copy() -> Evidence | None:
     )
 
 
-def gramschmidt_granularity_findings() -> list[Finding]:
-    findings: list[Finding] = []
-    cuda_scalar = gramschmidt_cuda_scalar_norm_copy()
+def gramschmidt_finding(
+    check: str,
+    seguru: Evidence,
+    cuda_scalar: Evidence | None,
+) -> Finding:
     if cuda_scalar is None:
-        return findings
-
-    seguru_bench = gramschmidt_seguru_benchmark_whole_matrix_norm_copy()
-    if seguru_bench is not None:
-        findings.append(
-            Finding(
-                check="gramschmidt-bench-d2h-granularity-mismatch",
-                path=seguru_bench.path,
-                line=seguru_bench.line,
-                message=(
-                    f"{seguru_bench.detail} {cuda_scalar.detail} "
-                    f"CUDA evidence: {rel(cuda_scalar.path)}:{cuda_scalar.line}."
-                ),
-            )
+        return Finding(
+            check=f"{check}-cuda-evidence-missing",
+            path=seguru.path,
+            line=seguru.line,
+            message=(
+                f"{seguru.detail} CUDA scalar-copy evidence was missing or "
+                "unrecognized, so this check fails closed instead of passing silently."
+            ),
         )
 
-    seguru_helper = gramschmidt_helper_whole_matrix_norm_copy()
-    if seguru_helper is not None:
-        findings.append(
-            Finding(
-                check="gramschmidt-helper-d2h-granularity-mismatch",
-                path=seguru_helper.path,
-                line=seguru_helper.line,
-                message=(
-                    f"{seguru_helper.detail} {cuda_scalar.detail} "
-                    f"CUDA evidence: {rel(cuda_scalar.path)}:{cuda_scalar.line}."
-                ),
-            )
-        )
+    return Finding(
+        check=f"{check}-d2h-granularity-mismatch",
+        path=seguru.path,
+        line=seguru.line,
+        message=(
+            f"{seguru.detail} {cuda_scalar.detail} "
+            f"CUDA evidence: {rel(cuda_scalar.path)}:{cuda_scalar.line}."
+        ),
+    )
 
-    return findings
+
+def gramschmidt_granularity_findings() -> list[Finding]:
+    seguru_evidence = [
+        ("gramschmidt-bench", gramschmidt_seguru_benchmark_whole_matrix_norm_copy()),
+        ("gramschmidt-helper", gramschmidt_helper_whole_matrix_norm_copy()),
+    ]
+    seguru_evidence = [
+        (check, evidence) for check, evidence in seguru_evidence if evidence is not None
+    ]
+    if not seguru_evidence:
+        return []
+
+    cuda_scalar = gramschmidt_cuda_scalar_norm_copy()
+    return [
+        gramschmidt_finding(check, evidence, cuda_scalar)
+        for check, evidence in seguru_evidence
+    ]
 
 
 def collect_findings() -> list[Finding]:

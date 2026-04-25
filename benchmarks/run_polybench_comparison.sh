@@ -42,12 +42,8 @@ for bench in "${BENCHMARKS[@]}"; do
         echo "SKIP $bench (no $src)"
         continue
     fi
-    if [ ! -f "$bin" ] || [ "$src" -nt "$bin" ]; then
-        echo "  Compiling $src ..."
-        $NVCC $NVCC_FLAGS -o "$bin" "$src" 2>&1 || { echo "  FAIL: $bench"; continue; }
-    else
-        echo "  $bin up-to-date"
-    fi
+    echo "  Compiling $src ..."
+    $NVCC $NVCC_FLAGS -o "$bin" "$src" 2>&1
 done
 echo ""
 

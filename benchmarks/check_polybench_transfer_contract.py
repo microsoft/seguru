@@ -409,12 +409,86 @@ def gramschmidt_granularity_findings() -> list[Finding]:
     ]
 
 
+def cuda_comparison_mtime_skip() -> Finding | None:
+    path, text = read_source("benchmarks/run_polybench_comparison.sh")
+    mtime_guard = re.search(
+        r"if\s+"
+        r"\[\s*!\s+-f\s+\"\$bin\"\s*\]\s*"
+        r"\|\|\s*"
+        r"\[\s*\"\$src\"\s+-nt\s+\"\$bin\"\s*\]\s*"
+        r";\s*then",
+        text,
+    )
+    if mtime_guard is None:
+        return None
+
+    up_to_date_branch = re.search(
+        r"else\s*\n\s*echo\s+\"[^\"]*\$bin[^\"]*up-to-date[^\"]*\"",
+        text[mtime_guard.end() :],
+    )
+    if up_to_date_branch is None:
+        return None
+
+    return Finding(
+        check="cuda-comparison-mtime-up-to-date-skip",
+        path=path,
+        line=line_number(text, mtime_guard.start()),
+        message=(
+            "CUDA comparison compilation skips existing binaries when the "
+            "source is not newer (`$src -nt $bin`) and reports them "
+            "up-to-date; comparison runs must rebuild from source to avoid "
+            "stale ABI binaries with misleading mtimes."
+        ),
+    )
+
+
+def cuda_comparison_compile_failure_continues_to_stale_binary() -> Finding | None:
+    path, text = read_source("benchmarks/run_polybench_comparison.sh")
+    fail_and_continue = re.search(
+        r"\$NVCC\b[^\n]*\|\|\s*\{\s*"
+        r"echo\s+\"[^\"]*FAIL:\s*\$bench[^\"]*\"\s*;\s*"
+        r"continue\s*;\s*"
+        r"\}",
+        text,
+    )
+    if fail_and_continue is None:
+        return None
+
+    phase2_start = text.find("# ---------- Phase 2: Run CUDA benchmarks ----------")
+    if phase2_start == -1:
+        return None
+    phase3_start = text.find("# ---------- Phase 3:", phase2_start)
+    phase2 = text[phase2_start : phase3_start if phase3_start != -1 else len(text)]
+    runs_existing_binary = (
+        'bin="$CUDA_DIR/bench_${bench}"' in phase2
+        and re.search(r"if\s+\[\s*!\s+-x\s+\"\$bin\"\s*\]\s*;\s*then", phase2)
+        is not None
+        and re.search(r"result=\$\(\s*\"\$bin\"", phase2) is not None
+    )
+    if not runs_existing_binary:
+        return None
+
+    return Finding(
+        check="cuda-comparison-compile-failure-continues-to-stale-binary",
+        path=path,
+        line=line_number(text, fail_and_continue.start()),
+        message=(
+            "CUDA comparison compilation reports FAIL and continues after an "
+            "nvcc failure, while Phase 2 runs any existing bench_$bench "
+            "executable; failed rebuilds can therefore reuse stale CUDA "
+            "results."
+        ),
+    )
+
+
 def collect_findings() -> list[Finding]:
     findings = [
         finding
         for finding in (
             lu_benchmark_full_matrix_sync(),
             lu_helper_full_matrix_sync(),
+            cuda_comparison_mtime_skip(),
+            cuda_comparison_compile_failure_continues_to_stale_binary(),
         )
         if finding is not None
     ]
@@ -434,7 +508,7 @@ def main() -> int:
             f"- [{finding.check}] {rel(finding.path)}:{finding.line}: "
             f"{finding.message}"
         )
-    print("Expected RED until LU and GramSchmidt transfer contracts are made comparable.")
+    print("Expected RED until known-bad transfer/build patterns are removed.")
     return 1
 
 

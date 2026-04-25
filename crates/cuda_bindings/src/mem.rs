@@ -46,6 +46,23 @@ impl<T: ?Sized, N: GpuCtxSpace> Drop for CudaMemBox<T, N> {
 pub type TensorMut<'ctx, T, N> = &'ctx mut CudaMemBox<T, N>;
 pub type TensorRef<'ctx, T, N> = &'ctx CudaMemBox<T, N>;
 
+/// Types that may be safely reinterpreted through `TensorView` slice casts.
+///
+/// # Safety
+///
+/// Implementors must be plain data types with no invalid bit patterns for GPU
+/// transfer and no drop-sensitive ownership. Reinterpreting initialized device
+/// bytes as this type must not by itself violate Rust's validity rules.
+pub unsafe trait TensorViewCastElement: Copy + Sync + 'static {}
+
+macro_rules! impl_tensor_view_cast_element {
+    ($($t:ty),* $(,)?) => {
+        $(unsafe impl TensorViewCastElement for $t {})*
+    };
+}
+
+impl_tensor_view_cast_element!(u8, u16, u32, u64, usize, i8, i16, i32, i64, isize, f32, f64);
+
 /// TensorView represents an immutable view of a tensor allocated on the GPU.
 /// It is tied to the lifetime of the GPU context guard for current context.
 /// When the current context switches to another context, the TensorView's lifetime ends.
@@ -227,7 +244,16 @@ impl<'a, T: ?Sized + SizedOrSlice> TensorViewMut<'a, T> {
     }
 }
 
-impl<'a, T> TensorView<'a, [T]> {
+impl<'a, T: TensorViewCastElement> TensorView<'a, [T]> {
+    pub fn try_cast_slice<U: TensorViewCastElement>(
+        &self,
+    ) -> Result<TensorView<'_, [U]>, CudaError> {
+        let dst_len = cast_slice_len::<T, U>(self.len())?;
+        check_cast_alignment::<U>(self.as_devptr() as usize)?;
+        let devptr = core::ptr::slice_from_raw_parts(self.as_devptr() as *const U, dst_len);
+        Ok(TensorView { devptr, _marker: PhantomData })
+    }
+
     /// Split the tensor into two at the given index.
     /// The returned tensors will have the same lifetime as the original tensor.
     /// Since split_at allows multiple immutable borrows, user does not need to split.
@@ -253,7 +279,16 @@ impl<'a, T> TensorView<'a, [T]> {
     }
 }
 
-impl<'a, T> TensorViewMut<'a, [T]> {
+impl<'a, T: TensorViewCastElement> TensorViewMut<'a, [T]> {
+    pub fn try_cast_slice_mut<U: TensorViewCastElement>(
+        &mut self,
+    ) -> Result<TensorViewMut<'_, [U]>, CudaError> {
+        let dst_len = cast_slice_len::<T, U>(self.len())?;
+        check_cast_alignment::<U>(self.as_devptr() as usize)?;
+        let devptr = core::ptr::slice_from_raw_parts_mut(self.as_devptr() as *mut U, dst_len);
+        Ok(TensorViewMut { inner: TensorView { devptr, _marker: PhantomData } })
+    }
+
     /// Split the tensor into two at the given index.
     /// The returned tensors will have the same lifetime as the lifetime of the
     /// reference, which usually be live only for the scope of the mutable
@@ -295,6 +330,38 @@ impl<'a, T> TensorViewMut<'a, [T]> {
         let (left, right) = self.inner.split(mid);
         (TensorViewMut { inner: left }, TensorViewMut { inner: right })
     }
+}
+
+fn cast_slice_len<T, U>(src_len: usize) -> Result<usize, CudaError> {
+    let src_elem_size = core::mem::size_of::<T>();
+    let dst_elem_size = core::mem::size_of::<U>();
+    if src_elem_size == 0 || dst_elem_size == 0 {
+        return Err(CudaError::TensorViewCastZeroSized);
+    }
+
+    let Some(src_bytes) = src_len.checked_mul(src_elem_size) else {
+        return Err(CudaError::TensorViewCastSizeMismatch {
+            src_len,
+            src_elem_size,
+            dst_elem_size,
+        });
+    };
+    if src_bytes % dst_elem_size != 0 {
+        return Err(CudaError::TensorViewCastSizeMismatch {
+            src_len,
+            src_elem_size,
+            dst_elem_size,
+        });
+    }
+    Ok(src_bytes / dst_elem_size)
+}
+
+fn check_cast_alignment<U>(addr: usize) -> Result<(), CudaError> {
+    let required_align = core::mem::align_of::<U>();
+    if addr % required_align != 0 {
+        return Err(CudaError::TensorViewCastAlignmentMismatch { addr, required_align });
+    }
+    Ok(())
 }
 
 impl<'ctx: 'a, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {

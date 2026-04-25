@@ -1,48 +1,47 @@
-KernelBench-C Phase T / Task 5c SeGuRu-from-CUDA refresh
+KernelBench-C safe vector-view/map rerun
 
-Base commit: fb8d5e668e616dc3b7b724a77918424bbf5546db
-Branch/worktree: bench-full-refresh at /home/sanghle/work/seguru/.worktrees/bench-full-refresh
+Source: current worktree after safe vector-view/map cleanup
 Environment: CUDA_HOME=/usr/local/cuda-13.2, DISABLE_GPU_BOUND_CHECK=true, CARGO_TARGET_DIR=/home/sanghle/work/seguru/examples/target
-Logs: results/kernelbench-c-before.txt and results/kernelbench-c-after.txt (project-local because /tmp writes are prohibited in this environment)
+
+Command:
+```bash
+cd /home/sanghle/work/seguru/examples
+cargo build --release -p kernelbench-c
+python3.11 kernelbench-c/python/compare.py
+```
 
 Correctness counts:
-- before: seguru_fc 12/12 correct, cuda 12/12 correct, hand seguru 12/12 correct
-- after:  seguru_fc 12/12 correct, cuda 12/12 correct, hand seguru 12/12 correct
+- seguru 12/12 correct
+- cuda 12/12 correct
+- seguru_fc 12/12 correct
 
 Geomean vs cuda (lower is better):
-- hand seguru before: 0.9968x
-- hand seguru after:  0.9971x
-- seguru_fc before:   1.0329x
-- seguru_fc after:    1.0082x
+- hand seguru: 0.9945x
+- seguru_fc:   1.0045x
 
-Top remaining raw-CUDA parity gaps after refresh:
-1. gemm_relu_div:         1.0348x
-2. matmul_scale_resadd:   1.0300x
-3. gemm_mul_lrelu:        1.0297x
-4. matmul_sub_mul_relu:   1.0276x
-5. gemm_add_relu:         1.0265x
+Top remaining raw-CUDA parity gaps after the safe-vector rerun:
+1. gemm_mul_lrelu: 1.0295x
+2. matmul_scale_resadd: 1.0278x
+3. matmul_min_subtract: 1.0249x
+4. gemm_relu_div: 1.0227x
+5. gemm_add_relu: 1.0212x
 
-Regressions:
-- No correctness regressions: seguru_fc remains 12/12 correct.
-- Small ratio increases on unchanged kernels (largest +0.0048x on gemm_relu_div, +0.0027x on conv_relu_biasadd) are within observed benchmark run noise.
-- conv_relu_hardswish_fc improved from 1.3122x to 0.9861x by replacing the stale 14x14 shared-memory patch tile with a direct 16x16 flattened-row convolution matching the raw CUDA arm.
-
-Per-problem seguru_fc / cuda ratios:
-problem                 before    after    delta
-------------------------------------------------
-gemm_mul_lrelu          1.0292x   1.0297x  +0.0006x
-conv_relu_hardswish     1.3122x   0.9861x  -0.3261x
-matmul_mish_mish        1.0132x   1.0134x  +0.0002x
-matmul_scale_resadd     1.0304x   1.0300x  -0.0004x
-gemm_scale_htanh_gelu   1.0151x   1.0139x  -0.0012x
-matmul_sigmoid_sum      0.8979x   0.8898x  -0.0080x
-gemm_relu_div           1.0300x   1.0348x  +0.0048x
-conv_relu_biasadd       1.0034x   1.0061x  +0.0027x
-matmul_sub_mul_relu     1.0278x   1.0276x  -0.0002x
-gemm_add_relu           1.0277x   1.0265x  -0.0012x
-matmul_div_gelu         1.0251x   1.0245x  -0.0006x
-matmul_min_subtract     1.0250x   1.0248x  -0.0002x
+Per-problem ratios vs cuda:
+problem                 hand     seguru_fc
+------------------------------------------
+gemm_mul_lrelu           1.0146x  1.0295x
+conv_relu_hardswish      0.9904x  0.9876x
+matmul_mish_mish         0.9987x  1.0138x
+matmul_scale_resadd      1.0113x  1.0278x
+gemm_scale_htanh_gelu    0.9979x  1.0122x
+matmul_sigmoid_sum       0.8898x  0.8858x
+gemm_relu_div            1.0088x  1.0227x
+conv_relu_biasadd        1.0001x  1.0021x
+matmul_sub_mul_relu      1.0106x  1.0190x
+gemm_add_relu            1.0056x  1.0212x
+matmul_div_gelu          1.0091x  1.0172x
+matmul_min_subtract      1.0036x  1.0249x
 
 Notes:
-- The 10 non-convolution from_cuda modules already match the updated GEMM/row-reduction recipes and raw CUDA algorithms, so they were left unchanged.
-- conv_relu_biasadd_fc was already on the direct 16x16 one-output-per-thread path and stayed at parity.
+- Rerun was requested after replacing benchmark-local raw Float4 casts with checked tensor-view casts and removing remaining benchmark-local manual ScopeUniqueMap implementations.
+- Use the ratios above as the current stored benchmark snapshot; exact timings are rerun-specific.

@@ -8,6 +8,16 @@ pub fn get_fn_name<T>(_: T) -> String {
     gpu_name::convert_def_path_to_gpu_sym_name(name)
 }
 
+#[cfg(test)]
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct AlignedF32x4 {
+    data: [f32; 4],
+}
+
+#[cfg(test)]
+unsafe impl TensorViewCastElement for AlignedF32x4 {}
+
 #[test]
 fn test_cuda_mem_single_ctx() {
     let value1: [f32; 10] = [123f32; 10];
@@ -34,6 +44,68 @@ fn test_tensor_index() {
             assert!(host_value[0] == i as f32);
             assert!(host_value[1] == (i + 1) as f32);
         }
+    });
+}
+
+#[test]
+fn test_tensor_view_cast_slice_rebuilds_len() {
+    let value: [f32; 8] = [0.0; 8];
+    cuda_ctx_no_mod(0, |ctx| {
+        let x = ctx.new_tensor_view(&value[..]).unwrap();
+        let x4 = x.try_cast_slice::<AlignedF32x4>().unwrap();
+        assert_eq!(x4.len(), 2);
+    });
+}
+
+#[test]
+fn test_tensor_view_cast_slice_rejects_non_divisible_len() {
+    let value: [f32; 5] = [0.0; 5];
+    cuda_ctx_no_mod(0, |ctx| {
+        let x = ctx.new_tensor_view(&value[..]).unwrap();
+        let err = x.try_cast_slice::<AlignedF32x4>().unwrap_err();
+        assert!(matches!(
+            err,
+            CudaError::TensorViewCastSizeMismatch {
+                src_len: 5,
+                src_elem_size: 4,
+                dst_elem_size: 16
+            }
+        ));
+    });
+}
+
+#[test]
+fn test_tensor_view_cast_slice_rejects_misaligned_ptr() {
+    let value: [f32; 8] = [0.0; 8];
+    cuda_ctx_no_mod(0, |ctx| {
+        let x = ctx.new_tensor_view(&value[..]).unwrap();
+        let shifted = x.index(1..5);
+        let err = shifted.try_cast_slice::<AlignedF32x4>().unwrap_err();
+        assert!(matches!(
+            err,
+            CudaError::TensorViewCastAlignmentMismatch { required_align: 16, .. }
+        ));
+    });
+}
+
+#[test]
+fn test_tensor_view_mut_cast_slice_rebuilds_len_and_preserves_writes() {
+    let value: [f32; 8] = [0.0; 8];
+    cuda_ctx_no_mod(0, |ctx| {
+        let mut x = ctx.new_tensor_view(&value[..]).unwrap();
+        {
+            let mut x4 = x.try_cast_slice_mut::<AlignedF32x4>().unwrap();
+            assert_eq!(x4.len(), 2);
+            x4.copy_from_host(&[
+                AlignedF32x4 { data: [1.0, 2.0, 3.0, 4.0] },
+                AlignedF32x4 { data: [5.0, 6.0, 7.0, 8.0] },
+            ])
+            .unwrap();
+        }
+
+        let mut out = [0.0f32; 8];
+        x.copy_to_host(&mut out).unwrap();
+        assert_eq!(out, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
     });
 }
 

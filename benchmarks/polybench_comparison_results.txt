@@ -1,72 +1,106 @@
 PolyBench CUDA vs SeGuRu comparison results
 
-Previous after summary: 7117cb836ba2494845b15293ec2884e91a8bb77d
-After source/results: current worktree final comparison run
+Source/results: launch-normalized comparison rerun from current worktree after safe map/view cleanup
 GPU: NVIDIA A100 80GB PCIe
 CUDA: /usr/local/cuda-13.2
 
-Previous after geomean ratio (SeGuRu/CUDA): 1.164x
-After fix geomean ratio (SeGuRu/CUDA): 1.167x
-Geomean delta vs previous after: +0.003x
-Previous after within 5% of CUDA: 10/19
-After fix within 5% of CUDA: 9/19
-Previous after within 10% of CUDA: 11/19
-After fix within 10% of CUDA: 10/19
+Launch-normalized adjustment
+----------------------------
+CUDA launch overhead:   2.293 us/launch
+SeGuRu launch overhead: 4.761 us/launch
+Launch count source: benchmarks/run_polybench_comparison.sh CUDA_LAUNCH_COUNTS
+and SEGURU_LAUNCH_COUNTS
 
-Top after-fix gaps vs CUDA
-Benchmark       Previous  AfterFix   Delta
----------       --------  --------   -----
-jacobi1d          1.924x    1.838x  -0.086x
-lu                1.714x    1.731x  +0.017x
-gramschm          1.419x    1.417x  -0.002x
-corr              1.327x    1.328x  +0.001x
-covar             1.294x    1.296x  +0.002x
+Normalized time = raw time - side-specific launch count * side-specific launch
+overhead.
+Normalized times are floored at 0.001 us only when launch overhead fully
+dominates a microbenchmark. The raw table remains the wall-clock benchmark
+result; the launch-normalized table is a long-running-kernel proxy.
+Ratios below 1.0x in the launch-normalized table can indicate launch overhead
+dominates the measured runtime; use the raw table as the authoritative
+wall-clock result for those workloads.
 
-Per-benchmark previous-after/final ratios
-Benchmark       Previous  AfterFix   Delta
----------       --------  --------   -----
-conv2d            1.007x    1.007x  +0.000x
-conv3d            1.053x    1.053x  -0.000x
-gemm              1.030x    1.026x  -0.004x
-twomm             1.036x    1.036x  -0.000x
-threemm           1.018x    1.017x  -0.001x
-atax              1.241x    1.239x  -0.002x
-bicg              1.243x    1.242x  -0.001x
-mvt               1.241x    1.240x  -0.001x
-gesummv           0.918x    0.918x  -0.000x
-syr2k             1.004x    1.004x  +0.000x
-syrk              1.005x    1.005x  -0.000x
-corr              1.327x    1.328x  +0.001x
-covar             1.294x    1.296x  +0.002x
-doitgen           1.036x    1.019x  -0.017x
-fdtd2d            1.010x    1.011x  +0.001x
-gramschm          1.419x    1.417x  -0.002x
-jacobi1d          1.924x    1.838x  -0.086x
-jacobi2d          1.039x    1.166x  +0.127x
-lu                1.714x    1.731x  +0.017x
+Summary
+-------
+Metric                                      Raw        Launch-normalized
+------                                      ---        -----------------
+Geomean ratio (SeGuRu/CUDA)                1.172x     1.052x
+No more than 5% slower than CUDA            8/19       12/19
+No more than 10% slower than CUDA           10/19      12/19
 
-After fix comparison table
+Top raw gaps vs CUDA
+--------------------
+Benchmark       Raw ratio
+---------       ---------
+jacobi1d          1.877x
+lu                1.727x
+gramschm          1.416x
+corr              1.326x
+covar             1.298x
+atax              1.242x
+bicg              1.242x
+mvt               1.241x
+
+Top launch-normalized gaps vs CUDA
+----------------------------------
+Benchmark       CUDA launches  SeGuRu launches  Normalized ratio
+---------       -------------  ---------------  ----------------
+gramschm              8190             8192            1.384x
+corr                     4                4            1.325x
+covar                    3                3            1.297x
+lu                    4095             6141            1.297x
+atax                     2                2            1.239x
+bicg                     2                2            1.238x
+mvt                      2                2            1.237x
+twomm                    2                2            1.050x
+
+Raw comparison table
+--------------------
 Benchmark          CUDA (us)     SeGuRu (us)      Ratio
 --------           ---------      ----------      -----
-conv2d               119.542         120.390     1.007x
-conv3d               221.583         233.290     1.053x
-gemm                 100.055         102.630     1.026x
-twomm               1398.221        1448.390     1.036x
-threemm              298.957         304.090     1.017x
-atax                1099.930        1362.370     1.239x
-bicg                1099.069        1365.170     1.242x
-mvt                 1100.872        1365.310     1.240x
-gesummv             1655.685        1519.400     0.918x
-syr2k               4116.767        4134.550     1.004x
-syrk                2063.298        2072.790     1.005x
-corr                6184.468        8210.660     1.328x
-covar               6127.206        7940.150     1.296x
-doitgen              159.846         162.960     1.019x
-fdtd2d             64068.512       64793.000     1.011x
-gramschm          395896.719      561092.000     1.417x
-jacobi1d           53835.777       98972.000     1.838x
-jacobi2d             266.720         311.000     1.166x
-lu                 39429.664       68268.000     1.731x
+conv2d               119.450         120.380     1.008x
+conv3d               221.594         233.780     1.055x
+gemm                 100.096         104.110     1.040x
+twomm               1397.606        1472.140     1.053x
+threemm              299.059         308.370     1.031x
+atax                1099.725        1366.080     1.242x
+bicg                1098.691        1364.140     1.242x
+mvt                 1100.565        1365.290     1.241x
+gesummv             1655.511        1519.370     0.918x
+syr2k               4116.654        4134.580     1.004x
+syrk                2063.206        2073.080     1.005x
+corr                6222.254        8250.690     1.326x
+covar               6167.931        8006.430     1.298x
+doitgen              159.805         166.040     1.039x
+fdtd2d             64055.105       64924.000     1.014x
+gramschm          396655.438      561814.000     1.416x
+jacobi1d           53501.953      100430.000     1.877x
+jacobi2d             266.528         307.000     1.152x
+lu                 39661.152       68488.000     1.727x
 
-Raw after CUDA results: benchmarks/cuda_results.txt
-Raw after SeGuRu results: benchmarks/seguru_results.txt
+Launch-normalized comparison table
+----------------------------------
+Benchmark       CUDA launches  SeGuRu launches   CUDA norm(us) SeGuRu norm(us)  Normalized ratio
+--------        -------------  ---------------   ------------- ---------------  ----------------
+conv2d                   1                1         117.157         115.619            0.987x
+conv3d                   1                1         219.301         229.019            1.044x
+gemm                     1                1          97.803          99.349            1.016x
+twomm                    2                2        1393.020        1462.618            1.050x
+threemm                  3                3         292.180         294.087            1.007x
+atax                     2                2        1095.139        1356.558            1.239x
+bicg                     2                2        1094.105        1354.618            1.238x
+mvt                      2                2        1095.979        1355.768            1.237x
+gesummv                  1                1        1653.218        1514.609            0.916x
+syr2k                    1                1        4114.361        4129.819            1.004x
+syrk                     1                1        2060.913        2068.319            1.004x
+corr                     4                4        6213.082        8231.646            1.325x
+covar                    3                3        6161.052        7992.147            1.297x
+doitgen                  2                2         155.219         156.518            1.008x
+fdtd2d                1500             1500       60615.605       57782.500            0.953x
+gramschm              8190             8192      377875.768      522811.888            1.384x
+jacobi1d             20000            20000        7641.953        5210.000            0.682x
+jacobi2d                40               40         174.808         116.560            0.667x
+lu                    4095             6141       30271.317       39250.699            1.297x
+
+Raw CUDA results: benchmarks/cuda_results.txt
+Raw SeGuRu results: benchmarks/seguru_results.txt

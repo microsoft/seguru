@@ -635,6 +635,110 @@ def cuda_comparison_compile_failure_continues_to_stale_binary() -> Finding | Non
     )
 
 
+def polybench_launch_normalized_reporting_missing() -> list[Finding]:
+    findings: list[Finding] = []
+    script_path, script = read_source("benchmarks/run_polybench_comparison.sh")
+    script_requirements = [
+        ("LAUNCH_OVERHEAD_CUDA_US", "configurable CUDA empty-kernel launch overhead"),
+        ("LAUNCH_OVERHEAD_SEGURU_US", "configurable SeGuRu empty-kernel launch overhead"),
+        ("CUDA_LAUNCH_COUNTS", "per-benchmark CUDA launch-count metadata"),
+        ("SEGURU_LAUNCH_COUNTS", "per-benchmark SeGuRu launch-count metadata"),
+        ("require_launch_overhead", "hard failure when launch-overhead parsing fails"),
+        ("LAUNCH-NORMALIZED COMPARISON TABLE", "launch-normalized comparison output"),
+        ("normalize_time", "normalized-time helper"),
+    ]
+    for token, description in script_requirements:
+        if token not in script:
+            findings.append(
+                Finding(
+                    check="polybench-launch-normalized-script-missing",
+                    path=script_path,
+                    line=1,
+                    message=(
+                        f"run_polybench_comparison.sh does not expose {description}; "
+                        "keep the raw table and add a launch-normalized table for "
+                        "long-running-kernel comparisons."
+                    ),
+                )
+            )
+
+    launch_count_requirements = [
+        ("CUDA_LAUNCH_COUNTS", "lu", "4095"),
+        ("SEGURU_LAUNCH_COUNTS", "lu", "6141"),
+        ("CUDA_LAUNCH_COUNTS", "gramschm", "8190"),
+        ("SEGURU_LAUNCH_COUNTS", "gramschm", "8192"),
+    ]
+    for map_name, benchmark, expected_count in launch_count_requirements:
+        pattern = rf"\b{map_name}\s*=\s*\([\s\S]*?\[{benchmark}\]\s*=\s*{expected_count}\b"
+        if re.search(pattern, script) is None:
+            findings.append(
+                Finding(
+                    check="polybench-launch-count-specific-value-missing",
+                    path=script_path,
+                    line=1,
+                    message=(
+                        f"run_polybench_comparison.sh must set {map_name}[{benchmark}] "
+                        f"to {expected_count}; CUDA and SeGuRu launch different "
+                        "kernel counts for LU/GramSchmidt, so one shared count "
+                        "misstates launch-normalized ratios."
+                    ),
+                )
+            )
+
+    summary_path, summary = read_source("benchmarks/polybench_comparison_results.txt")
+    summary_requirements = [
+        "Launch-normalized",
+        "CUDA launch overhead",
+        "SeGuRu launch overhead",
+        "CUDA launches",
+        "SeGuRu launches",
+        "Normalized ratio",
+        "Ratios below 1.0x in the launch-normalized table",
+    ]
+    for token in summary_requirements:
+        if token not in summary:
+            findings.append(
+                Finding(
+                    check="polybench-launch-normalized-summary-missing",
+                    path=summary_path,
+                    line=1,
+                    message=(
+                        f"polybench_comparison_results.txt is missing {token!r}; "
+                        "store both raw and launch-normalized PolyBench results."
+                    ),
+                )
+            )
+
+    return findings
+
+
+def example_manual_scope_unique_map_impls() -> list[Finding]:
+    findings: list[Finding] = []
+    pattern = re.compile(
+        r"\bunsafe\s+impl\b[^{;\n]*\bScopeUniqueMap\b[^{;\n]*\bfor\b",
+        re.MULTILINE,
+    )
+    for path in (REPO_ROOT / "examples").glob("**/*.rs"):
+        text = path.read_text(encoding="utf-8")
+        for match in pattern.finditer(text):
+            line_start = text.rfind("\n", 0, match.start()) + 1
+            if text[line_start : match.start()].lstrip().startswith("//"):
+                continue
+            findings.append(
+                Finding(
+                    check="example-manual-scope-unique-map-impl",
+                    path=path,
+                    line=line_number(text, match.start()),
+                    message=(
+                        "examples should use existing safe map abstractions or "
+                        "generated reshape_map! maps instead of benchmark-local "
+                        "manual unsafe ScopeUniqueMap implementations."
+                    ),
+                )
+            )
+    return findings
+
+
 def collect_findings() -> list[Finding]:
     findings = [
         finding
@@ -651,6 +755,8 @@ def collect_findings() -> list[Finding]:
     ]
     findings.extend(gramschmidt_granularity_findings())
     findings.extend(monolithic_cuda_modulo_initializer_findings())
+    findings.extend(polybench_launch_normalized_reporting_missing())
+    findings.extend(example_manual_scope_unique_map_impls())
     return findings
 
 

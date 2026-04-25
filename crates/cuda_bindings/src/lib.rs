@@ -32,7 +32,7 @@ pub use ctx::{
     GpuCtxToken, GpuCtxZeroGuard, GpuFunction, GpuModule, GpuToken,
 };
 pub use host_mem::PinnedHostBox;
-pub use mem::{TensorMut, TensorRef, TensorView, TensorViewMut};
+pub use mem::{TensorMut, TensorRef, TensorView, TensorViewCastElement, TensorViewMut};
 pub use params::{AsHostKernelParams, GPUConfig, GPUDynamicConfig, GPUStaticConfig, SafeGpuConfig};
 pub use unsafe_bindings::{CUctx_flags, CUdevprop};
 
@@ -46,6 +46,9 @@ pub enum CudaError {
     Unknown(String),
     MemAlignmentTooHigh(usize, usize),
     MemCopyOutOfBound,
+    TensorViewCastSizeMismatch { src_len: usize, src_elem_size: usize, dst_elem_size: usize },
+    TensorViewCastAlignmentMismatch { addr: usize, required_align: usize },
+    TensorViewCastZeroSized,
 }
 
 fn get_cuda_error_name(error: CUresult) -> String {
@@ -71,6 +74,21 @@ impl core::fmt::Debug for CudaError {
             CudaError::Unknown(msg) => write!(f, "CUDA Error: {}", msg),
             CudaError::MemAlignmentTooHigh(max_align, actual) => {
                 write!(f, "Memory alignment too high (max: {}, actual: {})", max_align, actual)
+            }
+            CudaError::TensorViewCastSizeMismatch { src_len, src_elem_size, dst_elem_size } => {
+                write!(
+                    f,
+                    "TensorView cast size mismatch (src_len: {}, src_elem_size: {}, dst_elem_size: {})",
+                    src_len, src_elem_size, dst_elem_size
+                )
+            }
+            CudaError::TensorViewCastAlignmentMismatch { addr, required_align } => write!(
+                f,
+                "TensorView cast alignment mismatch (addr: {:#x}, required_align: {})",
+                addr, required_align
+            ),
+            CudaError::TensorViewCastZeroSized => {
+                write!(f, "TensorView cast does not support zero-sized element types")
             }
         }
     }

@@ -67,12 +67,18 @@ pub fn matmul_div_gelu_kernel(
         {
             let mut ca = tile_a.chunk_mut(load_map);
             let v: Float4 = x[((bm + a_row) * (K >> 2) + k_base4 + (a_col >> 2)) as usize];
-            ca[0] = v[0]; ca[1] = v[1]; ca[2] = v[2]; ca[3] = v[3];
+            ca[0] = v[0];
+            ca[1] = v[1];
+            ca[2] = v[2];
+            ca[3] = v[3];
         }
         {
             let mut cb = tile_b.chunk_mut(load_map);
             let v: Float4 = w[((bn + a_row) * (K >> 2) + k_base4 + (a_col >> 2)) as usize];
-            cb[0] = v[0]; cb[1] = v[1]; cb[2] = v[2]; cb[3] = v[3];
+            cb[0] = v[0];
+            cb[1] = v[1];
+            cb[2] = v[2];
+            cb[3] = v[3];
         }
 
         sync_threads();
@@ -150,8 +156,14 @@ pub fn run(
     let d_b = ctx.new_tensor_view(h_b.as_slice()).unwrap();
     let mut d_y = ctx.new_tensor_view(h_y.as_mut_slice()).unwrap();
 
-    let d_x4 = unsafe { &*(&d_x as *const _ as *const gpu_host::TensorView<'_, [Float4]>) };
-    let d_w4 = unsafe { &*(&d_w as *const _ as *const gpu_host::TensorView<'_, [Float4]>) };
+    let d_x4_view = d_x
+        .try_cast_slice::<Float4>()
+        .expect("x Float4 view requires 16-byte alignment and length divisible by 4");
+    let d_w4_view = d_w
+        .try_cast_slice::<Float4>()
+        .expect("w Float4 view requires 16-byte alignment and length divisible by 4");
+    let d_x4 = &d_x4_view;
+    let d_w4 = &d_w4_view;
 
     let mm = m as u32;
     let nn = n as u32;
@@ -163,8 +175,10 @@ pub fn run(
 
     {
         let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
-        matmul_div_gelu_kernel::launch(cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk, divisor)
-            .unwrap();
+        matmul_div_gelu_kernel::launch(
+            cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk, divisor,
+        )
+        .unwrap();
     }
     ctx.sync().unwrap();
 
@@ -172,8 +186,10 @@ pub fn run(
     let wt = Instant::now();
     for _ in 0..warmup_iters {
         let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
-        matmul_div_gelu_kernel::launch(cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk, divisor)
-            .unwrap();
+        matmul_div_gelu_kernel::launch(
+            cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk, divisor,
+        )
+        .unwrap();
     }
     ctx.sync().unwrap();
     let warmup_us = wt.elapsed().as_micros() as f64 / warmup_iters as f64;
@@ -181,8 +197,10 @@ pub fn run(
     let t = Instant::now();
     for _ in 0..iters {
         let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
-        matmul_div_gelu_kernel::launch(cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk, divisor)
-            .unwrap();
+        matmul_div_gelu_kernel::launch(
+            cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk, divisor,
+        )
+        .unwrap();
     }
     ctx.sync().unwrap();
     let kernel_us = t.elapsed().as_micros() as f64 / iters as f64;

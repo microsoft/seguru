@@ -23,10 +23,10 @@ const BDIM_Y: u32 = 16;
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::needless_range_loop)]
 pub fn gemm_add_relu_kernel(
-    x:   &[Float4],
-    w:   &[Float4],
+    x: &[Float4],
+    w: &[Float4],
     bias: &[Float4],
-    y:   &mut [Float4],
+    y: &mut [Float4],
     M: u32,
     N: u32,
     K: u32,
@@ -176,9 +176,18 @@ pub fn run(
 
     // Reinterpret X and W as &[Float4] device views to emit ld.global.v4.f32.
     // K must be a multiple of 4 (asserted above: k % BK == 0, BK=8).
-    let d_x4 = unsafe { &*(&d_x as *const _ as *const gpu_host::TensorView<'_, [Float4]>) };
-    let d_w4 = unsafe { &*(&d_w as *const _ as *const gpu_host::TensorView<'_, [Float4]>) };
-    let d_b4 = unsafe { &*(&d_b as *const _ as *const gpu_host::TensorView<'_, [Float4]>) };
+    let d_x4_view = d_x
+        .try_cast_slice::<Float4>()
+        .expect("x Float4 view requires 16-byte alignment and length divisible by 4");
+    let d_w4_view = d_w
+        .try_cast_slice::<Float4>()
+        .expect("w Float4 view requires 16-byte alignment and length divisible by 4");
+    let d_b4_view = d_b
+        .try_cast_slice::<Float4>()
+        .expect("bias Float4 view requires 16-byte alignment and length divisible by 4");
+    let d_x4 = &d_x4_view;
+    let d_w4 = &d_w4_view;
+    let d_b4 = &d_b4_view;
 
     let mm = m as u32;
     let nn = n as u32;
@@ -189,9 +198,11 @@ pub fn run(
 
     {
         let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
-        let d_y4 = unsafe { &mut *(&mut d_y as *mut _ as *mut gpu_host::TensorViewMut<'_, [Float4]>) };
-        gemm_add_relu_kernel::launch(cfg, ctx, md, d_x4, d_w4, d_b4, d_y4, mm, nn, kk)
-            .unwrap();
+        let mut d_y4_view = d_y
+            .try_cast_slice_mut::<Float4>()
+            .expect("y Float4 view requires 16-byte alignment and length divisible by 4");
+        let d_y4 = &mut d_y4_view;
+        gemm_add_relu_kernel::launch(cfg, ctx, md, d_x4, d_w4, d_b4, d_y4, mm, nn, kk).unwrap();
     }
     ctx.sync().unwrap();
 
@@ -199,9 +210,11 @@ pub fn run(
     let wt = Instant::now();
     for _ in 0..warmup_iters {
         let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
-        let d_y4 = unsafe { &mut *(&mut d_y as *mut _ as *mut gpu_host::TensorViewMut<'_, [Float4]>) };
-        gemm_add_relu_kernel::launch(cfg, ctx, md, d_x4, d_w4, d_b4, d_y4, mm, nn, kk)
-            .unwrap();
+        let mut d_y4_view = d_y
+            .try_cast_slice_mut::<Float4>()
+            .expect("y Float4 view requires 16-byte alignment and length divisible by 4");
+        let d_y4 = &mut d_y4_view;
+        gemm_add_relu_kernel::launch(cfg, ctx, md, d_x4, d_w4, d_b4, d_y4, mm, nn, kk).unwrap();
     }
     ctx.sync().unwrap();
     let warmup_us = wt.elapsed().as_micros() as f64 / warmup_iters as f64;
@@ -209,9 +222,11 @@ pub fn run(
     let t = Instant::now();
     for _ in 0..iters {
         let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
-        let d_y4 = unsafe { &mut *(&mut d_y as *mut _ as *mut gpu_host::TensorViewMut<'_, [Float4]>) };
-        gemm_add_relu_kernel::launch(cfg, ctx, md, d_x4, d_w4, d_b4, d_y4, mm, nn, kk)
-            .unwrap();
+        let mut d_y4_view = d_y
+            .try_cast_slice_mut::<Float4>()
+            .expect("y Float4 view requires 16-byte alignment and length divisible by 4");
+        let d_y4 = &mut d_y4_view;
+        gemm_add_relu_kernel::launch(cfg, ctx, md, d_x4, d_w4, d_b4, d_y4, mm, nn, kk).unwrap();
     }
     ctx.sync().unwrap();
     let kernel_us = t.elapsed().as_micros() as f64 / iters as f64;

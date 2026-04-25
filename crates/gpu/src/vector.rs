@@ -101,8 +101,14 @@ macro_rules! impl_floatn_from {
 /// Since we cannot do `repr(align(N * size_of::<T::Elem>))` yet,
 /// we define separate types for different sizes.
 #[derive(Clone, Copy, PartialEq, Debug)]
+#[repr(transparent)]
 pub struct VecType<T: VecTypeTrait> {
     val: T,
+}
+
+unsafe impl<T> cuda_bindings::TensorViewCastElement for VecType<T> where
+    T: VecTypeTrait + Sync + 'static
+{
 }
 
 impl<T: VecTypeTrait> Default for VecType<T> {

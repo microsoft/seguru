@@ -20,6 +20,7 @@ target/
 # CUDA stuff
 *.cubin
 *.ptx
+benchmarks/cuda_build/
 
 # Objects
 *.o

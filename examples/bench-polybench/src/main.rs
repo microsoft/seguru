@@ -1,31 +1,18 @@
-use gpu::chunk::ScopeUniqueMap;
-use gpu::chunk_scope::{ChunkScope, TID_MAX_LEN};
-use gpu::prelude::*;
 use gpu::CacheStreamLoadStore;
+use gpu::prelude::*;
 use std::time::Instant;
-
-#[derive(Clone, Copy)]
-struct LuTrailingUpdateMap {
-    n: u32,
-    k: u32,
-    rem: u32,
-}
-
-unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for LuTrailingUpdateMap {
-    type IndexType = u32;
-    type GlobalIndexType = u32;
-
-    fn map(&self, idx: Self::IndexType, thread_ids: [u32; TID_MAX_LEN]) -> (bool, u32) {
-        let j_tail = CS::global_id_x(thread_ids);
-        let i_tail = CS::global_id_y(thread_ids);
-        let valid = idx == 0 && i_tail < self.rem && j_tail < self.rem;
-        (valid, i_tail * self.n + self.k + 1 + j_tail)
-    }
-}
 
 // =====================================================================
 // Kernel definitions — all 19 PolybenchGPU benchmarks
 // =====================================================================
+
+#[gpu::cuda_kernel]
+pub fn bench_empty_launch(out: &mut [f32]) {
+    let mut out = chunk_mut(out, MapContinuousLinear::new(1));
+    if block_id::<DimX>() == 0 && thread_id::<DimX>() == 0 {
+        out[0] = 0.0;
+    }
+}
 
 // --- conv2d ---
 #[gpu::cuda_kernel]
@@ -707,9 +694,9 @@ pub fn bench_lu_kernel2(row_tail: &[f32], col: &[f32], rows_below: &mut [f32], n
     let j_tail = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i_tail = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     let rem = n - k - 1;
-    let mut rows_below = chunk_mut(rows_below, LuTrailingUpdateMap { n, k, rem });
+    let mut rows_below = chunk_mut(rows_below, Map2D::new(n as usize));
     if i_tail < rem && j_tail < rem {
-        rows_below[0] = rows_below[0] - col[i_tail as usize] * row_tail[j_tail as usize];
+        rows_below[(0, 0)] = rows_below[(0, 0)] - col[i_tail as usize] * row_tail[j_tail as usize];
     }
 }
 
@@ -717,8 +704,53 @@ pub fn bench_lu_kernel2(row_tail: &[f32], col: &[f32], rows_below: &mut [f32], n
 // Benchmark runner — all benchmarks inline in cuda_ctx closure
 // =====================================================================
 
+fn launch_overhead_iters_from_args() -> Option<usize> {
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--launch-overhead" {
+            return Some(
+                args.next()
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .filter(|iters| *iters > 0)
+                    .unwrap_or(20000),
+            );
+        }
+    }
+    None
+}
+
+fn run_launch_overhead(
+    ctx: &gpu_host::GpuCtxZeroGuard<'_, '_>,
+    m: &gpu_host::GpuModule<gpu_host::CtxSpaceZero>,
+    iters: usize,
+) {
+    let mut h_out = vec![0.0f32; 1];
+    let mut d_out = ctx.new_tensor_view(h_out.as_mut_slice()).unwrap();
+
+    for _ in 0..100 {
+        let cfg = gpu_host::gpu_config!(1, 1, 1, 1, 1, 1, 0);
+        bench_empty_launch::launch(cfg, ctx, m, &mut d_out).unwrap();
+    }
+    ctx.sync().unwrap();
+
+    let start = Instant::now();
+    for _ in 0..iters {
+        let cfg = gpu_host::gpu_config!(1, 1, 1, 1, 1, 1, 0);
+        bench_empty_launch::launch(cfg, ctx, m, &mut d_out).unwrap();
+    }
+    ctx.sync().unwrap();
+    let us = start.elapsed().as_micros() as f64 / iters as f64;
+    println!("empty_launch SeGuRu: {:.3} us/iter ({} iters)", us, iters);
+}
+
 fn main() {
+    let launch_overhead_iters = launch_overhead_iters_from_args();
     gpu_host::cuda_ctx(0, |ctx, m| {
+        if let Some(iters) = launch_overhead_iters {
+            run_launch_overhead(ctx, m, iters);
+            return;
+        }
+
         // --- conv2d (NI=4096, NJ=4096) ---
         {
             let ni: usize = 4096;
@@ -1623,7 +1655,7 @@ fn main() {
                         {
                             let row_tail_start = k * n + k + 1;
                             let row_tail_end = (k + 1) * n;
-                            let split_at = (k + 1) * n;
+                            let split_at = (k + 1) * n + k + 1;
                             let (prefix, mut rows_below) = d_a.split_at_mut(split_at);
                             let row_tail = prefix.index(row_tail_start..row_tail_end);
                             let col = d_col.index(..rem);

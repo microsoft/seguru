@@ -19,34 +19,11 @@
 use std::path::Path;
 use std::time::Instant;
 
-use gpu::chunk::ScopeUniqueMap;
-use gpu::chunk_scope::{ChunkScope, TID_MAX_LEN};
 use gpu::prelude::*;
 
 const BDIM_X: u32 = 16;
 const BDIM_Y: u32 = 16;
 const KHW: u32 = 9; // Kh*Kw for 3x3
-
-#[derive(Clone, Copy)]
-struct ConvOutputMap {
-    wo: u32,
-    ho: u32,
-}
-
-// Each valid (global x, global y, global z) thread maps to exactly one
-// y[z, y, x] element; edge-tile threads are invalidated before storing.
-unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for ConvOutputMap {
-    type IndexType = u32;
-    type GlobalIndexType = u32;
-
-    fn map(&self, idx: Self::IndexType, thread_ids: [u32; TID_MAX_LEN]) -> (bool, u32) {
-        let x = CS::global_id_x(thread_ids);
-        let y = CS::global_id_y(thread_ids);
-        let z = CS::global_id_z(thread_ids);
-        let valid = idx == 0 && x < self.wo && y < self.ho;
-        (valid, (z * self.ho + y) * self.wo + x)
-    }
-}
 
 #[gpu::cuda_kernel]
 #[allow(clippy::too_many_arguments)]
@@ -83,7 +60,12 @@ pub fn conv_relu_biasadd_kernel(
     let ho = by * BDIM_Y + ty;
     let wo = bx * BDIM_X + tx;
 
-    let mut y_thread = chunk_mut(y, ConvOutputMap { wo: Wo, ho: Ho });
+    let gx = block_dim::<DimX>() * grid_dim::<DimX>();
+    let gy = block_dim::<DimY>() * grid_dim::<DimY>();
+    let gz = block_dim::<DimZ>() * grid_dim::<DimZ>();
+    let output_map =
+        reshape_map!([1] | [(gx, Wo), (gy, Ho), gz] => layout: [i0, t0, t1, t2]);
+    let mut y_thread = chunk_mut(y, output_map);
 
     let hw = H * Wd;
     let x_batch_base = bi * Cin * hw;

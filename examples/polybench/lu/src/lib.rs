@@ -1,25 +1,4 @@
-use gpu::chunk::ScopeUniqueMap;
-use gpu::chunk_scope::{ChunkScope, TID_MAX_LEN};
 use gpu::prelude::*;
-
-#[derive(Clone, Copy)]
-struct LuTrailingUpdateMap {
-    n: u32,
-    k: u32,
-    rem: u32,
-}
-
-unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for LuTrailingUpdateMap {
-    type IndexType = u32;
-    type GlobalIndexType = u32;
-
-    fn map(&self, idx: Self::IndexType, thread_ids: [u32; TID_MAX_LEN]) -> (bool, u32) {
-        let j_tail = CS::global_id_x(thread_ids);
-        let i_tail = CS::global_id_y(thread_ids);
-        let valid = idx == 0 && i_tail < self.rem && j_tail < self.rem;
-        (valid, i_tail * self.n + self.k + 1 + j_tail)
-    }
-}
 
 // A[k][j] /= A[k][k] for j > k (only row k is modified)
 #[gpu::cuda_kernel]
@@ -47,9 +26,9 @@ pub fn lu_kernel2(row_tail: &[f32], col: &[f32], rows_below: &mut [f32], n: u32,
     let j_tail = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i_tail = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     let rem = n - k - 1;
-    let mut rows_below = chunk_mut(rows_below, LuTrailingUpdateMap { n, k, rem });
+    let mut rows_below = chunk_mut(rows_below, Map2D::new(n as usize));
     if i_tail < rem && j_tail < rem {
-        rows_below[0] = rows_below[0] - col[i_tail as usize] * row_tail[j_tail as usize];
+        rows_below[(0, 0)] = rows_below[(0, 0)] - col[i_tail as usize] * row_tail[j_tail as usize];
     }
 }
 
@@ -133,7 +112,7 @@ mod tests {
                     {
                         let row_tail_start = k * n + k + 1;
                         let row_tail_end = (k + 1) * n;
-                        let split_at = (k + 1) * n;
+                        let split_at = (k + 1) * n + k + 1;
                         let (prefix, mut rows_below) = d_a.split_at_mut(split_at);
                         let row_tail = prefix.index(row_tail_start..row_tail_end);
                         let col = d_col.index(..rem);
@@ -173,8 +152,11 @@ mod tests {
             assert!(
                 diff <= tolerance,
                 "Mismatch at {}: gpu={} cpu={} diff={} tolerance={}",
-                i, gpu[i], cpu[i],
-                diff, tolerance,
+                i,
+                gpu[i],
+                cpu[i],
+                diff,
+                tolerance,
             );
         }
 

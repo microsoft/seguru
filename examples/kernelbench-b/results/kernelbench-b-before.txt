@@ -1,0 +1,45 @@
+... leaky_relu
+  leaky_relu    torch=  640.7us  seguru=   693.5us ✓  cuda=   669.2us ✓  seguru_fc=   642.1us ✓
+... tanh
+  tanh          torch=  653.7us  seguru=   701.8us ✓  cuda=   663.1us ✓  seguru_fc=   635.9us ✓
+... rms_norm
+  rms_norm      torch=24279.3us  seguru= 15652.4us ✓  cuda= 13274.2us ✓  seguru_fc= 13336.4us ✓
+... relu
+  relu          torch=  654.4us  seguru=   695.5us ✓  cuda=   668.0us ✓  seguru_fc=   642.1us ✓
+... sigmoid
+  sigmoid       torch=  654.9us  seguru=   699.6us ✓  cuda=   664.8us ✓  seguru_fc=   641.1us ✓
+... gelu
+  gelu          torch=  664.1us  seguru=   729.1us ✓  cuda=   664.8us ✓  seguru_fc=   641.5us ✓
+... softmax
+  softmax       torch=  229.6us  seguru=   303.2us ✓  cuda=   243.7us ✓  seguru_fc=   303.5us ✓
+... layer_norm
+  layer_norm    torch=  263.0us  seguru=   243.2us ✓  cuda=   214.6us ✓  seguru_fc=   226.9us ✓
+... sum_dim
+  sum_dim       torch=  177.8us  seguru=   163.6us ✓  cuda=   152.7us ✓  seguru_fc=   163.4us ✓
+... l2_norm
+  l2_norm       torch=  453.2us  seguru=   242.5us ✓  cuda=   208.7us ✓  seguru_fc=   242.3us ✓
+... log_softmax
+  log_softmax   torch=  205.7us  seguru=   299.3us ✓  cuda=   243.1us ✓  seguru_fc=   299.6us ✓
+... swish
+  swish         torch= 1593.9us  seguru=   700.6us ✓  cuda=   671.6us ✓  seguru_fc=   700.0us ✓
+... softplus
+  softplus      torch=  664.9us  seguru=   769.0us ✓  cuda=   678.6us ✓  seguru_fc=   769.1us ✓
+... l1_norm
+  l1_norm       torch=  459.5us  seguru=   242.8us ✓  cuda=   209.5us ✓  seguru_fc=   242.7us ✓
+... max_pool1d
+  max_pool1d    torch= 2487.4us  seguru=  1642.5us ✓  cuda=  1646.2us ✓  seguru_fc=  1642.8us ✓
+... mean_dim
+  mean_dim      torch=  177.2us  seguru=   163.9us ✓  cuda=   155.4us ✓  seguru_fc=   163.9us ✓
+... max_dim
+  max_dim       torch=  187.3us  seguru=   224.8us ✓  cuda=   166.3us ✓  seguru_fc=   224.6us ✓
+... argmax_dim
+  argmax_dim    torch=  179.9us  seguru=   450.1us ✓  cuda=   324.1us ✓  seguru_fc=   450.2us ✓
+... cumsum
+  cumsum        torch=  121.1us  seguru=   163.0us ✓  cuda=   176.5us ✓  seguru_fc=   165.4us ✓
+... mse_loss
+  mse_loss      torch=  174.3us  seguru=  9211.5us ✓  cuda=  2386.2us ✓  seguru_fc=  9210.8us ✓
+
+=== summary (correctness + speedup vs torch-eager) ===
+  seguru    correct=20/20  fast_1= 40%  fast_2=  5%  avg_speedup=1.06x
+  cuda      correct=20/20  fast_1= 45%  fast_2= 15%  avg_speedup=1.19x
+  seguru_fc  correct=20/20  fast_1= 60%  fast_2=  5%  avg_speedup=1.10x

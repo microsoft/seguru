@@ -11,7 +11,8 @@ import torch.nn.functional as F
 from torch.utils.cpp_extension import load
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
-RUNNER = REPO / "examples/target/release/kernelbench-b"
+TARGET_DIR = pathlib.Path(os.environ.get("CARGO_TARGET_DIR", REPO / "examples/target"))
+RUNNER = TARGET_DIR / "release/kernelbench-b"
 CUDA_DIR = REPO / "examples/kernelbench-b/cuda"
 BUILD_DIR = REPO / "examples/kernelbench-b/cuda_build"
 BUILD_DIR.mkdir(exist_ok=True)

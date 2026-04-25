@@ -1,0 +1,64 @@
+KernelBench-B compare2 SeGuRu-from-CUDA refresh (Phase T / Task 5b)
+====================================================================
+
+Base commit: 25077b49d241783221384043a36db08b2747b461
+Branch/worktree: bench-full-refresh at /home/sanghle/work/seguru/.worktrees/bench-full-refresh
+Environment: CUDA_HOME=/usr/local/cuda-13.2, DISABLE_GPU_BOUND_CHECK=true, RUST_MIN_STACK=67108864, CARGO_TARGET_DIR=/home/sanghle/work/seguru/examples/target
+Raw logs in this results directory: kernelbench-b-before.txt, kernelbench-b-after.txt
+
+Summary
+-------
+Metric                                Before        After
+seguru_fc / cuda geomean              1.1497x       1.0077x
+seguru_fc correctness                 20/20         20/20
+seguru_fc avg speedup vs torch eager  1.10x         1.17x
+
+Per-problem seguru_fc / cuda ratios
+-----------------------------------
+problem        before   after    change
+leaky_relu     0.960x   0.959x   -0.000x
+tanh           0.959x   0.958x   -0.001x
+rms_norm       1.005x   1.005x   +0.000x
+relu           0.961x   0.961x   +0.000x
+sigmoid        0.964x   0.964x   -0.000x
+gelu           0.965x   0.964x   -0.001x
+softmax        1.245x   0.999x   -0.246x
+layer_norm     1.057x   1.059x   +0.001x
+sum_dim        1.070x   1.065x   -0.005x
+l2_norm        1.161x   1.164x   +0.003x
+log_softmax    1.232x   0.996x   -0.236x
+swish          1.042x   0.954x   -0.088x
+softplus       1.133x   0.945x   -0.188x
+l1_norm        1.158x   1.160x   +0.002x
+max_pool1d     0.998x   0.998x   -0.000x
+mean_dim       1.055x   1.055x   +0.001x
+max_dim        1.351x   0.984x   -0.366x
+argmax_dim     1.389x   0.990x   -0.399x
+cumsum         0.937x   0.934x   -0.003x
+mse_loss       3.860x   1.077x   -2.783x
+
+Top remaining raw-CUDA parity gaps after refresh
+------------------------------------------------
+1. l2_norm      1.164x (242.4us seguru_fc vs 208.2us cuda)
+2. l1_norm      1.160x (242.6us seguru_fc vs 209.1us cuda)
+3. mse_loss     1.077x (2570.7us seguru_fc vs 2386.6us cuda)
+4. sum_dim      1.065x (163.2us seguru_fc vs 153.3us cuda)
+5. layer_norm   1.059x (227.1us seguru_fc vs 214.5us cuda)
+
+Regressions
+-----------
+No correctness regressions were observed. Small ratio movements on unchanged kernels (for example l2_norm +0.003x and layer_norm +0.002x) are within run-to-run timing noise.
+
+Changes made
+------------
+- compare2.py now honors CARGO_TARGET_DIR when locating the built kernelbench-b runner, matching the verification environment.
+- softmax/log_softmax: process compatible rows as Float4 while preserving online max+sum and one-block-per-row geometry; keep scalar fallback for other D multiples of BLOCK.
+- swish/softplus: port CUDA float4 vectorized body plus scalar tail handling.
+- max_dim: add Float4 row traversal and restrict final cross-warp reduction/output write to warp 0.
+- argmax_dim: add Float4 row traversal and replace the full-block shared-memory min tree with warp-level min plus one cross-warp min reduction.
+- mse_loss: add Float4 single-block reduction path with scalar fallback.
+- tanh/sigmoid: replace unsafe TensorView reinterpret casts with explicit host Float4 repacking plus scalar tail handling.
+
+Kernels intentionally left otherwise unchanged
+----------------------------------------------
+leaky_relu, relu, gelu, rms_norm, layer_norm, sum_dim, l2_norm, l1_norm, max_pool1d, mean_dim, and cumsum were already correct and close to parity or had no safe obvious updated-skill change beyond existing Float4/row-reduction patterns.

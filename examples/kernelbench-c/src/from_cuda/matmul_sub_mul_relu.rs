@@ -49,7 +49,8 @@ pub fn matmul_sub_mul_relu_kernel(
     let mut tile_a = gpu::GpuShared::<[f32; (BM * BK) as usize]>::zero();
     let mut tile_b = gpu::GpuShared::<[f32; (BN * BK) as usize]>::zero();
 
-    let load_map = reshape_map!([4] | [16, 16] => layout: [i0, t0, t1]);
+    // K-major shared layout for BM/BN=128: offset = k_lane * 128 + row_or_col.
+    let load_map = reshape_map!([4] | [2, 8, 16] => layout: [t1, t2, i0, t0]);
 
     let out_map = reshape_map!(
         [8, 8] | [16, grid_dim::<DimX>(), 16, grid_dim::<DimY>()]
@@ -85,10 +86,10 @@ pub fn matmul_sub_mul_relu_kernel(
             let mut b_reg = [0.0f32; TN as usize];
 
             for ii in 0..8usize {
-                a_reg[ii] = tile_a[(row_off + ii) * 8 + kk];
+                a_reg[ii] = tile_a[kk * BM as usize + row_off + ii];
             }
             for jj in 0..8usize {
-                b_reg[jj] = tile_b[(col_off + jj) * 8 + kk];
+                b_reg[jj] = tile_b[kk * BN as usize + col_off + jj];
             }
 
             unroll! { for ii in 0..8 {

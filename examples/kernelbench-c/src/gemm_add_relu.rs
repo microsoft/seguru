@@ -52,7 +52,7 @@ pub fn gemm_add_relu_kernel(
     let k4 = K >> 2;
     let a_col4 = a_col >> 2;
 
-    // K-major shared layout: offset = (a_col + i0) * 128 + a_row.
+    // K-major shared layout for BM/BN=128: offset = k_lane * 128 + row_or_col.
     let load_map = reshape_map!([4] | [2, 8, 16] => layout: [t1, t2, i0, t0]);
 
     let mut acc = [[0.0f32; TN as usize]; TM as usize];

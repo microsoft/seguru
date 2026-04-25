@@ -19,14 +19,9 @@
 //!   COMPUTE phase").
 //!
 //! Deviations from the CUDA:
-//!   * Shared tiles are stored non-transposed (As[m][k], Bs[n][k]) rather
-//!     than transposed [k][m] / [k][n]. The reason is that with a non-
-//!     transposed layout each thread's 4 tile writes land in 4 *contiguous*
-//!     slots (`tid*4 + 0..3`), which matches a simple
-//!     `reshape_map!([4] | [16,16] => layout: [i0, t0, t1])` and therefore
-//!     eliminates bounds checks on the LOAD phase. The transposed layout
-//!     would require per-thread strided writes, which `chunk_mut` cannot
-//!     express as a disjoint partition. Compute reads remain scalar.
+//!   * Shared tiles use a safe K-major `reshape_map!` so each thread's four
+//!     K-lane writes remain a proven disjoint `chunk_mut` partition while
+//!     compute reads match the CUDA-style [k][m] / [k][n] layout.
 //!   * Loads use 4 scalar reads per tile per thread instead of a `float4`
 //!     vectorized load — the NVVM backend still emits 128-bit loads for
 //!     contiguous addresses in many cases and the control flow is simpler.
@@ -77,14 +72,12 @@ pub fn gemm_mul_lrelu_kernel(
     let a_row = tid >> 1; // 0..128 (one row of the 128-row tile per 2 threads)
     let a_col = (tid & 1) << 2; // either 0 or 4 — the 4-wide slice of K this thread loads
 
-    // Shared tiles, non-transposed: As[m_local, k_local], Bs[n_local, k_local].
+    // Shared tiles, K-major: As[k_local, m_local], Bs[k_local, n_local].
     let mut tile_a = gpu::GpuShared::<[f32; (BM * BK) as usize]>::zero(); // 1024
     let mut tile_b = gpu::GpuShared::<[f32; (BN * BK) as usize]>::zero(); // 1024
 
-    // Per-thread disjoint slot for tile loads: 4 contiguous slots at tid*4.
-    // layout [i0, t0, t1] → mem = (t1*16 + t0)*4 + i0 = tid*4 + i0.
-    // That is exactly a_row*BK + a_col + i0 for this thread. ✓
-    let load_map = reshape_map!([4] | [16, 16] => layout: [i0, t0, t1]);
+    // K-major shared layout for BM/BN=128: offset = k_lane * 128 + row_or_col.
+    let load_map = reshape_map!([4] | [2, 8, 16] => layout: [t1, t2, i0, t0]);
 
     // Per-thread disjoint slot for the 8×8 output tile.
     // We want y[(bid_y*BM + ty*TM + i) * N + (bid_x*BN + tx*TN + j)] at
@@ -137,10 +130,10 @@ pub fn gemm_mul_lrelu_kernel(
             let mut b_reg = [0.0f32; TN as usize];
 
             for ii in 0..8usize {
-                a_reg[ii] = tile_a[(row_off + ii) * 8 + kk];
+                a_reg[ii] = tile_a[kk * BM as usize + row_off + ii];
             }
             for jj in 0..8usize {
-                b_reg[jj] = tile_b[(col_off + jj) * 8 + kk];
+                b_reg[jj] = tile_b[kk * BN as usize + col_off + jj];
             }
 
             // 64 FMAs per k step — 512 FMAs per BK-tile per thread.

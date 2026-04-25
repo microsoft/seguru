@@ -13,10 +13,13 @@ import torch.nn.functional as F
 from torch.utils.cpp_extension import load
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
-RUNNER = REPO / "examples/target/release/kernelbench-c"
+TARGET_DIR = pathlib.Path(os.environ.get("CARGO_TARGET_DIR", REPO / "examples/target"))
+RUNNER = TARGET_DIR / "release/kernelbench-c"
 CUDA_DIR = REPO / "examples/kernelbench-c/cuda"
 BUILD_DIR = REPO / "examples/kernelbench-c/cuda_build"
 BUILD_DIR.mkdir(exist_ok=True)
+TMP_DIR = BUILD_DIR / "tmp"
+TMP_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def time_fn(fn, iters=50, warmup=10):
@@ -347,7 +350,7 @@ def run_one(name):
     # SeGuRu←PyTorch arm
     sg_us, sg_err, sg_error = float("inf"), float("inf"), ""
     try:
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(dir=TMP_DIR) as td:
             tmp = pathlib.Path(td); (tmp / "in").mkdir(); (tmp / "out").mkdir()
             for k, v in ins.items(): dump_bin(tmp / f"in/{k}.bin", v)
             sg = run_seguru(name, tmp / "in", tmp / "out", iters=50, shape=p["in_shape"])
@@ -360,7 +363,7 @@ def run_one(name):
     # SeGuRu←CUDA arm
     fc_us, fc_err, fc_error = float("inf"), float("inf"), ""
     try:
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(dir=TMP_DIR) as td:
             tmp = pathlib.Path(td); (tmp / "in").mkdir(); (tmp / "out").mkdir()
             for k, v in ins.items(): dump_bin(tmp / f"in/{k}.bin", v)
             fc = run_seguru(f"{name}_fc", tmp / "in", tmp / "out", iters=50, shape=p["in_shape"])

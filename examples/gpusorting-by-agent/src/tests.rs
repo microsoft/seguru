@@ -167,4 +167,113 @@ mod sort_tests {
         run_sort(&mut data);
         assert_eq!(data, expected);
     }
+
+    #[test]
+    fn bench_sort_1m() {
+        let n = 1 << 20; // ~1M elements
+        let data: Vec<u32> = (0..n as u32).map(|i| i.wrapping_mul(2654435761u32)).collect();
+
+        cuda_ctx(0, |ctx, m| {
+            let size = data.len() as u32;
+            let thread_blocks = (size + PART_SIZE - 1) / PART_SIZE;
+            let padded_thread_blocks =
+                ((thread_blocks + SCAN_THREADS - 1) / SCAN_THREADS) * SCAN_THREADS;
+            let global_hist_len = (RADIX * RADIX_PASSES) as usize;
+            let pass_hist_len = (RADIX * padded_thread_blocks) as usize;
+
+            // Pre-allocate host zeroed buffers
+            let h_zero_gh = vec![0u32; global_hist_len];
+            let h_zero_ph = vec![0u32; pass_hist_len];
+            let h_alt = vec![0u32; data.len()];
+
+            // Warmup run
+            {
+                let mut d_sort = ctx.new_tensor_view::<[u32]>(&data).unwrap();
+                let mut d_alt = ctx.new_tensor_view::<[u32]>(&h_alt).unwrap();
+                let mut d_global_hist = ctx.new_tensor_view::<[u32]>(&h_zero_gh).unwrap();
+                for pass in 0..RADIX_PASSES {
+                    let radix_shift = pass * RADIX_LOG;
+                    let mut d_ph = ctx.new_tensor_view::<[u32]>(&h_zero_ph).unwrap();
+                    let us_cfg = gpu_host::gpu_config!(thread_blocks, 1, 1, UPSWEEP_THREADS, 1, 1, RADIX * 2 * 4);
+                    if pass % 2 == 0 {
+                        crate::upsweep::radix_upsweep::launch(us_cfg, ctx, m, &d_sort, &mut d_global_hist, &mut d_ph, size, radix_shift, padded_thread_blocks).unwrap();
+                    } else {
+                        crate::upsweep::radix_upsweep::launch(us_cfg, ctx, m, &d_alt, &mut d_global_hist, &mut d_ph, size, radix_shift, padded_thread_blocks).unwrap();
+                    }
+                    let sc_cfg = gpu_host::gpu_config!(RADIX, 1, 1, SCAN_THREADS, 1, 1, SCAN_THREADS * 4);
+                    crate::scan::radix_scan::launch(sc_cfg, ctx, m, &mut d_ph, padded_thread_blocks).unwrap();
+                    let ds_cfg = gpu_host::gpu_config!(thread_blocks, 1, 1, DOWNSWEEP_THREADS, 1, 1, (BIN_PART_SIZE + RADIX) * 4);
+                    if pass % 2 == 0 {
+                        crate::downsweep::radix_downsweep::launch(ds_cfg, ctx, m, &d_sort, &mut d_alt, &d_global_hist, &d_ph, size, radix_shift, padded_thread_blocks).unwrap();
+                    } else {
+                        crate::downsweep::radix_downsweep::launch(ds_cfg, ctx, m, &d_alt, &mut d_sort, &d_global_hist, &d_ph, size, radix_shift, padded_thread_blocks).unwrap();
+                    }
+                }
+            }
+
+            // Benchmark: 10 iterations
+            let iters = 10;
+            let start = std::time::Instant::now();
+            for _ in 0..iters {
+                let mut d_sort = ctx.new_tensor_view::<[u32]>(&data).unwrap();
+                let mut d_alt = ctx.new_tensor_view::<[u32]>(&h_alt).unwrap();
+                let mut d_global_hist = ctx.new_tensor_view::<[u32]>(&h_zero_gh).unwrap();
+                for pass in 0..RADIX_PASSES {
+                    let radix_shift = pass * RADIX_LOG;
+                    let mut d_ph = ctx.new_tensor_view::<[u32]>(&h_zero_ph).unwrap();
+                    let us_cfg = gpu_host::gpu_config!(thread_blocks, 1, 1, UPSWEEP_THREADS, 1, 1, RADIX * 2 * 4);
+                    if pass % 2 == 0 {
+                        crate::upsweep::radix_upsweep::launch(us_cfg, ctx, m, &d_sort, &mut d_global_hist, &mut d_ph, size, radix_shift, padded_thread_blocks).unwrap();
+                    } else {
+                        crate::upsweep::radix_upsweep::launch(us_cfg, ctx, m, &d_alt, &mut d_global_hist, &mut d_ph, size, radix_shift, padded_thread_blocks).unwrap();
+                    }
+                    let sc_cfg = gpu_host::gpu_config!(RADIX, 1, 1, SCAN_THREADS, 1, 1, SCAN_THREADS * 4);
+                    crate::scan::radix_scan::launch(sc_cfg, ctx, m, &mut d_ph, padded_thread_blocks).unwrap();
+                    let ds_cfg = gpu_host::gpu_config!(thread_blocks, 1, 1, DOWNSWEEP_THREADS, 1, 1, (BIN_PART_SIZE + RADIX) * 4);
+                    if pass % 2 == 0 {
+                        crate::downsweep::radix_downsweep::launch(ds_cfg, ctx, m, &d_sort, &mut d_alt, &d_global_hist, &d_ph, size, radix_shift, padded_thread_blocks).unwrap();
+                    } else {
+                        crate::downsweep::radix_downsweep::launch(ds_cfg, ctx, m, &d_alt, &mut d_sort, &d_global_hist, &d_ph, size, radix_shift, padded_thread_blocks).unwrap();
+                    }
+                }
+                // Sync to ensure GPU finished
+                let mut result = vec![0u32; data.len()];
+                d_sort.copy_to_host(&mut result).unwrap();
+            }
+            let elapsed = start.elapsed();
+            let avg_us = elapsed.as_micros() as f64 / iters as f64;
+            eprintln!(
+                "bench_sort_1m: {:.1} us/sort ({} iters, {:.1} ms total, n={})",
+                avg_us, iters, elapsed.as_millis() as f64, n
+            );
+
+            // Verify correctness on last run
+            let mut d_sort = ctx.new_tensor_view::<[u32]>(&data).unwrap();
+            let mut d_alt = ctx.new_tensor_view::<[u32]>(&vec![0u32; data.len()]).unwrap();
+            let mut d_global_hist = ctx.new_tensor_view::<[u32]>(&h_zero_gh).unwrap();
+            for pass in 0..RADIX_PASSES {
+                let radix_shift = pass * RADIX_LOG;
+                let mut d_ph = ctx.new_tensor_view::<[u32]>(&h_zero_ph).unwrap();
+                let us_cfg = gpu_host::gpu_config!(thread_blocks, 1, 1, UPSWEEP_THREADS, 1, 1, RADIX * 2 * 4);
+                if pass % 2 == 0 {
+                    crate::upsweep::radix_upsweep::launch(us_cfg, ctx, m, &d_sort, &mut d_global_hist, &mut d_ph, size, radix_shift, padded_thread_blocks).unwrap();
+                } else {
+                    crate::upsweep::radix_upsweep::launch(us_cfg, ctx, m, &d_alt, &mut d_global_hist, &mut d_ph, size, radix_shift, padded_thread_blocks).unwrap();
+                }
+                let sc_cfg = gpu_host::gpu_config!(RADIX, 1, 1, SCAN_THREADS, 1, 1, SCAN_THREADS * 4);
+                crate::scan::radix_scan::launch(sc_cfg, ctx, m, &mut d_ph, padded_thread_blocks).unwrap();
+                let ds_cfg = gpu_host::gpu_config!(thread_blocks, 1, 1, DOWNSWEEP_THREADS, 1, 1, (BIN_PART_SIZE + RADIX) * 4);
+                if pass % 2 == 0 {
+                    crate::downsweep::radix_downsweep::launch(ds_cfg, ctx, m, &d_sort, &mut d_alt, &d_global_hist, &d_ph, size, radix_shift, padded_thread_blocks).unwrap();
+                } else {
+                    crate::downsweep::radix_downsweep::launch(ds_cfg, ctx, m, &d_alt, &mut d_sort, &d_global_hist, &d_ph, size, radix_shift, padded_thread_blocks).unwrap();
+                }
+            }
+            let mut result = vec![0u32; data.len()];
+            d_sort.copy_to_host(&mut result).unwrap();
+            let mut expected = data.clone();
+            expected.sort();
+            assert_eq!(result, expected);
+        });
+    }
 }

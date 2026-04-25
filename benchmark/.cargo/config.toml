@@ -1,0 +1,8 @@
+[build]
+rustc = "../crates/target/debug/rustc-gpu"
+rustflags = ["--emit=mir", "-Zmir-opt-level=3"]
+
+[env]
+USE_FAST="true"
+USE_FTZ="true"
+NVPTX_FEATURES="+ptx87"

@@ -30,7 +30,7 @@ unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for LuTrailingUpdateMap {
 // --- conv2d ---
 #[gpu::cuda_kernel]
 pub fn bench_conv2d(a: &[f32], b: &mut [f32], ni: u32, nj: u32) {
-    let mut b = chunk_mut(b, MapContinuousLinear::new(1));
+    let mut b = chunk_mut(b, Map2D::new(nj as usize));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     let c11: f32 = 0.2;
@@ -43,7 +43,7 @@ pub fn bench_conv2d(a: &[f32], b: &mut [f32], ni: u32, nj: u32) {
     let c23: f32 = 0.7;
     let c33: f32 = 0.10;
     if i > 0 && i < ni - 1 && j > 0 && j < nj - 1 {
-        b[0] = c11 * a[((i - 1) * nj + (j - 1)) as usize]
+        b[(0, 0)] = c11 * a[((i - 1) * nj + (j - 1)) as usize]
             + c21 * a[((i - 1) * nj + j) as usize]
             + c31 * a[((i - 1) * nj + (j + 1)) as usize]
             + c12 * a[(i * nj + (j - 1)) as usize]
@@ -58,7 +58,7 @@ pub fn bench_conv2d(a: &[f32], b: &mut [f32], ni: u32, nj: u32) {
 // --- conv3d ---
 #[gpu::cuda_kernel]
 pub fn bench_conv3d(a: &[f32], b: &mut [f32], ni: u32, nj: u32, nk: u32) {
-    let mut b = chunk_mut(b, MapContinuousLinear::new(1));
+    let mut b = chunk_mut(b, Map2D::new(nk as usize));
     let k = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let ij = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     let i = ij / nj;
@@ -74,7 +74,7 @@ pub fn bench_conv3d(a: &[f32], b: &mut [f32], ni: u32, nj: u32, nk: u32) {
         let c32: f32 = 7.0;
         let c33: f32 = 10.0;
         let s = nj * nk;
-        b[0] = c11 * a[((i - 1) * s + (j - 1) * nk + (k - 1)) as usize]
+        b[(0, 0)] = c11 * a[((i - 1) * s + (j - 1) * nk + (k - 1)) as usize]
             + c12 * a[((i - 1) * s + (j - 1) * nk + k) as usize]
             + c13 * a[((i - 1) * s + (j - 1) * nk + (k + 1)) as usize]
             + c21 * a[((i - 1) * s + j * nk + (k - 1)) as usize]
@@ -124,7 +124,7 @@ pub fn bench_gemm(
         let a_row: &[f32] = &a[(i * nk) as usize..((i + 1) * nk) as usize];
         let mut b_idx = j as usize;
         for a_val in a_row {
-            val += alpha * a_val * b[b_idx];
+            val += alpha * a_val * b[b_idx].ldcs();
             b_idx += nj as usize;
         }
         c[(0, 0)] = val;
@@ -150,7 +150,7 @@ pub fn bench_mm2_kernel1(
         let a_row: &[f32] = &a[(i * nk) as usize..((i + 1) * nk) as usize];
         let mut b_idx = j as usize;
         for a_val in a_row {
-            val += alpha * a_val * b[b_idx];
+            val += alpha * a_val * b[b_idx].ldcs();
             b_idx += nj as usize;
         }
         tmp[(0, 0)] = val;
@@ -175,7 +175,7 @@ pub fn bench_mm2_kernel2(
         let tmp_row: &[f32] = &tmp[(i * nj) as usize..((i + 1) * nj) as usize];
         let mut c_idx = l as usize;
         for t_val in tmp_row {
-            val += t_val * c[c_idx];
+            val += t_val * c[c_idx].ldcs();
             c_idx += nl as usize;
         }
         d[(0, 0)] = val;
@@ -184,14 +184,7 @@ pub fn bench_mm2_kernel2(
 
 // --- threemm ---
 #[gpu::cuda_kernel]
-pub fn bench_mm3_kernel1(
-    a: &[f32],
-    b: &[f32],
-    e: &mut [f32],
-    ni: u32,
-    nj: u32,
-    nk: u32,
-) {
+pub fn bench_mm3_kernel1(a: &[f32], b: &[f32], e: &mut [f32], ni: u32, nj: u32, nk: u32) {
     let mut e = chunk_mut(e, Map2D::new(nj as usize));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
@@ -200,7 +193,7 @@ pub fn bench_mm3_kernel1(
         let a_row: &[f32] = &a[(i * nk) as usize..((i + 1) * nk) as usize];
         let mut b_idx = j as usize;
         for a_val in a_row {
-            val += a_val * b[b_idx];
+            val += a_val * b[b_idx].ldcs();
             b_idx += nj as usize;
         }
         e[(0, 0)] = val;
@@ -208,14 +201,7 @@ pub fn bench_mm3_kernel1(
 }
 
 #[gpu::cuda_kernel]
-pub fn bench_mm3_kernel2(
-    c: &[f32],
-    d: &[f32],
-    f: &mut [f32],
-    nj: u32,
-    nl: u32,
-    nm: u32,
-) {
+pub fn bench_mm3_kernel2(c: &[f32], d: &[f32], f: &mut [f32], nj: u32, nl: u32, nm: u32) {
     let mut f = chunk_mut(f, Map2D::new(nl as usize));
     let l = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let j = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
@@ -224,7 +210,7 @@ pub fn bench_mm3_kernel2(
         let c_row: &[f32] = &c[(j * nm) as usize..((j + 1) * nm) as usize];
         let mut d_idx = l as usize;
         for c_val in c_row {
-            val += c_val * d[d_idx];
+            val += c_val * d[d_idx].ldcs();
             d_idx += nl as usize;
         }
         f[(0, 0)] = val;
@@ -232,14 +218,7 @@ pub fn bench_mm3_kernel2(
 }
 
 #[gpu::cuda_kernel]
-pub fn bench_mm3_kernel3(
-    e: &[f32],
-    f: &[f32],
-    g: &mut [f32],
-    ni: u32,
-    nj: u32,
-    nl: u32,
-) {
+pub fn bench_mm3_kernel3(e: &[f32], f: &[f32], g: &mut [f32], ni: u32, nj: u32, nl: u32) {
     let mut g = chunk_mut(g, Map2D::new(nl as usize));
     let l = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
@@ -248,7 +227,7 @@ pub fn bench_mm3_kernel3(
         let e_row: &[f32] = &e[(i * nj) as usize..((i + 1) * nj) as usize];
         let mut f_idx = l as usize;
         for e_val in e_row {
-            val += e_val * f[f_idx];
+            val += e_val * f[f_idx].ldcs();
             f_idx += nl as usize;
         }
         g[(0, 0)] = val;
@@ -280,7 +259,7 @@ pub fn bench_atax_kernel2(a: &[f32], tmp: &[f32], y: &mut [f32], nx: u32, ny: u3
         let mut sum = 0.0f32;
         let mut i: u32 = 0;
         while i < nx {
-            sum += a[(i * ny + j) as usize] * tmp[i as usize];
+            sum += a[(i * ny + j) as usize].ldcs() * tmp[i as usize];
             i += 1;
         }
         y[0] = sum;
@@ -296,7 +275,7 @@ pub fn bench_bicg_kernel1(a: &[f32], r: &[f32], s: &mut [f32], nx: u32, ny: u32)
         let mut sum = 0.0f32;
         let mut i: u32 = 0;
         while i < nx {
-            sum += r[i as usize] * a[(i * ny + j) as usize];
+            sum += r[i as usize] * a[(i * ny + j) as usize].ldcs();
             i += 1;
         }
         s[0] = sum;
@@ -344,7 +323,7 @@ pub fn bench_mvt_kernel2(a: &[f32], x2: &mut [f32], y2: &[f32], n: u32) {
         let mut sum = x2[0];
         let mut j: u32 = 0;
         while j < n {
-            sum += a[(j * n + i) as usize] * y2[j as usize];
+            sum += a[(j * n + i) as usize].ldcs() * y2[j as usize];
             j += 1;
         }
         x2[0] = sum;
@@ -381,15 +360,7 @@ pub fn bench_gesummv(
 
 // --- syr2k ---
 #[gpu::cuda_kernel]
-pub fn bench_syr2k(
-    a: &[f32],
-    b: &[f32],
-    c: &mut [f32],
-    ni: u32,
-    nj: u32,
-    alpha: f32,
-    beta: f32,
-) {
+pub fn bench_syr2k(a: &[f32], b: &[f32], c: &mut [f32], ni: u32, nj: u32, alpha: f32, beta: f32) {
     let mut c = chunk_mut(c, Map2D::new(ni as usize));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
@@ -408,14 +379,7 @@ pub fn bench_syr2k(
 
 // --- syrk ---
 #[gpu::cuda_kernel]
-pub fn bench_syrk(
-    a: &[f32],
-    c: &mut [f32],
-    ni: u32,
-    nj: u32,
-    alpha: f32,
-    beta: f32,
-) {
+pub fn bench_syrk(a: &[f32], c: &mut [f32], ni: u32, nj: u32, alpha: f32, beta: f32) {
     let mut c = chunk_mut(c, Map2D::new(ni as usize));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
@@ -556,10 +520,11 @@ pub fn bench_doitgen_kernel1(
     let r = qr / nq;
     if p < np && q < nq && r < nr {
         let mut val = 0.0f32;
-        let a_row: &[f32] = &a[(r * (nq * np) + q * np) as usize..(r * (nq * np) + q * np + np) as usize];
+        let a_row: &[f32] =
+            &a[(r * (nq * np) + q * np) as usize..(r * (nq * np) + q * np + np) as usize];
         let mut c4_idx = p as usize;
         for a_val in a_row {
-            val += a_val * c4[c4_idx];
+            val += a_val * c4[c4_idx].ldcs();
             c4_idx += np as usize;
         }
         sum_arr[0] = val;
@@ -567,13 +532,7 @@ pub fn bench_doitgen_kernel1(
 }
 
 #[gpu::cuda_kernel]
-pub fn bench_doitgen_kernel2(
-    sum_arr: &[f32],
-    a: &mut [f32],
-    nr: u32,
-    nq: u32,
-    np: u32,
-) {
+pub fn bench_doitgen_kernel2(sum_arr: &[f32], a: &mut [f32], nr: u32, nq: u32, np: u32) {
     let mut a = chunk_mut(a, MapContinuousLinear::new(1));
     let p = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let qr = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
@@ -586,45 +545,41 @@ pub fn bench_doitgen_kernel2(
 
 // --- fdtd2d ---
 #[gpu::cuda_kernel]
-pub fn bench_fdtd_step1(
-    fict: &[f32],
-    ey: &mut [f32],
-    hz: &[f32],
-    nx: u32,
-    ny: u32,
-    t: u32,
-) {
-    let mut ey = chunk_mut(ey, MapContinuousLinear::new(1));
+pub fn bench_fdtd_step1(fict: &[f32], ey: &mut [f32], hz: &[f32], nx: u32, ny: u32, t: u32) {
+    let mut ey = chunk_mut(ey, Map2D::new(ny as usize));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i < nx && j < ny {
         if i == 0 {
-            ey[0] = fict[t as usize];
+            ey[(0, 0)] = fict[t as usize];
         } else {
-            ey[0] = ey[0] - 0.5 * (hz[(i * ny + j) as usize] - hz[((i - 1) * ny + j) as usize]);
+            ey[(0, 0)] =
+                ey[(0, 0)] - 0.5 * (hz[(i * ny + j) as usize] - hz[((i - 1) * ny + j) as usize]);
         }
     }
 }
 
 #[gpu::cuda_kernel]
 pub fn bench_fdtd_step2(ex: &mut [f32], hz: &[f32], nx: u32, ny: u32) {
-    let mut ex = chunk_mut(ex, MapContinuousLinear::new(1));
+    let mut ex = chunk_mut(ex, Map2D::new(ny as usize));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i < nx && j > 0 && j < ny {
-        ex[0] = ex[0] - 0.5 * (hz[(i * ny + j) as usize] - hz[(i * ny + (j - 1)) as usize]);
+        ex[(0, 0)] =
+            ex[(0, 0)] - 0.5 * (hz[(i * ny + j) as usize] - hz[(i * ny + (j - 1)) as usize]);
     }
 }
 
 #[gpu::cuda_kernel]
 pub fn bench_fdtd_step3(ex: &[f32], ey: &[f32], hz: &mut [f32], nx: u32, ny: u32) {
-    let mut hz = chunk_mut(hz, MapContinuousLinear::new(1));
+    let mut hz = chunk_mut(hz, Map2D::new(ny as usize));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i < nx - 1 && j < ny - 1 {
-        hz[0] = hz[0]
+        hz[(0, 0)] = hz[(0, 0)]
             - 0.7
-                * (ex[(i * ny + (j + 1)) as usize] - ex[(i * ny + j) as usize] + ey[((i + 1) * ny + j) as usize]
+                * (ex[(i * ny + (j + 1)) as usize] - ex[(i * ny + j) as usize]
+                    + ey[((i + 1) * ny + j) as usize]
                     - ey[(i * ny + j) as usize]);
     }
 }
@@ -647,14 +602,7 @@ pub fn bench_gramschm_kernel1(a: &[f32], r_kk: &mut [f32], ni: u32, nj: u32, k: 
 }
 
 #[gpu::cuda_kernel]
-pub fn bench_gramschm_kernel2(
-    a: &[f32],
-    r: &[f32],
-    q: &mut [f32],
-    nj: u32,
-    ni: u32,
-    k: u32,
-) {
+pub fn bench_gramschm_kernel2(a: &[f32], r: &[f32], q: &mut [f32], nj: u32, ni: u32, k: u32) {
     let mut q = chunk_mut(q, Map2D::new(nj as usize));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
@@ -664,14 +612,7 @@ pub fn bench_gramschm_kernel2(
 }
 
 #[gpu::cuda_kernel]
-pub fn bench_gramschm_kernel3a(
-    q: &[f32],
-    a: &[f32],
-    r: &mut [f32],
-    ni: u32,
-    nj: u32,
-    k: u32,
-) {
+pub fn bench_gramschm_kernel3a(q: &[f32], a: &[f32], r: &mut [f32], ni: u32, nj: u32, k: u32) {
     let mut r = chunk_mut(r, Map2D::new(nj as usize));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let row = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
@@ -687,14 +628,7 @@ pub fn bench_gramschm_kernel3a(
 }
 
 #[gpu::cuda_kernel]
-pub fn bench_gramschm_kernel3b(
-    q: &[f32],
-    r: &[f32],
-    a: &mut [f32],
-    ni: u32,
-    nj: u32,
-    k: u32,
-) {
+pub fn bench_gramschm_kernel3b(q: &[f32], r: &[f32], a: &mut [f32], ni: u32, nj: u32, k: u32) {
     let mut a = chunk_mut(a, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
@@ -808,7 +742,10 @@ fn main() {
             }
             ctx.sync().unwrap();
             let us = start.elapsed().as_micros() as f64 / iters as f64;
-            println!("conv2d SeGuRu: {:.3} us/iter (NI={}, NJ={}, {} iters)", us, ni, nj, iters);
+            println!(
+                "conv2d SeGuRu: {:.3} us/iter (NI={}, NJ={}, {} iters)",
+                us, ni, nj, iters
+            );
         }
 
         // --- conv3d (NI=NJ=NK=256) ---
@@ -822,21 +759,26 @@ fn main() {
             let mut h_b = vec![0.0f32; sz];
             let d_a = ctx.new_tensor_view(h_a.as_slice()).unwrap();
             let mut d_b = ctx.new_tensor_view(h_b.as_mut_slice()).unwrap();
-            let bx: u32 = 16;
-            let by: u32 = 16;
+            let bx: u32 = 32;
+            let by: u32 = 8;
             let gx = (nk as u32 + bx - 1) / bx;
             let gy = ((ni * nj) as u32 + by - 1) / by;
             let cfg = gpu_host::gpu_config!(gx, gy, 1, bx, by, 1, 0);
-            bench_conv3d::launch(cfg, ctx, m, &d_a, &mut d_b, ni as u32, nj as u32, nk as u32).unwrap();
+            bench_conv3d::launch(cfg, ctx, m, &d_a, &mut d_b, ni as u32, nj as u32, nk as u32)
+                .unwrap();
             ctx.sync().unwrap();
             let start = Instant::now();
             for _ in 0..iters {
                 let cfg = gpu_host::gpu_config!(gx, gy, 1, bx, by, 1, 0);
-                bench_conv3d::launch(cfg, ctx, m, &d_a, &mut d_b, ni as u32, nj as u32, nk as u32).unwrap();
+                bench_conv3d::launch(cfg, ctx, m, &d_a, &mut d_b, ni as u32, nj as u32, nk as u32)
+                    .unwrap();
             }
             ctx.sync().unwrap();
             let us = start.elapsed().as_micros() as f64 / iters as f64;
-            println!("conv3d SeGuRu: {:.3} us/iter (NI={}, NJ={}, NK={}, {} iters)", us, ni, nj, nk, iters);
+            println!(
+                "conv3d SeGuRu: {:.3} us/iter (NI={}, NJ={}, NK={}, {} iters)",
+                us, ni, nj, nk, iters
+            );
         }
 
         // --- gemm (NI=NJ=NK=512) ---
@@ -856,12 +798,19 @@ fn main() {
             let gx = (nj as u32 + bx - 1) / bx;
             let gy = (ni as u32 + by - 1) / by;
             let cfg = gpu_host::gpu_config!(gx, gy, 1, bx, by, 1, 0);
-            bench_gemm::launch(cfg, ctx, m, &d_a, &d_b, &mut d_c, ni as u32, nj as u32, nk as u32, 1.0f32, 0.0f32).unwrap();
+            bench_gemm::launch(
+                cfg, ctx, m, &d_a, &d_b, &mut d_c, ni as u32, nj as u32, nk as u32, 1.0f32, 0.0f32,
+            )
+            .unwrap();
             ctx.sync().unwrap();
             let start = Instant::now();
             for _ in 0..iters {
                 let cfg = gpu_host::gpu_config!(gx, gy, 1, bx, by, 1, 0);
-                bench_gemm::launch(cfg, ctx, m, &d_a, &d_b, &mut d_c, ni as u32, nj as u32, nk as u32, 1.0f32, 0.0f32).unwrap();
+                bench_gemm::launch(
+                    cfg, ctx, m, &d_a, &d_b, &mut d_c, ni as u32, nj as u32, nk as u32, 1.0f32,
+                    0.0f32,
+                )
+                .unwrap();
             }
             ctx.sync().unwrap();
             let us = start.elapsed().as_micros() as f64 / iters as f64;
@@ -872,11 +821,11 @@ fn main() {
         {
             let n: usize = 1024;
             let iters = 100;
-            let h_a = vec![1.0f32; n * n];
-            let h_b = vec![1.0f32; n * n];
-            let h_c = vec![1.0f32; n * n];
+            let h_a: Vec<f32> = (0..n * n).map(|i| (i % 1024) as f32 / 1024.0).collect();
+            let h_b: Vec<f32> = (0..n * n).map(|i| (i % 1024) as f32 / 1024.0).collect();
+            let h_c: Vec<f32> = (0..n * n).map(|i| (i % 1024) as f32 / 1024.0).collect();
             let mut h_tmp = vec![0.0f32; n * n];
-            let mut h_d = vec![0.0f32; n * n];
+            let mut h_d: Vec<f32> = (0..n * n).map(|i| (i % 1024) as f32 / 1024.0).collect();
             let d_a = ctx.new_tensor_view(h_a.as_slice()).unwrap();
             let d_b = ctx.new_tensor_view(h_b.as_slice()).unwrap();
             let d_c = ctx.new_tensor_view(h_c.as_slice()).unwrap();
@@ -886,16 +835,28 @@ fn main() {
             let by: u32 = 16;
             let g = (n as u32 + bx - 1) / bx;
             let cfg = gpu_host::gpu_config!(g, g, 1, bx, by, 1, 0);
-            bench_mm2_kernel1::launch(cfg, ctx, m, &d_a, &d_b, &mut d_tmp, n as u32, n as u32, n as u32, 1.0f32).unwrap();
+            bench_mm2_kernel1::launch(
+                cfg, ctx, m, &d_a, &d_b, &mut d_tmp, n as u32, n as u32, n as u32, 1.0f32,
+            )
+            .unwrap();
             let cfg = gpu_host::gpu_config!(g, g, 1, bx, by, 1, 0);
-            bench_mm2_kernel2::launch(cfg, ctx, m, &d_tmp, &d_c, &mut d_d, n as u32, n as u32, n as u32, 1.0f32).unwrap();
+            bench_mm2_kernel2::launch(
+                cfg, ctx, m, &d_tmp, &d_c, &mut d_d, n as u32, n as u32, n as u32, 1.0f32,
+            )
+            .unwrap();
             ctx.sync().unwrap();
             let start = Instant::now();
             for _ in 0..iters {
                 let cfg = gpu_host::gpu_config!(g, g, 1, bx, by, 1, 0);
-                bench_mm2_kernel1::launch(cfg, ctx, m, &d_a, &d_b, &mut d_tmp, n as u32, n as u32, n as u32, 1.0f32).unwrap();
+                bench_mm2_kernel1::launch(
+                    cfg, ctx, m, &d_a, &d_b, &mut d_tmp, n as u32, n as u32, n as u32, 1.0f32,
+                )
+                .unwrap();
                 let cfg = gpu_host::gpu_config!(g, g, 1, bx, by, 1, 0);
-                bench_mm2_kernel2::launch(cfg, ctx, m, &d_tmp, &d_c, &mut d_d, n as u32, n as u32, n as u32, 1.0f32).unwrap();
+                bench_mm2_kernel2::launch(
+                    cfg, ctx, m, &d_tmp, &d_c, &mut d_d, n as u32, n as u32, n as u32, 1.0f32,
+                )
+                .unwrap();
             }
             ctx.sync().unwrap();
             let us = start.elapsed().as_micros() as f64 / iters as f64;
@@ -906,10 +867,10 @@ fn main() {
         {
             let n: usize = 512;
             let iters = 100;
-            let h_a = vec![1.0f32; n * n];
-            let h_b = vec![1.0f32; n * n];
-            let h_c = vec![1.0f32; n * n];
-            let h_d = vec![1.0f32; n * n];
+            let h_a: Vec<f32> = (0..n * n).map(|i| (i % 1024) as f32 / 1024.0).collect();
+            let h_b: Vec<f32> = (0..n * n).map(|i| (i % 1024) as f32 / 1024.0).collect();
+            let h_c: Vec<f32> = (0..n * n).map(|i| (i % 1024) as f32 / 1024.0).collect();
+            let h_d: Vec<f32> = (0..n * n).map(|i| (i % 1024) as f32 / 1024.0).collect();
             let mut h_e = vec![0.0f32; n * n];
             let mut h_f = vec![0.0f32; n * n];
             let mut h_g = vec![0.0f32; n * n];
@@ -924,32 +885,53 @@ fn main() {
             let by: u32 = 16;
             let g = (n as u32 + bx - 1) / bx;
             let cfg = gpu_host::gpu_config!(g, g, 1, bx, by, 1, 0);
-            bench_mm3_kernel1::launch(cfg, ctx, m, &d_a, &d_b, &mut d_e, n as u32, n as u32, n as u32).unwrap();
+            bench_mm3_kernel1::launch(
+                cfg, ctx, m, &d_a, &d_b, &mut d_e, n as u32, n as u32, n as u32,
+            )
+            .unwrap();
             let cfg = gpu_host::gpu_config!(g, g, 1, bx, by, 1, 0);
-            bench_mm3_kernel2::launch(cfg, ctx, m, &d_c, &d_d, &mut d_f, n as u32, n as u32, n as u32).unwrap();
+            bench_mm3_kernel2::launch(
+                cfg, ctx, m, &d_c, &d_d, &mut d_f, n as u32, n as u32, n as u32,
+            )
+            .unwrap();
             let cfg = gpu_host::gpu_config!(g, g, 1, bx, by, 1, 0);
-            bench_mm3_kernel3::launch(cfg, ctx, m, &d_e, &d_f, &mut d_g, n as u32, n as u32, n as u32).unwrap();
+            bench_mm3_kernel3::launch(
+                cfg, ctx, m, &d_e, &d_f, &mut d_g, n as u32, n as u32, n as u32,
+            )
+            .unwrap();
             ctx.sync().unwrap();
             let start = Instant::now();
             for _ in 0..iters {
                 let cfg = gpu_host::gpu_config!(g, g, 1, bx, by, 1, 0);
-                bench_mm3_kernel1::launch(cfg, ctx, m, &d_a, &d_b, &mut d_e, n as u32, n as u32, n as u32).unwrap();
+                bench_mm3_kernel1::launch(
+                    cfg, ctx, m, &d_a, &d_b, &mut d_e, n as u32, n as u32, n as u32,
+                )
+                .unwrap();
                 let cfg = gpu_host::gpu_config!(g, g, 1, bx, by, 1, 0);
-                bench_mm3_kernel2::launch(cfg, ctx, m, &d_c, &d_d, &mut d_f, n as u32, n as u32, n as u32).unwrap();
+                bench_mm3_kernel2::launch(
+                    cfg, ctx, m, &d_c, &d_d, &mut d_f, n as u32, n as u32, n as u32,
+                )
+                .unwrap();
                 let cfg = gpu_host::gpu_config!(g, g, 1, bx, by, 1, 0);
-                bench_mm3_kernel3::launch(cfg, ctx, m, &d_e, &d_f, &mut d_g, n as u32, n as u32, n as u32).unwrap();
+                bench_mm3_kernel3::launch(
+                    cfg, ctx, m, &d_e, &d_f, &mut d_g, n as u32, n as u32, n as u32,
+                )
+                .unwrap();
             }
             ctx.sync().unwrap();
             let us = start.elapsed().as_micros() as f64 / iters as f64;
-            println!("threemm SeGuRu: {:.3} us/iter (N={}, {} iters)", us, n, iters);
+            println!(
+                "threemm SeGuRu: {:.3} us/iter (N={}, {} iters)",
+                us, n, iters
+            );
         }
 
         // --- atax (N=4096) ---
         {
             let n: usize = 4096;
             let iters = 100;
-            let h_a = vec![1.0f32; n * n];
-            let h_x = vec![1.0f32; n];
+            let h_a: Vec<f32> = (0..n * n).map(|i| (i % 1024) as f32 / 1024.0).collect();
+            let h_x: Vec<f32> = (0..n).map(|i| (i % 1024) as f32 / 1024.0).collect();
             let mut h_tmp = vec![0.0f32; n];
             let mut h_y = vec![0.0f32; n];
             let d_a = ctx.new_tensor_view(h_a.as_slice()).unwrap();
@@ -959,16 +941,20 @@ fn main() {
             let bs: u32 = 256;
             let nb = (n as u32 + bs - 1) / bs;
             let cfg = gpu_host::gpu_config!(nb, 1, 1, bs, 1, 1, 0);
-            bench_atax_kernel1::launch(cfg, ctx, m, &d_a, &d_x, &mut d_tmp, n as u32, n as u32).unwrap();
+            bench_atax_kernel1::launch(cfg, ctx, m, &d_a, &d_x, &mut d_tmp, n as u32, n as u32)
+                .unwrap();
             let cfg = gpu_host::gpu_config!(nb, 1, 1, bs, 1, 1, 0);
-            bench_atax_kernel2::launch(cfg, ctx, m, &d_a, &d_tmp, &mut d_y, n as u32, n as u32).unwrap();
+            bench_atax_kernel2::launch(cfg, ctx, m, &d_a, &d_tmp, &mut d_y, n as u32, n as u32)
+                .unwrap();
             ctx.sync().unwrap();
             let start = Instant::now();
             for _ in 0..iters {
                 let cfg = gpu_host::gpu_config!(nb, 1, 1, bs, 1, 1, 0);
-                bench_atax_kernel1::launch(cfg, ctx, m, &d_a, &d_x, &mut d_tmp, n as u32, n as u32).unwrap();
+                bench_atax_kernel1::launch(cfg, ctx, m, &d_a, &d_x, &mut d_tmp, n as u32, n as u32)
+                    .unwrap();
                 let cfg = gpu_host::gpu_config!(nb, 1, 1, bs, 1, 1, 0);
-                bench_atax_kernel2::launch(cfg, ctx, m, &d_a, &d_tmp, &mut d_y, n as u32, n as u32).unwrap();
+                bench_atax_kernel2::launch(cfg, ctx, m, &d_a, &d_tmp, &mut d_y, n as u32, n as u32)
+                    .unwrap();
             }
             ctx.sync().unwrap();
             let us = start.elapsed().as_micros() as f64 / iters as f64;
@@ -979,9 +965,9 @@ fn main() {
         {
             let n: usize = 4096;
             let iters = 100;
-            let h_a = vec![1.0f32; n * n];
-            let h_r = vec![1.0f32; n];
-            let h_p = vec![1.0f32; n];
+            let h_a: Vec<f32> = (0..n * n).map(|i| (i % 1024) as f32 / 1024.0).collect();
+            let h_r: Vec<f32> = (0..n).map(|i| (i % 1024) as f32 / 1024.0).collect();
+            let h_p: Vec<f32> = (0..n).map(|i| (i % 1024) as f32 / 1024.0).collect();
             let mut h_s = vec![0.0f32; n];
             let mut h_q = vec![0.0f32; n];
             let d_a = ctx.new_tensor_view(h_a.as_slice()).unwrap();
@@ -992,16 +978,20 @@ fn main() {
             let bs: u32 = 256;
             let nb = (n as u32 + bs - 1) / bs;
             let cfg = gpu_host::gpu_config!(nb, 1, 1, bs, 1, 1, 0);
-            bench_bicg_kernel1::launch(cfg, ctx, m, &d_a, &d_r, &mut d_s, n as u32, n as u32).unwrap();
+            bench_bicg_kernel1::launch(cfg, ctx, m, &d_a, &d_r, &mut d_s, n as u32, n as u32)
+                .unwrap();
             let cfg = gpu_host::gpu_config!(nb, 1, 1, bs, 1, 1, 0);
-            bench_bicg_kernel2::launch(cfg, ctx, m, &d_a, &d_p, &mut d_q, n as u32, n as u32).unwrap();
+            bench_bicg_kernel2::launch(cfg, ctx, m, &d_a, &d_p, &mut d_q, n as u32, n as u32)
+                .unwrap();
             ctx.sync().unwrap();
             let start = Instant::now();
             for _ in 0..iters {
                 let cfg = gpu_host::gpu_config!(nb, 1, 1, bs, 1, 1, 0);
-                bench_bicg_kernel1::launch(cfg, ctx, m, &d_a, &d_r, &mut d_s, n as u32, n as u32).unwrap();
+                bench_bicg_kernel1::launch(cfg, ctx, m, &d_a, &d_r, &mut d_s, n as u32, n as u32)
+                    .unwrap();
                 let cfg = gpu_host::gpu_config!(nb, 1, 1, bs, 1, 1, 0);
-                bench_bicg_kernel2::launch(cfg, ctx, m, &d_a, &d_p, &mut d_q, n as u32, n as u32).unwrap();
+                bench_bicg_kernel2::launch(cfg, ctx, m, &d_a, &d_p, &mut d_q, n as u32, n as u32)
+                    .unwrap();
             }
             ctx.sync().unwrap();
             let us = start.elapsed().as_micros() as f64 / iters as f64;
@@ -1012,9 +1002,9 @@ fn main() {
         {
             let n: usize = 4096;
             let iters = 100;
-            let h_a = vec![1.0f32; n * n];
-            let h_y1 = vec![1.0f32; n];
-            let h_y2 = vec![1.0f32; n];
+            let h_a: Vec<f32> = (0..n * n).map(|i| (i % 1024) as f32 / 1024.0).collect();
+            let h_y1: Vec<f32> = (0..n).map(|i| (i % 1024) as f32 / 1024.0).collect();
+            let h_y2: Vec<f32> = (0..n).map(|i| (i % 512) as f32 / 512.0).collect();
             let mut h_x1 = vec![0.0f32; n];
             let mut h_x2 = vec![0.0f32; n];
             let d_a = ctx.new_tensor_view(h_a.as_slice()).unwrap();
@@ -1045,9 +1035,9 @@ fn main() {
         {
             let n: usize = 4096;
             let iters = 100;
-            let h_a = vec![1.0f32; n * n];
-            let h_b = vec![1.0f32; n * n];
-            let h_x = vec![1.0f32; n];
+            let h_a: Vec<f32> = (0..n * n).map(|i| (i % 1024) as f32 / 1024.0).collect();
+            let h_b: Vec<f32> = (0..n * n).map(|i| (i % 512) as f32 / 512.0).collect();
+            let h_x: Vec<f32> = (0..n).map(|i| (i % 1024) as f32 / 1024.0).collect();
             let mut h_y = vec![0.0f32; n];
             let d_a = ctx.new_tensor_view(h_a.as_slice()).unwrap();
             let d_b = ctx.new_tensor_view(h_b.as_slice()).unwrap();
@@ -1056,16 +1046,25 @@ fn main() {
             let bs: u32 = 256;
             let nb = (n as u32 + bs - 1) / bs;
             let cfg = gpu_host::gpu_config!(nb, 1, 1, bs, 1, 1, 0);
-            bench_gesummv::launch(cfg, ctx, m, &d_a, &d_b, &d_x, &mut d_y, n as u32, 1.0f32, 1.0f32).unwrap();
+            bench_gesummv::launch(
+                cfg, ctx, m, &d_a, &d_b, &d_x, &mut d_y, n as u32, 1.0f32, 1.0f32,
+            )
+            .unwrap();
             ctx.sync().unwrap();
             let start = Instant::now();
             for _ in 0..iters {
                 let cfg = gpu_host::gpu_config!(nb, 1, 1, bs, 1, 1, 0);
-                bench_gesummv::launch(cfg, ctx, m, &d_a, &d_b, &d_x, &mut d_y, n as u32, 1.0f32, 1.0f32).unwrap();
+                bench_gesummv::launch(
+                    cfg, ctx, m, &d_a, &d_b, &d_x, &mut d_y, n as u32, 1.0f32, 1.0f32,
+                )
+                .unwrap();
             }
             ctx.sync().unwrap();
             let us = start.elapsed().as_micros() as f64 / iters as f64;
-            println!("gesummv SeGuRu: {:.3} us/iter (N={}, {} iters)", us, n, iters);
+            println!(
+                "gesummv SeGuRu: {:.3} us/iter (N={}, {} iters)",
+                us, n, iters
+            );
         }
 
         // --- syr2k (NI=NJ=1024) ---
@@ -1073,8 +1072,8 @@ fn main() {
             let ni: usize = 1024;
             let nj: usize = 1024;
             let iters = 100;
-            let h_a = vec![1.0f32; ni * nj];
-            let h_b = vec![1.0f32; ni * nj];
+            let h_a: Vec<f32> = (0..ni * nj).map(|i| (i % 1024) as f32 / 1024.0).collect();
+            let h_b: Vec<f32> = (0..ni * nj).map(|i| (i % 512) as f32 / 512.0).collect();
             let mut h_c = vec![0.0f32; ni * ni];
             let d_a = ctx.new_tensor_view(h_a.as_slice()).unwrap();
             let d_b = ctx.new_tensor_view(h_b.as_slice()).unwrap();
@@ -1083,16 +1082,25 @@ fn main() {
             let by: u32 = 16;
             let g = (ni as u32 + bx - 1) / bx;
             let cfg = gpu_host::gpu_config!(g, g, 1, bx, by, 1, 0);
-            bench_syr2k::launch(cfg, ctx, m, &d_a, &d_b, &mut d_c, ni as u32, nj as u32, 1.0f32, 0.0f32).unwrap();
+            bench_syr2k::launch(
+                cfg, ctx, m, &d_a, &d_b, &mut d_c, ni as u32, nj as u32, 1.0f32, 0.0f32,
+            )
+            .unwrap();
             ctx.sync().unwrap();
             let start = Instant::now();
             for _ in 0..iters {
                 let cfg = gpu_host::gpu_config!(g, g, 1, bx, by, 1, 0);
-                bench_syr2k::launch(cfg, ctx, m, &d_a, &d_b, &mut d_c, ni as u32, nj as u32, 1.0f32, 0.0f32).unwrap();
+                bench_syr2k::launch(
+                    cfg, ctx, m, &d_a, &d_b, &mut d_c, ni as u32, nj as u32, 1.0f32, 0.0f32,
+                )
+                .unwrap();
             }
             ctx.sync().unwrap();
             let us = start.elapsed().as_micros() as f64 / iters as f64;
-            println!("syr2k SeGuRu: {:.3} us/iter (NI={}, NJ={}, {} iters)", us, ni, nj, iters);
+            println!(
+                "syr2k SeGuRu: {:.3} us/iter (NI={}, NJ={}, {} iters)",
+                us, ni, nj, iters
+            );
         }
 
         // --- syrk (NI=NJ=1024) ---
@@ -1100,7 +1108,7 @@ fn main() {
             let ni: usize = 1024;
             let nj: usize = 1024;
             let iters = 100;
-            let h_a = vec![1.0f32; ni * nj];
+            let h_a: Vec<f32> = (0..ni * nj).map(|i| (i % 1024) as f32 / 1024.0).collect();
             let mut h_c = vec![0.0f32; ni * ni];
             let d_a = ctx.new_tensor_view(h_a.as_slice()).unwrap();
             let mut d_c = ctx.new_tensor_view(h_c.as_mut_slice()).unwrap();
@@ -1108,16 +1116,25 @@ fn main() {
             let by: u32 = 16;
             let g = (ni as u32 + bx - 1) / bx;
             let cfg = gpu_host::gpu_config!(g, g, 1, bx, by, 1, 0);
-            bench_syrk::launch(cfg, ctx, m, &d_a, &mut d_c, ni as u32, nj as u32, 1.0f32, 0.0f32).unwrap();
+            bench_syrk::launch(
+                cfg, ctx, m, &d_a, &mut d_c, ni as u32, nj as u32, 1.0f32, 0.0f32,
+            )
+            .unwrap();
             ctx.sync().unwrap();
             let start = Instant::now();
             for _ in 0..iters {
                 let cfg = gpu_host::gpu_config!(g, g, 1, bx, by, 1, 0);
-                bench_syrk::launch(cfg, ctx, m, &d_a, &mut d_c, ni as u32, nj as u32, 1.0f32, 0.0f32).unwrap();
+                bench_syrk::launch(
+                    cfg, ctx, m, &d_a, &mut d_c, ni as u32, nj as u32, 1.0f32, 0.0f32,
+                )
+                .unwrap();
             }
             ctx.sync().unwrap();
             let us = start.elapsed().as_micros() as f64 / iters as f64;
-            println!("syrk SeGuRu: {:.3} us/iter (NI={}, NJ={}, {} iters)", us, ni, nj, iters);
+            println!(
+                "syrk SeGuRu: {:.3} us/iter (NI={}, NJ={}, {} iters)",
+                us, ni, nj, iters
+            );
         }
 
         // --- corr (M=N=2048) ---
@@ -1139,29 +1156,76 @@ fn main() {
             let gm = (mn as u32 + bs - 1) / bs;
             let gn = (nn as u32 + bs - 1) / bs;
             let cfg = gpu_host::gpu_config!(gm, 1, 1, bs, 1, 1, 0);
-            bench_corr_mean::launch(cfg, ctx, m, &d_data_ro, &mut d_mean, mn as u32, nn as u32).unwrap();
+            bench_corr_mean::launch(cfg, ctx, m, &d_data_ro, &mut d_mean, mn as u32, nn as u32)
+                .unwrap();
             let cfg = gpu_host::gpu_config!(gm, 1, 1, bs, 1, 1, 0);
-            bench_corr_std::launch(cfg, ctx, m, &d_data_ro, &d_mean, &mut d_stddev, mn as u32, nn as u32).unwrap();
+            bench_corr_std::launch(
+                cfg,
+                ctx,
+                m,
+                &d_data_ro,
+                &d_mean,
+                &mut d_stddev,
+                mn as u32,
+                nn as u32,
+            )
+            .unwrap();
             let cfg = gpu_host::gpu_config!(gm, gn, 1, bs, bs, 1, 0);
-            bench_corr_reduce::launch(cfg, ctx, m, &d_mean, &d_stddev, &mut d_data, mn as u32, nn as u32).unwrap();
+            bench_corr_reduce::launch(
+                cfg,
+                ctx,
+                m,
+                &d_mean,
+                &d_stddev,
+                &mut d_data,
+                mn as u32,
+                nn as u32,
+            )
+            .unwrap();
             let cfg = gpu_host::gpu_config!(gm, gm, 1, bs, bs, 1, 0);
-            bench_corr_corr::launch(cfg, ctx, m, &d_data, &mut d_symmat, mn as u32, nn as u32).unwrap();
+            bench_corr_corr::launch(cfg, ctx, m, &d_data, &mut d_symmat, mn as u32, nn as u32)
+                .unwrap();
             ctx.sync().unwrap();
             let start = Instant::now();
             for _ in 0..iters {
                 d_data.copy_from_host(&h_data).unwrap();
                 let cfg = gpu_host::gpu_config!(gm, 1, 1, bs, 1, 1, 0);
-                bench_corr_mean::launch(cfg, ctx, m, &d_data_ro, &mut d_mean, mn as u32, nn as u32).unwrap();
+                bench_corr_mean::launch(cfg, ctx, m, &d_data_ro, &mut d_mean, mn as u32, nn as u32)
+                    .unwrap();
                 let cfg = gpu_host::gpu_config!(gm, 1, 1, bs, 1, 1, 0);
-                bench_corr_std::launch(cfg, ctx, m, &d_data_ro, &d_mean, &mut d_stddev, mn as u32, nn as u32).unwrap();
+                bench_corr_std::launch(
+                    cfg,
+                    ctx,
+                    m,
+                    &d_data_ro,
+                    &d_mean,
+                    &mut d_stddev,
+                    mn as u32,
+                    nn as u32,
+                )
+                .unwrap();
                 let cfg = gpu_host::gpu_config!(gm, gn, 1, bs, bs, 1, 0);
-                bench_corr_reduce::launch(cfg, ctx, m, &d_mean, &d_stddev, &mut d_data, mn as u32, nn as u32).unwrap();
+                bench_corr_reduce::launch(
+                    cfg,
+                    ctx,
+                    m,
+                    &d_mean,
+                    &d_stddev,
+                    &mut d_data,
+                    mn as u32,
+                    nn as u32,
+                )
+                .unwrap();
                 let cfg = gpu_host::gpu_config!(gm, gm, 1, bs, bs, 1, 0);
-                bench_corr_corr::launch(cfg, ctx, m, &d_data, &mut d_symmat, mn as u32, nn as u32).unwrap();
+                bench_corr_corr::launch(cfg, ctx, m, &d_data, &mut d_symmat, mn as u32, nn as u32)
+                    .unwrap();
             }
             ctx.sync().unwrap();
             let us = start.elapsed().as_micros() as f64 / iters as f64;
-            println!("corr SeGuRu: {:.3} us/iter (M={}, N={}, {} iters)", us, mn, nn, iters);
+            println!(
+                "corr SeGuRu: {:.3} us/iter (M={}, N={}, {} iters)",
+                us, mn, nn, iters
+            );
         }
 
         // --- covar (M=N=2048) ---
@@ -1181,25 +1245,50 @@ fn main() {
             let gm = (mn as u32 + bs - 1) / bs;
             let gn = (nn as u32 + bs - 1) / bs;
             let cfg = gpu_host::gpu_config!(gm, 1, 1, bs, 1, 1, 0);
-            bench_covar_mean::launch(cfg, ctx, m, &d_data_ro, &mut d_mean, mn as u32, nn as u32).unwrap();
+            bench_covar_mean::launch(cfg, ctx, m, &d_data_ro, &mut d_mean, mn as u32, nn as u32)
+                .unwrap();
             let cfg = gpu_host::gpu_config!(gm, gn, 1, bs, bs, 1, 0);
-            bench_covar_reduce::launch(cfg, ctx, m, &d_mean, &mut d_data, mn as u32, nn as u32).unwrap();
+            bench_covar_reduce::launch(cfg, ctx, m, &d_mean, &mut d_data, mn as u32, nn as u32)
+                .unwrap();
             let cfg = gpu_host::gpu_config!(gm, gm, 1, bs, bs, 1, 0);
-            bench_covar_covar::launch(cfg, ctx, m, &d_data, &mut d_symmat, mn as u32, nn as u32).unwrap();
+            bench_covar_covar::launch(cfg, ctx, m, &d_data, &mut d_symmat, mn as u32, nn as u32)
+                .unwrap();
             ctx.sync().unwrap();
             let start = Instant::now();
             for _ in 0..iters {
                 d_data.copy_from_host(&h_data).unwrap();
                 let cfg = gpu_host::gpu_config!(gm, 1, 1, bs, 1, 1, 0);
-                bench_covar_mean::launch(cfg, ctx, m, &d_data_ro, &mut d_mean, mn as u32, nn as u32).unwrap();
+                bench_covar_mean::launch(
+                    cfg,
+                    ctx,
+                    m,
+                    &d_data_ro,
+                    &mut d_mean,
+                    mn as u32,
+                    nn as u32,
+                )
+                .unwrap();
                 let cfg = gpu_host::gpu_config!(gm, gn, 1, bs, bs, 1, 0);
-                bench_covar_reduce::launch(cfg, ctx, m, &d_mean, &mut d_data, mn as u32, nn as u32).unwrap();
+                bench_covar_reduce::launch(cfg, ctx, m, &d_mean, &mut d_data, mn as u32, nn as u32)
+                    .unwrap();
                 let cfg = gpu_host::gpu_config!(gm, gm, 1, bs, bs, 1, 0);
-                bench_covar_covar::launch(cfg, ctx, m, &d_data, &mut d_symmat, mn as u32, nn as u32).unwrap();
+                bench_covar_covar::launch(
+                    cfg,
+                    ctx,
+                    m,
+                    &d_data,
+                    &mut d_symmat,
+                    mn as u32,
+                    nn as u32,
+                )
+                .unwrap();
             }
             ctx.sync().unwrap();
             let us = start.elapsed().as_micros() as f64 / iters as f64;
-            println!("covar SeGuRu: {:.3} us/iter (M={}, N={}, {} iters)", us, mn, nn, iters);
+            println!(
+                "covar SeGuRu: {:.3} us/iter (M={}, N={}, {} iters)",
+                us, mn, nn, iters
+            );
         }
 
         // --- doitgen (NR=NQ=NP=128) ---
@@ -1213,7 +1302,6 @@ fn main() {
             let h_c4: Vec<f32> = (0..np * np).map(|i| (i % 1024) as f32 / 1024.0).collect();
             let mut h_a_gpu = h_a.clone();
             let mut h_sum = vec![0.0f32; sz];
-            let d_a_ro = ctx.new_tensor_view(h_a.as_slice()).unwrap();
             let mut d_a = ctx.new_tensor_view(h_a_gpu.as_mut_slice()).unwrap();
             let d_c4 = ctx.new_tensor_view(h_c4.as_slice()).unwrap();
             let mut d_sum = ctx.new_tensor_view(h_sum.as_mut_slice()).unwrap();
@@ -1222,20 +1310,35 @@ fn main() {
             let gx = (np as u32 + bx - 1) / bx;
             let gy = ((nr * nq) as u32 + by - 1) / by;
             let cfg = gpu_host::gpu_config!(gx, gy, 1, bx, by, 1, 0);
-            bench_doitgen_kernel1::launch(cfg, ctx, m, &d_a_ro, &d_c4, &mut d_sum, nr as u32, nq as u32, np as u32).unwrap();
+            bench_doitgen_kernel1::launch(
+                cfg, ctx, m, &d_a, &d_c4, &mut d_sum, nr as u32, nq as u32, np as u32,
+            )
+            .unwrap();
             let cfg = gpu_host::gpu_config!(gx, gy, 1, bx, by, 1, 0);
-            bench_doitgen_kernel2::launch(cfg, ctx, m, &d_sum, &mut d_a, nr as u32, nq as u32, np as u32).unwrap();
+            bench_doitgen_kernel2::launch(
+                cfg, ctx, m, &d_sum, &mut d_a, nr as u32, nq as u32, np as u32,
+            )
+            .unwrap();
             ctx.sync().unwrap();
             let start = Instant::now();
             for _ in 0..iters {
                 let cfg = gpu_host::gpu_config!(gx, gy, 1, bx, by, 1, 0);
-                bench_doitgen_kernel1::launch(cfg, ctx, m, &d_a_ro, &d_c4, &mut d_sum, nr as u32, nq as u32, np as u32).unwrap();
+                bench_doitgen_kernel1::launch(
+                    cfg, ctx, m, &d_a, &d_c4, &mut d_sum, nr as u32, nq as u32, np as u32,
+                )
+                .unwrap();
                 let cfg = gpu_host::gpu_config!(gx, gy, 1, bx, by, 1, 0);
-                bench_doitgen_kernel2::launch(cfg, ctx, m, &d_sum, &mut d_a, nr as u32, nq as u32, np as u32).unwrap();
+                bench_doitgen_kernel2::launch(
+                    cfg, ctx, m, &d_sum, &mut d_a, nr as u32, nq as u32, np as u32,
+                )
+                .unwrap();
             }
             ctx.sync().unwrap();
             let us = start.elapsed().as_micros() as f64 / iters as f64;
-            println!("doitgen SeGuRu: {:.3} us/iter (NR={}, NQ={}, NP={}, {} iters)", us, nr, nq, np, iters);
+            println!(
+                "doitgen SeGuRu: {:.3} us/iter (NR={}, NQ={}, NP={}, {} iters)",
+                us, nr, nq, np, iters
+            );
         }
 
         // --- fdtd2d (NX=NY=2048, TMAX=500) ---
@@ -1249,13 +1352,6 @@ fn main() {
             let mut h_ex = vec![0.0f32; sz];
             let mut h_ey = vec![0.0f32; sz];
             let mut h_hz = vec![0.0f32; sz];
-            for i in 0..nx {
-                for j in 0..ny {
-                    h_ex[i * ny + j] = (i * (j + 1)) as f32 / nx as f32;
-                    h_ey[i * ny + j] = (i * (j + 2)) as f32 / ny as f32;
-                    h_hz[i * ny + j] = (i * (j + 3)) as f32 / nx as f32;
-                }
-            }
             let d_fict = ctx.new_tensor_view(fict.as_slice()).unwrap();
             let mut d_ex = ctx.new_tensor_view(h_ex.as_mut_slice()).unwrap();
             let mut d_ey = ctx.new_tensor_view(h_ey.as_mut_slice()).unwrap();
@@ -1265,26 +1361,43 @@ fn main() {
             let gy = (nx as u32 + bs - 1) / bs;
             // Warmup
             let cfg = gpu_host::gpu_config!(gx, gy, 1, bs, bs, 1, 0);
-            bench_fdtd_step1::launch(cfg, ctx, m, &d_fict, &mut d_ey, &d_hz, nx as u32, ny as u32, 0u32).unwrap();
+            bench_fdtd_step1::launch(
+                cfg, ctx, m, &d_fict, &mut d_ey, &d_hz, nx as u32, ny as u32, 0u32,
+            )
+            .unwrap();
             let cfg = gpu_host::gpu_config!(gx, gy, 1, bs, bs, 1, 0);
             bench_fdtd_step2::launch(cfg, ctx, m, &mut d_ex, &d_hz, nx as u32, ny as u32).unwrap();
             let cfg = gpu_host::gpu_config!(gx, gy, 1, bs, bs, 1, 0);
-            bench_fdtd_step3::launch(cfg, ctx, m, &d_ex, &d_ey, &mut d_hz, nx as u32, ny as u32).unwrap();
+            bench_fdtd_step3::launch(cfg, ctx, m, &d_ex, &d_ey, &mut d_hz, nx as u32, ny as u32)
+                .unwrap();
             ctx.sync().unwrap();
+            d_ex.copy_from_host(&h_ex).unwrap();
+            d_ey.copy_from_host(&h_ey).unwrap();
+            d_hz.copy_from_host(&h_hz).unwrap();
             let start = Instant::now();
             for _ in 0..iters {
                 for t in 0..tmax {
                     let cfg = gpu_host::gpu_config!(gx, gy, 1, bs, bs, 1, 0);
-                    bench_fdtd_step1::launch(cfg, ctx, m, &d_fict, &mut d_ey, &d_hz, nx as u32, ny as u32, t as u32).unwrap();
+                    bench_fdtd_step1::launch(
+                        cfg, ctx, m, &d_fict, &mut d_ey, &d_hz, nx as u32, ny as u32, t as u32,
+                    )
+                    .unwrap();
                     let cfg = gpu_host::gpu_config!(gx, gy, 1, bs, bs, 1, 0);
-                    bench_fdtd_step2::launch(cfg, ctx, m, &mut d_ex, &d_hz, nx as u32, ny as u32).unwrap();
+                    bench_fdtd_step2::launch(cfg, ctx, m, &mut d_ex, &d_hz, nx as u32, ny as u32)
+                        .unwrap();
                     let cfg = gpu_host::gpu_config!(gx, gy, 1, bs, bs, 1, 0);
-                    bench_fdtd_step3::launch(cfg, ctx, m, &d_ex, &d_ey, &mut d_hz, nx as u32, ny as u32).unwrap();
+                    bench_fdtd_step3::launch(
+                        cfg, ctx, m, &d_ex, &d_ey, &mut d_hz, nx as u32, ny as u32,
+                    )
+                    .unwrap();
                 }
             }
             ctx.sync().unwrap();
             let us = start.elapsed().as_micros() as f64 / iters as f64;
-            println!("fdtd2d SeGuRu: {:.3} us/iter (NX={}, NY={}, TMAX={}, {} iters)", us, nx, ny, tmax, iters);
+            println!(
+                "fdtd2d SeGuRu: {:.3} us/iter (NX={}, NY={}, TMAX={}, {} iters)",
+                us, nx, ny, tmax, iters
+            );
         }
 
         // --- gramschm (NI=NJ=2048) ---
@@ -1293,10 +1406,8 @@ fn main() {
             let nj: usize = 2048;
             let iters = 1;
             let mut h_a: Vec<f32> = vec![0.0; ni * nj];
-            for i in 0..ni {
-                for j in 0..nj {
-                    h_a[i * nj + j] = ((i * j + 1) as f32) / (ni * nj) as f32;
-                }
+            for i in 0..(ni * nj) {
+                h_a[i] = (i % 1024) as f32 / 1024.0 + 0.001;
             }
             let mut h_r = vec![0.0f32; nj * nj];
             let mut h_q = vec![0.0f32; ni * nj];
@@ -1309,25 +1420,34 @@ fn main() {
                 {
                     let (mut r_kk, _) = d_r.split_at_mut(1);
                     let cfg = gpu_host::gpu_config!(1, 1, 1, 1, 1, 1, 0);
-                    bench_gramschm_kernel1::launch(cfg, ctx, m, &d_a, &mut r_kk, ni as u32, nj as u32, 0u32)
-                        .unwrap();
+                    bench_gramschm_kernel1::launch(
+                        cfg, ctx, m, &d_a, &mut r_kk, ni as u32, nj as u32, 0u32,
+                    )
+                    .unwrap();
                 }
                 let gx = (nj as u32 + bs - 1) / bs;
                 let gy = (ni as u32 + bs - 1) / bs;
                 let cfg = gpu_host::gpu_config!(gx, gy, 1, bs, bs, 1, 0);
-                bench_gramschm_kernel2::launch(cfg, ctx, m, &d_a, &d_r, &mut d_q, nj as u32, ni as u32, 0u32).unwrap();
+                bench_gramschm_kernel2::launch(
+                    cfg, ctx, m, &d_a, &d_r, &mut d_q, nj as u32, ni as u32, 0u32,
+                )
+                .unwrap();
                 let gy2 = (nj as u32 + bs - 1) / bs;
                 let cfg = gpu_host::gpu_config!(gx, gy2, 1, bs, bs, 1, 0);
-                bench_gramschm_kernel3a::launch(cfg, ctx, m, &d_q, &d_a, &mut d_r, ni as u32, nj as u32, 0u32).unwrap();
+                bench_gramschm_kernel3a::launch(
+                    cfg, ctx, m, &d_q, &d_a, &mut d_r, ni as u32, nj as u32, 0u32,
+                )
+                .unwrap();
                 let cfg = gpu_host::gpu_config!(gx, gy, 1, bs, bs, 1, 0);
-                bench_gramschm_kernel3b::launch(cfg, ctx, m, &d_q, &d_r, &mut d_a, ni as u32, nj as u32, 0u32).unwrap();
+                bench_gramschm_kernel3b::launch(
+                    cfg, ctx, m, &d_q, &d_r, &mut d_a, ni as u32, nj as u32, 0u32,
+                )
+                .unwrap();
                 ctx.sync().unwrap();
             }
             // Reset
-            for i in 0..ni {
-                for j in 0..nj {
-                    h_a[i * nj + j] = ((i * j + 1) as f32) / (ni * nj) as f32;
-                }
+            for i in 0..(ni * nj) {
+                h_a[i] = (i % 1024) as f32 / 1024.0 + 0.001;
             }
             h_r = vec![0.0f32; nj * nj];
             h_q = vec![0.0f32; ni * nj];
@@ -1343,24 +1463,38 @@ fn main() {
                         let (_, mut diag_and_after) = d_r.split_at_mut(diag);
                         let (mut r_kk, _) = diag_and_after.split_at_mut(1);
                         let cfg = gpu_host::gpu_config!(1, 1, 1, 1, 1, 1, 0);
-                        bench_gramschm_kernel1::launch(cfg, ctx, m, &d_a, &mut r_kk, ni as u32, nj as u32, k as u32)
-                            .unwrap();
+                        bench_gramschm_kernel1::launch(
+                            cfg, ctx, m, &d_a, &mut r_kk, ni as u32, nj as u32, k as u32,
+                        )
+                        .unwrap();
                     }
 
                     let gx = (nj as u32 + bs - 1) / bs;
                     let gy = (ni as u32 + bs - 1) / bs;
                     let cfg = gpu_host::gpu_config!(gx, gy, 1, bs, bs, 1, 0);
-                    bench_gramschm_kernel2::launch(cfg, ctx, m, &d_a, &d_r, &mut d_q, nj as u32, ni as u32, k as u32).unwrap();
+                    bench_gramschm_kernel2::launch(
+                        cfg, ctx, m, &d_a, &d_r, &mut d_q, nj as u32, ni as u32, k as u32,
+                    )
+                    .unwrap();
                     let gy2 = (nj as u32 + bs - 1) / bs;
                     let cfg = gpu_host::gpu_config!(gx, gy2, 1, bs, bs, 1, 0);
-                    bench_gramschm_kernel3a::launch(cfg, ctx, m, &d_q, &d_a, &mut d_r, ni as u32, nj as u32, k as u32).unwrap();
+                    bench_gramschm_kernel3a::launch(
+                        cfg, ctx, m, &d_q, &d_a, &mut d_r, ni as u32, nj as u32, k as u32,
+                    )
+                    .unwrap();
                     let cfg = gpu_host::gpu_config!(gx, gy, 1, bs, bs, 1, 0);
-                    bench_gramschm_kernel3b::launch(cfg, ctx, m, &d_q, &d_r, &mut d_a, ni as u32, nj as u32, k as u32).unwrap();
+                    bench_gramschm_kernel3b::launch(
+                        cfg, ctx, m, &d_q, &d_r, &mut d_a, ni as u32, nj as u32, k as u32,
+                    )
+                    .unwrap();
                 }
             }
             ctx.sync().unwrap();
             let us = start.elapsed().as_micros() as f64 / iters as f64;
-            println!("gramschm SeGuRu: {:.3} us/iter (NI={}, NJ={}, {} iters)", us, ni, nj, iters);
+            println!(
+                "gramschm SeGuRu: {:.3} us/iter (NI={}, NJ={}, {} iters)",
+                us, ni, nj, iters
+            );
         }
 
         // --- jacobi1d (N=4096, TSTEPS=10000) ---
@@ -1368,7 +1502,7 @@ fn main() {
             let n: usize = 4096;
             let tsteps: usize = 10000;
             let iters = 1;
-            let mut h_a: Vec<f32> = (0..n).map(|i| i as f32 / n as f32).collect();
+            let mut h_a: Vec<f32> = (0..n).map(|i| (i % 1024) as f32 / 1024.0).collect();
             let mut h_b = vec![0.0f32; n];
             let mut d_a = ctx.new_tensor_view(h_a.as_mut_slice()).unwrap();
             let mut d_b = ctx.new_tensor_view(h_b.as_mut_slice()).unwrap();
@@ -1379,6 +1513,8 @@ fn main() {
             let cfg = gpu_host::gpu_config!(nb, 1, 1, bs, 1, 1, 0);
             bench_jacobi1d_kernel2::launch(cfg, ctx, m, &mut d_a, &d_b, n as u32).unwrap();
             ctx.sync().unwrap();
+            d_a.copy_from_host(&h_a).unwrap();
+            d_b.copy_from_host(&h_b).unwrap();
             let start = Instant::now();
             for _ in 0..iters {
                 for _ in 0..tsteps {
@@ -1390,7 +1526,10 @@ fn main() {
             }
             ctx.sync().unwrap();
             let us = start.elapsed().as_micros() as f64 / iters as f64;
-            println!("jacobi1d SeGuRu: {:.3} us/iter (N={}, TSTEPS={}, {} iters)", us, n, tsteps, iters);
+            println!(
+                "jacobi1d SeGuRu: {:.3} us/iter (N={}, TSTEPS={}, {} iters)",
+                us, n, tsteps, iters
+            );
         }
 
         // --- jacobi2d (N=1000, TSTEPS=20) ---
@@ -1409,6 +1548,8 @@ fn main() {
             let cfg = gpu_host::gpu_config!(g, g, 1, bs, bs, 1, 0);
             bench_jacobi2d_kernel2::launch(cfg, ctx, m, &mut d_a, &d_b, n as u32).unwrap();
             ctx.sync().unwrap();
+            d_a.copy_from_host(&h_a).unwrap();
+            d_b.copy_from_host(&h_b).unwrap();
             let start = Instant::now();
             for _ in 0..iters {
                 for _ in 0..tsteps {
@@ -1420,7 +1561,10 @@ fn main() {
             }
             ctx.sync().unwrap();
             let us = start.elapsed().as_micros() as f64 / iters as f64;
-            println!("jacobi2d SeGuRu: {:.3} us/iter (N={}, TSTEPS={}, {} iters)", us, n, tsteps, iters);
+            println!(
+                "jacobi2d SeGuRu: {:.3} us/iter (N={}, TSTEPS={}, {} iters)",
+                us, n, tsteps, iters
+            );
         }
 
         // --- lu (N=2048) ---
@@ -1431,9 +1575,9 @@ fn main() {
             for i in 0..n {
                 for j in 0..n {
                     h_a[i * n + j] = if i == j {
-                        (n as f32) + 1.0
+                        2.0
                     } else {
-                        (i as f32 + j as f32) / n as f32
+                        ((i + j) % 1024) as f32 / 2048.0
                     };
                 }
             }
@@ -1472,13 +1616,7 @@ fn main() {
                             let grid = (rem as u32 + row_bs - 1) / row_bs;
                             let cfg = gpu_host::gpu_config!(grid, 1, 1, row_bs, 1, 1, 0);
                             bench_lu_copy_col::launch(
-                                cfg,
-                                ctx,
-                                m,
-                                &d_a,
-                                &mut d_col,
-                                n as u32,
-                                k as u32,
+                                cfg, ctx, m, &d_a, &mut d_col, n as u32, k as u32,
                             )
                             .unwrap();
                         }

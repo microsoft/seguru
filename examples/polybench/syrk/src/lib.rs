@@ -5,7 +5,7 @@ pub fn syrk_kernel(a: &[f32], c: &mut [f32], ni: u32, nj: u32, alpha: f32, beta:
     let mut c = chunk_mut(c, Map2D::new(ni as usize));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
-    if i < ni && j < ni {
+    if i < ni && j <= i {
         let mut val = c[(0, 0)] * beta;
         let a_row_i: &[f32] = &a[(i * nj) as usize..((i + 1) * nj) as usize];
         let a_row_j: &[f32] = &a[(j * nj) as usize..((j + 1) * nj) as usize];
@@ -28,7 +28,7 @@ mod tests {
 
         // CPU reference
         for i in 0..ni {
-            for j in 0..ni {
+            for j in 0..=i {
                 h_c_cpu[i * ni + j] *= beta;
                 for k in 0..nj {
                     h_c_cpu[i * ni + j] += alpha * h_a[i * nj + k] * h_a[j * nj + k];
@@ -45,10 +45,11 @@ mod tests {
             let block_size: u32 = 16;
             let grid_x: u32 = (ni as u32 + block_size - 1) / block_size;
             let grid_y: u32 = (ni as u32 + block_size - 1) / block_size;
-            let config =
-                gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
-            syrk_kernel::launch(config, ctx, m, &d_a, &mut d_c, ni as u32, nj as u32, alpha, beta)
-                .expect("kernel launch failed");
+            let config = gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
+            syrk_kernel::launch(
+                config, ctx, m, &d_a, &mut d_c, ni as u32, nj as u32, alpha, beta,
+            )
+            .expect("kernel launch failed");
 
             d_c.copy_to_host(&mut h_c_gpu).expect("copy failed");
         });
@@ -70,6 +71,10 @@ mod tests {
                 cpu[i],
             );
         }
-        assert!((gpu[0] - 32.0).abs() < 1e-4, "Expected 32.0, got {}", gpu[0]);
+        assert!(
+            (gpu[0] - 32.0).abs() < 1e-4,
+            "Expected 32.0, got {}",
+            gpu[0]
+        );
     }
 }

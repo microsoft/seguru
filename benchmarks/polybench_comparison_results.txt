@@ -1,0 +1,72 @@
+PolyBench CUDA vs SeGuRu comparison results
+
+Previous after summary: 7117cb836ba2494845b15293ec2884e91a8bb77d
+After source/results: current worktree final comparison run
+GPU: NVIDIA A100 80GB PCIe
+CUDA: /usr/local/cuda-13.2
+
+Previous after geomean ratio (SeGuRu/CUDA): 1.164x
+After fix geomean ratio (SeGuRu/CUDA): 1.167x
+Geomean delta vs previous after: +0.003x
+Previous after within 5% of CUDA: 10/19
+After fix within 5% of CUDA: 9/19
+Previous after within 10% of CUDA: 11/19
+After fix within 10% of CUDA: 10/19
+
+Top after-fix gaps vs CUDA
+Benchmark       Previous  AfterFix   Delta
+---------       --------  --------   -----
+jacobi1d          1.924x    1.838x  -0.086x
+lu                1.714x    1.731x  +0.017x
+gramschm          1.419x    1.417x  -0.002x
+corr              1.327x    1.328x  +0.001x
+covar             1.294x    1.296x  +0.002x
+
+Per-benchmark previous-after/final ratios
+Benchmark       Previous  AfterFix   Delta
+---------       --------  --------   -----
+conv2d            1.007x    1.007x  +0.000x
+conv3d            1.053x    1.053x  -0.000x
+gemm              1.030x    1.026x  -0.004x
+twomm             1.036x    1.036x  -0.000x
+threemm           1.018x    1.017x  -0.001x
+atax              1.241x    1.239x  -0.002x
+bicg              1.243x    1.242x  -0.001x
+mvt               1.241x    1.240x  -0.001x
+gesummv           0.918x    0.918x  -0.000x
+syr2k             1.004x    1.004x  +0.000x
+syrk              1.005x    1.005x  -0.000x
+corr              1.327x    1.328x  +0.001x
+covar             1.294x    1.296x  +0.002x
+doitgen           1.036x    1.019x  -0.017x
+fdtd2d            1.010x    1.011x  +0.001x
+gramschm          1.419x    1.417x  -0.002x
+jacobi1d          1.924x    1.838x  -0.086x
+jacobi2d          1.039x    1.166x  +0.127x
+lu                1.714x    1.731x  +0.017x
+
+After fix comparison table
+Benchmark          CUDA (us)     SeGuRu (us)      Ratio
+--------           ---------      ----------      -----
+conv2d               119.542         120.390     1.007x
+conv3d               221.583         233.290     1.053x
+gemm                 100.055         102.630     1.026x
+twomm               1398.221        1448.390     1.036x
+threemm              298.957         304.090     1.017x
+atax                1099.930        1362.370     1.239x
+bicg                1099.069        1365.170     1.242x
+mvt                 1100.872        1365.310     1.240x
+gesummv             1655.685        1519.400     0.918x
+syr2k               4116.767        4134.550     1.004x
+syrk                2063.298        2072.790     1.005x
+corr                6184.468        8210.660     1.328x
+covar               6127.206        7940.150     1.296x
+doitgen              159.846         162.960     1.019x
+fdtd2d             64068.512       64793.000     1.011x
+gramschm          395896.719      561092.000     1.417x
+jacobi1d           53835.777       98972.000     1.838x
+jacobi2d             266.720         311.000     1.166x
+lu                 39429.664       68268.000     1.731x
+
+Raw after CUDA results: benchmarks/cuda_results.txt
+Raw after SeGuRu results: benchmarks/seguru_results.txt

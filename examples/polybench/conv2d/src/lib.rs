@@ -2,7 +2,7 @@ use gpu::prelude::*;
 
 #[gpu::cuda_kernel]
 pub fn conv2d_kernel(a: &[f32], b: &mut [f32], ni: u32, nj: u32) {
-    let mut b = chunk_mut(b, MapContinuousLinear::new(1));
+    let mut b = chunk_mut(b, Map2D::new(nj as usize));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
 
@@ -17,7 +17,7 @@ pub fn conv2d_kernel(a: &[f32], b: &mut [f32], ni: u32, nj: u32) {
     let c33: f32 = 0.10;
 
     if i > 0 && i < ni - 1 && j > 0 && j < nj - 1 {
-        b[0] = c11 * a[((i - 1) * nj + (j - 1)) as usize]
+        b[(0, 0)] = c11 * a[((i - 1) * nj + (j - 1)) as usize]
             + c21 * a[((i - 1) * nj + j) as usize]
             + c31 * a[((i - 1) * nj + (j + 1)) as usize]
             + c12 * a[(i * nj + (j - 1)) as usize]
@@ -74,8 +74,7 @@ mod tests {
             let block_size: u32 = 16;
             let grid_x: u32 = (nj as u32 + block_size - 1) / block_size;
             let grid_y: u32 = (ni as u32 + block_size - 1) / block_size;
-            let config =
-                gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
+            let config = gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
             conv2d_kernel::launch(config, ctx, m, &d_a, &mut d_b, ni as u32, nj as u32)
                 .expect("kernel launch failed");
 
@@ -88,8 +87,8 @@ mod tests {
 
     #[test]
     fn test_conv2d() {
-        let ni = 64;
-        let nj = 64;
+        let ni = 65;
+        let nj = 67;
         let (gpu, cpu) = run_conv2d(ni, nj);
         for i in 1..ni - 1 {
             for j in 1..nj - 1 {

@@ -3,11 +3,11 @@ use gpu::prelude::*;
 /// B[i][j] = 0.2*(A[i][j] + A[i][j-1] + A[i][j+1] + A[i+1][j] + A[i-1][j])
 #[gpu::cuda_kernel]
 pub fn jacobi2d_kernel1(a: &[f32], b: &mut [f32], n: u32) {
-    let mut b = chunk_mut(b, MapContinuousLinear::new(1));
+    let mut b = chunk_mut(b, Map2D::new(n as usize));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i >= 1 && i < n - 1 && j >= 1 && j < n - 1 {
-        b[0] = 0.2
+        b[(0, 0)] = 0.2
             * (a[(i * n + j) as usize]
                 + a[(i * n + (j - 1)) as usize]
                 + a[(i * n + (j + 1)) as usize]
@@ -19,11 +19,11 @@ pub fn jacobi2d_kernel1(a: &[f32], b: &mut [f32], n: u32) {
 /// A[i][j] = B[i][j]
 #[gpu::cuda_kernel]
 pub fn jacobi2d_kernel2(a: &mut [f32], b: &[f32], n: u32) {
-    let mut a = chunk_mut(a, MapContinuousLinear::new(1));
+    let mut a = chunk_mut(a, Map2D::new(n as usize));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     if i >= 1 && i < n - 1 && j >= 1 && j < n - 1 {
-        a[0] = b[(i * n + j) as usize];
+        a[(0, 0)] = b[(i * n + j) as usize];
     }
 }
 
@@ -75,7 +75,7 @@ mod tests {
 
     #[test]
     fn test_jacobi2d() {
-        let n = 32;
+        let n = 33;
         let tsteps = 5;
 
         let mut h_a_gpu: Vec<f32> = (0..n * n)

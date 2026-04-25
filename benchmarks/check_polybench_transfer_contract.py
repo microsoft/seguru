@@ -1,9 +1,9 @@
 #!/usr/bin/env python3.11
-"""RED source check for known-bad PolyBench transfer contracts.
+"""RED source check for known-bad PolyBench benchmark contracts.
 
 This check is intentionally source-based and fast: it does not run GPU code.
-It fails while LU/GramSchmidt benchmark host-device transfer contracts are not
-comparable between CUDA and SeGuRu.
+It fails while benchmark host-device transfer/dataflow/initializer contracts are
+not comparable between CUDA and SeGuRu.
 """
 
 from __future__ import annotations
@@ -195,6 +195,160 @@ def find_full_matrix_column_norm_copy(block: Block) -> re.Match[str] | None:
 
 def match_line_index(block: Block, match: re.Match[str], group: str = "method") -> int:
     return block.body_start + match.start(group)
+
+
+def rust_benchmark_section(name: str) -> tuple[Path, str, Block]:
+    path, text = read_source("examples/bench-polybench/src/main.rs")
+    marker = text.index(f"// --- {name} ")
+    section = require_block(path, text, rf"// --- {re.escape(name)} \(.*?\) ---\s*\{{", marker)
+    return path, text, section
+
+
+def doitgen_timed_kernel1_uses_immutable_input() -> Finding | None:
+    path, text, section = rust_benchmark_section("doitgen")
+    timed_start = text.find("let start = Instant::now();", section.body_start, section.body_end)
+    if timed_start == -1:
+        return None
+    iter_loop = find_block_bounded(
+        text, r"for\s+_\s+in\s+0\.\.iters\s*\{", timed_start, section.body_end
+    )
+    if iter_loop is None:
+        return None
+
+    immutable_input = re.search(
+        r"bench_doitgen_kernel1::launch\s*\([\s\S]*?&\s*d_a_ro\b", iter_loop.body
+    )
+    if immutable_input is None:
+        return None
+
+    input_index = iter_loop.body_start + immutable_input.start()
+    return Finding(
+        check="doitgen-seguru-timed-kernel1-immutable-input",
+        path=path,
+        line=line_number(text, input_index),
+        message=(
+            "doitgen timed kernel1 launches from d_a_ro instead of the updated "
+            "d_a buffer; CUDA feeds each kernel2 update back into the next "
+            "kernel1 launch."
+        ),
+    )
+
+
+def jacobi_missing_warmup_reset(name: str) -> Finding | None:
+    path, text, section = rust_benchmark_section(name)
+    timed_start = text.find("let start = Instant::now();", section.body_start, section.body_end)
+    if timed_start == -1:
+        return None
+
+    before_timing = text[section.body_start:timed_start]
+    syncs = list(re.finditer(r"ctx\s*\.\s*sync\s*\(\)\s*\.\s*unwrap\s*\(\)\s*;", before_timing))
+    if not syncs:
+        return Finding(
+            check=f"{name}-seguru-warmup-sync-missing",
+            path=path,
+            line=line_number(text, timed_start),
+            message=f"{name} has no ctx.sync() before timing, so the warmup/reset boundary is unclear.",
+        )
+
+    reset_region_start = section.body_start + syncs[-1].end()
+    reset_region = text[reset_region_start:timed_start]
+    missing = []
+    for device, host in (("d_a", "h_a"), ("d_b", "h_b")):
+        if (
+            re.search(
+                rf"\b{device}\s*\.\s*copy_from_host\s*\(\s*&\s*{host}\s*\)\s*\.\s*unwrap\s*\(\)\s*;",
+                reset_region,
+            )
+            is None
+        ):
+            missing.append(f"{device}.copy_from_host(&{host})")
+
+    if not missing:
+        return None
+
+    return Finding(
+        check=f"{name}-seguru-warmup-reset-missing",
+        path=path,
+        line=line_number(text, timed_start),
+        message=(
+            f"{name} starts timing without resetting {', '.join(missing)} "
+            "after warmup ctx.sync(); CUDA copies original host A/B back to "
+            "device before recording the timed interval."
+        ),
+    )
+
+
+def rust_initializer_decl(block: Block, variable: str) -> re.Match[str] | None:
+    return re.search(
+        rf"\blet\s+(?:mut\s+)?{variable}\b(?:\s*:\s*[^=;]+)?\s*=\s*(?P<expr>.*?);",
+        block.body,
+        re.DOTALL,
+    )
+
+
+def expr_has_cuda_modulo_pattern(expr: str, modulus: int) -> bool:
+    return (
+        re.search(
+            rf"\(\s*i\s*%\s*{modulus}\s*\)\s*as\s+f32\s*/\s*{modulus}(?:\.0)?",
+            expr,
+        )
+        is not None
+    )
+
+
+CUDA_MODULO_INITIALIZERS: dict[str, dict[str, int]] = {
+    "twomm": {"h_a": 1024, "h_b": 1024, "h_c": 1024, "h_d": 1024},
+    "threemm": {"h_a": 1024, "h_b": 1024, "h_c": 1024, "h_d": 1024},
+    "atax": {"h_a": 1024, "h_x": 1024},
+    "bicg": {"h_a": 1024, "h_r": 1024, "h_p": 1024},
+    "mvt": {"h_a": 1024, "h_y1": 1024, "h_y2": 512},
+    "gesummv": {"h_a": 1024, "h_b": 512, "h_x": 1024},
+    "syr2k": {"h_a": 1024, "h_b": 512},
+    "syrk": {"h_a": 1024},
+    "jacobi1d": {"h_a": 1024},
+}
+
+
+def monolithic_cuda_modulo_initializer_findings() -> list[Finding]:
+    findings: list[Finding] = []
+    for bench, variables in CUDA_MODULO_INITIALIZERS.items():
+        path, text, section = rust_benchmark_section(bench)
+        for variable, modulus in variables.items():
+            decl = rust_initializer_decl(section, variable)
+            if decl is None:
+                findings.append(
+                    Finding(
+                        check=f"{bench}-seguru-{variable}-initializer-missing",
+                        path=path,
+                        line=line_number(text, section.header_start),
+                        message=(
+                            f"{bench} has no visible {variable} initializer in the "
+                            "monolithic runner; expected CUDA modulo pattern "
+                            f"(i % {modulus})/{modulus}.0."
+                        ),
+                    )
+                )
+                continue
+
+            if expr_has_cuda_modulo_pattern(decl.group("expr"), modulus):
+                continue
+
+            decl_index = section.body_start + decl.start()
+            findings.append(
+                Finding(
+                    check=f"{bench}-seguru-{variable}-cuda-initializer-mismatch",
+                    path=path,
+                    line=line_number(text, decl_index),
+                    message=(
+                        f"{bench} initializes {variable} without CUDA's "
+                        f"(i % {modulus})/{modulus}.0 pattern; constant host "
+                        "initializers make the monolithic benchmark contract "
+                        "non-comparable."
+                    ),
+                )
+            )
+
+    return findings
 
 
 def lu_benchmark_full_matrix_sync() -> Finding | None:
@@ -485,6 +639,9 @@ def collect_findings() -> list[Finding]:
     findings = [
         finding
         for finding in (
+            doitgen_timed_kernel1_uses_immutable_input(),
+            jacobi_missing_warmup_reset("jacobi1d"),
+            jacobi_missing_warmup_reset("jacobi2d"),
             lu_benchmark_full_matrix_sync(),
             lu_helper_full_matrix_sync(),
             cuda_comparison_mtime_skip(),
@@ -493,6 +650,7 @@ def collect_findings() -> list[Finding]:
         if finding is not None
     ]
     findings.extend(gramschmidt_granularity_findings())
+    findings.extend(monolithic_cuda_modulo_initializer_findings())
     return findings
 
 

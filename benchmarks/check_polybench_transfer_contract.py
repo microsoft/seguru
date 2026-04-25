@@ -103,23 +103,44 @@ def find_matching_brace(text: str, open_index: int) -> int:
     raise ValueError("no matching closing brace found")
 
 
+def find_block_bounded(
+    text: str, header_pattern: str, start: int = 0, end: int | None = None
+) -> Block | None:
+    if end is None:
+        end = len(text)
+    if start < 0 or end < start or end > len(text):
+        raise ValueError("invalid search bounds")
+
+    search_start = start
+    while search_start < end:
+        match = re.search(header_pattern, text[search_start:end], re.MULTILINE)
+        if match is None:
+            return None
+
+        header_start = search_start + match.start()
+        open_index = text.find("{", header_start, end)
+        if open_index == -1:
+            return None
+
+        try:
+            close_index = find_matching_brace(text, open_index)
+        except ValueError:
+            return None
+        if close_index < end:
+            return Block(
+                header_start=header_start,
+                body_start=open_index + 1,
+                body_end=close_index,
+                body=text[open_index + 1 : close_index],
+            )
+
+        search_start = header_start + 1
+
+    return None
+
+
 def find_block(text: str, header_pattern: str, start: int = 0) -> Block | None:
-    match = re.search(header_pattern, text[start:], re.MULTILINE)
-    if match is None:
-        return None
-
-    header_start = start + match.start()
-    open_index = text.find("{", header_start)
-    if open_index == -1:
-        return None
-
-    close_index = find_matching_brace(text, open_index)
-    return Block(
-        header_start=header_start,
-        body_start=open_index + 1,
-        body_end=close_index,
-        body=text[open_index + 1 : close_index],
-    )
+    return find_block_bounded(text, header_pattern, start)
 
 
 def require_block(path: Path, text: str, header_pattern: str, start: int = 0) -> Block:
@@ -179,8 +200,20 @@ def match_line_index(block: Block, match: re.Match[str], group: str = "method") 
 def lu_benchmark_full_matrix_sync() -> Finding | None:
     path, text = read_source("examples/bench-polybench/src/main.rs")
     lu_marker = text.index("// --- lu (N=")
-    timed_start = text.index("let start = Instant::now();", lu_marker)
-    k_loop = require_block(path, text, r"for\s+k\s+in\s+0\.\.n\s*\{", timed_start)
+    section = require_block(path, text, r"// --- lu \(N=.*?\) ---\s*\{", lu_marker)
+    timed_start = text.find("let start = Instant::now();", section.body_start, section.body_end)
+    if timed_start == -1:
+        return None
+    iter_loop = find_block_bounded(
+        text, r"for\s+_\s+in\s+0\.\.iters\s*\{", timed_start, section.body_end
+    )
+    if iter_loop is None:
+        return None
+    k_loop = find_block_bounded(
+        text, r"for\s+k\s+in\s+0\.\.n\s*\{", iter_loop.body_start, iter_loop.body_end
+    )
+    if k_loop is None:
+        return None
 
     full_sync = find_host_roundtrip_through_same_buffer(k_loop)
     if full_sync is None:
@@ -201,9 +234,20 @@ def lu_benchmark_full_matrix_sync() -> Finding | None:
 
 def lu_helper_full_matrix_sync() -> Finding | None:
     path, text = read_source("examples/polybench/lu/src/lib.rs")
-    run_lu = text.index("fn run_lu")
-    gpu_section = text.index("// GPU", run_lu)
-    k_loop = require_block(path, text, r"for\s+k\s+in\s+0\.\.n\s*\{", gpu_section)
+    run_lu = require_block(path, text, r"fn\s+run_lu\b[^{]*\{")
+    gpu_section = text.find("// GPU", run_lu.body_start, run_lu.body_end)
+    if gpu_section == -1:
+        return None
+    cuda_block = find_block_bounded(
+        text, r"cuda_ctx\s*\([^{}]*\|\s*\{", gpu_section, run_lu.body_end
+    )
+    if cuda_block is None:
+        return None
+    k_loop = find_block_bounded(
+        text, r"for\s+k\s+in\s+0\.\.n\s*\{", cuda_block.body_start, cuda_block.body_end
+    )
+    if k_loop is None:
+        return None
 
     full_sync = find_host_roundtrip_through_same_buffer(k_loop)
     if full_sync is None:
@@ -227,10 +271,22 @@ def gramschmidt_cuda_scalar_norm_copy() -> Evidence | None:
     timed_start = text.find("cudaEventRecord(start);")
     if timed_start == -1:
         return None
-    k_loop = find_block(
+    timed_end = text.find("cudaEventRecord(stop);", timed_start)
+    if timed_end == -1:
+        timed_end = len(text)
+    iter_loop = find_block_bounded(
+        text,
+        r"for\s*\(\s*int\s+it\s*=\s*0\s*;\s*it\s*<\s*ITERS\s*;\s*it\+\+\s*\)\s*\{",
+        timed_start,
+        timed_end,
+    )
+    if iter_loop is None:
+        return None
+    k_loop = find_block_bounded(
         text,
         r"for\s*\(\s*int\s+k\s*=\s*0\s*;\s*k\s*<\s*NJ\s*;\s*k\+\+\s*\)\s*\{",
-        timed_start,
+        iter_loop.body_start,
+        iter_loop.body_end,
     )
     if k_loop is None:
         return None
@@ -250,9 +306,22 @@ def gramschmidt_cuda_scalar_norm_copy() -> Evidence | None:
 def gramschmidt_seguru_benchmark_whole_matrix_norm_copy() -> Evidence | None:
     path, text = read_source("examples/bench-polybench/src/main.rs")
     gramschm_marker = text.index("// --- gramschm (NI=")
-    timed_start = text.index("let start = Instant::now();", gramschm_marker)
-    iter_loop = require_block(path, text, r"for\s+_\s+in\s+0\.\.iters\s*\{", timed_start)
-    k_loop = require_block(path, text, r"for\s+k\s+in\s+0\.\.nj\s*\{", iter_loop.body_start)
+    section = require_block(
+        path, text, r"// --- gramschm \(NI=.*?\) ---\s*\{", gramschm_marker
+    )
+    timed_start = text.find("let start = Instant::now();", section.body_start, section.body_end)
+    if timed_start == -1:
+        return None
+    iter_loop = find_block_bounded(
+        text, r"for\s+_\s+in\s+0\.\.iters\s*\{", timed_start, section.body_end
+    )
+    if iter_loop is None:
+        return None
+    k_loop = find_block_bounded(
+        text, r"for\s+k\s+in\s+0\.\.nj\s*\{", iter_loop.body_start, iter_loop.body_end
+    )
+    if k_loop is None:
+        return None
 
     full_d2h = find_full_matrix_column_norm_copy(k_loop)
     if full_d2h is None:
@@ -268,9 +337,20 @@ def gramschmidt_seguru_benchmark_whole_matrix_norm_copy() -> Evidence | None:
 
 def gramschmidt_helper_whole_matrix_norm_copy() -> Evidence | None:
     path, text = read_source("examples/polybench/gramschm/src/lib.rs")
-    run_gramschm = text.index("fn run_gramschm")
-    gpu_section = text.index("// GPU", run_gramschm)
-    k_loop = require_block(path, text, r"for\s+k\s+in\s+0\.\.nj\s*\{", gpu_section)
+    run_gramschm = require_block(path, text, r"fn\s+run_gramschm\b[^{]*\{")
+    gpu_section = text.find("// GPU", run_gramschm.body_start, run_gramschm.body_end)
+    if gpu_section == -1:
+        return None
+    cuda_block = find_block_bounded(
+        text, r"cuda_ctx\s*\([^{}]*\|\s*\{", gpu_section, run_gramschm.body_end
+    )
+    if cuda_block is None:
+        return None
+    k_loop = find_block_bounded(
+        text, r"for\s+k\s+in\s+0\.\.nj\s*\{", cuda_block.body_start, cuda_block.body_end
+    )
+    if k_loop is None:
+        return None
 
     full_d2h = find_full_matrix_column_norm_copy(k_loop)
     if full_d2h is None:

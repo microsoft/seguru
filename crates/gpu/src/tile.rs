@@ -19,7 +19,10 @@
 //! per chunk. The lifetime `'a` on the underlying slice reference is retained
 //! so the borrow checker still enforces exclusive access. Per-access bounds
 //! are checked using the lid-side validity returned by `map_lid_offset`, and
-//! the tid-side validity is checked once at open time.
+//! the tid-side validity is checked once at open time. `OpenedRow` follows the
+//! same guarded GPU pointer convention as `OpenedTile`: raw pointer offsets are
+//! derived from macro-generated map offsets, and the final reference is passed
+//! through `assert_ptr` with the combined validity flag expected by the backend.
 
 use core::marker::PhantomData;
 use core::ops::{Index, IndexMut};
@@ -27,7 +30,7 @@ use core::ops::{Index, IndexMut};
 use num_traits::AsPrimitive;
 
 use crate::assert_ptr;
-use crate::chunk::{GlobalGroupChunk, MapWithLidOffset, ScopeUniqueMap};
+use crate::chunk::{GlobalGroupChunk, MapWithLidOffset, MapWithRows, ScopeUniqueMap};
 use crate::chunk_scope::{ChunkScope, Thread};
 
 /// A thread-owned view into a `GlobalGroupChunk` with the tid-invariant
@@ -49,6 +52,19 @@ where
     base_ok: bool,
     map_params: Map,
     _data: PhantomData<&'a mut [T]>,
+    _cs: PhantomData<CS>,
+}
+
+/// A mutable row view borrowed from an `OpenedTile`.
+pub struct OpenedRow<'row, T, CS, Map>
+where
+    CS: ChunkScope,
+    Map: ScopeUniqueMap<CS> + MapWithLidOffset<CS> + MapWithRows<CS>,
+{
+    row_ptr: *mut T,
+    row_ok: bool,
+    map_params: Map,
+    _tile: PhantomData<&'row mut T>,
     _cs: PhantomData<CS>,
 }
 
@@ -88,6 +104,29 @@ where
     }
 }
 
+impl<'a, T, CS, Map> OpenedTile<'a, T, CS, Map>
+where
+    CS: ChunkScope<ToScope = Thread>,
+    Map: ScopeUniqueMap<CS> + MapWithLidOffset<CS> + MapWithRows<CS>,
+    Map::GlobalIndexType: AsPrimitive<usize>,
+{
+    /// Borrow one row of this opened tile as a mutable in-row view.
+    #[inline(always)]
+    #[gpu_codegen::device]
+    pub fn row_mut<'row>(&'row mut self, row: u32) -> OpenedRow<'row, T, CS, Map> {
+        let (row_ok, row_off) = self.map_params.row_lid_offset(row);
+        let row_off: usize = row_off.as_();
+        let row_ptr = unsafe { self.tile_ptr.add(row_off) };
+        OpenedRow {
+            row_ptr,
+            row_ok: self.base_ok & row_ok,
+            map_params: self.map_params.clone(),
+            _tile: PhantomData,
+            _cs: PhantomData,
+        }
+    }
+}
+
 impl<'a, T, CS, Map> Index<Map::IndexType> for OpenedTile<'a, T, CS, Map>
 where
     CS: ChunkScope,
@@ -105,6 +144,40 @@ where
         // a select when DISABLE_GPU_BOUND_CHECK is set).
         let ptr = unsafe { &*self.tile_ptr.add(off) };
         assert_ptr(self.base_ok & lid_ok, ptr)
+    }
+}
+
+impl<'row, T, CS, Map> Index<u32> for OpenedRow<'row, T, CS, Map>
+where
+    CS: ChunkScope,
+    Map: ScopeUniqueMap<CS> + MapWithLidOffset<CS> + MapWithRows<CS>,
+    Map::GlobalIndexType: AsPrimitive<usize>,
+{
+    type Output = T;
+
+    #[inline(always)]
+    #[gpu_codegen::device]
+    fn index(&self, col: u32) -> &T {
+        let (col_ok, col_off) = self.map_params.in_row_lid_offset(col);
+        let col_off: usize = col_off.as_();
+        let ptr = unsafe { &*self.row_ptr.add(col_off) };
+        assert_ptr(self.row_ok & col_ok, ptr)
+    }
+}
+
+impl<'row, T, CS, Map> IndexMut<u32> for OpenedRow<'row, T, CS, Map>
+where
+    CS: ChunkScope<ToScope = Thread>,
+    Map: ScopeUniqueMap<CS> + MapWithLidOffset<CS> + MapWithRows<CS>,
+    Map::GlobalIndexType: AsPrimitive<usize>,
+{
+    #[inline(always)]
+    #[gpu_codegen::device]
+    fn index_mut(&mut self, col: u32) -> &mut T {
+        let (col_ok, col_off) = self.map_params.in_row_lid_offset(col);
+        let col_off: usize = col_off.as_();
+        let ptr = unsafe { &mut *self.row_ptr.add(col_off) };
+        assert_ptr(self.row_ok & col_ok, ptr)
     }
 }
 

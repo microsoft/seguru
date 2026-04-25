@@ -92,6 +92,32 @@ pub unsafe trait MapWithLidOffset<CS: ChunkScope>: ScopeUniqueMap<CS> {
     ) -> (bool, Self::GlobalIndexType);
 }
 
+/// Companion to `MapWithLidOffset` for maps whose local index is a 2D
+/// `(col, row)` pair that can be split into a row base and an in-row offset.
+///
+/// # Safety
+/// Implementors must ensure:
+/// ```text
+/// forall col, row:
+///     map_lid_offset((col, row)).1 == row_lid_offset(row).1 + in_row_lid_offset(col).1
+/// ```
+/// Implementors must also preserve the validity-flag algebra:
+/// ```text
+/// map_lid_offset((col, row)).0 == (row_lid_offset(row).0 & in_row_lid_offset(col).0)
+/// ```
+/// and the validity flags returned by the split methods must match the row and
+/// in-row portions of the original local-index bounds checks. Neither method
+/// may include thread-dependent terms.
+pub unsafe trait MapWithRows<CS: ChunkScope>:
+    MapWithLidOffset<CS, IndexType = (u32, u32)>
+{
+    #[gpu_codegen::device]
+    fn row_lid_offset(&self, row: u32) -> (bool, Self::GlobalIndexType);
+
+    #[gpu_codegen::device]
+    fn in_row_lid_offset(&self, col: u32) -> (bool, Self::GlobalIndexType);
+}
+
 /// Represent a chunk of global memory that is uniquely mapped to each thread group.
 /// It supports both continuous and non-continuous mapping strategies.
 /// - T: element type

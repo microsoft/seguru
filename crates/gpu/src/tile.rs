@@ -19,7 +19,10 @@
 //! per chunk. The lifetime `'a` on the underlying slice reference is retained
 //! so the borrow checker still enforces exclusive access. Per-access bounds
 //! are checked using the lid-side validity returned by `map_lid_offset`, and
-//! the tid-side validity is checked once at open time.
+//! the tid-side validity is checked once at open time. `OpenedRow` follows the
+//! same guarded GPU pointer convention as `OpenedTile`: raw pointer offsets are
+//! derived from macro-generated map offsets, and the final reference is passed
+//! through `assert_ptr` with the combined validity flag expected by the backend.
 
 use core::marker::PhantomData;
 use core::ops::{Index, IndexMut};

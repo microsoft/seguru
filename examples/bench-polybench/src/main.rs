@@ -713,22 +713,35 @@ pub fn bench_jacobi2d_kernel2(a: &mut [f32], b: &[f32], n: u32) {
 
 // --- lu ---
 #[gpu::cuda_kernel]
-pub fn bench_lu_kernel1(a_read: &[f32], a_write: &mut [f32], n: u32, k: u32) {
-    let mut a_write = chunk_mut(a_write, Map2D::new(n as usize));
+pub fn bench_lu_kernel1(pivot: &[f32], row_tail: &mut [f32], rem: u32) {
+    let mut row_tail = chunk_mut(row_tail, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
-    let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
-    if i == k && j > k && j < n {
-        a_write[(0, 0)] = a_read[(k * n + j) as usize] / a_read[(k * n + k) as usize];
+    if j < rem {
+        row_tail[0] = row_tail[0] / pivot[0];
     }
 }
 
 #[gpu::cuda_kernel]
-pub fn bench_lu_kernel2(a_read: &[f32], a_write: &mut [f32], n: u32, k: u32) {
-    let mut a_write = chunk_mut(a_write, Map2D::new(n as usize));
-    let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
-    let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
-    if i > k && j > k && i < n && j < n {
-        a_write[(0, 0)] = a_read[(i * n + j) as usize] - a_read[(i * n + k) as usize] * a_read[(k * n + j) as usize];
+pub fn bench_lu_copy_col(a: &[f32], col: &mut [f32], n: u32, k: u32) {
+    let mut col = chunk_mut(col, MapContinuousLinear::new(1));
+    let i_tail = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let rem = n - k - 1;
+    if i_tail < rem {
+        col[0] = a[((i_tail + k + 1) * n + k) as usize];
+    }
+}
+
+#[gpu::cuda_kernel]
+pub fn bench_lu_kernel2(row_tail: &[f32], col: &[f32], rows_below: &mut [f32], n: u32, k: u32) {
+    let j_tail = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let i_tail = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
+    let rem = n - k - 1;
+    let mut rows_below = chunk_mut(
+        rows_below,
+        reshape_map!([1] | [(rem, n), rem] => layout: [i0, t0, t1], offset: k + 1),
+    );
+    if i_tail < rem && j_tail < rem {
+        rows_below[0] = rows_below[0] - col[i_tail as usize] * row_tail[j_tail as usize];
     }
 }
 
@@ -1397,48 +1410,86 @@ fn main() {
                 }
             }
             let mut h_a_gpu = h_a.clone();
-            let mut h_a_read = h_a.clone();
-            let mut d_a_write = ctx.new_tensor_view(h_a_gpu.as_mut_slice()).unwrap();
-            let mut d_a_read = ctx.new_tensor_view(h_a_read.as_mut_slice()).unwrap();
+            let mut h_col = vec![0.0f32; n];
+            let mut d_a = ctx.new_tensor_view(h_a_gpu.as_mut_slice()).unwrap();
+            let mut d_col = ctx.new_tensor_view(h_col.as_mut_slice()).unwrap();
             let bs: u32 = 16;
-            let g = (n as u32 + bs - 1) / bs;
+            let row_bs: u32 = 256;
+            macro_rules! launch_lu_step {
+                ($k:expr) => {{
+                    let k = $k;
+                    let rem = n - k - 1;
+                    if rem > 0 {
+                        {
+                            let row_tail_start = k * n + k + 1;
+                            let row_tail_end = (k + 1) * n;
+                            let (prefix, mut tail_and_after) = d_a.split_at_mut(row_tail_start);
+                            let pivot = prefix.index(row_tail_start - 1..row_tail_start);
+                            let (mut row_tail, _) =
+                                tail_and_after.split_at_mut(row_tail_end - row_tail_start);
+                            let grid = (rem as u32 + row_bs - 1) / row_bs;
+                            let cfg = gpu_host::gpu_config!(grid, 1, 1, row_bs, 1, 1, 0);
+                            bench_lu_kernel1::launch(
+                                cfg,
+                                ctx,
+                                m,
+                                &pivot,
+                                &mut row_tail,
+                                rem as u32,
+                            )
+                            .unwrap();
+                        }
+                        ctx.sync().unwrap();
+                        {
+                            let grid = (rem as u32 + row_bs - 1) / row_bs;
+                            let cfg = gpu_host::gpu_config!(grid, 1, 1, row_bs, 1, 1, 0);
+                            bench_lu_copy_col::launch(
+                                cfg,
+                                ctx,
+                                m,
+                                &d_a,
+                                &mut d_col,
+                                n as u32,
+                                k as u32,
+                            )
+                            .unwrap();
+                        }
+                        {
+                            let row_tail_start = k * n + k + 1;
+                            let row_tail_end = (k + 1) * n;
+                            let split_at = (k + 1) * n;
+                            let (prefix, mut rows_below) = d_a.split_at_mut(split_at);
+                            let row_tail = prefix.index(row_tail_start..row_tail_end);
+                            let col = d_col.index(..rem);
+                            let grid = (rem as u32 + bs - 1) / bs;
+                            let cfg = gpu_host::gpu_config!(grid, grid, 1, bs, bs, 1, 0);
+                            bench_lu_kernel2::launch(
+                                cfg,
+                                ctx,
+                                m,
+                                &row_tail,
+                                &col,
+                                &mut rows_below,
+                                n as u32,
+                                k as u32,
+                            )
+                            .unwrap();
+                        }
+                        ctx.sync().unwrap();
+                    }
+                }};
+            }
             // Warmup
             {
-                let cfg = gpu_host::gpu_config!(g, g, 1, bs, bs, 1, 0);
-                bench_lu_kernel1::launch(cfg, ctx, m, &d_a_read, &mut d_a_write, n as u32, 0u32).unwrap();
-                d_a_write.copy_to_host(&mut h_a_gpu).unwrap();
-                d_a_read.copy_from_host(&h_a_gpu).unwrap();
-                let cfg = gpu_host::gpu_config!(g, g, 1, bs, bs, 1, 0);
-                bench_lu_kernel2::launch(cfg, ctx, m, &d_a_read, &mut d_a_write, n as u32, 0u32).unwrap();
-                d_a_write.copy_to_host(&mut h_a_gpu).unwrap();
-                d_a_read.copy_from_host(&h_a_gpu).unwrap();
-                ctx.sync().unwrap();
+                launch_lu_step!(0usize);
             }
             // Reset
-            for i in 0..n {
-                for j in 0..n {
-                    h_a_gpu[i * n + j] = if i == j {
-                        (n as f32) + 1.0
-                    } else {
-                        (i as f32 + j as f32) / n as f32
-                    };
-                }
-            }
-            h_a_read = h_a_gpu.clone();
-            d_a_write.copy_from_host(&h_a_gpu).unwrap();
-            d_a_read.copy_from_host(&h_a_read).unwrap();
+            d_a.copy_from_host(&h_a_gpu).unwrap();
 
             let start = Instant::now();
             for _ in 0..iters {
                 for k in 0..n {
-                    let cfg = gpu_host::gpu_config!(g, g, 1, bs, bs, 1, 0);
-                    bench_lu_kernel1::launch(cfg, ctx, m, &d_a_read, &mut d_a_write, n as u32, k as u32).unwrap();
-                    d_a_write.copy_to_host(&mut h_a_gpu).unwrap();
-                    d_a_read.copy_from_host(&h_a_gpu).unwrap();
-                    let cfg = gpu_host::gpu_config!(g, g, 1, bs, bs, 1, 0);
-                    bench_lu_kernel2::launch(cfg, ctx, m, &d_a_read, &mut d_a_write, n as u32, k as u32).unwrap();
-                    d_a_write.copy_to_host(&mut h_a_gpu).unwrap();
-                    d_a_read.copy_from_host(&h_a_gpu).unwrap();
+                    launch_lu_step!(k);
                 }
             }
             ctx.sync().unwrap();

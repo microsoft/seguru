@@ -1,6 +1,27 @@
+use gpu::chunk::ScopeUniqueMap;
+use gpu::chunk_scope::{ChunkScope, TID_MAX_LEN};
 use gpu::prelude::*;
 use gpu::CacheStreamLoadStore;
 use std::time::Instant;
+
+#[derive(Clone, Copy)]
+struct LuTrailingUpdateMap {
+    n: u32,
+    k: u32,
+    rem: u32,
+}
+
+unsafe impl<CS: ChunkScope> ScopeUniqueMap<CS> for LuTrailingUpdateMap {
+    type IndexType = u32;
+    type GlobalIndexType = u32;
+
+    fn map(&self, idx: Self::IndexType, thread_ids: [u32; TID_MAX_LEN]) -> (bool, u32) {
+        let j_tail = CS::global_id_x(thread_ids);
+        let i_tail = CS::global_id_y(thread_ids);
+        let valid = idx == 0 && i_tail < self.rem && j_tail < self.rem;
+        (valid, i_tail * self.n + self.k + 1 + j_tail)
+    }
+}
 
 // =====================================================================
 // Kernel definitions — all 19 PolybenchGPU benchmarks
@@ -736,10 +757,7 @@ pub fn bench_lu_kernel2(row_tail: &[f32], col: &[f32], rows_below: &mut [f32], n
     let j_tail = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i_tail = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
     let rem = n - k - 1;
-    let mut rows_below = chunk_mut(
-        rows_below,
-        reshape_map!([1] | [(rem, n), rem] => layout: [i0, t0, t1], offset: k + 1),
-    );
+    let mut rows_below = chunk_mut(rows_below, LuTrailingUpdateMap { n, k, rem });
     if i_tail < rem && j_tail < rem {
         rows_below[0] = rows_below[0] - col[i_tail as usize] * row_tail[j_tail as usize];
     }

@@ -1,4 +1,5 @@
 use gpu::prelude::*;
+use gpu::MapLinear;
 
 use crate::{
     BIN_HISTS_SIZE, BIN_KEYS_PER_THREAD, BIN_PART_SIZE, BIN_SUB_PART_SIZE, LANE_COUNT, LANE_LOG,
@@ -39,6 +40,7 @@ pub fn radix_downsweep(
     pass_hist: &[u32],
     size: u32,
     radix_shift: u32,
+    padded_thread_blocks: u32,
 ) {
     let tid = thread_id::<DimX>();
     let bid = block_id::<DimX>();
@@ -64,11 +66,13 @@ pub fn radix_downsweep(
     // CUDA: for (uint32_t i = threadIdx.x; i < BIN_HISTS_SIZE; i += blockDim.x)
     //           s_warpHistograms[i] = 0;
     {
-        let s_wh_atom = gpu::sync::SharedAtomic::new(&mut *smem);
-        let mut i = tid;
-        while i < BIN_HISTS_SIZE {
-            s_wh_atom.index(i as usize).atomic_assign(0u32);
-            i += block_dim;
+        // BIN_HISTS_SIZE=4096, block_dim=512 → 8 elements per thread
+        let elems_per_thread = BIN_HISTS_SIZE / block_dim;
+        let mut smem_chunk = smem.chunk_mut(MapLinear::new(elems_per_thread as usize));
+        let mut k = 0u32;
+        while k < elems_per_thread {
+            smem_chunk[k as usize] = 0u32;
+            k += 1;
         }
     }
     sync_threads();
@@ -285,7 +289,7 @@ pub fn radix_downsweep(
     //               s_warpHistograms[threadIdx.x];
     if tid < RADIX {
         let global_base = global_hist[(tid + (radix_shift << 5)) as usize];
-        let pass_base = pass_hist[(tid * grid_dim + bid) as usize];
+        let pass_base = pass_hist[(tid * padded_thread_blocks + bid) as usize];
         let local_reduction = *smem[tid as usize]; // s_warpHistograms[threadIdx.x] = inclusive count total
         let base = global_base + pass_base - local_reduction;
 

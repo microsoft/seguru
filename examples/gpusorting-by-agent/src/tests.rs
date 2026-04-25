@@ -24,8 +24,11 @@ mod sort_tests {
         cuda_ctx(0, |ctx, m| {
             let size = input.len() as u32;
             let thread_blocks = (size + PART_SIZE - 1) / PART_SIZE;
+            // Pad thread_blocks to multiple of SCAN_THREADS for chunk_mut alignment
+            let padded_thread_blocks =
+                ((thread_blocks + SCAN_THREADS - 1) / SCAN_THREADS) * SCAN_THREADS;
             let global_hist_len = (RADIX * RADIX_PASSES) as usize;
-            let pass_hist_len = (RADIX * thread_blocks) as usize;
+            let pass_hist_len = (RADIX * padded_thread_blocks) as usize;
 
             let mut h_global_hist = vec![0u32; global_hist_len];
             let mut h_pass_hist = vec![0u32; pass_hist_len];
@@ -35,7 +38,7 @@ mod sort_tests {
             let mut d_alt = ctx.new_tensor_view::<[u32]>(&h_alt).expect("alloc alt");
             let mut d_global_hist =
                 ctx.new_tensor_view::<[u32]>(&h_global_hist).expect("alloc global_hist");
-            let mut d_pass_hist =
+            let mut _d_pass_hist =
                 ctx.new_tensor_view::<[u32]>(&h_pass_hist).expect("alloc pass_hist");
 
             for pass in 0..RADIX_PASSES {
@@ -46,7 +49,6 @@ mod sort_tests {
                 let mut d_pass_hist_fresh =
                     ctx.new_tensor_view::<[u32]>(&h_pass_hist).expect("alloc pass_hist");
 
-                // Ping-pong: even passes sort→alt, odd passes alt→sort
                 // 1. Upsweep
                 let upsweep_smem = RADIX * 2 * 4; // 2048 bytes
                 let upsweep_config =
@@ -54,12 +56,14 @@ mod sort_tests {
                 if pass % 2 == 0 {
                     crate::upsweep::radix_upsweep::launch(
                         upsweep_config, ctx, m,
-                        &d_data, &mut d_global_hist, &mut d_pass_hist_fresh, size, radix_shift,
+                        &d_data, &mut d_global_hist, &mut d_pass_hist_fresh,
+                        size, radix_shift, padded_thread_blocks,
                     ).expect("upsweep launch failed");
                 } else {
                     crate::upsweep::radix_upsweep::launch(
                         upsweep_config, ctx, m,
-                        &d_alt, &mut d_global_hist, &mut d_pass_hist_fresh, size, radix_shift,
+                        &d_alt, &mut d_global_hist, &mut d_pass_hist_fresh,
+                        size, radix_shift, padded_thread_blocks,
                     ).expect("upsweep launch failed");
                 }
 
@@ -68,26 +72,28 @@ mod sort_tests {
                 let scan_config =
                     gpu_host::gpu_config!(RADIX, 1, 1, SCAN_THREADS, 1, 1, scan_smem);
                 crate::scan::radix_scan::launch(
-                    scan_config, ctx, m, &mut d_pass_hist_fresh, thread_blocks,
+                    scan_config, ctx, m, &mut d_pass_hist_fresh, padded_thread_blocks,
                 ).expect("scan launch failed");
 
                 // 3. Downsweep
-                let downsweep_smem = (BIN_PART_SIZE + RADIX) * 4; // 31744 bytes
+                let downsweep_smem = (BIN_PART_SIZE + RADIX) * 4;
                 let downsweep_config =
                     gpu_host::gpu_config!(thread_blocks, 1, 1, DOWNSWEEP_THREADS, 1, 1, downsweep_smem);
                 if pass % 2 == 0 {
                     crate::downsweep::radix_downsweep::launch(
                         downsweep_config, ctx, m,
-                        &d_data, &mut d_alt, &d_global_hist, &d_pass_hist_fresh, size, radix_shift,
+                        &d_data, &mut d_alt, &d_global_hist, &d_pass_hist_fresh,
+                        size, radix_shift, padded_thread_blocks,
                     ).expect("downsweep launch failed");
                 } else {
                     crate::downsweep::radix_downsweep::launch(
                         downsweep_config, ctx, m,
-                        &d_alt, &mut d_data, &d_global_hist, &d_pass_hist_fresh, size, radix_shift,
+                        &d_alt, &mut d_data, &d_global_hist, &d_pass_hist_fresh,
+                        size, radix_shift, padded_thread_blocks,
                     ).expect("downsweep launch failed");
                 }
 
-                d_pass_hist = d_pass_hist_fresh;
+                _d_pass_hist = d_pass_hist_fresh;
             }
 
             // After 4 passes (even), result is in d_data

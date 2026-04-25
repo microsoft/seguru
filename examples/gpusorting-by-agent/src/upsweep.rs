@@ -50,6 +50,7 @@ pub fn radix_upsweep(
     pass_hist: &mut [u32],
     size: u32,
     radix_shift: u32,
+    padded_thread_blocks: u32,
 ) {
     let tid = thread_id::<DimX>();
     let block_id = block_id::<DimX>();
@@ -110,12 +111,13 @@ pub fn radix_upsweep(
     sync_threads();
 
     // CUDA: reduce two sub-hists, write passHist, begin warp scan
-    // passHist layout: [RADIX][gridDim], passHist[digit * gridDim + blockId].
-    // chunk_mut with reshape_map: chunk[k] → passHist[(tid + k*blockDim)*gridDim + blockId]
+    // passHist layout: passHist[digit * padded_thread_blocks + blockId].
+    // Use (grid_dim, padded_thread_blocks) to set TD for the grid dimension,
+    // ensuring stride between digits = padded_thread_blocks (not grid_dim).
     {
         let mut ph_chunk = chunk_mut(
             pass_hist,
-            reshape_map!([RADIX / block_dim] | [block_dim, grid_dim] => layout: [t1, t0, i0]),
+            reshape_map!([RADIX / block_dim] | [block_dim, (grid_dim, padded_thread_blocks)] => layout: [t1, t0, i0]),
         );
         let mut k = 0u32;
         let mut i = tid;

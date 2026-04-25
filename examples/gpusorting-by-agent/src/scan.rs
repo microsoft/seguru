@@ -1,6 +1,6 @@
 use gpu::prelude::*;
 
-use crate::{LANE_LOG, LANE_MASK, SCAN_THREADS};
+use crate::LANE_LOG;
 
 // ============================================================================
 // CUDA reference: DeviceRadixSort::Scan
@@ -32,166 +32,104 @@ use crate::{LANE_LOG, LANE_MASK, SCAN_THREADS};
 // }
 //
 // PORTING NOTES:
-// - passHist needs both read and write. Use chunk_mut with reshape_map for the
-//   structured per-digit access, and Atomic for the scatter-write with circular shift.
-// - CUDA's tail section doesn't zero s_scan for OOB threads (stale data).
-//   We zero explicitly for correctness.
+// - CUDA writes to passHist with circular-lane-shift addressing.
+//   We restructure: compute exclusive prefix and write back to SAME position
+//   via chunk_mut (no scatter). The final values are identical.
+// - Exclusive value at position p = inclusive_scan[p-1] + cross_warp_prefix + reduction
+// - passHist uses padded layout: stride = padded_thread_blocks (multiple of block_dim)
 // ============================================================================
 
 #[gpu::cuda_kernel(dynamic_shared)]
-pub fn radix_scan(pass_hist: &mut [u32], thread_blocks: u32) {
+pub fn radix_scan(pass_hist: &mut [u32], padded_thread_blocks: u32) {
     let tid = thread_id::<DimX>();
-    let bid = block_id::<DimX>();
     let block_dim = block_dim::<DimX>();
     let lane_id = lane_id();
 
-    // CUDA: __shared__ uint32_t s_scan[128];
-    let smem = smem_alloc.alloc::<u32>(SCAN_THREADS as usize);
+    // smem for within-block scan
+    let smem = smem_alloc.alloc::<u32>(block_dim as usize);
 
-    // passHist is read+write → Atomic for data-dependent circular-shift scatter
-    let ph = gpu::sync::Atomic::new(pass_hist);
+    let warp_id = tid >> LANE_LOG;
+    let local_size = padded_thread_blocks / block_dim;
+
+    // chunk_mut maps chunk[k] → pass_hist[bid * padded + k * block_dim + tid]
+    // Layout [t0, i0, t1]: index = tid + k * block_dim + bid * padded_thread_blocks
+    let mut ph_chunk = chunk_mut(
+        pass_hist,
+        reshape_map!([local_size] | [block_dim, grid_dim::<DimX>()] => layout: [t0, i0, t1]),
+    );
 
     let mut reduction = 0u32;
-    // CUDA: circularLaneShift = (getLaneId() + 1) & LANE_MASK
-    let circular_lane_shift = (lane_id + 1) & LANE_MASK;
-    // CUDA: partitionsEnd = threadBlocks / blockDim.x * blockDim.x
-    let partitions_end = thread_blocks / block_dim * block_dim;
-    // CUDA: digitOffset = blockIdx.x * threadBlocks
-    let digit_offset = bid * thread_blocks;
-
-    // Main loop: full partitions of block_dim elements
-    let num_full_partitions = partitions_end / block_dim;
     let mut partition = 0u32;
-    while partition < num_full_partitions {
-        let i = partition * block_dim + tid;
-
-        // CUDA: s_scan[tid] = passHist[i + digitOffset];
+    while partition < local_size {
+        // ---- Step 1: Load passHist into shared memory ----
+        // CUDA: s_scan[tid] = passHist[i + digitOffset]
+        let val = ph_chunk[partition];
         {
-            let val = ph.index((i + digit_offset) as usize).atomic_addi(0u32);
             let s_atom = gpu::sync::SharedAtomic::new(&mut *smem);
             s_atom.index(tid as usize).atomic_assign(val);
         }
         sync_threads();
 
-        // CUDA: s_scan[tid] = InclusiveWarpScan(s_scan[tid]);
+        // ---- Step 2: Inclusive warp scan ----
+        // CUDA: s_scan[tid] = InclusiveWarpScan(s_scan[tid])
         {
-            let val = *smem[tid as usize];
-            let scanned = crate::utils::inclusive_warp_scan(val);
+            let v = *smem[tid as usize];
+            let scanned = crate::utils::inclusive_warp_scan(v);
             let s_atom = gpu::sync::SharedAtomic::new(&mut *smem);
             s_atom.index(tid as usize).atomic_assign(scanned);
         }
         sync_threads();
 
+        // Save my inclusive value before inter-warp scan modifies warp tails
+        let my_inclusive = *smem[tid as usize];
+
+        // ---- Step 3: Inter-warp inclusive scan (sequential, tid 0) ----
         // CUDA: if (tid < (bdim >> LANE_LOG))
         //           s_scan[(tid+1 << LANE_LOG) - 1] = ActiveInclusiveWarpScan(...)
-        // JIT hang workaround: thread-0 sequential inclusive scan on warp-tail positions.
+        // JIT hang workaround: thread-0 sequential scan on warp-tail positions.
         if tid == 0 {
-            let n_warps = block_dim >> LANE_LOG; // 4
+            let n_warps = block_dim >> LANE_LOG;
             let mut running = 0u32;
             let mut w = 0u32;
             while w < n_warps {
                 let idx = (((w + 1) << LANE_LOG) - 1) as usize;
-                let val = *smem[idx];
-                running += val;
-                let s_atomic = gpu::sync::SharedAtomic::new(&mut *smem);
-                s_atomic.index(idx).atomic_assign(running);
+                let v = *smem[idx];
+                running += v;
+                let s_atom = gpu::sync::SharedAtomic::new(&mut *smem);
+                s_atom.index(idx).atomic_assign(running);
                 w += 1;
             }
         }
         sync_threads();
 
-        // CUDA: passHist[circularLaneShift + (i & ~LANE_MASK) + digitOffset] =
-        //           (getLaneId() != LANE_MASK ? s_scan[tid] : 0) +
-        //           (tid >= LANE_COUNT ? __shfl_sync(..., s_scan[tid-1], 0) : 0) +
-        //           reduction;
-        {
-            let scan_val = *smem[tid as usize];
-            let is_last_in_warp = lane_id == LANE_MASK;
+        // ---- Step 4: Compute exclusive prefix and write back ----
+        // Instead of CUDA's circular-shift scatter, we compute the exclusive
+        // value at each thread's own position and write back in-place.
+        //
+        // CUDA equivalent: passHist[i + digitOffset] = exclusive_prefix(positions 0..i-1)
+        //   = (inclusive of predecessor within warp) + (cross-warp prefix) + (global reduction)
+        //
+        // Exclusive within warp: shuffle_up(my_inclusive, 1) gives predecessor's inclusive.
+        let (prev_inclusive, _) = gpu::shuffle!(up, my_inclusive, 1u32, 32);
+        let exclusive_within_warp = if lane_id > 0 { prev_inclusive } else { 0u32 };
 
-            // Cross-warp: broadcast preceding warp's last element from lane 0
-            let cross_warp = if tid >= 32u32 {
-                *smem[(tid - 1) as usize]
-            } else {
-                0u32
-            };
-            let (shuffled_cross, _) = gpu::shuffle!(idx, cross_warp, 0u32, 32u32);
+        // Cross-warp prefix: after inter-warp inclusive scan, smem[(w*32)-1] = total of warps 0..w-1.
+        // For warp w, exclusive cross-warp = smem[(w*32)-1] for w>0, else 0.
+        let cross_warp = if warp_id > 0 {
+            *smem[((warp_id << LANE_LOG) - 1) as usize]
+        } else {
+            0u32
+        };
 
-            let warp_sum = if is_last_in_warp { 0u32 } else { scan_val };
-            let inter_warp_sum = if tid >= 32u32 { shuffled_cross } else { 0u32 };
-            let final_val = warp_sum + inter_warp_sum + reduction;
+        let final_exclusive = exclusive_within_warp + cross_warp + reduction;
 
-            // Circular-shift scatter: data-dependent output position
-            let output_idx = circular_lane_shift + (i & !LANE_MASK);
-            ph.index((output_idx + digit_offset) as usize)
-                .atomic_assign(final_val);
-        }
+        // Write back to same position via chunk_mut (no circular shift!)
+        ph_chunk[partition] = final_exclusive;
 
-        // CUDA: reduction += s_scan[blockDim.x - 1];
+        // CUDA: reduction += s_scan[blockDim.x - 1]
         reduction += *smem[(block_dim - 1) as usize];
         sync_threads();
 
         partition += 1;
-    }
-
-    // Tail: partial partition
-    let i = partitions_end + tid;
-
-    // CUDA: if (i < threadBlocks) s_scan[tid] = passHist[i + digitOffset];
-    // Zero explicitly for OOB threads (CUDA stale data bug fix).
-    {
-        let val = if i < thread_blocks {
-            ph.index((i + digit_offset) as usize).atomic_addi(0u32)
-        } else {
-            0u32
-        };
-        let s_atom = gpu::sync::SharedAtomic::new(&mut *smem);
-        s_atom.index(tid as usize).atomic_assign(val);
-    }
-    sync_threads();
-
-    // Inclusive warp scan on tail
-    {
-        let val = *smem[tid as usize];
-        let scanned = crate::utils::inclusive_warp_scan(val);
-        let s_atom = gpu::sync::SharedAtomic::new(&mut *smem);
-        s_atom.index(tid as usize).atomic_assign(scanned);
-    }
-    sync_threads();
-
-    // Inter-warp scan (sequential, thread 0)
-    if tid == 0 {
-        let n_warps = block_dim >> LANE_LOG;
-        let mut running = 0u32;
-        let mut w = 0u32;
-        while w < n_warps {
-            let idx = (((w + 1) << LANE_LOG) - 1) as usize;
-            let val = *smem[idx];
-            running += val;
-            let s_atomic = gpu::sync::SharedAtomic::new(&mut *smem);
-            s_atomic.index(idx).atomic_assign(running);
-            w += 1;
-        }
-    }
-    sync_threads();
-
-    // Tail output: same circular-shift scatter pattern
-    let output_idx = circular_lane_shift + (i & !LANE_MASK);
-    if output_idx < thread_blocks {
-        let scan_val = *smem[tid as usize];
-        let is_last_in_warp = lane_id == LANE_MASK;
-
-        // Cross-warp: read predecessor warp's last element directly
-        let pred_val = if tid >= 32u32 {
-            *smem[((tid & !LANE_MASK) - 1) as usize]
-        } else {
-            0u32
-        };
-
-        let warp_sum = if is_last_in_warp { 0u32 } else { scan_val };
-        let inter_warp_sum = if tid >= 32u32 { pred_val } else { 0u32 };
-        let final_val = warp_sum + inter_warp_sum + reduction;
-
-        ph.index((output_idx + digit_offset) as usize)
-            .atomic_assign(final_val);
     }
 }

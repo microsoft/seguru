@@ -1,6 +1,0 @@
-# Targets in this dir
-gpu_basic
-hello
-*.bc
-*.ll
-*.mir

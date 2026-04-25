@@ -104,7 +104,8 @@ pub fn gemm_add_relu_ptxas_kernel(
     let k4 = k >> 2;
     let a_col4 = a_col >> 2;
 
-    let load_map = reshape_map!([4] | [16, 16] => layout: [i0, t0, t1]);
+    // K-major shared layout: offset = (a_col + i0) * 128 + a_row.
+    let load_map = reshape_map!([4] | [2, 8, 16] => layout: [t1, t2, i0, t0]);
 
     let mut acc = [[0.0f32; TN as usize]; TM as usize];
 
@@ -144,10 +145,10 @@ pub fn gemm_add_relu_ptxas_kernel(
             let mut b_reg = [0.0f32; TN as usize];
 
             unroll8!(ii, {
-                a_reg[ii] = tile_a[(row_off + ii) * 8 + kk];
+                a_reg[ii] = tile_a[kk * BM as usize + row_off + ii];
             });
             unroll8!(jj, {
-                b_reg[jj] = tile_b[(col_off + jj) * 8 + kk];
+                b_reg[jj] = tile_b[kk * BN as usize + col_off + jj];
             });
 
             unroll8!(ii, {

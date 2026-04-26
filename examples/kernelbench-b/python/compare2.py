@@ -208,6 +208,13 @@ PROBLEMS = {
         cuda_run=lambda mod, x: mod.run(x),
         atol=0,
     ),
+    "min_dim": dict(
+        torch_fn=lambda x: x.min(dim=-1).values,
+        make_x=_rand(4096, 16384),
+        in_shape=[4096, 16384], out_shape=[4096],
+        cuda_run=lambda mod, x: mod.run(x),
+        atol=0,
+    ),
     "argmax_dim": dict(
         torch_fn=lambda x: x.argmax(dim=-1).to(torch.int64),
         make_x=_rand(4096, 16384),

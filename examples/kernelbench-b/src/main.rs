@@ -46,6 +46,7 @@ pub mod max_pool1d;
 pub mod avg_pool1d;
 pub mod mean_dim;
 pub mod max_dim;
+pub mod min_dim;
 pub mod argmax_dim;
 pub mod cumsum;
 pub mod mse_loss;
@@ -153,6 +154,7 @@ fn main() {
             "avg_pool1d"  => avg_pool1d::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "mean_dim"    => mean_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "max_dim"     => max_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "min_dim"     => min_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "argmax_dim"  => argmax_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "cumsum"      => cumsum::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "mse_loss"    => mse_loss::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
@@ -164,6 +166,7 @@ fn main() {
             "avg_pool1d_fc"  => from_cuda::avg_pool1d::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "mean_dim_fc"    => from_cuda::mean_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "max_dim_fc"     => from_cuda::max_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "min_dim_fc"     => from_cuda::min_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "argmax_dim_fc"  => from_cuda::argmax_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "cumsum_fc"      => from_cuda::cumsum::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "mse_loss_fc"    => from_cuda::mse_loss::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),

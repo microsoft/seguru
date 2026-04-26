@@ -23,6 +23,7 @@ pub mod max_pool1d;
 pub mod avg_pool1d;
 pub mod mean_dim;
 pub mod max_dim;
+pub mod min_dim;
 pub mod argmax_dim;
 pub mod cumsum;
 pub mod mse_loss;

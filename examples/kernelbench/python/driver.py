@@ -188,15 +188,27 @@ PROBLEMS = [
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--iters", type=int, default=100)
-    ap.add_argument("--only", help="comma-separated subset")
-    ap.add_argument("--problem", help="single problem or comma-separated subset")
+    selectors = ap.add_mutually_exclusive_group()
+    selectors.add_argument("--only", help="comma-separated subset")
+    selectors.add_argument("--problem", action="append",
+                           help="problem subset; repeat flag or use comma-separated names")
     args = ap.parse_args()
+
+    selected_groups = args.problem or ([args.only] if args.only else [])
+    wanted = {
+        name.strip()
+        for group in selected_groups
+        for name in group.split(",")
+        if name.strip()
+    } or None
+    available = {fn.__name__.replace("problem_", "") for fn in PROBLEMS}
+    if wanted:
+        unknown = wanted - available
+        if unknown:
+            raise SystemExit(f"unknown problem(s): {', '.join(sorted(unknown))}")
 
     assert RUNNER.exists(), (
         f"runner not found at {RUNNER}; build with `cargo build --release -p kernelbench`")
-
-    selected = args.problem or args.only
-    wanted = set(selected.split(",")) if selected else None
     rows = []
     SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=SCRATCH_ROOT) as td:

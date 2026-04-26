@@ -12,13 +12,16 @@ REQUIRED = {
     "examples/kernelbench/src/main.rs": [
         "pub fn avg_pool1d_kernel",
         "pub fn min_dim1_kernel",
-        '"avg_pool1d"',
-        '"min_dim1"',
+        '"avg_pool1d" =>',
+        '"min_dim1" =>',
+        "avg_pool1d_kernel::launch",
+        "min_dim1_kernel::launch",
     ],
     "examples/kernelbench/python/driver.py": [
         "def problem_avg_pool1d",
         "def problem_min_dim1",
-        "PROBLEMS = [",
+        "problem_avg_pool1d,",
+        "problem_min_dim1,",
     ],
     "examples/kernelbench-c/python/compare.py": [
         "def _matmul_swish_scaling",
@@ -29,10 +32,10 @@ REQUIRED = {
     "examples/kernelbench-c/src/main.rs": [
         "pub mod matmul_swish_scaling",
         "pub mod conv2d_scaling_min",
-        '"matmul_swish_scaling"',
-        '"conv2d_scaling_min"',
-        '"matmul_swish_scaling_fc"',
-        '"conv2d_scaling_min_fc"',
+        '"matmul_swish_scaling"      => matmul_swish_scaling::run',
+        '"conv2d_scaling_min"        => conv2d_scaling_min::run',
+        '"matmul_swish_scaling_fc"   => from_cuda::matmul_swish_scaling::run',
+        '"conv2d_scaling_min_fc"     => from_cuda::conv2d_scaling_min::run',
     ],
     "examples/kernelbench-c/src/from_cuda/mod.rs": [
         "pub mod matmul_swish_scaling",

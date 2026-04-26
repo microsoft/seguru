@@ -807,9 +807,11 @@ pub fn gemm_kernel(x: &[Float4], w: &[Float4], y: &mut [f32], K: u32) {
 let gx = (N as u32) / BN;
 let gy = (M as u32) / BM;
 let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
-// Reinterpret f32 device views as Float4 views (one-liner, no realloc).
-let d_x4 = unsafe { &*(&d_x as *const _ as *const gpu_host::TensorView<'_, [Float4]>) };
-let d_w4 = unsafe { &*(&d_w as *const _ as *const gpu_host::TensorView<'_, [Float4]>) };
+// Reinterpret f32 device views as Float4 views (checked, no realloc).
+let d_x4_view = d_x.try_cast_slice::<Float4>().unwrap();
+let d_w4_view = d_w.try_cast_slice::<Float4>().unwrap();
+let d_x4 = &d_x4_view;
+let d_w4 = &d_w4_view;
 gemm_kernel::launch(cfg, ctx, md, d_x4, d_w4, &mut d_y, kk).unwrap();
 ```
 
@@ -1120,8 +1122,9 @@ let inv_sum = if block_sum > 0.0 { 1.0 / block_sum } else { 0.0 };
 ## Launch Config & Occupancy
 
 SeGuRu kernels inherit CUDA's SIMT execution model; the same occupancy and
-block-size rules apply. You don't get to set `__launch_bounds__` directly,
-but the compiler-chosen tile / block dim still have to respect these.
+block-size rules apply. For measured register-heavy kernels, use
+`#[gpu::attr(nvvm_launch_bound(x, y, z, min_blocks_per_sm))]` to mirror CUDA's
+`__launch_bounds__` when the values match the actual launch configuration.
 
 **Defaults that almost always work**:
 
@@ -1855,4 +1858,3 @@ with just the Softmax Recipe while the other three needed Float4.
 Residual gap (raw CUDA still ~15–20% faster than SeGuRu): intrinsic
 SeGuRu codegen overhead (u32 vs usize, ptxas optimizations, etc.),
 not an LLM/skill-doc issue.
-

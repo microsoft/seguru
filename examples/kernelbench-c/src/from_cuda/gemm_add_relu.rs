@@ -19,6 +19,7 @@ const BDIM_X: u32 = 16;
 const BDIM_Y: u32 = 16;
 
 #[gpu::cuda_kernel]
+#[gpu::attr(nvvm_launch_bound(16, 16, 1, 2))]
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::needless_range_loop)]
 pub fn gemm_add_relu_kernel(
@@ -146,8 +147,14 @@ pub fn run(
     let d_b = ctx.new_tensor_view(h_b.as_slice()).unwrap();
     let mut d_y = ctx.new_tensor_view(h_y.as_mut_slice()).unwrap();
 
-    let d_x4 = unsafe { &*(&d_x as *const _ as *const gpu_host::TensorView<'_, [Float4]>) };
-    let d_w4 = unsafe { &*(&d_w as *const _ as *const gpu_host::TensorView<'_, [Float4]>) };
+    let d_x4_view = d_x
+        .try_cast_slice::<Float4>()
+        .expect("x Float4 view requires 16-byte alignment and length divisible by 4");
+    let d_w4_view = d_w
+        .try_cast_slice::<Float4>()
+        .expect("w Float4 view requires 16-byte alignment and length divisible by 4");
+    let d_x4 = &d_x4_view;
+    let d_w4 = &d_w4_view;
 
     let mm = m as u32;
     let nn = n as u32;

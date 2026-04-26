@@ -202,6 +202,24 @@ def _matmul_sigmoid_sum():
     return dict(make_inputs=make_inputs, torch_fn=torch_fn, cuda_run=cuda_run,
                 in_shape=[M, K, N], out_shape=[M, 1], atol=2e-1)
 
+def _matmul_swish_scaling():
+    M, K, N = 128, 32768, 32768
+    scaling_factor = 2.0
+    def make_inputs():
+        torch.manual_seed(0)
+        x = torch.rand(M, K, device="cuda")
+        lim = 1.0 / (K ** 0.5)
+        W = (torch.rand(N, K, device="cuda") * 2 - 1) * lim
+        b = (torch.rand(N, device="cuda") * 2 - 1) * lim
+        return dict(x=x, W=W, b=b)
+    def torch_fn(ins):
+        z = ins["x"] @ ins["W"].T + ins["b"]
+        return z * torch.sigmoid(z) * scaling_factor
+    def cuda_run(mod, ins):
+        return mod.run(ins["x"], ins["W"], ins["b"])
+    return dict(make_inputs=make_inputs, torch_fn=torch_fn, cuda_run=cuda_run,
+                in_shape=[M, K, N], out_shape=[M, N], atol=5e-3)
+
 def _gemm_relu_div():
     M, K, N = 1024, 8192, 8192
     divisor = 2.0
@@ -328,6 +346,7 @@ PROBLEMS = {
     "matmul_scale_resadd": _matmul_scale_resadd(),
     "gemm_scale_htanh_gelu": _gemm_scale_htanh_gelu(),
     "matmul_sigmoid_sum": _matmul_sigmoid_sum(),
+    "matmul_swish_scaling": _matmul_swish_scaling(),
     "gemm_relu_div": _gemm_relu_div(),
     "conv_relu_biasadd": _conv_relu_biasadd(),
     "matmul_sub_mul_relu": _matmul_sub_mul_relu(),

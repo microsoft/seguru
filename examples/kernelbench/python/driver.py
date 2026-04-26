@@ -162,12 +162,26 @@ def problem_avg_pool1d(tmp, iters):
                 seguru_us=res["kernel_us"], max_err=err)
 
 
+def problem_min_dim1(tmp, iters):
+    B, D1, D2 = 128, 4096, 4095
+    x = torch.rand(B, D1, D2, device="cuda")
+    ref = torch.min(x, dim=1)[0]
+    torch_us = time_torch(lambda: torch.min(x, dim=1)[0], iters=iters)
+    dump_bin(tmp / "in/x.bin", x)
+    res = run_seguru("min_dim1", tmp / "in", tmp / "out", iters, [B, D1, D2])
+    y = load_bin(tmp / "out/y.bin", (B, D2))
+    err = float((torch.from_numpy(y).to("cuda") - ref).abs().max())
+    return dict(problem="min_dim1", shape=[B, D1, D2], torch_us=torch_us,
+                seguru_us=res["kernel_us"], max_err=err)
+
+
 PROBLEMS = [
     problem_relu,
     problem_sigmoid,
     problem_softmax,
     problem_matmul,
     problem_avg_pool1d,
+    problem_min_dim1,
 ]
 
 

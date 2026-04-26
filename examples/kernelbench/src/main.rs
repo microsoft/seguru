@@ -6,6 +6,7 @@
 //!
 //! Problems (from ScalingIntelligence/KernelBench, level1/):
 //!   19_ReLU, 21_Sigmoid, 23_Softmax, 44_Average_Pooling_1D,
+//!   53_Min_reduction_over_a_dimension,
 //!   40_LayerNorm, 1_SquareMatmul
 //!
 //! Sizes reduced from KernelBench where necessary to fit GPU memory.
@@ -74,6 +75,40 @@ pub fn avg_pool1d_kernel(x: &[f32], y: &mut [f32], total_out: u32, out_len: u32)
             k += 1;
         }
         y[0] = sum * (1.0 / AVGPOOL1D_K as f32);
+    }
+}
+
+// ======================================================================
+// 53_Min_reduction_over_a_dimension — [B, D1, D2] -> [B, D2], dim=1
+// ======================================================================
+#[gpu::cuda_kernel]
+pub fn min_dim1_kernel(x: &[f32], y: &mut [f32], batches: u32, dim1: u32, dim2: u32) {
+    let warp = ThreadWarpTile::<32>;
+    let wpb = warp.meta_group_size();
+    let out_idx = block_id::<DimX>() * wpb + warp.subgroup_id();
+    let lane = warp.thread_rank();
+    let total_out = batches * dim2;
+    let mut y_chunk = chunk_mut(
+        y,
+        reshape_map!(
+            [1] | [(32, 1), wpb * grid_dim::<DimX>()] => layout: [i0, t0, t1]
+        ),
+    );
+
+    if out_idx < total_out {
+        let b = out_idx / dim2;
+        let j = out_idx - b * dim2;
+        let mut neg_min = f32::NEG_INFINITY;
+        let mut i = lane;
+        while i < dim1 {
+            let v = x[((b * dim1 + i) * dim2 + j) as usize].ldcs();
+            neg_min = neg_min.max(-v);
+            i += warp.size();
+        }
+        let reduced = -warp.redux(ReduxMax, neg_min);
+        if lane == 0 {
+            y_chunk[0].stcs(reduced);
+        }
     }
 }
 
@@ -245,6 +280,7 @@ fn max_abs_diff(a: &[f32], b: &[f32]) -> f32 {
 //   relu     : inputs=x.bin  outputs=y.bin   shape=[N]          (total elems)
 //   sigmoid  : inputs=x.bin  outputs=y.bin   shape=[N]
 //   avg_pool1d: inputs=x.bin outputs=y.bin   shape=[B, C, L, K, S, P]
+//   min_dim1 : inputs=x.bin  outputs=y.bin   shape=[B, D1, D2]
 //   softmax  : inputs=x.bin  outputs=y.bin   shape=[M, N]       (N must equal SOFTMAX_N)
 //   matmul   : inputs=a.bin,b.bin outputs=c.bin shape=[N]       (square NxN)
 // ======================================================================
@@ -394,6 +430,40 @@ fn run_cli(a: CliArgs) {
                 for _ in 0..a.iters {
                     let cfg = gpu_host::gpu_config!(gs, 1, 1, bs, 1, 1, 0);
                     avg_pool1d_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, total_out, out_len_u32).unwrap();
+                }
+                ctx.sync().unwrap();
+                let us = t.elapsed().as_micros() as f64 / a.iters as f64;
+                d_y.copy_to_host(&mut h_y).unwrap();
+                write_bin(&a.out_dir.join("y.bin"), &h_y);
+                (us, warmup)
+            }
+            "min_dim1" => {
+                assert_eq!(a.shape.len(), 3, "min_dim1: shape=[B,D1,D2]");
+                let (b, d1, d2) = (a.shape[0], a.shape[1], a.shape[2]);
+                let input_elems = b * d1 * d2;
+                let output_elems = b * d2;
+                let h_x = read_bin(&a.in_dir.join("x.bin"), input_elems);
+                let mut h_y = vec![0f32; output_elems];
+                let d_x = ctx.new_tensor_view(h_x.as_slice()).unwrap();
+                let mut d_y = ctx.new_tensor_view(h_y.as_mut_slice()).unwrap();
+                const WPB: u32 = 8;
+                const BDIM: u32 = 32 * WPB;
+                let total_out = output_elems as u32;
+                let gs: u32 = total_out.div_ceil(WPB);
+                let cfg = gpu_host::gpu_config!(gs, 1, 1, BDIM, 1, 1, 0);
+                min_dim1_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, b as u32, d1 as u32, d2 as u32).unwrap();
+                ctx.sync().unwrap();
+                let warmup_t = Instant::now();
+                for _ in 0..5 {
+                    let cfg = gpu_host::gpu_config!(gs, 1, 1, BDIM, 1, 1, 0);
+                    min_dim1_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, b as u32, d1 as u32, d2 as u32).unwrap();
+                }
+                ctx.sync().unwrap();
+                let warmup = warmup_t.elapsed().as_micros() as f64 / 5.0;
+                let t = Instant::now();
+                for _ in 0..a.iters {
+                    let cfg = gpu_host::gpu_config!(gs, 1, 1, BDIM, 1, 1, 0);
+                    min_dim1_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, b as u32, d1 as u32, d2 as u32).unwrap();
                 }
                 ctx.sync().unwrap();
                 let us = t.elapsed().as_micros() as f64 / a.iters as f64;

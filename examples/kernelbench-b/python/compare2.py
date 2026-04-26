@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from torch.utils.cpp_extension import load
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
-RUNNER = REPO / "examples/target/release/kernelbench-b"
+RUNNER = pathlib.Path(os.environ.get("CARGO_TARGET_DIR", REPO / "examples/target")) / "release/kernelbench-b"
 CUDA_DIR = REPO / "examples/kernelbench-b/cuda"
 BUILD_DIR = REPO / "examples/kernelbench-b/cuda_build"
 BUILD_DIR.mkdir(exist_ok=True)
@@ -186,6 +186,13 @@ PROBLEMS = {
         in_shape=[128, 64, 65536], out_shape=[128, 64, 16384],
         cuda_run=lambda mod, x: mod.run(x),
         atol=0,
+    ),
+    "avg_pool1d": dict(
+        torch_fn=lambda x: F.avg_pool1d(x, kernel_size=8, stride=1, padding=4),
+        make_x=_pos(128, 64, 65536),
+        in_shape=[128, 64, 65536], out_shape=[128, 64, 65537],
+        cuda_run=lambda mod, x: mod.run(x),
+        atol=1e-5,
     ),
     "mean_dim": dict(
         torch_fn=lambda x: x.mean(dim=-1),

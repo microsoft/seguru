@@ -43,6 +43,7 @@ pub mod swish;
 pub mod softplus;
 pub mod l1_norm;
 pub mod max_pool1d;
+pub mod avg_pool1d;
 pub mod mean_dim;
 pub mod max_dim;
 pub mod argmax_dim;
@@ -149,6 +150,7 @@ fn main() {
             "softplus"    => softplus::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "l1_norm"     => l1_norm::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "max_pool1d"  => max_pool1d::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "avg_pool1d"  => avg_pool1d::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "mean_dim"    => mean_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "max_dim"     => max_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "argmax_dim"  => argmax_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
@@ -159,6 +161,7 @@ fn main() {
             "softplus_fc"    => from_cuda::softplus::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "l1_norm_fc"     => from_cuda::l1_norm::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "max_pool1d_fc"  => from_cuda::max_pool1d::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "avg_pool1d_fc"  => from_cuda::avg_pool1d::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "mean_dim_fc"    => from_cuda::mean_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "max_dim_fc"     => from_cuda::max_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "argmax_dim_fc"  => from_cuda::argmax_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),

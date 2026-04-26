@@ -20,6 +20,7 @@ pub mod swish;
 pub mod softplus;
 pub mod l1_norm;
 pub mod max_pool1d;
+pub mod avg_pool1d;
 pub mod mean_dim;
 pub mod max_dim;
 pub mod argmax_dim;

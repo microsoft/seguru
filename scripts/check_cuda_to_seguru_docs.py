@@ -3,7 +3,7 @@
 
 The skill doc should be a compact reference for future porting agents. Empirical
 history, design decisions, phase summaries, and benchmark progress belong in the
-companion progress doc.
+companion progress/design docs.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SKILL_DOC = ROOT / "docs/cuda-to-seguru-porting-skill.md"
 PROGRESS_DOC = ROOT / "docs/cuda-to-seguru-porting-progress.md"
+DESIGN_DOC = ROOT / "docs/kernelbench-c-float4-16x16-design.md"
 
 
 def main() -> int:
@@ -41,6 +42,12 @@ def main() -> int:
     required_skill_refs = [
         "docs/cuda-to-seguru-porting-progress.md",
         "Raw custom CUDA parity is the primary target",
+        "docs/kernelbench-c-float4-16x16-design.md",
+        "K-major shared-memory tile layout",
+        "reshape_map!([4] | [2, 8, 16] => layout: [t1, t2, i0, t0])",
+        "tile_a[kk * BM as usize + row_off + ii]",
+        "#[gpu::attr(nvvm_launch_bound(16, 16, 1, 2))]",
+        "Do not reintroduce `.open_tile()` or `.row_mut()`",
     ]
     for token in required_skill_refs:
         if token not in skill:
@@ -60,6 +67,9 @@ def main() -> int:
         ]:
             if token not in progress:
                 errors.append(f"progress doc missing required content: {token!r}")
+
+    if not DESIGN_DOC.exists():
+        errors.append("missing KernelBench-C design doc: docs/kernelbench-c-float4-16x16-design.md")
 
     if errors:
         print("\n".join(errors))

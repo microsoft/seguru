@@ -519,8 +519,8 @@ inside the Row-Reduction Strategy section above for the checked zero-copy
 **When not to use** — see the "When not to use Float4" bullets in Row-Reduction
 Strategy. The short version: online algorithms with sequential per-element
 state (softmax max+sum, Welford) cannot vectorize the state update (only the
-outer accumulators). Compute-bound kernels reading smem (GEMM inner loop)
-are already not memory-bound, so Float4 on the smem load does not help.
+outer accumulators). For compute-bound GEMM, keep shared-memory compute reads
+scalar; use `Float4` only for the global tile loads feeding shared memory.
 
 ## Cache Hints
 
@@ -715,12 +715,10 @@ Note: `gpu_config!` returns a non-Copy type — recreate it before each `launch`
 
 ## GEMM / Matmul Recipe
 
-For dense FP32 matmul `y[M, N] = x[M, K] · W[N, K]ᵀ` (or equivalent). Recipe
-validated at scale by `examples/kernelbench-c/src/from_cuda/gemm_mul_lrelu.rs`
-and the four sibling GEMM+epilogue ports. After adding this recipe, the
-direct-from-PyTorch SeGuRu arm collapsed to match the two-stage `SeGuRu←CUDA`
-arm within 1% on all 5 fused-GEMM GEMM problems (~3.3× speedup from the prior
-1-output-per-thread baseline).
+For dense FP32 matmul `y[M, N] = x[M, K] · W[N, K]^T` (or equivalent). The
+current KernelBench-C design is documented in
+[`docs/kernelbench-c-float4-16x16-design.md`](kernelbench-c-float4-16x16-design.md);
+this section keeps only the reusable porting recipe.
 
 **Tile parameters (the defaults that work for `M, N, K` all multiples of 128/128/8):**
 
@@ -742,8 +740,7 @@ Kernel takes `x` / `w` as `&[Float4]` (not `&[f32]`). Each thread's 4-wide
 K slice — `a_col = (tid & 1) << 2` — is always 16-byte aligned because
 `BK=8` and `K` is a multiple of `BK`. Using `&[Float4]` makes the codegen
 emit `ld.global.v4.f32` for the tile load (one 128-bit load replaces four
-scalar 32-bit loads). Measured: ~14% end-to-end on every fused-GEMM in
-fused-GEMM. See "Non-negotiables" #4 below.
+scalar 32-bit loads). See "Non-negotiables" #4 below.
 
 ```rust
 const BM: u32 = 128; const BN: u32 = 128; const BK: u32 = 8;
@@ -751,6 +748,7 @@ const TM: u32 = 8;   const TN: u32 = 8;
 const BDIM_X: u32 = 16; const BDIM_Y: u32 = 16;
 
 #[gpu::cuda_kernel]
+#[gpu::attr(nvvm_launch_bound(16, 16, 1, 2))]
 pub fn gemm_kernel(x: &[Float4], w: &[Float4], y: &mut [f32], K: u32) {
     let tx = thread_id::<DimX>();  let ty = thread_id::<DimY>();
     let bm = block_id::<DimY>() * BM;
@@ -762,8 +760,10 @@ pub fn gemm_kernel(x: &[Float4], w: &[Float4], y: &mut [f32], K: u32) {
     let mut tile_a = GpuShared::<[f32; (BM * BK) as usize]>::zero(); // 128*8=1024
     let mut tile_b = GpuShared::<[f32; (BN * BK) as usize]>::zero();
 
-    // Per-thread disjoint 4-slot partition of each 1024-slot tile.
-    let load_map = reshape_map!([4] | [16, 16] => layout: [i0, t0, t1]);
+    // K-major shared-memory tile layout. For lane i0, this stores:
+    //   offset = (a_col + i0) * BM + a_row
+    // so compute reads use tile[k][row_or_col], matching raw CUDA.
+    let load_map = reshape_map!([4] | [2, 8, 16] => layout: [t1, t2, i0, t0]);
 
     // Per-thread disjoint 8×8 slot of the output. Decompose linear index
     // fastest→slowest: [j (stride 1), tx, bid_x, i, ty, bid_y].
@@ -793,8 +793,8 @@ pub fn gemm_kernel(x: &[Float4], w: &[Float4], y: &mut [f32], K: u32) {
         unroll! { for kk in 0..8 {
             let mut a_reg = [0.0f32; 8];
             let mut b_reg = [0.0f32; 8];
-            for ii in 0..8usize { a_reg[ii] = tile_a[(row_off + ii) * 8 + kk]; }
-            for jj in 0..8usize { b_reg[jj] = tile_b[(col_off + jj) * 8 + kk]; }
+            for ii in 0..8usize { a_reg[ii] = tile_a[kk * BM as usize + row_off + ii]; }
+            for jj in 0..8usize { b_reg[jj] = tile_b[kk * BN as usize + col_off + jj]; }
             unroll! { for ii in 0..8 {
                 let ai = a_reg[ii];
                 unroll! { for jj in 0..8 {
@@ -816,6 +816,7 @@ pub fn gemm_kernel(x: &[Float4], w: &[Float4], y: &mut [f32], K: u32) {
 let gx = (N as u32) / BN;
 let gy = (M as u32) / BM;
 let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
+// The nvvm_launch_bound annotation above must match this 16x16x1 block shape.
 // Reinterpret f32 device views as Float4 views with checked length/alignment.
 let d_x4 = d_x.try_cast_slice::<Float4>().expect("x must be Float4-aligned");
 let d_w4 = d_w.try_cast_slice::<Float4>().expect("w must be Float4-aligned");
@@ -824,29 +825,40 @@ gemm_kernel::launch(cfg, ctx, md, &d_x4, &d_w4, &mut d_y, kk).unwrap();
 
 **Non-negotiables**:
 
-1. **Non-transposed shared tiles** — `As[m_local, k_local]`, `Bs[n_local, k_local]`.
-   Each thread's 4 tile writes land in 4 *contiguous* slots (`tid*4 + 0..3`),
-   which is exactly what the `reshape_map!([4] | [16, 16] => [i0, t0, t1])`
-   partition expresses → zero bounds checks on the LOAD phase. A transposed
-   layout would require per-thread strided writes that `chunk_mut` cannot
-   prove disjoint.
+1. **K-major shared-memory tile layout** — store shared tiles physically as
+   `As[k_local, m_local]` and `Bs[k_local, n_local]`, using
+   `reshape_map!([4] | [2, 8, 16] => layout: [t1, t2, i0, t0])`. Each thread's
+   `Float4` load still writes four disjoint slots, but the compute loop reads
+   CUDA-style `tile[k][row_or_col]`. Float4 global loads plus a 16x16 block are
+   not sufficient if shared memory stays in the old row-major layout.
 2. **`unroll!` the kk / ii / jj loops** so the 64 accumulators + 8-wide
    `a_reg` / `b_reg` stay in registers. Without `unroll!` they spill to
    local memory and you lose the whole point of register tiling.
-3. **Compute reads remain scalar `tile_a[idx]`** — multiple threads reading
-   the same slot (broadcast) cannot be expressed as a disjoint partition, so
-   these keep their `setp+selp` bounds check. The 8×8 register tile amortizes
+3. **Compute reads remain scalar `tile_a[idx]` / `tile_b[idx]`** — multiple
+   threads reading the same slot (broadcast) cannot be expressed as a disjoint
+   partition, so these keep their `setp+selp` bounds check. Use the K-major
+   indices `tile_a[kk * BM as usize + row_off + ii]` and
+   `tile_b[kk * BN as usize + col_off + jj]`; the 8x8 register tile amortizes
    this cost (64 FMAs per shared load).
 4. **Take `x`/`w` as `&[Float4]`, not `&[f32]`** — four consecutive scalar
    `ld.global.f32` per thread per K-tile will **not** be auto-coalesced into
    a `ld.global.v4.f32` by the current SeGuRu codegen (tensor-view indexing
    forces u32→u64 promotion per element, breaking the peephole). Using
    `&[Float4]` emits the 128-bit load directly and drops the tile-load
-   `ld.global` count from 8 scalar to 2 vector ops — exactly matching
-   nvcc's PTX. This alone is ~14% end-to-end on every fused-GEMM port
-   (measured on fused-GEMM: `gemm_add_relu` 22.9ms → 20.0ms, same for the
-   8 sibling kernels). The host-side reinterpret is zero-cost (no realloc,
-   no H2D copy); the device pointer is identical.
+   `ld.global` count from 8 scalar to 2 vector ops, matching nvcc's PTX shape.
+   The host-side reinterpret is zero-cost (no realloc, no H2D copy); the
+   device pointer is identical.
+5. **Keep the 16x16/8x8 geometry as one contract** — `BDIM_X = 16`,
+   `BDIM_Y = 16`, `TM = 8`, and `TN = 8` together produce the 128x128 output
+   tile. If any value changes, retune the full tile shape and update the
+   launch-bound annotation in the same patch.
+6. **Use `#[gpu::attr(nvvm_launch_bound(16, 16, 1, 2))]` only when it matches
+   the real launch** — it is a register/occupancy contract with NVVM/ptxas, not
+   a replacement for `gpu_config!(..., 16, 16, 1, ...)`.
+7. **Do not reintroduce `.open_tile()` or `.row_mut()` for this recipe** unless
+   the core API is separately justified and benchmarked. Direct `chunk_mut`
+   indexing expresses the same output ownership without restoring invasive row
+   view/codegen helpers.
 
 **When to deviate**:
 
@@ -860,15 +872,9 @@ gemm_kernel::launch(cfg, ctx, md, &d_x4, &d_w4, &mut d_y, kk).unwrap();
   fused with a non-standard epilogue, for small sizes, or when precise FP32
   is required.
 
-**Measured**: with all four non-negotiables applied (incl. Float4 global
-loads), this recipe lands SeGuRu at ~2.2× torch-eager on fused-GEMM GEMM
-problems at `M=1024, K=N=8192` (~20 ms vs ~9 ms for hand-written CUDA
-and ~8.7 ms for torch eager). The residual gap to raw CUDA is
-structural — (a) SeGuRu's bounds checks on smem compute reads, and
-(b) address-arithmetic bloat from tensor-view indexing (SG emits ~70
-`add.s64` per tile iter vs nvcc's ~13). Both are codegen-level and
-uniform across every GEMM-class kernel; they're not something a kernel
-author can shrink further from Rust.
+For current benchmark snapshots and branch-specific conclusions, use
+[`docs/cuda-to-seguru-porting-progress.md`](cuda-to-seguru-porting-progress.md)
+and [`docs/kernelbench-c-float4-16x16-design.md`](kernelbench-c-float4-16x16-design.md).
 
 ## Convolution Recipe
 
@@ -1064,8 +1070,9 @@ let inv_sum = if block_sum > 0.0 { 1.0 / block_sum } else { 0.0 };
 ## Launch Config & Occupancy
 
 SeGuRu kernels inherit CUDA's SIMT execution model; the same occupancy and
-block-size rules apply. You don't get to set `__launch_bounds__` directly,
-but the compiler-chosen tile / block dim still have to respect these.
+block-size rules apply. For kernels that need an explicit CUDA launch-bound
+contract, use `#[gpu::attr(nvvm_launch_bound(x, y, z, min_blocks_per_sm))]`
+and keep it synchronized with the actual `gpu_config!` block dimensions.
 
 **Defaults that almost always work**:
 
@@ -1144,8 +1151,9 @@ periodic conflict.
 
 **When you do NOT need padding**:
 
-- **Row-major smem with stride-1 reads** (our GEMM Recipe uses this) —
-  no padding needed. The `+1` pad is for the *transposed* access.
+- **K-major GEMM shared tiles in this recipe** — no padding needed for the
+  retained 128x8 layout. The `+1` pad is for transposed column-wise tiles that
+  create periodic bank conflicts.
 - **fp16 smem** — two fp16 per bank means padding must be 2, not 1.
   Prefer storing `half2` pairs to avoid this.
 

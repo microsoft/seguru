@@ -10,10 +10,10 @@
 
 #![allow(non_snake_case)]
 
+use gpu::CacheStreamLoadStore;
 use gpu::cg::{CGOperations, ReduxAdd, ThreadWarpTile, WarpReduceOp};
 use gpu::prelude::*;
 use gpu::vector::{Float4, VecFlatten};
-use gpu::CacheStreamLoadStore;
 use std::time::Instant;
 
 const N: u32 = 1024;
@@ -43,8 +43,7 @@ pub fn layernorm_naive(x: &[f32], gamma: &[f32], beta: &[f32], y: &mut [f32]) {
         i += BDIM_NAIVE;
     }
     {
-        let mut sc =
-            sdata.chunk_mut(reshape_map!([1] | [BDIM_NAIVE] => layout: [i0, t0]));
+        let mut sc = sdata.chunk_mut(reshape_map!([1] | [BDIM_NAIVE] => layout: [i0, t0]));
         sc[0] = local_sum;
     }
     sync_threads();
@@ -70,8 +69,7 @@ pub fn layernorm_naive(x: &[f32], gamma: &[f32], beta: &[f32], y: &mut [f32]) {
         i += BDIM_NAIVE;
     }
     {
-        let mut sc =
-            sdata2.chunk_mut(reshape_map!([1] | [BDIM_NAIVE] => layout: [i0, t0]));
+        let mut sc = sdata2.chunk_mut(reshape_map!([1] | [BDIM_NAIVE] => layout: [i0, t0]));
         sc[0] = local_sq;
     }
     sync_threads();
@@ -237,8 +235,7 @@ fn cpu_reference(x: &[f32], gamma: &[f32], beta: &[f32], y: &mut [f32], m: usize
     for i in 0..m {
         let row = &x[i * n..(i + 1) * n];
         let mean: f32 = row.iter().sum::<f32>() / n as f32;
-        let var: f32 =
-            row.iter().map(|v| (v - mean) * (v - mean)).sum::<f32>() / n as f32;
+        let var: f32 = row.iter().map(|v| (v - mean) * (v - mean)).sum::<f32>() / n as f32;
         let rstd = 1.0 / (var + 1e-5).sqrt();
         for j in 0..n {
             y[i * n + j] = (row[j] - mean) * rstd * gamma[j] + beta[j];
@@ -346,8 +343,7 @@ fn main() {
             let gdim: u32 = (m as u32).div_ceil(WARPS_PER_BLOCK);
 
             let cfg = gpu_host::gpu_config!(gdim, 1, 1, BDIM_IDIOM, 1, 1, 0);
-            layernorm_vectorized::launch(cfg, ctx, md, &d_x4, &d_g4, &d_b4, &mut d_y4)
-                .unwrap();
+            layernorm_vectorized::launch(cfg, ctx, md, &d_x4, &d_g4, &d_b4, &mut d_y4).unwrap();
             ctx.sync().unwrap();
             d_y4.copy_to_host(h_y4.as_mut_slice()).unwrap();
             // Flatten Float4 back to f32 for verification.
@@ -357,8 +353,7 @@ fn main() {
             let start = Instant::now();
             for _ in 0..iters {
                 let cfg = gpu_host::gpu_config!(gdim, 1, 1, BDIM_IDIOM, 1, 1, 0);
-                layernorm_vectorized::launch(cfg, ctx, md, &d_x4, &d_g4, &d_b4, &mut d_y4)
-                    .unwrap();
+                layernorm_vectorized::launch(cfg, ctx, md, &d_x4, &d_g4, &d_b4, &mut d_y4).unwrap();
             }
             ctx.sync().unwrap();
             let us = start.elapsed().as_micros() as f64 / iters as f64;

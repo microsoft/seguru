@@ -1,5 +1,5 @@
-use gpu::prelude::*;
 use gpu::CacheStreamLoadStore;
+use gpu::prelude::*;
 
 #[gpu::cuda_kernel]
 pub fn bicg_kernel1(a: &[f32], r: &[f32], s: &mut [f32], nx: u32, ny: u32) {

@@ -1,11 +1,11 @@
 //! Log-softmax row-wise: y = (x - max) - log(sum_exp(x - max)).
 //! Same structure as softmax, but Pass 2 subtracts log(sum) instead of
 //! dividing by sum.
+use gpu::cg::{CGOperations, ReduxAdd, ReduxMax, ThreadWarpTile, WarpReduceOp};
+use gpu::chunk_scope::{Block, Thread, build_chunk_scope};
+use gpu::prelude::*;
 use std::path::Path;
 use std::time::Instant;
-use gpu::cg::{CGOperations, ReduxAdd, ReduxMax, ThreadWarpTile, WarpReduceOp};
-use gpu::chunk_scope::{build_chunk_scope, Block, Thread};
-use gpu::prelude::*;
 
 #[gpu::cuda_kernel]
 pub fn log_softmax_kernel(x: &[f32], y: &mut [f32], D: u32) {
@@ -40,10 +40,16 @@ pub fn log_softmax_kernel(x: &[f32], y: &mut [f32], D: u32) {
         let mut s = smem_max
             .chunk_to_scope(block2warp, MapContinuousLinear::new(1))
             .chunk_to_scope(warp2thread, MapContinuousLinear::new(1));
-        if lane_id == 0 { s[0] = warp_max; }
+        if lane_id == 0 {
+            s[0] = warp_max;
+        }
     }
     sync_threads();
-    let sv = if lane_id < num_warps { smem_max[lane_id as usize] } else { f32::NEG_INFINITY };
+    let sv = if lane_id < num_warps {
+        smem_max[lane_id as usize]
+    } else {
+        f32::NEG_INFINITY
+    };
     let block_max = warp.redux(ReduxMax, sv);
 
     local_sum *= GPUDeviceFloatIntrinsics::exp(local_max - block_max);
@@ -52,10 +58,16 @@ pub fn log_softmax_kernel(x: &[f32], y: &mut [f32], D: u32) {
         let mut s = smem_sum
             .chunk_to_scope(block2warp, MapContinuousLinear::new(1))
             .chunk_to_scope(warp2thread, MapContinuousLinear::new(1));
-        if lane_id == 0 { s[0] = warp_sum; }
+        if lane_id == 0 {
+            s[0] = warp_sum;
+        }
     }
     sync_threads();
-    let sv = if lane_id < num_warps { smem_sum[lane_id as usize] } else { 0.0f32 };
+    let sv = if lane_id < num_warps {
+        smem_sum[lane_id as usize]
+    } else {
+        0.0f32
+    };
     let block_sum = warp.redux(ReduxAdd, sv);
     let log_sum = GPUDeviceFloatIntrinsics::log(block_sum);
 
@@ -76,7 +88,10 @@ pub fn log_softmax_kernel(x: &[f32], y: &mut [f32], D: u32) {
 pub fn run(
     ctx: &gpu_host::GpuCtxZeroGuard<'_, '_>,
     md: &gpu_host::GpuModule<gpu_host::CtxSpaceZero>,
-    in_dir: &Path, out_dir: &Path, iters: usize, shape: &[usize],
+    in_dir: &Path,
+    out_dir: &Path,
+    iters: usize,
+    shape: &[usize],
 ) -> (f64, f64) {
     assert_eq!(shape.len(), 2);
     let (b, d) = (shape[0], shape[1]);
@@ -87,18 +102,27 @@ pub fn run(
     let mut h_y = vec![0f32; n];
     let d_x = ctx.new_tensor_view(h_x.as_slice()).unwrap();
     let mut d_y = ctx.new_tensor_view(h_y.as_mut_slice()).unwrap();
-    let dd = d as u32; let bs = BLOCK; let gs = b as u32;
-    { let cfg = gpu_host::gpu_config!(gs,1,1,bs,1,1,0);
-      log_softmax_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, dd).unwrap(); }
+    let dd = d as u32;
+    let bs = BLOCK;
+    let gs = b as u32;
+    {
+        let cfg = gpu_host::gpu_config!(gs, 1, 1, bs, 1, 1, 0);
+        log_softmax_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, dd).unwrap();
+    }
     ctx.sync().unwrap();
-    let wi = 5; let wt = Instant::now();
-    for _ in 0..wi { let cfg = gpu_host::gpu_config!(gs,1,1,bs,1,1,0);
-        log_softmax_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, dd).unwrap(); }
+    let wi = 5;
+    let wt = Instant::now();
+    for _ in 0..wi {
+        let cfg = gpu_host::gpu_config!(gs, 1, 1, bs, 1, 1, 0);
+        log_softmax_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, dd).unwrap();
+    }
     ctx.sync().unwrap();
     let warmup_us = wt.elapsed().as_micros() as f64 / wi as f64;
     let t = Instant::now();
-    for _ in 0..iters { let cfg = gpu_host::gpu_config!(gs,1,1,bs,1,1,0);
-        log_softmax_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, dd).unwrap(); }
+    for _ in 0..iters {
+        let cfg = gpu_host::gpu_config!(gs, 1, 1, bs, 1, 1, 0);
+        log_softmax_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, dd).unwrap();
+    }
     ctx.sync().unwrap();
     let kernel_us = t.elapsed().as_micros() as f64 / iters as f64;
     d_y.copy_to_host(&mut h_y).unwrap();

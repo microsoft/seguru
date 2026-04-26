@@ -44,7 +44,7 @@ pub fn relu_kernel_tail(x: &[f32], y: &mut [f32], tail_start: u32, n: u32) {
 
 pub fn run(
     ctx: &gpu_host::GpuCtxZeroGuard<'_, '_>,
-    md:  &gpu_host::GpuModule<gpu_host::CtxSpaceZero>,
+    md: &gpu_host::GpuModule<gpu_host::CtxSpaceZero>,
     in_dir: &Path,
     out_dir: &Path,
     iters: usize,
@@ -78,22 +78,23 @@ pub fn run(
     let gs4: u32 = if nn4 == 0 { 1 } else { nn4.div_ceil(bs) };
     let nn = n as u32;
     let tail_start: u32 = (n4 * 4) as u32;
-    let gs_tail: u32 = if tail == 0 { 0 } else { (tail as u32).div_ceil(bs) };
-
-    let launch = |ctx: &gpu_host::GpuCtxZeroGuard<'_, '_>,
-                  d_x4: &_,
-                  d_y4: &mut _,
-                  d_x: &_,
-                  d_y: &mut _| {
-        if nn4 > 0 {
-            let cfg = gpu_host::gpu_config!(gs4, 1, 1, bs, 1, 1, 0);
-            relu_kernel_vec4::launch(cfg, ctx, md, d_x4, d_y4, nn4).unwrap();
-        }
-        if gs_tail > 0 {
-            let cfg = gpu_host::gpu_config!(gs_tail, 1, 1, bs, 1, 1, 0);
-            relu_kernel_tail::launch(cfg, ctx, md, d_x, d_y, tail_start, nn).unwrap();
-        }
+    let gs_tail: u32 = if tail == 0 {
+        0
+    } else {
+        (tail as u32).div_ceil(bs)
     };
+
+    let launch =
+        |ctx: &gpu_host::GpuCtxZeroGuard<'_, '_>, d_x4: &_, d_y4: &mut _, d_x: &_, d_y: &mut _| {
+            if nn4 > 0 {
+                let cfg = gpu_host::gpu_config!(gs4, 1, 1, bs, 1, 1, 0);
+                relu_kernel_vec4::launch(cfg, ctx, md, d_x4, d_y4, nn4).unwrap();
+            }
+            if gs_tail > 0 {
+                let cfg = gpu_host::gpu_config!(gs_tail, 1, 1, bs, 1, 1, 0);
+                relu_kernel_tail::launch(cfg, ctx, md, d_x, d_y, tail_start, nn).unwrap();
+            }
+        };
 
     // Warm up once before timing.
     launch(ctx, &d_x4, &mut d_y4, &d_x, &mut d_y);

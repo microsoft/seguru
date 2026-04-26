@@ -13,9 +13,9 @@
 
 #![allow(non_snake_case)]
 
+use gpu::CacheStreamLoadStore;
 use gpu::cg::{CGOperations, ReduxAdd, ReduxMax, ThreadWarpTile, WarpReduceOp};
 use gpu::prelude::*;
-use gpu::CacheStreamLoadStore;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::time::Instant;
@@ -134,7 +134,9 @@ pub fn softmax_kernel(x: &[f32], y: &mut [f32]) {
     let mut i = lane;
     while i < SOFTMAX_N {
         let v = x_row[i as usize].ldcs();
-        if v > m { m = v; }
+        if v > m {
+            m = v;
+        }
         i += warp.size();
     }
     let mx: f32 = warp.redux(ReduxMax, m);
@@ -245,7 +247,9 @@ fn cpu_softmax_row(x: &[f32], y: &mut [f32], m: usize, n: usize) {
         let row = &x[r * n..(r + 1) * n];
         let mx = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
         let mut s = 0.0f32;
-        for v in row { s += (v - mx).exp(); }
+        for v in row {
+            s += (v - mx).exp();
+        }
         let inv = 1.0 / s;
         for (i, v) in row.iter().enumerate() {
             y[r * n + i] = (v - mx).exp() * inv;
@@ -257,14 +261,19 @@ fn cpu_matmul(a: &[f32], b: &[f32], c: &mut [f32], n: usize) {
     for i in 0..n {
         for j in 0..n {
             let mut s = 0.0f32;
-            for k in 0..n { s += a[i * n + k] * b[k * n + j]; }
+            for k in 0..n {
+                s += a[i * n + k] * b[k * n + j];
+            }
             c[i * n + j] = s;
         }
     }
 }
 
 fn max_abs_diff(a: &[f32], b: &[f32]) -> f32 {
-    a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).fold(0.0, f32::max)
+    a.iter()
+        .zip(b.iter())
+        .map(|(x, y)| (x - y).abs())
+        .fold(0.0, f32::max)
 }
 
 // ======================================================================
@@ -295,15 +304,18 @@ struct CliArgs {
 }
 
 fn parse_cli(args: Vec<String>) -> CliArgs {
-    let mut a = CliArgs { iters: 100, ..Default::default() };
+    let mut a = CliArgs {
+        iters: 100,
+        ..Default::default()
+    };
     let mut it = args.into_iter();
     while let Some(k) = it.next() {
         match k.as_str() {
             "--problem" => a.problem = it.next().expect("--problem needs value"),
-            "--in-dir"  => a.in_dir  = it.next().expect("--in-dir needs value").into(),
+            "--in-dir" => a.in_dir = it.next().expect("--in-dir needs value").into(),
             "--out-dir" => a.out_dir = it.next().expect("--out-dir needs value").into(),
-            "--iters"   => a.iters   = it.next().expect("--iters needs value").parse().unwrap(),
-            "--shape"   => {
+            "--iters" => a.iters = it.next().expect("--iters needs value").parse().unwrap(),
+            "--shape" => {
                 let s = it.next().expect("--shape needs value");
                 a.shape = s.split(',').map(|t| t.parse().unwrap()).collect();
             }
@@ -318,7 +330,8 @@ fn parse_cli(args: Vec<String>) -> CliArgs {
 fn read_bin(path: &PathBuf, n: usize) -> Vec<f32> {
     let mut f = std::fs::File::open(path).unwrap_or_else(|e| panic!("open {path:?}: {e}"));
     let mut buf = vec![0u8; n * 4];
-    f.read_exact(&mut buf).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
+    f.read_exact(&mut buf)
+        .unwrap_or_else(|e| panic!("read {path:?}: {e}"));
     let mut out = vec![0f32; n];
     for (i, chunk) in buf.chunks_exact(4).enumerate() {
         out[i] = f32::from_le_bytes(chunk.try_into().unwrap());
@@ -330,7 +343,9 @@ fn write_bin(path: &PathBuf, data: &[f32]) {
     std::fs::create_dir_all(path.parent().unwrap()).ok();
     let mut f = std::fs::File::create(path).unwrap_or_else(|e| panic!("create {path:?}: {e}"));
     let mut buf = Vec::with_capacity(data.len() * 4);
-    for v in data { buf.extend_from_slice(&v.to_le_bytes()); }
+    for v in data {
+        buf.extend_from_slice(&v.to_le_bytes());
+    }
     f.write_all(&buf).unwrap();
 }
 
@@ -401,10 +416,24 @@ fn run_cli(a: CliArgs) {
             }
             "avg_pool1d" => {
                 assert_eq!(a.shape.len(), 6, "avg_pool1d: shape=[B,C,L,K,S,P]");
-                let (b, c, l, k, s, p) = (a.shape[0], a.shape[1], a.shape[2], a.shape[3], a.shape[4], a.shape[5]);
-                assert_eq!(k as u32, AVGPOOL1D_K, "avg_pool1d: K must be {}", AVGPOOL1D_K);
-                assert_eq!(s as u32, AVGPOOL1D_STRIDE, "avg_pool1d: S must be {}", AVGPOOL1D_STRIDE);
-                assert_eq!(p as u32, AVGPOOL1D_PAD, "avg_pool1d: P must be {}", AVGPOOL1D_PAD);
+                let (b, c, l, k, s, p) = (
+                    a.shape[0], a.shape[1], a.shape[2], a.shape[3], a.shape[4], a.shape[5],
+                );
+                assert_eq!(
+                    k as u32, AVGPOOL1D_K,
+                    "avg_pool1d: K must be {}",
+                    AVGPOOL1D_K
+                );
+                assert_eq!(
+                    s as u32, AVGPOOL1D_STRIDE,
+                    "avg_pool1d: S must be {}",
+                    AVGPOOL1D_STRIDE
+                );
+                assert_eq!(
+                    p as u32, AVGPOOL1D_PAD,
+                    "avg_pool1d: P must be {}",
+                    AVGPOOL1D_PAD
+                );
                 let out_len = l + 2 * p - k + 1;
                 let input_elems = b * c * l;
                 let output_elems = b * c * out_len;
@@ -417,19 +446,22 @@ fn run_cli(a: CliArgs) {
                 let bs: u32 = 256;
                 let gs: u32 = total_out.div_ceil(bs);
                 let cfg = gpu_host::gpu_config!(gs, 1, 1, bs, 1, 1, 0);
-                avg_pool1d_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, total_out, out_len_u32).unwrap();
+                avg_pool1d_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, total_out, out_len_u32)
+                    .unwrap();
                 ctx.sync().unwrap();
                 let warmup_t = Instant::now();
                 for _ in 0..5 {
                     let cfg = gpu_host::gpu_config!(gs, 1, 1, bs, 1, 1, 0);
-                    avg_pool1d_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, total_out, out_len_u32).unwrap();
+                    avg_pool1d_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, total_out, out_len_u32)
+                        .unwrap();
                 }
                 ctx.sync().unwrap();
                 let warmup = warmup_t.elapsed().as_micros() as f64 / 5.0;
                 let t = Instant::now();
                 for _ in 0..a.iters {
                     let cfg = gpu_host::gpu_config!(gs, 1, 1, bs, 1, 1, 0);
-                    avg_pool1d_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, total_out, out_len_u32).unwrap();
+                    avg_pool1d_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, total_out, out_len_u32)
+                        .unwrap();
                 }
                 ctx.sync().unwrap();
                 let us = t.elapsed().as_micros() as f64 / a.iters as f64;
@@ -451,19 +483,28 @@ fn run_cli(a: CliArgs) {
                 let total_out = output_elems as u32;
                 let gs: u32 = total_out.div_ceil(WPB);
                 let cfg = gpu_host::gpu_config!(gs, 1, 1, BDIM, 1, 1, 0);
-                min_dim1_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, b as u32, d1 as u32, d2 as u32).unwrap();
+                min_dim1_kernel::launch(
+                    cfg, ctx, md, &d_x, &mut d_y, b as u32, d1 as u32, d2 as u32,
+                )
+                .unwrap();
                 ctx.sync().unwrap();
                 let warmup_t = Instant::now();
                 for _ in 0..5 {
                     let cfg = gpu_host::gpu_config!(gs, 1, 1, BDIM, 1, 1, 0);
-                    min_dim1_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, b as u32, d1 as u32, d2 as u32).unwrap();
+                    min_dim1_kernel::launch(
+                        cfg, ctx, md, &d_x, &mut d_y, b as u32, d1 as u32, d2 as u32,
+                    )
+                    .unwrap();
                 }
                 ctx.sync().unwrap();
                 let warmup = warmup_t.elapsed().as_micros() as f64 / 5.0;
                 let t = Instant::now();
                 for _ in 0..a.iters {
                     let cfg = gpu_host::gpu_config!(gs, 1, 1, BDIM, 1, 1, 0);
-                    min_dim1_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, b as u32, d1 as u32, d2 as u32).unwrap();
+                    min_dim1_kernel::launch(
+                        cfg, ctx, md, &d_x, &mut d_y, b as u32, d1 as u32, d2 as u32,
+                    )
+                    .unwrap();
                 }
                 ctx.sync().unwrap();
                 let us = t.elapsed().as_micros() as f64 / a.iters as f64;
@@ -474,7 +515,11 @@ fn run_cli(a: CliArgs) {
             "softmax" => {
                 assert_eq!(a.shape.len(), 2, "softmax: shape=[M,N]");
                 let (m, n) = (a.shape[0], a.shape[1]);
-                assert_eq!(n as u32, SOFTMAX_N, "softmax inner dim must equal compile-time SOFTMAX_N={}", SOFTMAX_N);
+                assert_eq!(
+                    n as u32, SOFTMAX_N,
+                    "softmax inner dim must equal compile-time SOFTMAX_N={}",
+                    SOFTMAX_N
+                );
                 let h_x = read_bin(&a.in_dir.join("x.bin"), m * n);
                 let mut h_y = vec![0f32; m * n];
                 let d_x = ctx.new_tensor_view(h_x.as_slice()).unwrap();
@@ -599,8 +644,10 @@ fn main() {
             }
             ctx.sync().unwrap();
             let us = start.elapsed().as_micros() as f64 / iters as f64;
-            println!("relu      [{}x{}={}]  SeGuRu: {:8.2} us  err={:.1e}",
-                elem_m, elem_n, elem_total, us, err);
+            println!(
+                "relu      [{}x{}={}]  SeGuRu: {:8.2} us  err={:.1e}",
+                elem_m, elem_n, elem_total, us, err
+            );
         }
 
         // ---------- Sigmoid ----------
@@ -628,8 +675,10 @@ fn main() {
             }
             ctx.sync().unwrap();
             let us = start.elapsed().as_micros() as f64 / iters as f64;
-            println!("sigmoid   [{}x{}={}]  SeGuRu: {:8.2} us  err={:.1e}",
-                elem_m, elem_n, elem_total, us, err);
+            println!(
+                "sigmoid   [{}x{}={}]  SeGuRu: {:8.2} us  err={:.1e}",
+                elem_m, elem_n, elem_total, us, err
+            );
         }
 
         // ---------- Softmax ----------
@@ -657,8 +706,10 @@ fn main() {
             }
             ctx.sync().unwrap();
             let us = start.elapsed().as_micros() as f64 / iters as f64;
-            println!("softmax   [{}x{}]       SeGuRu: {:8.2} us  err={:.1e}",
-                sm_m, sm_n, us, err);
+            println!(
+                "softmax   [{}x{}]       SeGuRu: {:8.2} us  err={:.1e}",
+                sm_m, sm_n, us, err
+            );
         }
 
         // ---------- Matmul ----------
@@ -702,8 +753,10 @@ fn main() {
             }
             ctx.sync().unwrap();
             let us = start.elapsed().as_micros() as f64 / iters as f64;
-            println!("matmul    [{}x{}]      SeGuRu: {:8.2} us  err={:.1e} (256×256 check)",
-                mm_n, mm_n, us, err);
+            println!(
+                "matmul    [{}x{}]      SeGuRu: {:8.2} us  err={:.1e} (256×256 check)",
+                mm_n, mm_n, us, err
+            );
         }
     });
 

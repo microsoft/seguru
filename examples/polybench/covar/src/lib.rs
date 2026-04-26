@@ -1,16 +1,11 @@
-use gpu::prelude::*;
 use gpu::CacheStreamLoadStore;
+use gpu::prelude::*;
 
 const FLOAT_N: f32 = 3214212.01;
 
 // mean[j] = sum_i(data[i*m+j]) / FLOAT_N
 #[gpu::cuda_kernel]
-pub fn covar_mean_kernel(
-    data: &[f32],
-    mean: &mut [f32],
-    m: u32,
-    n: u32,
-) {
+pub fn covar_mean_kernel(data: &[f32], mean: &mut [f32], m: u32, n: u32) {
     let mut mean = chunk_mut(mean, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
 
@@ -27,12 +22,7 @@ pub fn covar_mean_kernel(
 
 // data[i*m+j] -= mean[j]
 #[gpu::cuda_kernel]
-pub fn covar_reduce_kernel(
-    mean: &[f32],
-    data: &mut [f32],
-    m: u32,
-    n: u32,
-) {
+pub fn covar_reduce_kernel(mean: &[f32], data: &mut [f32], m: u32, n: u32) {
     let mut data = chunk_mut(data, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
@@ -44,12 +34,7 @@ pub fn covar_reduce_kernel(
 
 // symmat[j1*m+j2] = sum_i(data[i*m+j1] * data[i*m+j2])
 #[gpu::cuda_kernel]
-pub fn covar_kernel(
-    data: &[f32],
-    symmat: &mut [f32],
-    m: u32,
-    n: u32,
-) {
+pub fn covar_kernel(data: &[f32], symmat: &mut [f32], m: u32, n: u32) {
     let mut symmat = chunk_mut(symmat, Map2D::new(m as usize));
     let j2 = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let j1 = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
@@ -109,7 +94,9 @@ mod tests {
         }
 
         cuda_ctx(0, |ctx, m_module| {
-            let d_data_ro = ctx.new_tensor_view(h_data.as_slice()).expect("alloc data_ro");
+            let d_data_ro = ctx
+                .new_tensor_view(h_data.as_slice())
+                .expect("alloc data_ro");
             let mut d_data = ctx
                 .new_tensor_view(h_data_gpu.as_mut_slice())
                 .expect("alloc data");
@@ -124,34 +111,51 @@ mod tests {
 
             // kernel1: mean
             let grid_x: u32 = (m as u32 + block_size - 1) / block_size;
-            let config =
-                gpu_host::gpu_config!(grid_x, 1, 1, block_size, 1, 1, 0);
+            let config = gpu_host::gpu_config!(grid_x, 1, 1, block_size, 1, 1, 0);
             covar_mean_kernel::launch(
-                config, ctx, m_module, &d_data_ro, &mut d_mean, m as u32, n as u32,
+                config,
+                ctx,
+                m_module,
+                &d_data_ro,
+                &mut d_mean,
+                m as u32,
+                n as u32,
             )
             .expect("mean kernel launch failed");
 
             // kernel2: reduce (data -= mean)
             let grid_x: u32 = (m as u32 + block_size - 1) / block_size;
             let grid_y: u32 = (n as u32 + block_size - 1) / block_size;
-            let config =
-                gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
+            let config = gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
             covar_reduce_kernel::launch(
-                config, ctx, m_module, &d_mean, &mut d_data, m as u32, n as u32,
+                config,
+                ctx,
+                m_module,
+                &d_mean,
+                &mut d_data,
+                m as u32,
+                n as u32,
             )
             .expect("reduce kernel launch failed");
 
             // kernel3: covariance
             let grid_x: u32 = (m as u32 + block_size - 1) / block_size;
             let grid_y: u32 = (m as u32 + block_size - 1) / block_size;
-            let config =
-                gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
+            let config = gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
             covar_kernel::launch(
-                config, ctx, m_module, &d_data, &mut d_symmat, m as u32, n as u32,
+                config,
+                ctx,
+                m_module,
+                &d_data,
+                &mut d_symmat,
+                m as u32,
+                n as u32,
             )
             .expect("covar kernel launch failed");
 
-            d_symmat.copy_to_host(&mut h_symmat_gpu).expect("copy failed");
+            d_symmat
+                .copy_to_host(&mut h_symmat_gpu)
+                .expect("copy failed");
         });
 
         (h_symmat_gpu, h_symmat_cpu)

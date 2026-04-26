@@ -97,8 +97,10 @@ mod tests {
             let grid_y: u32 = ((ni * nj) as u32 + by - 1) / by;
             let config = gpu_host::gpu_config!(grid_x, grid_y, 1, bx, by, 1, 0);
 
-            conv3d_kernel::launch(config, ctx, m, &d_a, &mut d_b, ni as u32, nj as u32, nk as u32)
-                .expect("kernel launch");
+            conv3d_kernel::launch(
+                config, ctx, m, &d_a, &mut d_b, ni as u32, nj as u32, nk as u32,
+            )
+            .expect("kernel launch");
 
             d_b.copy_to_host(&mut h_b_gpu).expect("copy failed");
         });

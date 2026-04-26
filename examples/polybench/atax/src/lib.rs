@@ -1,5 +1,5 @@
-use gpu::prelude::*;
 use gpu::CacheStreamLoadStore;
+use gpu::prelude::*;
 
 #[gpu::cuda_kernel]
 pub fn atax_kernel1(a: &[f32], x: &[f32], tmp: &mut [f32], nx: u32, ny: u32) {
@@ -42,17 +42,23 @@ mod tests {
         cuda_ctx(0, |ctx, m| {
             let d_a = ctx.new_tensor_view(h_a).expect("alloc a");
             let d_x = ctx.new_tensor_view(h_x).expect("alloc x");
-            let mut d_tmp = ctx.new_tensor_view(h_tmp.as_mut_slice()).expect("alloc tmp");
+            let mut d_tmp = ctx
+                .new_tensor_view(h_tmp.as_mut_slice())
+                .expect("alloc tmp");
             let mut d_y = ctx.new_tensor_view(h_y.as_mut()).expect("alloc y");
 
             let bs: u32 = 256;
             let config1 = gpu_host::gpu_config!(((nx as u32) + bs - 1) / bs, 1, 1, bs, 1, 1, 0);
-            atax_kernel1::launch(config1, ctx, m, &d_a, &d_x, &mut d_tmp, nx as u32, ny as u32)
-                .expect("kernel1 launch failed");
+            atax_kernel1::launch(
+                config1, ctx, m, &d_a, &d_x, &mut d_tmp, nx as u32, ny as u32,
+            )
+            .expect("kernel1 launch failed");
 
             let config2 = gpu_host::gpu_config!(((ny as u32) + bs - 1) / bs, 1, 1, bs, 1, 1, 0);
-            atax_kernel2::launch(config2, ctx, m, &d_a, &d_tmp, &mut d_y, nx as u32, ny as u32)
-                .expect("kernel2 launch failed");
+            atax_kernel2::launch(
+                config2, ctx, m, &d_a, &d_tmp, &mut d_y, nx as u32, ny as u32,
+            )
+            .expect("kernel2 launch failed");
 
             d_y.copy_to_host(h_y).expect("copy failed");
         });

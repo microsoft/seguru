@@ -35,7 +35,8 @@ pub fn fdtd_step3(ex: &[f32], ey: &[f32], hz: &mut [f32], nx: u32, ny: u32) {
     if i < nx - 1 && j < ny - 1 {
         hz[0] = hz[0]
             - 0.7
-                * (ex[(i * ny + (j + 1)) as usize] - ex[(i * ny + j) as usize] + ey[((i + 1) * ny + j) as usize]
+                * (ex[(i * ny + (j + 1)) as usize] - ex[(i * ny + j) as usize]
+                    + ey[((i + 1) * ny + j) as usize]
                     - ey[(i * ny + j) as usize]);
     }
 }
@@ -56,18 +57,16 @@ mod tests {
     ) {
         for t in 0..tmax {
             for j in 0..ny {
-                ey[0 * ny + j] = fict[t];
+                ey[j] = fict[t];
             }
             for i in 1..nx {
                 for j in 0..ny {
-                    ey[i * ny + j] =
-                        ey[i * ny + j] - 0.5 * (hz[i * ny + j] - hz[(i - 1) * ny + j]);
+                    ey[i * ny + j] = ey[i * ny + j] - 0.5 * (hz[i * ny + j] - hz[(i - 1) * ny + j]);
                 }
             }
             for i in 0..nx {
                 for j in 1..ny {
-                    ex[i * ny + j] =
-                        ex[i * ny + j] - 0.5 * (hz[i * ny + j] - hz[i * ny + (j - 1)]);
+                    ex[i * ny + j] = ex[i * ny + j] - 0.5 * (hz[i * ny + j] - hz[i * ny + (j - 1)]);
                 }
             }
             for i in 0..nx - 1 {
@@ -102,10 +101,13 @@ mod tests {
 
             for t in 0..tmax {
                 let c1 = gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
-                fdtd_step1::launch(c1, ctx, m, &d_fict, &mut d_ey, &d_hz, nx as u32, ny as u32, t as u32)
-                    .expect("step1");
+                fdtd_step1::launch(
+                    c1, ctx, m, &d_fict, &mut d_ey, &d_hz, nx as u32, ny as u32, t as u32,
+                )
+                .expect("step1");
                 let c2 = gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
-                fdtd_step2::launch(c2, ctx, m, &mut d_ex, &d_hz, nx as u32, ny as u32).expect("step2");
+                fdtd_step2::launch(c2, ctx, m, &mut d_ex, &d_hz, nx as u32, ny as u32)
+                    .expect("step2");
                 let c3 = gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
                 fdtd_step3::launch(c3, ctx, m, &d_ex, &d_ey, &mut d_hz, nx as u32, ny as u32)
                     .expect("step3");
@@ -139,12 +141,8 @@ mod tests {
         let mut ey_cpu = ey_gpu.clone();
         let mut hz_cpu = hz_gpu.clone();
 
-        run_fdtd2d(
-            &fict, &mut ex_gpu, &mut ey_gpu, &mut hz_gpu, nx, ny, tmax,
-        );
-        fdtd2d_cpu(
-            &fict, &mut ex_cpu, &mut ey_cpu, &mut hz_cpu, nx, ny, tmax,
-        );
+        run_fdtd2d(&fict, &mut ex_gpu, &mut ey_gpu, &mut hz_gpu, nx, ny, tmax);
+        fdtd2d_cpu(&fict, &mut ex_cpu, &mut ey_cpu, &mut hz_cpu, nx, ny, tmax);
 
         for i in 0..nx {
             for j in 0..ny {

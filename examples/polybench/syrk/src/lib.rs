@@ -45,10 +45,11 @@ mod tests {
             let block_size: u32 = 16;
             let grid_x: u32 = (ni as u32 + block_size - 1) / block_size;
             let grid_y: u32 = (ni as u32 + block_size - 1) / block_size;
-            let config =
-                gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
-            syrk_kernel::launch(config, ctx, m, &d_a, &mut d_c, ni as u32, nj as u32, alpha, beta)
-                .expect("kernel launch failed");
+            let config = gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
+            syrk_kernel::launch(
+                config, ctx, m, &d_a, &mut d_c, ni as u32, nj as u32, alpha, beta,
+            )
+            .expect("kernel launch failed");
 
             d_c.copy_to_host(&mut h_c_gpu).expect("copy failed");
         });
@@ -70,6 +71,10 @@ mod tests {
                 cpu[i],
             );
         }
-        assert!((gpu[0] - 32.0).abs() < 1e-4, "Expected 32.0, got {}", gpu[0]);
+        assert!(
+            (gpu[0] - 32.0).abs() < 1e-4,
+            "Expected 32.0, got {}",
+            gpu[0]
+        );
     }
 }

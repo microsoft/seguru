@@ -1,17 +1,10 @@
-use gpu::prelude::*;
 use gpu::CacheStreamLoadStore;
+use gpu::prelude::*;
 
 // sum[r*(nq*np) + q*np + p] = sum_s(A[r*(nq*np) + q*np + s] * C4[s*np + p])
 // Pack r,q into Y dimension: qr = r*nq + q
 #[gpu::cuda_kernel]
-pub fn doitgen_kernel1(
-    a: &[f32],
-    c4: &[f32],
-    sum_arr: &mut [f32],
-    nr: u32,
-    nq: u32,
-    np: u32,
-) {
+pub fn doitgen_kernel1(a: &[f32], c4: &[f32], sum_arr: &mut [f32], nr: u32, nq: u32, np: u32) {
     let mut sum_arr = chunk_mut(sum_arr, MapContinuousLinear::new(1));
     let p = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let qr = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
@@ -19,7 +12,8 @@ pub fn doitgen_kernel1(
     let r = qr / nq;
     if p < np && q < nq && r < nr {
         let mut val = 0.0f32;
-        let a_row: &[f32] = &a[(r * (nq * np) + q * np) as usize..(r * (nq * np) + q * np + np) as usize];
+        let a_row: &[f32] =
+            &a[(r * (nq * np) + q * np) as usize..(r * (nq * np) + q * np + np) as usize];
         let mut c4_idx = p as usize;
         for a_val in a_row {
             val += a_val * c4[c4_idx].ldcs();
@@ -31,13 +25,7 @@ pub fn doitgen_kernel1(
 
 // A[r*(nq*np) + q*np + p] = sum[r*(nq*np) + q*np + p]
 #[gpu::cuda_kernel]
-pub fn doitgen_kernel2(
-    sum_arr: &[f32],
-    a: &mut [f32],
-    nr: u32,
-    nq: u32,
-    np: u32,
-) {
+pub fn doitgen_kernel2(sum_arr: &[f32], a: &mut [f32], nr: u32, nq: u32, np: u32) {
     let mut a = chunk_mut(a, MapContinuousLinear::new(1));
     let p = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let qr = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
@@ -106,15 +94,13 @@ mod tests {
             let grid_x = (np as u32 + bx - 1) / bx;
             let grid_y = ((nr * nq) as u32 + by - 1) / by;
 
-            let config =
-                gpu_host::gpu_config!(grid_x, grid_y, 1, bx, by, 1, 0);
+            let config = gpu_host::gpu_config!(grid_x, grid_y, 1, bx, by, 1, 0);
             doitgen_kernel1::launch(
                 config, ctx, m_module, &d_a_ro, &d_c4, &mut d_sum, nr as u32, nq as u32, np as u32,
             )
             .expect("kernel1 failed");
 
-            let config =
-                gpu_host::gpu_config!(grid_x, grid_y, 1, bx, by, 1, 0);
+            let config = gpu_host::gpu_config!(grid_x, grid_y, 1, bx, by, 1, 0);
             doitgen_kernel2::launch(
                 config, ctx, m_module, &d_sum, &mut d_a, nr as u32, nq as u32, np as u32,
             )
@@ -137,7 +123,9 @@ mod tests {
             assert!(
                 (gpu[i] - cpu[i]).abs() < 1.0,
                 "Mismatch at {}: gpu={} cpu={}",
-                i, gpu[i], cpu[i],
+                i,
+                gpu[i],
+                cpu[i],
             );
         }
 

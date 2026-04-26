@@ -28,7 +28,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use gpu::cg::{CGOperations, ReduxAdd, ThreadWarpTile, WarpReduceOp};
-use gpu::chunk_scope::{build_chunk_scope, Block, Thread};
+use gpu::chunk_scope::{Block, Thread, build_chunk_scope};
 use gpu::prelude::*;
 use gpu::vector::{Float4, VecFlatten};
 
@@ -156,7 +156,10 @@ pub fn run(
 ) -> (f64, f64) {
     assert_eq!(shape.len(), 2, "layer_norm_fc: shape=[B,D]");
     let (b, d) = (shape[0], shape[1]);
-    assert!(d % 4 == 0, "D ({d}) must be divisible by 4 for Float4 loads");
+    assert!(
+        d % 4 == 0,
+        "D ({d}) must be divisible by 4 for Float4 loads"
+    );
     let d4 = d / 4;
     assert!(
         d4 % BLOCK as usize == 0,

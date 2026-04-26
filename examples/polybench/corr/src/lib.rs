@@ -1,5 +1,5 @@
-use gpu::prelude::*;
 use gpu::CacheStreamLoadStore;
+use gpu::prelude::*;
 
 const FLOAT_N: f32 = 3214212.01;
 const EPS: f32 = 0.005;
@@ -22,13 +22,7 @@ pub fn corr_mean_kernel(data: &[f32], mean: &mut [f32], m: u32, n: u32) {
 
 // stddev[j] = sqrt(sum_i((data[i*m+j]-mean[j])^2) / FLOAT_N); clamp to 1.0 if <= EPS
 #[gpu::cuda_kernel]
-pub fn corr_std_kernel(
-    data: &[f32],
-    mean: &[f32],
-    stddev: &mut [f32],
-    m: u32,
-    n: u32,
-) {
+pub fn corr_std_kernel(data: &[f32], mean: &[f32], stddev: &mut [f32], m: u32, n: u32) {
     let mut stddev = chunk_mut(stddev, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if j < m {
@@ -48,13 +42,7 @@ pub fn corr_std_kernel(
 
 // data[i*m+j] = (data[i*m+j] - mean[j]) / (sqrt(FLOAT_N) * stddev[j])
 #[gpu::cuda_kernel]
-pub fn corr_reduce_kernel(
-    mean: &[f32],
-    stddev: &[f32],
-    data: &mut [f32],
-    m: u32,
-    n: u32,
-) {
+pub fn corr_reduce_kernel(mean: &[f32], stddev: &[f32], data: &mut [f32], m: u32, n: u32) {
     let mut data = chunk_mut(data, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
@@ -139,8 +127,9 @@ mod tests {
         }
 
         cuda_ctx(0, |ctx, m_module| {
-            let d_data_ro =
-                ctx.new_tensor_view(h_data.as_slice()).expect("alloc data_ro");
+            let d_data_ro = ctx
+                .new_tensor_view(h_data.as_slice())
+                .expect("alloc data_ro");
             let mut d_data = ctx
                 .new_tensor_view(h_data_gpu.as_mut_slice())
                 .expect("alloc data");
@@ -159,31 +148,59 @@ mod tests {
             // kernel1: mean
             let grid_x = (m as u32 + block_size - 1) / block_size;
             let config = gpu_host::gpu_config!(grid_x, 1, 1, block_size, 1, 1, 0);
-            corr_mean_kernel::launch(config, ctx, m_module, &d_data_ro, &mut d_mean, m as u32, n as u32)
-                .expect("mean kernel failed");
+            corr_mean_kernel::launch(
+                config,
+                ctx,
+                m_module,
+                &d_data_ro,
+                &mut d_mean,
+                m as u32,
+                n as u32,
+            )
+            .expect("mean kernel failed");
 
             // kernel2: stddev
             let config = gpu_host::gpu_config!(grid_x, 1, 1, block_size, 1, 1, 0);
             corr_std_kernel::launch(
-                config, ctx, m_module, &d_data_ro, &d_mean, &mut d_stddev, m as u32, n as u32,
+                config,
+                ctx,
+                m_module,
+                &d_data_ro,
+                &d_mean,
+                &mut d_stddev,
+                m as u32,
+                n as u32,
             )
             .expect("std kernel failed");
 
             // kernel3: reduce
             let grid_y = (n as u32 + block_size - 1) / block_size;
-            let config =
-                gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
+            let config = gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
             corr_reduce_kernel::launch(
-                config, ctx, m_module, &d_mean, &d_stddev, &mut d_data, m as u32, n as u32,
+                config,
+                ctx,
+                m_module,
+                &d_mean,
+                &d_stddev,
+                &mut d_data,
+                m as u32,
+                n as u32,
             )
             .expect("reduce kernel failed");
 
             // kernel4: correlation
             let grid_y = (m as u32 + block_size - 1) / block_size;
-            let config =
-                gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
-            corr_corr_kernel::launch(config, ctx, m_module, &d_data, &mut d_symmat, m as u32, n as u32)
-                .expect("corr kernel failed");
+            let config = gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
+            corr_corr_kernel::launch(
+                config,
+                ctx,
+                m_module,
+                &d_data,
+                &mut d_symmat,
+                m as u32,
+                n as u32,
+            )
+            .expect("corr kernel failed");
 
             d_symmat
                 .copy_to_host(&mut h_symmat_gpu)
@@ -205,7 +222,10 @@ mod tests {
                 assert!(
                     (gpu[j1 * m + j2] - gpu[j2 * m + j1]).abs() < 1e-1,
                     "Not symmetric at ({},{}): {} vs {}",
-                    j1, j2, gpu[j1 * m + j2], gpu[j2 * m + j1],
+                    j1,
+                    j2,
+                    gpu[j1 * m + j2],
+                    gpu[j2 * m + j1],
                 );
             }
         }
@@ -215,7 +235,9 @@ mod tests {
             assert!(
                 (gpu[i] - cpu[i]).abs() < 1.0,
                 "Mismatch at {}: gpu={} cpu={}",
-                i, gpu[i], cpu[i],
+                i,
+                gpu[i],
+                cpu[i],
             );
         }
 

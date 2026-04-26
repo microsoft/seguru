@@ -41,7 +41,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use gpu::cg::{CGOperations, ReduxAdd, ReduxMax, ThreadWarpTile, WarpReduceOp};
-use gpu::chunk_scope::{build_chunk_scope, Block, Thread};
+use gpu::chunk_scope::{Block, Thread, build_chunk_scope};
 use gpu::prelude::*;
 
 /// One block per row; 8 warps per block (BLOCK = 256).
@@ -136,8 +136,7 @@ pub fn softmax_kernel(x: &[f32], y: &mut [f32], D: u32) {
     let mut slot = 0u32;
     let mut i = tid;
     while i < D {
-        y_chunk[slot] =
-            GPUDeviceFloatIntrinsics::exp(x_row[i as usize] - block_max) * inv_sum;
+        y_chunk[slot] = GPUDeviceFloatIntrinsics::exp(x_row[i as usize] - block_max) * inv_sum;
         i += block_dim::<DimX>();
         slot += 1;
     }

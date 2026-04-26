@@ -74,8 +74,7 @@ mod tests {
             let block_size: u32 = 16;
             let grid_x: u32 = (nj as u32 + block_size - 1) / block_size;
             let grid_y: u32 = (ni as u32 + block_size - 1) / block_size;
-            let config =
-                gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
+            let config = gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
             conv2d_kernel::launch(config, ctx, m, &d_a, &mut d_b, ni as u32, nj as u32)
                 .expect("kernel launch failed");
 

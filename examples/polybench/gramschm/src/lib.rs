@@ -1,5 +1,5 @@
-use gpu::prelude::*;
 use gpu::CacheStreamLoadStore;
+use gpu::prelude::*;
 
 // kernel1: r[k*nj+k] = sqrt(sum_i(a[i*nj+k]^2))
 #[gpu::cuda_kernel]
@@ -21,14 +21,7 @@ pub fn gramschm_kernel1(a: &[f32], r_kk: &mut [f32], ni: u32, nj: u32, k: u32) {
 // kernel2: q[i*nj+k] = a[i*nj+k] / r[k*nj+k]
 // Launch full ni*nj grid, only column k threads write
 #[gpu::cuda_kernel]
-pub fn gramschm_kernel2(
-    a: &[f32],
-    r: &[f32],
-    q: &mut [f32],
-    nj: u32,
-    ni: u32,
-    k: u32,
-) {
+pub fn gramschm_kernel2(a: &[f32], r: &[f32], q: &mut [f32], nj: u32, ni: u32, k: u32) {
     let mut q = chunk_mut(q, Map2D::new(nj as usize));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
@@ -40,14 +33,7 @@ pub fn gramschm_kernel2(
 // kernel3a: r[k*nj+j] = dot(q[:,k], a[:,j]) for j > k
 // Launch nj*nj grid, only row k threads write
 #[gpu::cuda_kernel]
-pub fn gramschm_kernel3a(
-    q: &[f32],
-    a: &[f32],
-    r: &mut [f32],
-    ni: u32,
-    nj: u32,
-    k: u32,
-) {
+pub fn gramschm_kernel3a(q: &[f32], a: &[f32], r: &mut [f32], ni: u32, nj: u32, k: u32) {
     let mut r = chunk_mut(r, Map2D::new(nj as usize));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let row = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
@@ -64,14 +50,7 @@ pub fn gramschm_kernel3a(
 
 // kernel3b: a[i*nj+j] -= q[i*nj+k] * r[k*nj+j] for j > k
 #[gpu::cuda_kernel]
-pub fn gramschm_kernel3b(
-    q: &[f32],
-    r: &[f32],
-    a: &mut [f32],
-    ni: u32,
-    nj: u32,
-    k: u32,
-) {
+pub fn gramschm_kernel3b(q: &[f32], r: &[f32], a: &mut [f32], ni: u32, nj: u32, k: u32) {
     let mut a = chunk_mut(a, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
@@ -144,14 +123,7 @@ mod tests {
                     let (mut r_kk, _) = diag_and_after.split_at_mut(1);
                     let config = gpu_host::gpu_config!(1, 1, 1, 1, 1, 1, 0);
                     gramschm_kernel1::launch(
-                        config,
-                        ctx,
-                        m_module,
-                        &d_a,
-                        &mut r_kk,
-                        ni as u32,
-                        nj as u32,
-                        k as u32,
+                        config, ctx, m_module, &d_a, &mut r_kk, ni as u32, nj as u32, k as u32,
                     )
                     .expect("kernel1 failed");
                 }
@@ -159,8 +131,7 @@ mod tests {
                 // kernel2: q[:,k] = a[:,k] / r_kk — full ni*nj grid, only col k writes
                 let grid_x = (nj as u32 + block_size - 1) / block_size;
                 let grid_y = (ni as u32 + block_size - 1) / block_size;
-                let config =
-                    gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
+                let config = gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
                 gramschm_kernel2::launch(
                     config, ctx, m_module, &d_a, &d_r, &mut d_q, nj as u32, ni as u32, k as u32,
                 )
@@ -169,8 +140,7 @@ mod tests {
                 // kernel3a: r[k][j] = dot(q[:,k], a[:,j]) — full nj*nj grid, only row k writes
                 let grid_x = (nj as u32 + block_size - 1) / block_size;
                 let grid_y = (nj as u32 + block_size - 1) / block_size;
-                let config =
-                    gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
+                let config = gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
                 gramschm_kernel3a::launch(
                     config, ctx, m_module, &d_q, &d_a, &mut d_r, ni as u32, nj as u32, k as u32,
                 )
@@ -179,8 +149,7 @@ mod tests {
                 // kernel3b: a[i][j] -= q[i][k] * r[k][j] — full nj*ni grid
                 let grid_x = (nj as u32 + block_size - 1) / block_size;
                 let grid_y = (ni as u32 + block_size - 1) / block_size;
-                let config =
-                    gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
+                let config = gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
                 gramschm_kernel3b::launch(
                     config, ctx, m_module, &d_q, &d_r, &mut d_a, ni as u32, nj as u32, k as u32,
                 )
@@ -206,7 +175,9 @@ mod tests {
             assert!(
                 (r_gpu[i] - r_cpu[i]).abs() < 1.0,
                 "R mismatch at {}: gpu={} cpu={}",
-                i, r_gpu[i], r_cpu[i],
+                i,
+                r_gpu[i],
+                r_cpu[i],
             );
         }
 
@@ -215,7 +186,8 @@ mod tests {
             assert!(
                 r_gpu[k * nj + k] > 0.0,
                 "R diagonal at {} should be positive: {}",
-                k, r_gpu[k * nj + k],
+                k,
+                r_gpu[k * nj + k],
             );
         }
     }

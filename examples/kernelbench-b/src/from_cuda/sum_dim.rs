@@ -14,7 +14,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use gpu::cg::{CGOperations, ReduxAdd, ThreadWarpTile, WarpReduceOp};
-use gpu::chunk_scope::{build_chunk_scope, Block, Grid, Thread};
+use gpu::chunk_scope::{Block, Grid, Thread, build_chunk_scope};
 use gpu::prelude::*;
 
 /// One block per row. `BLOCK = 256` → 8 warps → 32-slot smem is safe up to
@@ -82,11 +82,11 @@ pub fn sum_dim_kernel(x: &[Float4], y: &mut [f32], D4: u32) {
 
 pub fn run(
     ctx: &gpu_host::GpuCtxZeroGuard<'_, '_>,
-    md:  &gpu_host::GpuModule<gpu_host::CtxSpaceZero>,
-    in_dir:  &Path,
+    md: &gpu_host::GpuModule<gpu_host::CtxSpaceZero>,
+    in_dir: &Path,
     out_dir: &Path,
-    iters:   usize,
-    shape:   &[usize],
+    iters: usize,
+    shape: &[usize],
 ) -> (f64, f64) {
     assert_eq!(shape.len(), 2, "sum_dim: shape must be [B, D]");
     let (b, d) = (shape[0], shape[1]);
@@ -103,7 +103,7 @@ pub fn run(
         .collect();
     let mut h_y = vec![0f32; b];
 
-    let d_x     = ctx.new_tensor_view(h_x4.as_slice()).unwrap();
+    let d_x = ctx.new_tensor_view(h_x4.as_slice()).unwrap();
     let mut d_y = ctx.new_tensor_view(h_y.as_mut_slice()).unwrap();
 
     let bb = b as u32;

@@ -30,14 +30,7 @@ use std::time::Instant;
 use gpu::prelude::*;
 
 #[gpu::cuda_kernel]
-pub fn rms_norm_reduce(
-    x: &[f32],
-    inv_rms: &mut [f32],
-    B: u32,
-    C: u32,
-    HW: u32,
-    eps: f32,
-) {
+pub fn rms_norm_reduce(x: &[f32], inv_rms: &mut [f32], B: u32, C: u32, HW: u32, eps: f32) {
     let mut out = chunk_mut(inv_rms, MapContinuousLinear::new(1));
     let idx = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let total = B * HW;
@@ -58,14 +51,7 @@ pub fn rms_norm_reduce(
 }
 
 #[gpu::cuda_kernel]
-pub fn rms_norm_apply(
-    x: &[f32],
-    inv_rms: &[f32],
-    y: &mut [f32],
-    C: u32,
-    HW: u32,
-    N: u32,
-) {
+pub fn rms_norm_apply(x: &[f32], inv_rms: &[f32], y: &mut [f32], C: u32, HW: u32, N: u32) {
     let mut out = chunk_mut(y, MapContinuousLinear::new(1));
     let idx = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     if idx < N {
@@ -81,7 +67,7 @@ pub fn rms_norm_apply(
 
 pub fn run(
     ctx: &gpu_host::GpuCtxZeroGuard<'_, '_>,
-    md:  &gpu_host::GpuModule<gpu_host::CtxSpaceZero>,
+    md: &gpu_host::GpuModule<gpu_host::CtxSpaceZero>,
     in_dir: &Path,
     out_dir: &Path,
     iters: usize,

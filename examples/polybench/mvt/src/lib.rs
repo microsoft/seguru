@@ -1,5 +1,5 @@
-use gpu::prelude::*;
 use gpu::CacheStreamLoadStore;
+use gpu::prelude::*;
 
 #[gpu::cuda_kernel]
 pub fn mvt_kernel1(a: &[f32], x1: &mut [f32], y1: &[f32], n: u32) {

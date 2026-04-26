@@ -31,7 +31,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use gpu::cg::{CGOperations, ReduxAdd, ThreadWarpTile, WarpReduceOp};
-use gpu::chunk_scope::{build_chunk_scope, Block, Thread};
+use gpu::chunk_scope::{Block, Thread, build_chunk_scope};
 use gpu::prelude::*;
 use gpu::vector::Float4;
 

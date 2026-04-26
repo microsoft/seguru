@@ -255,7 +255,8 @@ fn main() {
             let start = Instant::now();
             for _ in 0..iters {
                 let config = gpu_host::gpu_config!(nb, 1, 1, bs, 1, 1, 0);
-                bench_vector_add_u32::launch(config, ctx, m, &d_a, &d_b, &mut d_c, n as u32).unwrap();
+                bench_vector_add_u32::launch(config, ctx, m, &d_a, &d_b, &mut d_c, n as u32)
+                    .unwrap();
             }
             ctx.sync().unwrap();
             let elapsed = start.elapsed();

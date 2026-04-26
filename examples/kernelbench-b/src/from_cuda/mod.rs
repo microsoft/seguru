@@ -5,25 +5,25 @@
 //! Used to isolate the "translation" axis from the "from-scratch design"
 //! axis when evaluating LLM-as-porter for SeGuRu.
 
-pub mod leaky_relu;
-pub mod tanh;
-pub mod rms_norm;
-pub mod relu;
-pub mod sigmoid;
-pub mod gelu;
-pub mod softmax;
-pub mod layer_norm;
-pub mod sum_dim;
-pub mod l2_norm;
-pub mod log_softmax;
-pub mod swish;
-pub mod softplus;
-pub mod l1_norm;
-pub mod max_pool1d;
-pub mod avg_pool1d;
-pub mod mean_dim;
-pub mod max_dim;
-pub mod min_dim;
 pub mod argmax_dim;
+pub mod avg_pool1d;
 pub mod cumsum;
+pub mod gelu;
+pub mod l1_norm;
+pub mod l2_norm;
+pub mod layer_norm;
+pub mod leaky_relu;
+pub mod log_softmax;
+pub mod max_dim;
+pub mod max_pool1d;
+pub mod mean_dim;
+pub mod min_dim;
 pub mod mse_loss;
+pub mod relu;
+pub mod rms_norm;
+pub mod sigmoid;
+pub mod softmax;
+pub mod softplus;
+pub mod sum_dim;
+pub mod swish;
+pub mod tanh;

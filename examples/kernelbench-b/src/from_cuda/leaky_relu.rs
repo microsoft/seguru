@@ -49,7 +49,7 @@ pub fn leaky_relu_tail_kernel(x: &[f32], y: &mut [f32], slope: f32, n_tail: u32)
 
 pub fn run(
     ctx: &gpu_host::GpuCtxZeroGuard<'_, '_>,
-    md:  &gpu_host::GpuModule<gpu_host::CtxSpaceZero>,
+    md: &gpu_host::GpuModule<gpu_host::CtxSpaceZero>,
     in_dir: &Path,
     out_dir: &Path,
     iters: usize,

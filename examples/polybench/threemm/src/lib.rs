@@ -1,16 +1,9 @@
-use gpu::prelude::*;
 use gpu::CacheStreamLoadStore;
+use gpu::prelude::*;
 
 // kernel1: E = A * B
 #[gpu::cuda_kernel]
-pub fn mm3_kernel1(
-    a: &[f32],
-    b: &[f32],
-    e: &mut [f32],
-    ni: u32,
-    nj: u32,
-    nk: u32,
-) {
+pub fn mm3_kernel1(a: &[f32], b: &[f32], e: &mut [f32], ni: u32, nj: u32, nk: u32) {
     let mut e = chunk_mut(e, Map2D::new(nj as usize));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
@@ -29,14 +22,7 @@ pub fn mm3_kernel1(
 
 // kernel2: F = C * D
 #[gpu::cuda_kernel]
-pub fn mm3_kernel2(
-    c: &[f32],
-    d: &[f32],
-    f: &mut [f32],
-    nj: u32,
-    nl: u32,
-    nm: u32,
-) {
+pub fn mm3_kernel2(c: &[f32], d: &[f32], f: &mut [f32], nj: u32, nl: u32, nm: u32) {
     let mut f = chunk_mut(f, Map2D::new(nl as usize));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
@@ -55,14 +41,7 @@ pub fn mm3_kernel2(
 
 // kernel3: G = E * F
 #[gpu::cuda_kernel]
-pub fn mm3_kernel3(
-    e: &[f32],
-    f: &[f32],
-    g: &mut [f32],
-    ni: u32,
-    nj: u32,
-    nl: u32,
-) {
+pub fn mm3_kernel3(e: &[f32], f: &[f32], g: &mut [f32], ni: u32, nj: u32, nl: u32) {
     let mut g = chunk_mut(g, Map2D::new(nl as usize));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
@@ -84,13 +63,7 @@ mod tests {
     use super::*;
     use gpu_host::cuda_ctx;
 
-    fn run_threemm(
-        ni: usize,
-        nj: usize,
-        nk: usize,
-        nl: usize,
-        nm: usize,
-    ) -> (Vec<f32>, Vec<f32>) {
+    fn run_threemm(ni: usize, nj: usize, nk: usize, nl: usize, nm: usize) -> (Vec<f32>, Vec<f32>) {
         let h_a: Vec<f32> = vec![1.0; ni * nk];
         let h_b: Vec<f32> = vec![1.0; nk * nj];
         let h_c: Vec<f32> = vec![1.0; nj * nm];
@@ -145,8 +118,7 @@ mod tests {
             // kernel1: E = A * B
             let grid_x: u32 = (nj as u32 + block_size - 1) / block_size;
             let grid_y: u32 = (ni as u32 + block_size - 1) / block_size;
-            let config =
-                gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
+            let config = gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
             mm3_kernel1::launch(
                 config, ctx, m, &d_a, &d_b, &mut d_e, ni as u32, nj as u32, nk as u32,
             )
@@ -155,8 +127,7 @@ mod tests {
             // kernel2: F = C * D
             let grid_x: u32 = (nl as u32 + block_size - 1) / block_size;
             let grid_y: u32 = (nj as u32 + block_size - 1) / block_size;
-            let config =
-                gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
+            let config = gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
             mm3_kernel2::launch(
                 config, ctx, m, &d_c, &d_d, &mut d_f, nj as u32, nl as u32, nm as u32,
             )
@@ -165,8 +136,7 @@ mod tests {
             // kernel3: G = E * F
             let grid_x: u32 = (nl as u32 + block_size - 1) / block_size;
             let grid_y: u32 = (ni as u32 + block_size - 1) / block_size;
-            let config =
-                gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
+            let config = gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
             mm3_kernel3::launch(
                 config, ctx, m, &d_e, &d_f, &mut d_g, ni as u32, nj as u32, nl as u32,
             )

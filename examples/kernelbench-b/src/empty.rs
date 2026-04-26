@@ -15,17 +15,17 @@ pub fn empty_kernel(_x: &[f32], y: &mut [f32], _n: u32) {
 
 pub fn run(
     ctx: &gpu_host::GpuCtxZeroGuard<'_, '_>,
-    md:  &gpu_host::GpuModule<gpu_host::CtxSpaceZero>,
-    in_dir:  &Path,
+    md: &gpu_host::GpuModule<gpu_host::CtxSpaceZero>,
+    in_dir: &Path,
     out_dir: &Path,
-    iters:   usize,
-    shape:   &[usize],
+    iters: usize,
+    shape: &[usize],
 ) -> (f64, f64) {
     let n: usize = shape.iter().product();
     let h_x = crate::read_bin(&in_dir.join("x.bin"), n);
     let mut h_y = vec![0f32; n];
 
-    let d_x     = ctx.new_tensor_view(h_x.as_slice()).unwrap();
+    let d_x = ctx.new_tensor_view(h_x.as_slice()).unwrap();
     let mut d_y = ctx.new_tensor_view(h_y.as_mut_slice()).unwrap();
     let nn = n as u32;
 

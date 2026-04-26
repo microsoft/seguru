@@ -1,17 +1,9 @@
-use gpu::prelude::*;
 use gpu::CacheStreamLoadStore;
+use gpu::prelude::*;
 
 // kernel1: tmp = alpha * A * B
 #[gpu::cuda_kernel]
-pub fn mm2_kernel1(
-    a: &[f32],
-    b: &[f32],
-    tmp: &mut [f32],
-    ni: u32,
-    nj: u32,
-    nk: u32,
-    alpha: f32,
-) {
+pub fn mm2_kernel1(a: &[f32], b: &[f32], tmp: &mut [f32], ni: u32, nj: u32, nk: u32, alpha: f32) {
     let mut tmp = chunk_mut(tmp, Map2D::new(nj as usize));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
@@ -30,15 +22,7 @@ pub fn mm2_kernel1(
 
 // kernel2: D = D*beta + tmp*C
 #[gpu::cuda_kernel]
-pub fn mm2_kernel2(
-    tmp: &[f32],
-    c: &[f32],
-    d: &mut [f32],
-    ni: u32,
-    nj: u32,
-    nl: u32,
-    beta: f32,
-) {
+pub fn mm2_kernel2(tmp: &[f32], c: &[f32], d: &mut [f32], ni: u32, nj: u32, nl: u32, beta: f32) {
     let mut d = chunk_mut(d, Map2D::new(nl as usize));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
@@ -110,8 +94,7 @@ mod tests {
             // Launch kernel1: tmp = alpha * A * B
             let grid_x: u32 = (nj as u32 + block_size - 1) / block_size;
             let grid_y: u32 = (ni as u32 + block_size - 1) / block_size;
-            let config =
-                gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
+            let config = gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
             mm2_kernel1::launch(
                 config, ctx, m, &d_a, &d_b, &mut d_tmp, ni as u32, nj as u32, nk as u32, alpha,
             )
@@ -120,8 +103,7 @@ mod tests {
             // Launch kernel2: D = D*beta + tmp*C
             let grid_x: u32 = (nl as u32 + block_size - 1) / block_size;
             let grid_y: u32 = (ni as u32 + block_size - 1) / block_size;
-            let config =
-                gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
+            let config = gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
             mm2_kernel2::launch(
                 config, ctx, m, &d_tmp, &d_c, &mut d_d, ni as u32, nj as u32, nl as u32, beta,
             )

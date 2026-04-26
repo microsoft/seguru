@@ -68,9 +68,7 @@ mod tests {
 
     fn run_histogram(h_data: &[u32], h_bins: &mut [u32], n: usize, block_size: u32) {
         cuda_ctx(0, |ctx, m| {
-            let d_data = ctx
-                .new_tensor_view(h_data)
-                .expect("alloc data failed");
+            let d_data = ctx.new_tensor_view(h_data).expect("alloc data failed");
             let mut d_bins = ctx
                 .new_tensor_view(h_bins.as_mut())
                 .expect("alloc bins failed");

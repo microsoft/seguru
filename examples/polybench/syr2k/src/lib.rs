@@ -1,15 +1,7 @@
 use gpu::prelude::*;
 
 #[gpu::cuda_kernel]
-pub fn syr2k_kernel(
-    a: &[f32],
-    b: &[f32],
-    c: &mut [f32],
-    ni: u32,
-    nj: u32,
-    alpha: f32,
-    beta: f32,
-) {
+pub fn syr2k_kernel(a: &[f32], b: &[f32], c: &mut [f32], ni: u32, nj: u32, alpha: f32, beta: f32) {
     let mut c = chunk_mut(c, Map2D::new(ni as usize));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
     let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
@@ -32,12 +24,7 @@ mod tests {
     use super::*;
     use gpu_host::cuda_ctx;
 
-    fn run_syr2k(
-        ni: usize,
-        nj: usize,
-        alpha: f32,
-        beta: f32,
-    ) -> (Vec<f32>, Vec<f32>) {
+    fn run_syr2k(ni: usize, nj: usize, alpha: f32, beta: f32) -> (Vec<f32>, Vec<f32>) {
         // a[i][k] = ((i*nj + k) % 7) as f32
         let h_a: Vec<f32> = (0..ni * nj).map(|x| (x % 7) as f32).collect();
         let h_b: Vec<f32> = (0..ni * nj).map(|x| (x % 5) as f32).collect();
@@ -65,8 +52,7 @@ mod tests {
             let block_size: u32 = 16;
             let grid_x: u32 = (ni as u32 + block_size - 1) / block_size;
             let grid_y: u32 = (ni as u32 + block_size - 1) / block_size;
-            let config =
-                gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
+            let config = gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
             syr2k_kernel::launch(
                 config, ctx, m, &d_a, &d_b, &mut d_c, ni as u32, nj as u32, alpha, beta,
             )

@@ -35,7 +35,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use gpu::cg::{CGOperations, ReduxAdd, ThreadWarpTile, WarpReduceOp};
-use gpu::chunk_scope::{build_chunk_scope, Block, Thread};
+use gpu::chunk_scope::{Block, Thread, build_chunk_scope};
 use gpu::prelude::*;
 use gpu::vector::Float4;
 
@@ -154,7 +154,10 @@ pub fn run(
 
     // BLOCK=256. Float4 path requires D % 4 == 0 and D4 % BLOCK == 0.
     const BLOCK: u32 = 256;
-    assert!(d % 4 == 0, "layer_norm: D must be divisible by 4 for Float4");
+    assert!(
+        d % 4 == 0,
+        "layer_norm: D must be divisible by 4 for Float4"
+    );
     let d4 = d / 4;
     assert!(
         d4 % BLOCK as usize == 0,

@@ -1,10 +1,10 @@
 //! Port of cuda/mean_dim.cu.
-use std::path::Path;
-use std::time::Instant;
 use gpu::cg::{CGOperations, ReduxAdd, ThreadWarpTile, WarpReduceOp};
-use gpu::chunk_scope::{build_chunk_scope, Block, Grid, Thread};
+use gpu::chunk_scope::{Block, Grid, Thread, build_chunk_scope};
 use gpu::prelude::*;
 use gpu::vector::Float4;
+use std::path::Path;
+use std::time::Instant;
 
 #[gpu::cuda_kernel]
 pub fn mean_dim_kernel(x: &[Float4], y: &mut [f32], D4: u32, inv_d: f32) {
@@ -31,44 +31,67 @@ pub fn mean_dim_kernel(x: &[Float4], y: &mut [f32], D4: u32, inv_d: f32) {
     }
     let ws = warp.redux(ReduxAdd, acc);
     {
-        let mut sl = smem.chunk_to_scope(block2warp, MapContinuousLinear::new(1))
+        let mut sl = smem
+            .chunk_to_scope(block2warp, MapContinuousLinear::new(1))
             .chunk_to_scope(warp2thread, MapContinuousLinear::new(1));
-        if lane_id == 0 { sl[0] = ws; }
+        if lane_id == 0 {
+            sl[0] = ws;
+        }
     }
     sync_threads();
-    let sv = if lane_id < num_warps { smem[lane_id as usize] } else { 0.0 };
+    let sv = if lane_id < num_warps {
+        smem[lane_id as usize]
+    } else {
+        0.0
+    };
     let bs = warp.redux(ReduxAdd, sv);
-    if tid == 0 { y_chunk[0] = bs * inv_d; }
+    if tid == 0 {
+        y_chunk[0] = bs * inv_d;
+    }
 }
 
 pub fn run(
     ctx: &gpu_host::GpuCtxZeroGuard<'_, '_>,
     md: &gpu_host::GpuModule<gpu_host::CtxSpaceZero>,
-    in_dir: &Path, out_dir: &Path, iters: usize, shape: &[usize],
+    in_dir: &Path,
+    out_dir: &Path,
+    iters: usize,
+    shape: &[usize],
 ) -> (f64, f64) {
     assert_eq!(shape.len(), 2);
     let (b, d) = (shape[0], shape[1]);
     assert!(d % 4 == 0);
     let n = b * d;
     let h_x = crate::read_bin(&in_dir.join("x.bin"), n);
-    let h_x4: Vec<Float4> = h_x.chunks_exact(4).map(|c| Float4::new([c[0],c[1],c[2],c[3]])).collect();
+    let h_x4: Vec<Float4> = h_x
+        .chunks_exact(4)
+        .map(|c| Float4::new([c[0], c[1], c[2], c[3]]))
+        .collect();
     let mut h_y = vec![0f32; b];
     let d_x4 = ctx.new_tensor_view(h_x4.as_slice()).unwrap();
     let mut d_y = ctx.new_tensor_view(h_y.as_mut_slice()).unwrap();
     let d4 = (d / 4) as u32;
     let inv_d = 1.0f32 / (d as f32);
-    let bs: u32 = 256; let gs: u32 = b as u32;
-    { let cfg = gpu_host::gpu_config!(gs,1,1,bs,1,1,0);
-      mean_dim_kernel::launch(cfg, ctx, md, &d_x4, &mut d_y, d4, inv_d).unwrap(); }
+    let bs: u32 = 256;
+    let gs: u32 = b as u32;
+    {
+        let cfg = gpu_host::gpu_config!(gs, 1, 1, bs, 1, 1, 0);
+        mean_dim_kernel::launch(cfg, ctx, md, &d_x4, &mut d_y, d4, inv_d).unwrap();
+    }
     ctx.sync().unwrap();
-    let wi = 5; let wt = Instant::now();
-    for _ in 0..wi { let cfg = gpu_host::gpu_config!(gs,1,1,bs,1,1,0);
-        mean_dim_kernel::launch(cfg, ctx, md, &d_x4, &mut d_y, d4, inv_d).unwrap(); }
+    let wi = 5;
+    let wt = Instant::now();
+    for _ in 0..wi {
+        let cfg = gpu_host::gpu_config!(gs, 1, 1, bs, 1, 1, 0);
+        mean_dim_kernel::launch(cfg, ctx, md, &d_x4, &mut d_y, d4, inv_d).unwrap();
+    }
     ctx.sync().unwrap();
     let warmup_us = wt.elapsed().as_micros() as f64 / wi as f64;
     let t = Instant::now();
-    for _ in 0..iters { let cfg = gpu_host::gpu_config!(gs,1,1,bs,1,1,0);
-        mean_dim_kernel::launch(cfg, ctx, md, &d_x4, &mut d_y, d4, inv_d).unwrap(); }
+    for _ in 0..iters {
+        let cfg = gpu_host::gpu_config!(gs, 1, 1, bs, 1, 1, 0);
+        mean_dim_kernel::launch(cfg, ctx, md, &d_x4, &mut d_y, d4, inv_d).unwrap();
+    }
     ctx.sync().unwrap();
     let kernel_us = t.elapsed().as_micros() as f64 / iters as f64;
     d_y.copy_to_host(&mut h_y).unwrap();

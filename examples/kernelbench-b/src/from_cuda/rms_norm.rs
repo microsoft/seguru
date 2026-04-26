@@ -88,7 +88,7 @@ pub fn rms_norm_apply(
 
 pub fn run(
     ctx: &gpu_host::GpuCtxZeroGuard<'_, '_>,
-    md:  &gpu_host::GpuModule<gpu_host::CtxSpaceZero>,
+    md: &gpu_host::GpuModule<gpu_host::CtxSpaceZero>,
     in_dir: &Path,
     out_dir: &Path,
     iters: usize,
@@ -116,8 +116,8 @@ pub fn run(
 
     let cc = c as u32;
     let hw4_u = hw4 as u32;
-    let total_quads_red: u32 = (b * hw4) as u32;       // B * HW/4
-    let total_quads_app: u32 = (b * c * hw4) as u32;   // B * C * HW/4
+    let total_quads_red: u32 = (b * hw4) as u32; // B * HW/4
+    let total_quads_app: u32 = (b * c * hw4) as u32; // B * C * HW/4
     let eps: f32 = 1e-5;
     let inv_c: f32 = 1.0 / (c as f32);
 
@@ -129,12 +129,29 @@ pub fn run(
     {
         let cfg_r = gpu_host::gpu_config!(gs_red, 1, 1, bs, 1, 1, 0);
         rms_norm_reduce::launch(
-            cfg_r, ctx, md, &d_x, &mut d_inv, cc, hw4_u, total_quads_red, eps, inv_c,
+            cfg_r,
+            ctx,
+            md,
+            &d_x,
+            &mut d_inv,
+            cc,
+            hw4_u,
+            total_quads_red,
+            eps,
+            inv_c,
         )
         .unwrap();
         let cfg_a = gpu_host::gpu_config!(gs_app, 1, 1, bs, 1, 1, 0);
         rms_norm_apply::launch(
-            cfg_a, ctx, md, &d_x, &*d_inv, &mut d_y, cc, hw4_u, total_quads_app,
+            cfg_a,
+            ctx,
+            md,
+            &d_x,
+            &*d_inv,
+            &mut d_y,
+            cc,
+            hw4_u,
+            total_quads_app,
         )
         .unwrap();
     }
@@ -145,12 +162,29 @@ pub fn run(
     for _ in 0..warmup_iters {
         let cfg_r = gpu_host::gpu_config!(gs_red, 1, 1, bs, 1, 1, 0);
         rms_norm_reduce::launch(
-            cfg_r, ctx, md, &d_x, &mut d_inv, cc, hw4_u, total_quads_red, eps, inv_c,
+            cfg_r,
+            ctx,
+            md,
+            &d_x,
+            &mut d_inv,
+            cc,
+            hw4_u,
+            total_quads_red,
+            eps,
+            inv_c,
         )
         .unwrap();
         let cfg_a = gpu_host::gpu_config!(gs_app, 1, 1, bs, 1, 1, 0);
         rms_norm_apply::launch(
-            cfg_a, ctx, md, &d_x, &*d_inv, &mut d_y, cc, hw4_u, total_quads_app,
+            cfg_a,
+            ctx,
+            md,
+            &d_x,
+            &*d_inv,
+            &mut d_y,
+            cc,
+            hw4_u,
+            total_quads_app,
         )
         .unwrap();
     }
@@ -161,12 +195,29 @@ pub fn run(
     for _ in 0..iters {
         let cfg_r = gpu_host::gpu_config!(gs_red, 1, 1, bs, 1, 1, 0);
         rms_norm_reduce::launch(
-            cfg_r, ctx, md, &d_x, &mut d_inv, cc, hw4_u, total_quads_red, eps, inv_c,
+            cfg_r,
+            ctx,
+            md,
+            &d_x,
+            &mut d_inv,
+            cc,
+            hw4_u,
+            total_quads_red,
+            eps,
+            inv_c,
         )
         .unwrap();
         let cfg_a = gpu_host::gpu_config!(gs_app, 1, 1, bs, 1, 1, 0);
         rms_norm_apply::launch(
-            cfg_a, ctx, md, &d_x, &*d_inv, &mut d_y, cc, hw4_u, total_quads_app,
+            cfg_a,
+            ctx,
+            md,
+            &d_x,
+            &*d_inv,
+            &mut d_y,
+            cc,
+            hw4_u,
+            total_quads_app,
         )
         .unwrap();
     }

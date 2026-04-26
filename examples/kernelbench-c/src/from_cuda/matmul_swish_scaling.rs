@@ -218,19 +218,8 @@ pub fn run(
     // Priming launch (compilation + first-call overhead) — not counted.
     {
         let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
-        matmul_swish_scaling_kernel::launch(
-            cfg,
-            ctx,
-            md,
-            d_x4,
-            d_w4,
-            &d_b,
-            &mut d_y,
-            mm,
-            nn,
-            kk,
-        )
-        .unwrap();
+        matmul_swish_scaling_kernel::launch(cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk)
+            .unwrap();
     }
     ctx.sync().unwrap();
 
@@ -239,19 +228,8 @@ pub fn run(
     let wt = Instant::now();
     for _ in 0..warmup_iters {
         let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
-        matmul_swish_scaling_kernel::launch(
-            cfg,
-            ctx,
-            md,
-            d_x4,
-            d_w4,
-            &d_b,
-            &mut d_y,
-            mm,
-            nn,
-            kk,
-        )
-        .unwrap();
+        matmul_swish_scaling_kernel::launch(cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk)
+            .unwrap();
     }
     ctx.sync().unwrap();
     let warmup_us = wt.elapsed().as_micros() as f64 / warmup_iters as f64;
@@ -260,19 +238,8 @@ pub fn run(
     let t = Instant::now();
     for _ in 0..iters {
         let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
-        matmul_swish_scaling_kernel::launch(
-            cfg,
-            ctx,
-            md,
-            d_x4,
-            d_w4,
-            &d_b,
-            &mut d_y,
-            mm,
-            nn,
-            kk,
-        )
-        .unwrap();
+        matmul_swish_scaling_kernel::launch(cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk)
+            .unwrap();
     }
     ctx.sync().unwrap();
     let kernel_us = t.elapsed().as_micros() as f64 / iters as f64;

@@ -5,7 +5,8 @@
 //! noted in comments (search for "GAP:" in this file).
 //!
 //! Problems (from ScalingIntelligence/KernelBench, level1/):
-//!   19_ReLU, 21_Sigmoid, 23_Softmax, 40_LayerNorm, 1_SquareMatmul
+//!   19_ReLU, 21_Sigmoid, 23_Softmax, 44_Average_Pooling_1D,
+//!   40_LayerNorm, 1_SquareMatmul
 //!
 //! Sizes reduced from KernelBench where necessary to fit GPU memory.
 
@@ -43,6 +44,36 @@ pub fn sigmoid_kernel(x: &[f32], y: &mut [f32], n: u32) {
     if idx < n {
         let v = x[idx as usize];
         y_chunk[0] = 1.0 / (1.0 + (-v).exp());
+    }
+}
+
+// ======================================================================
+// 44_Average_Pooling_1D — K=8, stride=1, padding=4
+// ======================================================================
+const AVGPOOL1D_K: u32 = 8;
+const AVGPOOL1D_STRIDE: u32 = 1;
+const AVGPOOL1D_PAD: u32 = 4;
+
+#[gpu::cuda_kernel]
+pub fn avg_pool1d_kernel(x: &[f32], y: &mut [f32], total_out: u32, out_len: u32) {
+    let mut y = chunk_mut(y, MapContinuousLinear::new(1));
+    let idx = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    if idx < total_out {
+        let pos = idx % out_len;
+        let bc = idx / out_len;
+        let in_len = out_len - 1;
+        let in_base = bc * in_len;
+        let window_start = pos as i32 * AVGPOOL1D_STRIDE as i32 - AVGPOOL1D_PAD as i32;
+        let mut sum = 0.0f32;
+        let mut k: u32 = 0;
+        while k < AVGPOOL1D_K {
+            let in_pos = window_start + k as i32;
+            if in_pos >= 0 && in_pos < in_len as i32 {
+                sum += x[(in_base + in_pos as u32) as usize];
+            }
+            k += 1;
+        }
+        y[0] = sum * (1.0 / AVGPOOL1D_K as f32);
     }
 }
 
@@ -213,6 +244,7 @@ fn max_abs_diff(a: &[f32], b: &[f32]) -> f32 {
 // Problems:
 //   relu     : inputs=x.bin  outputs=y.bin   shape=[N]          (total elems)
 //   sigmoid  : inputs=x.bin  outputs=y.bin   shape=[N]
+//   avg_pool1d: inputs=x.bin outputs=y.bin   shape=[B, C, L, K, S, P]
 //   softmax  : inputs=x.bin  outputs=y.bin   shape=[M, N]       (N must equal SOFTMAX_N)
 //   matmul   : inputs=a.bin,b.bin outputs=c.bin shape=[N]       (square NxN)
 // ======================================================================
@@ -324,6 +356,44 @@ fn run_cli(a: CliArgs) {
                 for _ in 0..a.iters {
                     let cfg = gpu_host::gpu_config!(gs, 1, 1, bs, 1, 1, 0);
                     sigmoid_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, nn).unwrap();
+                }
+                ctx.sync().unwrap();
+                let us = t.elapsed().as_micros() as f64 / a.iters as f64;
+                d_y.copy_to_host(&mut h_y).unwrap();
+                write_bin(&a.out_dir.join("y.bin"), &h_y);
+                (us, warmup)
+            }
+            "avg_pool1d" => {
+                assert_eq!(a.shape.len(), 6, "avg_pool1d: shape=[B,C,L,K,S,P]");
+                let (b, c, l, k, s, p) = (a.shape[0], a.shape[1], a.shape[2], a.shape[3], a.shape[4], a.shape[5]);
+                assert_eq!(k as u32, AVGPOOL1D_K, "avg_pool1d: K must be {}", AVGPOOL1D_K);
+                assert_eq!(s as u32, AVGPOOL1D_STRIDE, "avg_pool1d: S must be {}", AVGPOOL1D_STRIDE);
+                assert_eq!(p as u32, AVGPOOL1D_PAD, "avg_pool1d: P must be {}", AVGPOOL1D_PAD);
+                let out_len = l + 2 * p - k + 1;
+                let input_elems = b * c * l;
+                let output_elems = b * c * out_len;
+                let h_x = read_bin(&a.in_dir.join("x.bin"), input_elems);
+                let mut h_y = vec![0f32; output_elems];
+                let d_x = ctx.new_tensor_view(h_x.as_slice()).unwrap();
+                let mut d_y = ctx.new_tensor_view(h_y.as_mut_slice()).unwrap();
+                let total_out = output_elems as u32;
+                let out_len_u32 = out_len as u32;
+                let bs: u32 = 256;
+                let gs: u32 = total_out.div_ceil(bs);
+                let cfg = gpu_host::gpu_config!(gs, 1, 1, bs, 1, 1, 0);
+                avg_pool1d_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, total_out, out_len_u32).unwrap();
+                ctx.sync().unwrap();
+                let warmup_t = Instant::now();
+                for _ in 0..5 {
+                    let cfg = gpu_host::gpu_config!(gs, 1, 1, bs, 1, 1, 0);
+                    avg_pool1d_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, total_out, out_len_u32).unwrap();
+                }
+                ctx.sync().unwrap();
+                let warmup = warmup_t.elapsed().as_micros() as f64 / 5.0;
+                let t = Instant::now();
+                for _ in 0..a.iters {
+                    let cfg = gpu_host::gpu_config!(gs, 1, 1, bs, 1, 1, 0);
+                    avg_pool1d_kernel::launch(cfg, ctx, md, &d_x, &mut d_y, total_out, out_len_u32).unwrap();
                 }
                 ctx.sync().unwrap();
                 let us = t.elapsed().as_micros() as f64 / a.iters as f64;

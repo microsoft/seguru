@@ -27,7 +27,25 @@ import torch
 import torch.nn.functional as F
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
-RUNNER = REPO / "examples/target/release/kernelbench"
+
+def target_dir():
+    env_target = os.environ.get("CARGO_TARGET_DIR")
+    if env_target:
+        return pathlib.Path(env_target)
+    local_target = REPO / "examples/target"
+    if local_target.exists():
+        return local_target
+    parts = REPO.parts
+    if ".worktrees" in parts:
+        idx = parts.index(".worktrees")
+        shared_target = pathlib.Path(*parts[:idx]) / "examples/target"
+        if shared_target.exists():
+            return shared_target
+    return local_target
+
+
+RUNNER = target_dir() / "release/kernelbench"
+SCRATCH_ROOT = target_dir() / "kernelbench-driver-tmp"
 
 ATOL = 1e-4
 
@@ -129,21 +147,45 @@ def problem_matmul(tmp, iters):
                 seguru_us=res["kernel_us"], max_err=err)
 
 
-PROBLEMS = [problem_relu, problem_sigmoid, problem_softmax, problem_matmul]
+def problem_avg_pool1d(tmp, iters):
+    B, C, L = 64, 128, 65536
+    K, S, P = 8, 1, 4
+    x = torch.rand(B, C, L, device="cuda")
+    ref = F.avg_pool1d(x, kernel_size=K, stride=S, padding=P)
+    torch_us = time_torch(lambda: F.avg_pool1d(x, kernel_size=K, stride=S, padding=P), iters=iters)
+    dump_bin(tmp / "in/x.bin", x)
+    out_len = ref.shape[-1]
+    res = run_seguru("avg_pool1d", tmp / "in", tmp / "out", iters, [B, C, L, K, S, P])
+    y = load_bin(tmp / "out/y.bin", (B, C, out_len))
+    err = float((torch.from_numpy(y).to("cuda") - ref).abs().max())
+    return dict(problem="avg_pool1d", shape=[B, C, L], torch_us=torch_us,
+                seguru_us=res["kernel_us"], max_err=err)
+
+
+PROBLEMS = [
+    problem_relu,
+    problem_sigmoid,
+    problem_softmax,
+    problem_matmul,
+    problem_avg_pool1d,
+]
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--iters", type=int, default=100)
     ap.add_argument("--only", help="comma-separated subset")
+    ap.add_argument("--problem", help="single problem or comma-separated subset")
     args = ap.parse_args()
 
     assert RUNNER.exists(), (
         f"runner not found at {RUNNER}; build with `cargo build --release -p kernelbench`")
 
-    wanted = set(args.only.split(",")) if args.only else None
+    selected = args.problem or args.only
+    wanted = set(selected.split(",")) if selected else None
     rows = []
-    with tempfile.TemporaryDirectory() as td:
+    SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=SCRATCH_ROOT) as td:
         tmp = pathlib.Path(td)
         (tmp / "in").mkdir()
         (tmp / "out").mkdir()

@@ -43,7 +43,7 @@ pub fn tanh_tail_kernel(x: &[f32], y: &mut [f32], tail_start: u32, n: u32) {
 
 pub fn run(
     ctx: &gpu_host::GpuCtxZeroGuard<'_, '_>,
-    md:  &gpu_host::GpuModule<gpu_host::CtxSpaceZero>,
+    md: &gpu_host::GpuModule<gpu_host::CtxSpaceZero>,
     in_dir: &Path,
     out_dir: &Path,
     iters: usize,
@@ -58,55 +58,71 @@ pub fn run(
     let d_x = ctx.new_tensor_view(h_x.as_slice()).unwrap();
     let mut d_y = ctx.new_tensor_view(h_y.as_mut_slice()).unwrap();
 
-    // Reinterpret f32 tensor views as Float4 views for the vectorized path.
-    let d_x4 = unsafe { &*(&d_x as *const _ as *const TensorView<'_, [Float4]>) };
-    let d_y4 = unsafe { &mut *(&mut d_y as *mut _ as *mut TensorViewMut<'_, [Float4]>) };
-
-    let nn   = n as u32;
-    let n4   = nn / 4;
+    let nn = n as u32;
+    let n4 = nn / 4;
     let tail_start = n4 * 4;
     let tail_count = nn - tail_start;
+    let tail_start_usize = tail_start as usize;
+
+    // Checked Float4 view over the vectorized prefix; scalar tail stays f32.
+    let (d_x_vec, _) = d_x.split_at(tail_start_usize);
+    let d_x4_view = d_x_vec
+        .try_cast_slice::<Float4>()
+        .expect("tanh: vectorized input prefix must be Float4-compatible");
 
     let bs: u32 = 256;
-    let gs_vec:  u32 = if n4 > 0 { n4.div_ceil(bs) } else { 0 };
-    let gs_tail: u32 = if tail_count > 0 { tail_count.div_ceil(bs) } else { 0 };
+    let gs_vec: u32 = if n4 > 0 { n4.div_ceil(bs) } else { 0 };
+    let gs_tail: u32 = if tail_count > 0 {
+        tail_count.div_ceil(bs)
+    } else {
+        0
+    };
 
     let launch = |ctx: &gpu_host::GpuCtxZeroGuard<'_, '_>,
-                  md:  &gpu_host::GpuModule<gpu_host::CtxSpaceZero>,
+                  md: &gpu_host::GpuModule<gpu_host::CtxSpaceZero>,
                   d_x4: &TensorView<'_, [Float4]>,
                   d_y4: &mut TensorViewMut<'_, [Float4]>,
-                  d_x:  &TensorView<'_, [f32]>,
-                  d_y:  &mut TensorViewMut<'_, [f32]>| {
+                  d_x: &TensorView<'_, [f32]>,
+                  d_y_tail: &mut TensorViewMut<'_, [f32]>| {
         if gs_vec > 0 {
             let cfg = gpu_host::gpu_config!(gs_vec, 1, 1, bs, 1, 1, 0);
             tanh_vec_kernel::launch(cfg, ctx, md, d_x4, d_y4, n4).unwrap();
         }
         if gs_tail > 0 {
             let cfg = gpu_host::gpu_config!(gs_tail, 1, 1, bs, 1, 1, 0);
-            tanh_tail_kernel::launch(cfg, ctx, md, d_x, d_y, tail_start, nn).unwrap();
+            tanh_tail_kernel::launch(cfg, ctx, md, d_x, d_y_tail, tail_start, nn).unwrap();
         }
     };
 
-    // Warm up once before timing.
-    launch(ctx, md, d_x4, d_y4, &d_x, &mut d_y);
-    ctx.sync().unwrap();
+    let (kernel_us, warmup_us) = {
+        let (mut d_y_vec, mut d_y_tail) = d_y.split_at_mut(tail_start_usize);
+        let mut d_y4_view = d_y_vec
+            .try_cast_slice_mut::<Float4>()
+            .expect("tanh: vectorized output prefix must be Float4-compatible");
 
-    // Warmup pass (timed for the warmup return value).
-    let warmup_iters: usize = 5;
-    let wt = Instant::now();
-    for _ in 0..warmup_iters {
-        launch(ctx, md, d_x4, d_y4, &d_x, &mut d_y);
-    }
-    ctx.sync().unwrap();
-    let warmup_us = wt.elapsed().as_micros() as f64 / warmup_iters as f64;
+        // Warm up once before timing.
+        launch(ctx, md, &d_x4_view, &mut d_y4_view, &d_x, &mut d_y_tail);
+        ctx.sync().unwrap();
 
-    // Timed iterations.
-    let t = Instant::now();
-    for _ in 0..iters {
-        launch(ctx, md, d_x4, d_y4, &d_x, &mut d_y);
-    }
-    ctx.sync().unwrap();
-    let kernel_us = t.elapsed().as_micros() as f64 / iters as f64;
+        // Warmup pass (timed for the warmup return value).
+        let warmup_iters: usize = 5;
+        let wt = Instant::now();
+        for _ in 0..warmup_iters {
+            launch(ctx, md, &d_x4_view, &mut d_y4_view, &d_x, &mut d_y_tail);
+        }
+        ctx.sync().unwrap();
+        let warmup_us = wt.elapsed().as_micros() as f64 / warmup_iters as f64;
+
+        // Timed iterations.
+        let t = Instant::now();
+        for _ in 0..iters {
+            launch(ctx, md, &d_x4_view, &mut d_y4_view, &d_x, &mut d_y_tail);
+        }
+        ctx.sync().unwrap();
+        let kernel_us = t.elapsed().as_micros() as f64 / iters as f64;
+
+        (kernel_us, warmup_us)
+    };
 
     d_y.copy_to_host(&mut h_y).unwrap();
     drop(d_y);

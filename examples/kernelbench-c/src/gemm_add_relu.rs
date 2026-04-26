@@ -23,16 +23,15 @@ const BDIM_Y: u32 = 16;
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::needless_range_loop)]
 pub fn gemm_add_relu_kernel(
-    x:   &[Float4],
-    w:   &[Float4],
-    bias: &[f32],
-    y:   &mut [f32],
+    x: &[Float4],
+    w: &[Float4],
+    bias: &[Float4],
+    y: &mut [Float4],
     M: u32,
     N: u32,
     K: u32,
 ) {
     let _ = M;
-    let _ = N;
 
     let tx = thread_id::<DimX>();
     let ty = thread_id::<DimY>();
@@ -53,13 +52,8 @@ pub fn gemm_add_relu_kernel(
     let k4 = K >> 2;
     let a_col4 = a_col >> 2;
 
-    let load_map = reshape_map!([4] | [16, 16] => layout: [i0, t0, t1]);
-
-    let out_map = reshape_map!(
-        [8, 8] | [16, grid_dim::<DimX>(), 16, grid_dim::<DimY>()]
-        => layout: [i0, t0, t1, i1, t2, t3]
-    );
-    let mut y_thread = chunk_mut(y, out_map);
+    // K-major shared layout for BM/BN=128: offset = k_lane * 128 + row_or_col.
+    let load_map = reshape_map!([4] | [2, 8, 16] => layout: [t1, t2, i0, t0]);
 
     let mut acc = [[0.0f32; TN as usize]; TM as usize];
 
@@ -97,10 +91,10 @@ pub fn gemm_add_relu_kernel(
             let mut b_reg = [0.0f32; TN as usize];
 
             for ii in 0..8usize {
-                a_reg[ii] = tile_a[(row_off + ii) * 8 + kk];
+                a_reg[ii] = tile_a[kk * BM as usize + row_off + ii];
             }
             for jj in 0..8usize {
-                b_reg[jj] = tile_b[(col_off + jj) * 8 + kk];
+                b_reg[jj] = tile_b[kk * BN as usize + col_off + jj];
             }
 
             unroll! { for ii in 0..8 {
@@ -115,18 +109,38 @@ pub fn gemm_add_relu_kernel(
         tstep += 1;
     }
 
-    // ---- Epilogue: fused bias + custom op.
-    let mut bias_reg = [0.0f32; TN as usize];
-    unroll! { for j in 0..8 {
-        bias_reg[j] = bias[(bn + tx * TN) as usize + j];
-    }}
+    // ---- Epilogue: fused bias + relu, written as Float4 (st.global.v4.f32).
+    // bias reinterpreted as &[Float4]; each thread needs 2 Float4 of bias.
+    let bn4 = bn >> 2;
+    let col4_base = bn4 + tx * 2;
+    let b0: Float4 = bias[col4_base as usize];
+    let b1: Float4 = bias[(col4_base + 1) as usize];
+
+    // y as &mut [Float4] with [M][N/4] row-major. Per-thread chunk is 2 Float4 × 8 rows.
+    // stride check: i0=col4 inner (stride 1), t0=tx (stride TN/4=2), t1=bid_x (stride BN/4=32),
+    //               i1=row inner (stride N/4), t2=ty (stride TM*N/4), t3=bid_y (stride BM*N/4).
+    let _ = N;
+    let out_map = reshape_map!(
+        [2, 8] | [16, grid_dim::<DimX>(), 16, grid_dim::<DimY>()]
+        => layout: [i0, t0, t1, i1, t2, t3]
+    );
+    let mut y_tile = chunk_mut(y, out_map);
 
     unroll! { for i in 0..8 {
-        unroll! { for j in 0..8 {
-            let mut v = acc[i][j] + bias_reg[j];
+        let mut o0 = Float4::default();
+        let mut o1 = Float4::default();
+        unroll! { for j in 0..4 {
+            let mut v = acc[i][j] + b0[j];
             if v < 0.0 { v = 0.0; }
-            y_thread[(j as u32, i as u32)] = v;
+            o0[j] = v;
         }}
+        unroll! { for j in 0..4 {
+            let mut v = acc[i][j + 4] + b1[j];
+            if v < 0.0 { v = 0.0; }
+            o1[j] = v;
+        }}
+        y_tile[(0u32, i as u32)] = o0;
+        y_tile[(1u32, i as u32)] = o1;
     }}
 }
 
@@ -167,8 +181,12 @@ pub fn run(
     let d_w4_view = d_w
         .try_cast_slice::<Float4>()
         .expect("w Float4 view requires 16-byte alignment and length divisible by 4");
+    let d_b4_view = d_b
+        .try_cast_slice::<Float4>()
+        .expect("bias Float4 view requires 16-byte alignment and length divisible by 4");
     let d_x4 = &d_x4_view;
     let d_w4 = &d_w4_view;
+    let d_b4 = &d_b4_view;
 
     let mm = m as u32;
     let nn = n as u32;
@@ -179,8 +197,11 @@ pub fn run(
 
     {
         let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
-        gemm_add_relu_kernel::launch(cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk)
-            .unwrap();
+        let mut d_y4_view = d_y
+            .try_cast_slice_mut::<Float4>()
+            .expect("y Float4 view requires 16-byte alignment and length divisible by 4");
+        let d_y4 = &mut d_y4_view;
+        gemm_add_relu_kernel::launch(cfg, ctx, md, d_x4, d_w4, d_b4, d_y4, mm, nn, kk).unwrap();
     }
     ctx.sync().unwrap();
 
@@ -188,8 +209,11 @@ pub fn run(
     let wt = Instant::now();
     for _ in 0..warmup_iters {
         let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
-        gemm_add_relu_kernel::launch(cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk)
-            .unwrap();
+        let mut d_y4_view = d_y
+            .try_cast_slice_mut::<Float4>()
+            .expect("y Float4 view requires 16-byte alignment and length divisible by 4");
+        let d_y4 = &mut d_y4_view;
+        gemm_add_relu_kernel::launch(cfg, ctx, md, d_x4, d_w4, d_b4, d_y4, mm, nn, kk).unwrap();
     }
     ctx.sync().unwrap();
     let warmup_us = wt.elapsed().as_micros() as f64 / warmup_iters as f64;
@@ -197,8 +221,11 @@ pub fn run(
     let t = Instant::now();
     for _ in 0..iters {
         let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
-        gemm_add_relu_kernel::launch(cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk)
-            .unwrap();
+        let mut d_y4_view = d_y
+            .try_cast_slice_mut::<Float4>()
+            .expect("y Float4 view requires 16-byte alignment and length divisible by 4");
+        let d_y4 = &mut d_y4_view;
+        gemm_add_relu_kernel::launch(cfg, ctx, md, d_x4, d_w4, d_b4, d_y4, mm, nn, kk).unwrap();
     }
     ctx.sync().unwrap();
     let kernel_us = t.elapsed().as_micros() as f64 / iters as f64;

@@ -8,21 +8,41 @@ measured results, phase history, and current optimization targets here.
 ## Branch status
 
 - `agent-poc-v2` is the slim branch. It was reset to the pre-invasive
-  `open_tile` base and currently keeps only the small retained changes:
-  Float4 global-load ports already present at the base, checked Float4 tensor
-  views, and `nvvm_launch_bound(16, 16, 1, 2)` annotations matching the existing
-  16x16 launch geometry.
+  `open_tile` base and currently keeps the source-level retained changes:
+  Float4 global-load ports, K-major shared-memory layout for KernelBench-C
+  GEMM/matmul kernels, checked Float4 tensor views, and
+  `nvvm_launch_bound(16, 16, 1, 2)` annotations matching the 16x16 launch
+  geometry.
 - `codegen-i32-addr-arith` preserves the full reference branch with the
   experimental codegen work and refreshed benchmark snapshots.
 - The active slim branch intentionally does not restore the open-tile proposal,
   row-view API, generated row-offset traits, or codegen investigation docs.
 
-Representative slim-branch check on A100 80GB (CUDA 13.2,
-`DISABLE_GPU_BOUND_CHECK=true`):
+Fresh slim-branch KernelBench-C check on A100 80GB (CUDA 13.2,
+`DISABLE_GPU_BOUND_CHECK=true`) after restoring K-major shared layout without
+restoring open-tile/core row-view APIs:
 
 | Problem | PyTorch eager | Raw CUDA | SeGuRu | SeGuRu-from-CUDA |
 |---|---:|---:|---:|---:|
-| gemm_add_relu | 8387.2 us | 8967.5 us | 18377.9 us | 18375.5 us |
+| gemm_mul_lrelu | 8433.9 us | 8955.6 us | 9082.2 us | 9083.5 us |
+| conv_relu_hardswish | 6560.1 us | 6661.6 us | 6598.4 us | 8662.9 us |
+| matmul_mish_mish | 8527.0 us | 9102.9 us | 9077.7 us | 9078.0 us |
+| matmul_scale_resadd | 30832.5 us | 32767.6 us | 33215.9 us | 33389.9 us |
+| gemm_scale_htanh_gelu | 15411.4 us | 17594.8 us | 17661.2 us | 17662.6 us |
+| matmul_sigmoid_sum | 18721.0 us | 2093111.6 us | 1863824.2 us | 1863721.2 us |
+| gemm_relu_div | 8641.5 us | 8961.8 us | 9156.2 us | 9152.9 us |
+| conv_relu_biasadd | 7759.3 us | 103038.4 us | 136556.0 us | 136575.6 us |
+| matmul_sub_mul_relu | 8654.6 us | 8962.1 us | 9096.9 us | 9084.9 us |
+| gemm_add_relu | 8556.6 us | 8961.1 us | 9026.5 us | 9082.9 us |
+| matmul_div_gelu | 8572.7 us | 8975.0 us | 9095.9 us | 9096.7 us |
+| matmul_min_subtract | 4744.8 us | 7524.9 us | 7555.1 us | 7550.7 us |
+
+Summary: all three implementation arms are 12/12 correct. Average speedup vs
+PyTorch eager is 0.76x for SeGuRu, 0.77x for raw CUDA, and 0.74x for
+SeGuRu-from-CUDA. The corrected ablation is: `open_tile().row_mut()` was
+performance-neutral in isolation, but K-major shared-memory layout was not; the
+branch must keep K-major layout while still avoiding the invasive core row-view
+APIs.
 
 ## Reference benchmark snapshot
 

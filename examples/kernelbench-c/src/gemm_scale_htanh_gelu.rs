@@ -88,7 +88,8 @@ pub fn gemm_scale_htanh_gelu_kernel(
     let mut tile_a = gpu::GpuShared::<[f32; (BM * BK) as usize]>::zero();
     let mut tile_b = gpu::GpuShared::<[f32; (BN * BK) as usize]>::zero();
 
-    let load_map = reshape_map!([4] | [16, 16] => layout: [i0, t0, t1]);
+    // K-major shared layout for BM/BN=128: offset = k_lane * 128 + row_or_col.
+    let load_map = reshape_map!([4] | [2, 8, 16] => layout: [t1, t2, i0, t0]);
 
     let out_map = reshape_map!(
         [8, 8] | [16, grid_dim::<DimX>(), 16, grid_dim::<DimY>()]
@@ -107,12 +108,18 @@ pub fn gemm_scale_htanh_gelu_kernel(
         {
             let mut ca = tile_a.chunk_mut(load_map);
             let v: Float4 = x[((bm + a_row) * (K >> 2) + k_base4 + (a_col >> 2)) as usize];
-            ca[0] = v[0]; ca[1] = v[1]; ca[2] = v[2]; ca[3] = v[3];
+            ca[0] = v[0];
+            ca[1] = v[1];
+            ca[2] = v[2];
+            ca[3] = v[3];
         }
         {
             let mut cb = tile_b.chunk_mut(load_map);
             let v: Float4 = w[((bn + a_row) * (K >> 2) + k_base4 + (a_col >> 2)) as usize];
-            cb[0] = v[0]; cb[1] = v[1]; cb[2] = v[2]; cb[3] = v[3];
+            cb[0] = v[0];
+            cb[1] = v[1];
+            cb[2] = v[2];
+            cb[3] = v[3];
         }
 
         sync_threads();
@@ -126,10 +133,10 @@ pub fn gemm_scale_htanh_gelu_kernel(
             let mut b_reg = [0.0f32; TN as usize];
 
             for ii in 0..8usize {
-                a_reg[ii] = tile_a[(row_off + ii) * 8 + kk];
+                a_reg[ii] = tile_a[kk * BM as usize + row_off + ii];
             }
             for jj in 0..8usize {
-                b_reg[jj] = tile_b[(col_off + jj) * 8 + kk];
+                b_reg[jj] = tile_b[kk * BN as usize + col_off + jj];
             }
 
             unroll! { for ii in 0..8 {
@@ -211,10 +218,8 @@ pub fn run(
     // Priming launch (compilation + first-call overhead) — not counted.
     {
         let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
-        gemm_scale_htanh_gelu_kernel::launch(
-            cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk,
-        )
-        .unwrap();
+        gemm_scale_htanh_gelu_kernel::launch(cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk)
+            .unwrap();
     }
     ctx.sync().unwrap();
 
@@ -222,10 +227,8 @@ pub fn run(
     let wt = Instant::now();
     for _ in 0..warmup_iters {
         let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
-        gemm_scale_htanh_gelu_kernel::launch(
-            cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk,
-        )
-        .unwrap();
+        gemm_scale_htanh_gelu_kernel::launch(cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk)
+            .unwrap();
     }
     ctx.sync().unwrap();
     let warmup_us = wt.elapsed().as_micros() as f64 / warmup_iters as f64;
@@ -233,10 +236,8 @@ pub fn run(
     let t = Instant::now();
     for _ in 0..iters {
         let cfg = gpu_host::gpu_config!(gx, gy, 1, BDIM_X, BDIM_Y, 1, 0);
-        gemm_scale_htanh_gelu_kernel::launch(
-            cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk,
-        )
-        .unwrap();
+        gemm_scale_htanh_gelu_kernel::launch(cfg, ctx, md, d_x4, d_w4, &d_b, &mut d_y, mm, nn, kk)
+            .unwrap();
     }
     ctx.sync().unwrap();
     let kernel_us = t.elapsed().as_micros() as f64 / iters as f64;

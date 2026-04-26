@@ -1,10 +1,12 @@
 # KernelBench-C Float4 and 16x16 GEMM Design
 
-This document explains the two retained KernelBench-C GEMM design choices on
-the slim branch:
+This document explains the retained KernelBench-C GEMM design choices on the
+slim branch:
 
 - `Float4` global-memory views for `x` and `W`;
-- 16x16 thread blocks with 8x8 per-thread register tiles.
+- K-major shared-memory tile layout;
+- 16x16 thread blocks with 8x8 per-thread register tiles;
+- checked `Float4` vector views for any vectorized epilogue operands.
 
 The goal is raw custom CUDA parity. PyTorch/cuBLAS numbers are useful context,
 but these kernels are compared primarily against hand-written CUDA kernels with
@@ -14,9 +16,9 @@ the same algorithm and launch geometry.
 
 This design describes the current `agent-poc-v2` slim branch. It intentionally
 does not depend on the open-tile prototype, row views, generated row-offset
-traits, K-major shared-memory experiments, or vectorized epilogue stores. Those
-experiments are preserved on the reference branch, not in this branch's active
-design.
+traits, or core codegen experiments. K-major shared memory is retained because
+the corrected ablation showed it is a source-level performance requirement, not
+an invasive codegen feature.
 
 The representative implementation is
 `examples/kernelbench-c/src/gemm_add_relu.rs`; the same geometry and host-side
@@ -71,8 +73,8 @@ The kernels take them as `&[Float4]`:
 pub fn gemm_add_relu_kernel(
     x: &[Float4],
     w: &[Float4],
-    bias: &[f32],
-    y: &mut [f32],
+    bias: &[Float4],
+    y: &mut [Float4],
     M: u32,
     N: u32,
     K: u32,
@@ -138,22 +140,23 @@ thread 2*r + 0 loads columns 0..3 as one Float4
 thread 2*r + 1 loads columns 4..7 as one Float4
 ```
 
-The shared-memory load map is:
+The shared-memory load map is K-major:
 
 ```rust
-let load_map = reshape_map!([4] | [16, 16] => layout: [i0, t0, t1]);
+let load_map = reshape_map!([4] | [2, 8, 16] => layout: [t1, t2, i0, t0]);
 ```
 
 For local lane `i0`, this maps to:
 
 ```text
-offset = ((ty * 16) + tx) * 4 + i0
-       = tid * 4 + i0
-       = a_row * 8 + a_col + i0
+offset = (a_col + i0) * 128 + a_row
 ```
 
-So each thread writes four contiguous shared-memory slots, and all 256 threads
-collectively fill exactly 1024 scalar slots (`128 * 8`) without overlap.
+So each thread still writes four disjoint shared-memory slots, and all 256
+threads collectively fill exactly 1024 scalar slots (`128 * 8`) without
+overlap. The difference from the original slim branch is the physical shared
+layout: compute reads use CUDA-style `tile[k][row_or_col]`, which is much faster
+than reading the old row-major shared tile as `tile[row_or_col][k]`.
 
 ## Register-tile compute loop
 
@@ -170,8 +173,8 @@ For each `kk` in the 8-wide K tile, the thread reads:
 let row_off = (ty * TM) as usize;
 let col_off = (tx * TN) as usize;
 
-a_reg[ii] = tile_a[(row_off + ii) * 8 + kk];
-b_reg[jj] = tile_b[(col_off + jj) * 8 + kk];
+a_reg[ii] = tile_a[kk * BM as usize + row_off + ii];
+b_reg[jj] = tile_b[kk * BN as usize + col_off + jj];
 ```
 
 Then it performs the outer product:
@@ -186,7 +189,8 @@ but still small enough to compile and run with the launch-bound register cap.
 
 ## Output mapping
 
-The scalar epilogue writes each thread's 8x8 register tile through `chunk_mut`:
+Most GEMM/matmul epilogues write each thread's 8x8 register tile through
+scalar `chunk_mut`:
 
 ```rust
 let out_map = reshape_map!(
@@ -211,6 +215,32 @@ y[(bid_y * 128 + ty * 8 + i) * N + (bid_x * 128 + tx * 8 + j)]
 The important safety property is that `chunk_mut` receives a map whose local
 8x8 tile is unique for each `(block, thread)` pair. The kernel code never
 constructs raw mutable pointers for epilogue writes.
+
+`gemm_add_relu` additionally uses a vectorized bias/output epilogue because the
+preserved reference branch had that source-level change. The kernel signature is
+`bias: &[Float4]` and `y: &mut [Float4]`, and the output map writes two
+`Float4` values per row:
+
+```rust
+let out_map = reshape_map!(
+    [2, 8] | [16, grid_dim::<DimX>(), 16, grid_dim::<DimY>()]
+    => layout: [i0, t0, t1, i1, t2, t3]
+);
+let mut y_tile = chunk_mut(y, out_map);
+
+unroll! { for i in 0..8 {
+    let mut o0 = Float4::default();
+    let mut o1 = Float4::default();
+    // fill o0/o1 from acc + bias
+    y_tile[(0u32, i as u32)] = o0;
+    y_tile[(1u32, i as u32)] = o1;
+}}
+```
+
+The earlier reference branch spelled this with `open_tile().row_mut()`. The
+current branch keeps the same vectorized output shape but uses direct
+`chunk_mut` indexing, because isolated testing showed the row-view helper itself
+was performance-neutral and would require restoring invasive core APIs.
 
 ## Launch-bound annotation
 
@@ -260,14 +290,17 @@ The retained design is intentionally conservative:
 - `Float4` global loads are a small source-level change that expresses the
   intended 128-bit global-load shape (`ld.global.v4.f32`) through a safe host
   abstraction.
+- K-major shared memory is retained because it is required for the raw-CUDA
+  access pattern in the compute loop; reverting it roughly doubled GEMM/matmul
+  runtime on KernelBench-C.
 - 16x16 block geometry is the raw-CUDA-compatible shape for these fused GEMM
   kernels and aligns with the 8x8 per-thread register tile.
 - `nvvm_launch_bound(16, 16, 1, 2)` is tied directly to that launch geometry.
 
 Invasive APIs such as open-tile row views and generated row-offset traits are
-not part of this branch. Isolated GEMM testing showed that replacing direct
-`chunk_mut` epilogue indexing with row views did not materially change runtime,
-so the slim branch keeps the existing safe map/chunk interface.
+not part of this branch. The corrected conclusion is that K-major layout and
+vectorized data shapes matter, while the `open_tile().row_mut()` helper itself
+does not. The slim branch therefore keeps the existing safe map/chunk interface.
 
 ## Maintenance checklist
 
@@ -277,8 +310,14 @@ When adding or modifying a KernelBench-C fused GEMM kernel:
    changing the whole tiling design.
 2. Use checked `try_cast_slice::<Float4>()` host views for `x` and `W`; do not
    add benchmark-local unsafe pointer casts.
-3. Keep `K % BK == 0` assertions so `Float4` indexing is valid.
-4. Ensure `nvvm_launch_bound(16, 16, 1, 2)` matches the actual launch
+3. Keep the K-major shared-memory map:
+   `reshape_map!([4] | [2, 8, 16] => layout: [t1, t2, i0, t0])`.
+4. Keep `K % BK == 0` assertions so `Float4` indexing is valid.
+5. If an epilogue uses `Float4` for bias or output, create those views with
+   checked `try_cast_slice::<Float4>()` / `try_cast_slice_mut::<Float4>()`.
+6. Ensure `nvvm_launch_bound(16, 16, 1, 2)` matches the actual launch
    dimensions.
-5. Use `chunk_mut` plus `reshape_map!` for output writes; do not introduce raw
+7. Use `chunk_mut` plus `reshape_map!` for output writes; do not introduce raw
    mutable epilogue pointers in benchmark code.
+8. Do not reintroduce `.open_tile()` or `.row_mut()` for KernelBench-C unless the
+   core API is separately justified and benchmarked.

@@ -2,23 +2,33 @@ use gpu::prelude::*;
 
 // A[k][j] /= A[k][k] for j > k (only row k is modified)
 #[gpu::cuda_kernel]
-pub fn lu_kernel1(a_read: &[f32], a_write: &mut [f32], n: u32, k: u32) {
-    let mut a_write = chunk_mut(a_write, Map2D::new(n as usize));
+pub fn lu_kernel1(pivot: &[f32], row_tail: &mut [f32], rem: u32) {
+    let mut row_tail = chunk_mut(row_tail, MapContinuousLinear::new(1));
     let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
-    let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
-    if i == k && j > k && j < n {
-        a_write[(0, 0)] = a_read[(k * n + j) as usize] / a_read[(k * n + k) as usize];
+    if j < rem {
+        row_tail[0] = row_tail[0] / pivot[0];
+    }
+}
+
+#[gpu::cuda_kernel]
+pub fn lu_copy_col(a: &[f32], col: &mut [f32], n: u32, k: u32) {
+    let mut col = chunk_mut(col, MapContinuousLinear::new(1));
+    let i_tail = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let rem = n - k - 1;
+    if i_tail < rem {
+        col[0] = a[((i_tail + k + 1) * n + k) as usize];
     }
 }
 
 // A[i][j] -= A[i][k] * A[k][j] for i,j > k
 #[gpu::cuda_kernel]
-pub fn lu_kernel2(a_read: &[f32], a_write: &mut [f32], n: u32, k: u32) {
-    let mut a_write = chunk_mut(a_write, Map2D::new(n as usize));
-    let j = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
-    let i = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
-    if i > k && j > k && i < n && j < n {
-        a_write[(0, 0)] = a_read[(i * n + j) as usize] - a_read[(i * n + k) as usize] * a_read[(k * n + j) as usize];
+pub fn lu_kernel2(row_tail: &[f32], col: &[f32], rows_below: &mut [f32], n: u32, k: u32) {
+    let j_tail = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let i_tail = block_id::<DimY>() * block_dim::<DimY>() + thread_id::<DimY>();
+    let rem = n - k - 1;
+    let mut rows_below = chunk_mut(rows_below, Map2D::new(n as usize));
+    if i_tail < rem && j_tail < rem {
+        rows_below[(0, 0)] = rows_below[(0, 0)] - col[i_tail as usize] * row_tail[j_tail as usize];
     }
 }
 
@@ -55,55 +65,77 @@ mod tests {
 
         // GPU
         let mut h_a_gpu = h_a.clone();
-        let mut h_a_read = h_a.clone();
+        let mut h_col = vec![0.0f32; n];
 
         cuda_ctx(0, |ctx, m_module| {
-            let mut d_a_write = ctx
+            let mut d_a = ctx
                 .new_tensor_view(h_a_gpu.as_mut_slice())
-                .expect("alloc a_write");
-            let mut d_a_read = ctx
-                .new_tensor_view(h_a_read.as_mut_slice())
-                .expect("alloc a_read");
+                .expect("alloc a");
+            let mut d_col = ctx
+                .new_tensor_view(h_col.as_mut_slice())
+                .expect("alloc col");
 
             let block_size: u32 = 16;
-            let grid_x = (n as u32 + block_size - 1) / block_size;
-            let grid_y = (n as u32 + block_size - 1) / block_size;
+            let row_block_size: u32 = 256;
 
             for k in 0..n {
-                let config =
-                    gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
-                lu_kernel1::launch(
-                    config, ctx, m_module, &d_a_read, &mut d_a_write, n as u32, k as u32,
-                )
-                .expect("kernel1 failed");
-
-                // Sync: copy d_a_write → d_a_read for kernel2 to read updated values
-                d_a_write
-                    .copy_to_host(&mut h_a_gpu)
-                    .expect("copy to host");
-                d_a_read
-                    .copy_from_host(&h_a_gpu)
-                    .expect("copy to device");
-
-                let config =
-                    gpu_host::gpu_config!(grid_x, grid_y, 1, block_size, block_size, 1, 0);
-                lu_kernel2::launch(
-                    config, ctx, m_module, &d_a_read, &mut d_a_write, n as u32, k as u32,
-                )
-                .expect("kernel2 failed");
-
-                // Sync for next iteration
-                d_a_write
-                    .copy_to_host(&mut h_a_gpu)
-                    .expect("copy to host");
-                d_a_read
-                    .copy_from_host(&h_a_gpu)
-                    .expect("copy to device");
+                let rem = n - k - 1;
+                if rem > 0 {
+                    {
+                        let row_tail_start = k * n + k + 1;
+                        let row_tail_end = (k + 1) * n;
+                        let (prefix, mut tail_and_after) = d_a.split_at_mut(row_tail_start);
+                        let pivot = prefix.index(row_tail_start - 1..row_tail_start);
+                        let (mut row_tail, _) =
+                            tail_and_after.split_at_mut(row_tail_end - row_tail_start);
+                        let grid = (rem as u32 + row_block_size - 1) / row_block_size;
+                        let config = gpu_host::gpu_config!(grid, 1, 1, row_block_size, 1, 1, 0);
+                        lu_kernel1::launch(
+                            config,
+                            ctx,
+                            m_module,
+                            &pivot,
+                            &mut row_tail,
+                            rem as u32,
+                        )
+                        .expect("kernel1 failed");
+                    }
+                    ctx.sync().expect("kernel1 sync failed");
+                    {
+                        let grid = (rem as u32 + row_block_size - 1) / row_block_size;
+                        let config = gpu_host::gpu_config!(grid, 1, 1, row_block_size, 1, 1, 0);
+                        lu_copy_col::launch(
+                            config, ctx, m_module, &d_a, &mut d_col, n as u32, k as u32,
+                        )
+                        .expect("copy col failed");
+                    }
+                    {
+                        let row_tail_start = k * n + k + 1;
+                        let row_tail_end = (k + 1) * n;
+                        let split_at = (k + 1) * n + k + 1;
+                        let (prefix, mut rows_below) = d_a.split_at_mut(split_at);
+                        let row_tail = prefix.index(row_tail_start..row_tail_end);
+                        let col = d_col.index(..rem);
+                        let grid = (rem as u32 + block_size - 1) / block_size;
+                        let config =
+                            gpu_host::gpu_config!(grid, grid, 1, block_size, block_size, 1, 0);
+                        lu_kernel2::launch(
+                            config,
+                            ctx,
+                            m_module,
+                            &row_tail,
+                            &col,
+                            &mut rows_below,
+                            n as u32,
+                            k as u32,
+                        )
+                        .expect("kernel2 failed");
+                    }
+                    ctx.sync().expect("kernel2 sync failed");
+                }
             }
 
-            d_a_write
-                .copy_to_host(&mut h_a_gpu)
-                .expect("copy failed");
+            d_a.copy_to_host(&mut h_a_gpu).expect("copy failed");
         });
 
         (h_a_gpu, h_a_cpu)
@@ -111,14 +143,20 @@ mod tests {
 
     #[test]
     fn test_lu() {
-        let n = 32;
+        let n = 33;
         let (gpu, cpu) = run_lu(n);
 
         for i in 0..gpu.len() {
+            let diff = (gpu[i] - cpu[i]).abs();
+            let tolerance = 1e-3f32.max(1e-3 * cpu[i].abs());
             assert!(
-                (gpu[i] - cpu[i]).abs() < 1.0,
-                "Mismatch at {}: gpu={} cpu={}",
-                i, gpu[i], cpu[i],
+                diff <= tolerance,
+                "Mismatch at {}: gpu={} cpu={} diff={} tolerance={}",
+                i,
+                gpu[i],
+                cpu[i],
+                diff,
+                tolerance,
             );
         }
 

@@ -2,10 +2,19 @@
 #include <math.h>
 #include <cuda_runtime.h>
 
-__global__ void gs_normalize(float *q, const float *a, int NI, int NJ, int k, float nrm) {
+__global__ void gs_norm(const float *a, float *r, int NI, int NJ, int k) {
+    if (blockIdx.x == 0 && threadIdx.x == 0) {
+        float nrm = 0.0f;
+        for (int i = 0; i < NI; i++)
+            nrm += a[i*NJ+k] * a[i*NJ+k];
+        r[k*NJ+k] = sqrtf(nrm);
+    }
+}
+
+__global__ void gs_normalize(float *q, const float *a, const float *r, int NI, int NJ, int k) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < NI) {
-        q[i*NJ+k] = a[i*NJ+k] / nrm;
+        q[i*NJ+k] = a[i*NJ+k] / r[k*NJ+k];
     }
 }
 
@@ -42,15 +51,10 @@ int main() {
     dim3 block1(256);
     dim3 block2(16,16);
 
-    // Warmup (just 1 iteration of k=0)
+    // Warmup: compute the column norm on GPU, matching the timed dataflow.
     {
-        float nrm = 0.0f;
-        float *col = (float*)malloc(NI*sizeof(float));
-        cudaMemcpy(col, d_a, NI*sizeof(float), cudaMemcpyDeviceToHost);
-        for (int i=0;i<NI;i++) nrm += col[i]*col[i];
-        nrm = sqrtf(nrm);
-        free(col);
-        gs_normalize<<<(NI+255)/256,block1>>>(d_q,d_a,NI,NJ,0,nrm);
+        gs_norm<<<1,1>>>(d_a,d_r,NI,NJ,0);
+        gs_normalize<<<(NI+255)/256,block1>>>(d_q,d_a,d_r,NI,NJ,0);
         cudaDeviceSynchronize();
     }
 
@@ -64,17 +68,8 @@ int main() {
     cudaEventRecord(start);
     for (int it=0;it<ITERS;it++) {
         for (int k=0;k<NJ;k++) {
-            // Compute norm on CPU
-            float *col = (float*)malloc(NI*sizeof(float));
-            for (int i=0;i<NI;i++) {
-                cudaMemcpy(&col[i], &((float*)d_a)[i*NJ+k], sizeof(float), cudaMemcpyDeviceToHost);
-            }
-            float nrm = 0.0f;
-            for (int i=0;i<NI;i++) nrm += col[i]*col[i];
-            nrm = sqrtf(nrm);
-            free(col);
-
-            gs_normalize<<<(NI+255)/256,block1>>>(d_q,d_a,NI,NJ,k,nrm);
+            gs_norm<<<1,1>>>(d_a,d_r,NI,NJ,k);
+            gs_normalize<<<(NI+255)/256,block1>>>(d_q,d_a,d_r,NI,NJ,k);
             cudaDeviceSynchronize();
 
             int rem = NJ - k - 1;

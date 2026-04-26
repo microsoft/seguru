@@ -13,7 +13,8 @@ import torch.nn.functional as F
 from torch.utils.cpp_extension import load
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
-RUNNER = REPO / "examples/target/release/kernelbench-c"
+TARGET_DIR = pathlib.Path(os.environ.get("CARGO_TARGET_DIR", REPO / "examples/target"))
+RUNNER = TARGET_DIR / "release/kernelbench-c"
 CUDA_DIR = REPO / "examples/kernelbench-c/cuda"
 BUILD_DIR = REPO / "examples/kernelbench-c/cuda_build"
 BUILD_DIR.mkdir(exist_ok=True)
@@ -220,6 +221,27 @@ def _matmul_swish_scaling():
     return dict(make_inputs=make_inputs, torch_fn=torch_fn, cuda_run=cuda_run,
                 in_shape=[M, K, N], out_shape=[M, N], atol=5e-3)
 
+def _conv2d_scaling_min():
+    B, Cin, H, W = 64, 64, 256, 256
+    Cout, Kh, Kw = 128, 3, 3
+    Ho, Wo = H - Kh + 1, W - Kw + 1
+    scale_factor = 2.0
+    def make_inputs():
+        torch.manual_seed(0)
+        x = torch.rand(B, Cin, H, W, device="cuda")
+        lim = 1.0 / ((Cin * Kh * Kw) ** 0.5)
+        weight = (torch.rand(Cout, Cin, Kh, Kw, device="cuda") * 2 - 1) * lim
+        bias = (torch.rand(Cout, device="cuda") * 2 - 1) * lim
+        return dict(x=x, W=weight, b=bias)
+    def torch_fn(ins):
+        tmp = F.conv2d(ins["x"], ins["W"], ins["b"])
+        tmp = tmp * scale_factor
+        return torch.min(tmp, dim=1, keepdim=True)[0]
+    def cuda_run(mod, ins):
+        return mod.run(ins["x"], ins["W"], ins["b"])
+    return dict(make_inputs=make_inputs, torch_fn=torch_fn, cuda_run=cuda_run,
+                in_shape=[B, Cin, H, W, Cout, Kh, Kw], out_shape=[B, 1, Ho, Wo], atol=5e-3)
+
 def _gemm_relu_div():
     M, K, N = 1024, 8192, 8192
     divisor = 2.0
@@ -347,6 +369,7 @@ PROBLEMS = {
     "gemm_scale_htanh_gelu": _gemm_scale_htanh_gelu(),
     "matmul_sigmoid_sum": _matmul_sigmoid_sum(),
     "matmul_swish_scaling": _matmul_swish_scaling(),
+    "conv2d_scaling_min": _conv2d_scaling_min(),
     "gemm_relu_div": _gemm_relu_div(),
     "conv_relu_biasadd": _conv_relu_biasadd(),
     "matmul_sub_mul_relu": _matmul_sub_mul_relu(),

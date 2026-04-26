@@ -85,7 +85,7 @@ def main() -> int:
         print("\n".join(errors))
         return 1
 
-    print("KernelBench mixed batch source wiring is present.")
+    print("KernelBench mixed batch registrations are present.")
     return 0
 
 

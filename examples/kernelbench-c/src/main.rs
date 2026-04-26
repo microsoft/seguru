@@ -38,6 +38,7 @@ pub mod matmul_sub_mul_relu;    // 9
 pub mod gemm_add_relu;          // 76
 pub mod matmul_div_gelu;        // 86
 pub mod matmul_min_subtract;    // 68
+pub mod conv2d_scaling_min;      // 32
 
 pub mod from_cuda;
 
@@ -113,6 +114,7 @@ fn main() {
             "gemm_scale_htanh_gelu"  => gemm_scale_htanh_gelu::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "matmul_sigmoid_sum"     => matmul_sigmoid_sum::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "matmul_swish_scaling"      => matmul_swish_scaling::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "conv2d_scaling_min"        => conv2d_scaling_min::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "gemm_relu_div"          => gemm_relu_div::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "conv_relu_biasadd"      => conv_relu_biasadd::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "matmul_sub_mul_relu"    => matmul_sub_mul_relu::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
@@ -126,6 +128,7 @@ fn main() {
             "gemm_scale_htanh_gelu_fc"  => from_cuda::gemm_scale_htanh_gelu::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "matmul_sigmoid_sum_fc"     => from_cuda::matmul_sigmoid_sum::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "matmul_swish_scaling_fc"   => from_cuda::matmul_swish_scaling::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "conv2d_scaling_min_fc"     => from_cuda::conv2d_scaling_min::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "gemm_relu_div_fc"          => from_cuda::gemm_relu_div::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "conv_relu_biasadd_fc"      => from_cuda::conv_relu_biasadd::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "matmul_sub_mul_relu_fc"    => from_cuda::matmul_sub_mul_relu::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),

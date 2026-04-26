@@ -91,7 +91,7 @@ for bench in "${BENCHMARKS[@]}"; do
     seguru_us=$(grep "^${bench} SeGuRu:" "$SEGURU_RESULTS_FILE" 2>/dev/null | grep -oP '[\d.]+(?= us/iter)' || echo "N/A")
 
     if [ "$cuda_us" != "N/A" ] && [ "$seguru_us" != "N/A" ]; then
-        ratio=$(echo "scale=3; $seguru_us / $cuda_us" | bc 2>/dev/null || echo "N/A")
+        ratio=$(awk -v seguru="$seguru_us" -v cuda="$cuda_us" 'BEGIN { printf "%.3f", seguru / cuda }')
         printf "%-12s %15s %15s %9sx\n" "$bench" "$cuda_us" "$seguru_us" "$ratio"
     else
         printf "%-12s %15s %15s %10s\n" "$bench" "$cuda_us" "$seguru_us" "N/A"

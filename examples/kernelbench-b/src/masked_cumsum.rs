@@ -73,10 +73,7 @@ pub fn run(
 ) -> (f64, f64) {
     assert_eq!(shape.len(), 2, "masked_cumsum: shape=[B,D]");
     let (b, d) = (shape[0], shape[1]);
-    assert!(
-        b > 0 && d > 0,
-        "masked_cumsum requires non-empty B and D"
-    );
+    assert!(b > 0 && d > 0, "masked_cumsum requires non-empty B and D");
     assert_eq!(d % BLOCK as usize, 0, "D must be divisible by BLOCK");
     let n = b
         .checked_mul(d)

@@ -31,10 +31,7 @@ fn flat_tuple<'tcx>(t: &rustc_middle::ty::Ty<'tcx>) -> Vec<rustc_middle::ty::Ty<
     type_list
 }
 
-impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a>
-where
-    'tcx: 'a,
-{
+impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     pub(crate) fn align_to_attr(
         &self,
         align: rustc_abi::Align,
@@ -466,10 +463,7 @@ where
     }
 }
 
-impl<'tcx, 'ml, 'a> BaseTypeCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a>
-where
-    'tcx: 'a,
-{
+impl<'tcx, 'ml, 'a> BaseTypeCodegenMethods for GPUCodegenContext<'tcx, 'ml, 'a> {
     fn type_i8(&self) -> Self::Type {
         self.type_i_bits(8)
     }
@@ -522,7 +516,7 @@ where
     }
 
     fn type_ptr(&self) -> Self::Type {
-        self.type_ptr_ext(rustc_abi::AddressSpace::ZERO)
+        self.type_ptr_ext(rustc_abi::AddressSpace::DATA)
     }
 
     fn element_type(&self, ty: Self::Type) -> Self::Type {
@@ -557,7 +551,7 @@ where
             rustc_codegen_ssa_gpu::common::TypeKind::Integer
         } else if ty.is_ranked_tensor() {
             rustc_codegen_ssa_gpu::common::TypeKind::Array
-        } else if ty.is_llvm_pointer_type() || ty.is_mem_ref() {
+        } else if ty.is_llvm_pointer_type() {
             rustc_codegen_ssa_gpu::common::TypeKind::Pointer
         } else if ty.is_function() {
             rustc_codegen_ssa_gpu::common::TypeKind::Function
@@ -569,10 +563,7 @@ where
     }
 }
 
-impl<'tcx, 'ml, 'a> LayoutTypeCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, 'a>
-where
-    'tcx: 'a,
-{
+impl<'tcx, 'ml, 'a> LayoutTypeCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'ml, 'a> {
     fn backend_type(&self, layout: rustc_middle::ty::layout::TyAndLayout<'tcx>) -> Self::Type {
         let ty = self.mlir_type(layout, false);
         ty

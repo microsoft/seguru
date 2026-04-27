@@ -60,7 +60,7 @@ pub fn run_host_matmul<'ctx>(
 
     // Now do the kernel
     // block_dim_x * block_dim_y * block_dim_z must be less than or equal to 1024
-    assert!(dim < 32 || dim.is_multiple_of(32), "dim must be a multiple of 32 or less than 32");
+    assert!(dim < 32 || dim % 32 == 0, "dim must be a multiple of 32 or less than 32");
     let grid_dim = if dim > 32 { dim / 32 } else { 1 };
     let block_dim = if dim > 32 { 32 } else { dim };
 

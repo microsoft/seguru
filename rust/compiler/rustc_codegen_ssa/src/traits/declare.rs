@@ -1,18 +1,17 @@
-use rustc_hir::attrs::Linkage;
 use rustc_hir::def_id::DefId;
-use rustc_middle::mir::mono::Visibility;
+use rustc_middle::mir::mono::{Linkage, Visibility};
 use rustc_middle::ty::Instance;
 
 pub trait PreDefineCodegenMethods<'tcx> {
     fn predefine_static(
-        &mut self,
+        &self,
         def_id: DefId,
         linkage: Linkage,
         visibility: Visibility,
         symbol_name: &str,
     );
     fn predefine_fn(
-        &mut self,
+        &self,
         instance: Instance<'tcx>,
         linkage: Linkage,
         visibility: Visibility,

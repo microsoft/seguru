@@ -4,6 +4,7 @@ use melior::ir::operation::{
 use mlir_compile::CompileConfig;
 use rustc_codegen_ssa_gpu::back::write::{CodegenContext, ModuleConfig};
 use rustc_codegen_ssa_gpu::{CompiledModule, ModuleCodegen};
+use rustc_errors::DiagCtxtHandle;
 use tracing::{debug, trace};
 
 use crate::backend::{GPUCodeGenModule, GPUCodegenBackend};
@@ -18,22 +19,17 @@ pub(crate) fn get_compile_config(config: &rustc_session::config::CodegenOptions)
 
 pub(crate) fn codegen(
     cgcx: &CodegenContext<GPUCodegenBackend>,
+    dcx: DiagCtxtHandle<'_>,
     module: ModuleCodegen<GPUCodeGenModule>,
     config: &ModuleConfig,
 ) -> Result<rustc_codegen_ssa_gpu::CompiledModule, rustc_errors::FatalError> {
     let mod_name = module.name.clone();
-    let module_name = &mod_name[..];
+    let module_name = Some(&mod_name[..]);
     let out = if let Some(mut m) = module.module_llvm.mlir_module {
-        let out = cgcx.output_filenames.temp_path_for_cgu(
-            rustc_session::config::OutputType::Mir,
-            module_name,
-            None,
-        );
-        let out_object = cgcx.output_filenames.temp_path_for_cgu(
-            rustc_session::config::OutputType::Object,
-            module_name,
-            None,
-        );
+        let out =
+            cgcx.output_filenames.temp_path(rustc_session::config::OutputType::Mir, module_name);
+        let out_object =
+            cgcx.output_filenames.temp_path(rustc_session::config::OutputType::Object, module_name);
         debug!("write MLIR module to {:?}", out);
         let mut op = m.module.as_operation_mut();
         crate::mlir::visit::visit_ops_recursively(&mut op, &|op: &mut OperationRefMut<'_, '_>| {

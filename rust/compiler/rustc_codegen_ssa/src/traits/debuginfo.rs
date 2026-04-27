@@ -77,22 +77,11 @@ pub trait DebugInfoBuilderMethods: BackendTypes {
         indirect_offsets: &[Size],
         // Byte range in the `dbg_var` covered by this fragment,
         // if this is a fragment of a composite `DIVariable`.
-        fragment: &Option<Range<Size>>,
-    );
-    fn dbg_var_value(
-        &mut self,
-        dbg_var: Self::DIVariable,
-        dbg_loc: Self::DILocation,
-        value: Self::Value,
-        direct_offset: Size,
-        // NB: each offset implies a deref (i.e. they're steps in a pointer chain).
-        indirect_offsets: &[Size],
-        // Byte range in the `dbg_var` covered by this fragment,
-        // if this is a fragment of a composite `DIVariable`.
-        fragment: &Option<Range<Size>>,
+        fragment: Option<Range<Size>>,
     );
     fn set_dbg_loc(&mut self, dbg_loc: Self::DILocation);
     fn clear_dbg_loc(&mut self);
+    fn get_dbg_loc(&self) -> Option<Self::DILocation>;
     fn insert_reference_to_gdb_debug_scripts_section_global(&mut self);
     fn set_var_name(&mut self, value: Self::Value, name: &str);
 }

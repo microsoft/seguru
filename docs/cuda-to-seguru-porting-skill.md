@@ -385,7 +385,9 @@ claim.
 ```rust
 #[gpu::cuda_kernel]
 pub fn norm_stats_kernel(x: &[Float4], mean: &mut [f32], rstd: &mut [f32], D4: u32) {
-    // One block per row: Float4 sum/sumsq, warp reduce to mean_v/rstd_v, then:
+    // Abbreviated: use one block per row, accumulate Float4 sum/sumsq, then
+    // reduce across the block to compute mean_v/rstd_v. See the complete
+    // implementation in examples/kernelbench-b/src/group_norm.rs.
     let grid2block = build_chunk_scope(Grid, Block);
     let block2thread = build_chunk_scope(Block, Thread);
     let mut mean_out = mean
@@ -441,6 +443,10 @@ KernelBench-B `group_norm` (`rows=32`, `D=524288`) moved SeGuRu from
 for softmax/layernorm shapes with many rows (e.g. `[128, 4096]`), a single
 kernel is still faster because the extra launch and global stats buffers
 outweigh apply-pass parallelism.
+
+Complete working references:
+`examples/kernelbench-b/src/group_norm.rs` and
+`examples/kernelbench-b/src/from_cuda/group_norm.rs`.
 
 ## Shared Memory Tiling: The Key to CUDA Parity
 

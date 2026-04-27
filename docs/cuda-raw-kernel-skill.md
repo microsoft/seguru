@@ -208,7 +208,9 @@ __global__ void norm_stats_kernel(const float4* __restrict__ x4,
         sum += v.x + v.y + v.z + v.w;
         sumsq += v.x*v.x + v.y*v.y + v.z*v.z + v.w*v.w;
     }
-    // Reduce sum/sumsq across the block into block_sum/block_sumsq.
+    // Abbreviated: reduce sum/sumsq across the block into
+    // block_sum/block_sumsq. See examples/kernelbench-b/cuda/group_norm.cu
+    // for the complete shared-memory reduction.
     if (threadIdx.x == 0) {
         float m = block_sum * (1.0f / (D4 * 4.0f));
         float var = fmaxf(block_sumsq * (1.0f / (D4 * 4.0f)) - m * m, 0.0f);
@@ -243,6 +245,8 @@ this split. Do not apply it blindly: for softmax/layernorm shapes with many
 rows (for example `[128, 4096]`), the single-kernel template is faster because
 the extra launch and global stats buffers cost more than the apply-pass
 parallelism.
+
+Complete working reference: `examples/kernelbench-b/cuda/group_norm.cu`.
 
 ## Softmax Recipe
 

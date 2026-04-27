@@ -25,7 +25,7 @@ and current parity targets are maintained in
 6. **`chunk_mut` uses LOCAL indices** — write `c[0]`, not `c[global_idx]`
 7. **Row reductions need block- or warp-per-row, not 1-thread-per-row** — reusing the elementwise template (`gs=B.div_ceil(bs)`, `if row<B`) for `sum(x,dim=-1)`-style kernels underutilizes the GPU by 10–20×. See "Row-Reduction Strategy".
 8. **Host-side readback is NOT automatic** — after a kernel writes to a `TensorViewMut<[T]>` backed by a host vector, you must call `d_out.copy_to_host(&mut h_out).unwrap()` before reading or persisting `h_out`. Dropping the view does not trigger readback. Silent all-zeros output otherwise. See "Host-Side Patterns".
-9. **Port the algorithm before the idioms** — fuse multi-pass reductions (max+sum, mean+var, logsumexp) into one pass; pick vector width (Float4) before writing the loop; pick the tile size with register tiling before writing GEMM. Only then apply SeGuRu's chunk_mut / reshape_map / warp-redux patterns. A clean SeGuRu rendering of a bad algorithm will not reach parity.
+9. **Port the algorithm before the idioms** — fuse reduction statistics inside a row (max+sum, mean+var, logsumexp); split stats from apply only when a tiny row count makes the full-size write pass underparallelized. Pick vector width (Float4) before writing the loop; pick the tile size with register tiling before writing GEMM. Only then apply SeGuRu's chunk_mut / reshape_map / warp-redux patterns. A clean SeGuRu rendering of a bad algorithm will not reach parity.
 10. **Optimize against raw custom CUDA parity first** — PyTorch eager often measures library dispatch, not a comparable hand-written kernel. Treat PyTorch numbers as context unless the raw CUDA baseline is also fast.
 11. **Keep benchmark/example code safe** — use generated maps (`reshape_map!`, `MapContinuousLinear`, `Map2D`) and checked host helpers such as `try_cast_slice::<Float4>()`; keep `unsafe` inside reviewed library abstractions or unavoidable external FFI boundaries.
 
@@ -219,6 +219,13 @@ Rule of thumb: you want ≥ ~4× SM count worth of *resident threads*. An A100
 has 108 SMs, so aim for at least ~50K–100K concurrent threads. `B × threads_per_row`
 should land in that range.
 
+For normalization kernels whose output is the same size as the input, this
+table only covers the stats pass. If the row count is tiny (for example
+`B*groups=32`) and each row has hundreds of thousands of elements, a fused
+one-block-per-row stats+apply kernel leaves the write-heavy apply pass with
+only `rows * blockDim` threads. Use the split stats/apply pattern below so the
+apply pass gets a full linear grid.
+
 ### Pattern: 1 block per row (the right sum_dim)
 
 ```rust
@@ -366,6 +373,74 @@ This is used whenever the kernel writes one value per block — reduction
 scalars (`sum`, `max`, `argmax`), row statistics (`row_max`, `row_sum` in
 a 2-pass softmax), etc. See `examples/kernelbench-b/src/from_cuda/softmax.rs`
 for the canonical example.
+
+### Pattern: split stats/apply for huge normalization rows
+
+Use this for group/instance-style normalization when there are very few rows
+and each row is huge. Keep the statistics fused inside one row-reduction
+kernel, but move the full-size normalization write to a second linear-grid
+kernel. This is a raw CUDA parity optimization, not a cuDNN/PyTorch parity
+claim.
+
+```rust
+#[gpu::cuda_kernel]
+pub fn norm_stats_kernel(x: &[Float4], mean: &mut [f32], rstd: &mut [f32], D4: u32) {
+    // One block per row: Float4 sum/sumsq, warp reduce to mean_v/rstd_v, then:
+    let grid2block = build_chunk_scope(Grid, Block);
+    let block2thread = build_chunk_scope(Block, Thread);
+    let mut mean_out = mean
+        .chunk_to_scope(grid2block, MapContinuousLinear::new(1))
+        .chunk_to_scope(block2thread, MapContinuousLinear::new(1));
+    let mut rstd_out = rstd
+        .chunk_to_scope(grid2block, MapContinuousLinear::new(1))
+        .chunk_to_scope(block2thread, MapContinuousLinear::new(1));
+    if thread_id::<DimX>() == 0 {
+        mean_out[0] = mean_v;
+        rstd_out[0] = rstd_v;
+    }
+}
+
+#[gpu::cuda_kernel]
+pub fn norm_apply_kernel(
+    x: &[Float4],
+    mean: &[f32],
+    rstd: &[f32],
+    y: &mut [Float4],
+    D4: u32,
+    total4: u32,
+) {
+    let idx = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
+    let mut out = chunk_mut(y, MapContinuousLinear::new(1));
+    if idx < total4 {
+        let row = idx / D4;
+        let m = mean[row as usize];
+        let rs = rstd[row as usize];
+        let v = x[idx as usize];
+        out[0] = Float4::new([
+            (v[0] - m) * rs,
+            (v[1] - m) * rs,
+            (v[2] - m) * rs,
+            (v[3] - m) * rs,
+        ]);
+    }
+}
+```
+
+Host launch shape:
+
+```rust
+let stats_cfg = gpu_host::gpu_config!(rows as u32, 1, 1, BLOCK, 1, 1, 0);
+let apply_cfg = gpu_host::gpu_config!(total4.div_ceil(BLOCK as usize) as u32, 1, 1, BLOCK, 1, 1, 0);
+norm_stats_kernel::launch(stats_cfg, ctx, md, &d_x4, &mut d_mean, &mut d_rstd, D4).unwrap();
+norm_apply_kernel::launch(apply_cfg, ctx, md, &d_x4, &d_mean, &d_rstd, &mut d_y4, D4, total4 as u32).unwrap();
+```
+
+KernelBench-B `group_norm` (`rows=32`, `D=524288`) moved SeGuRu from
+~2100 µs to ~353 µs with this split. Raw CUDA also improved (~453 µs to
+~170 µs), so this is worth applying before porting. Do not use it blindly:
+for softmax/layernorm shapes with many rows (e.g. `[128, 4096]`), a single
+kernel is still faster because the extra launch and global stats buffers
+outweigh apply-pass parallelism.
 
 ## Shared Memory Tiling: The Key to CUDA Parity
 
@@ -1069,7 +1144,9 @@ pub fn softmax_kernel(x: &[f32], y: &mut [f32], D: u32) {
 
 - **Two-kernel split (`stats_kernel` + `apply_kernel`)**: measured ~1.3×
   slower than single-kernel fused on `[128, 4096]`. Launch overhead + two
-  extra global buffers kills you. Only split if the row must span blocks.
+  extra global buffers kills you. For softmax, split only if the row must
+  span blocks; for huge-row group/instance norm, use the separate stats/apply
+  recipe above.
 - **Using `0.0` as max identity**: `max(0, -5) = 0` corrupts the result
   for all-negative rows. Always `f32::NEG_INFINITY`.
 - **Computing `1.0 / sum` in the inner write loop**: hoist `inv_sum`

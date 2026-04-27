@@ -43,11 +43,13 @@ Target is Ampere (`sm_80`) and newer.
    or `torch::empty({...}, x.options())` on the host wrapper.
 10. **Assert contiguity + dtype** with `TORCH_CHECK(x.is_cuda())`,
     `TORCH_CHECK(x.is_contiguous())`, `TORCH_CHECK(x.dtype() == torch::kFloat32)`.
-11. **Port the algorithm before the idioms.** Fuse multi-pass reductions
-    (max+sum → single-pass online softmax; mean+var → Welford); pick
-    vector width (float4) before writing the loop; pick the tile size with
-    register tiling before writing a GEMM. A clean CUDA rendering of a bad
-    algorithm will not reach parity. See Case Studies.
+11. **Port the algorithm before the idioms.** Fuse row statistics
+    (max+sum → single-pass online softmax; mean+var → one reduction);
+    split stats from apply only when a tiny row count makes the full-size
+    write pass underparallelized. Pick vector width (float4) before writing
+    the loop; pick the tile size with register tiling before writing a GEMM.
+    A clean CUDA rendering of a bad algorithm will not reach parity. See
+    Case Studies.
 
 ## File skeleton (copy-paste)
 
@@ -117,6 +119,11 @@ Rule of thumb: you want ≥ ~4× SM count worth of *resident threads*. An A100
 has 108 SMs, so aim for at least ~50K–100K concurrent threads.
 `B × threads_per_row` should land in that range.
 
+For normalization kernels that write one output per input, this table only
+chooses the stats pass. If row count is tiny and row width is huge, a fused
+one-block-per-row stats+apply kernel underutilizes the write pass; use the
+split pattern below.
+
 **The #1 LLM mistake here**: reusing the elementwise grid-stride template
 for reductions:
 
@@ -178,6 +185,64 @@ __global__ void row_kernel(const float* __restrict__ x,
 ```
 
 Launch: `row_kernel<256><<<B, 256, 0, stream>>>(x, y, D)` with one block per row.
+
+## Huge-row normalization: split stats and apply
+
+Use this for group/instance-style normalization when rows are few and huge
+(for example `B*groups=32`, `D=524288`). Keep sum/sumsq fused in one stats
+kernel, then launch a full linear-grid apply kernel over `float4` elements.
+This targets hand-written raw CUDA parity; cuDNN/PyTorch may still use more
+specialized library paths.
+
+```cpp
+template <int BLOCK>
+__global__ void norm_stats_kernel(const float4* __restrict__ x4,
+                                  float* __restrict__ mean,
+                                  float* __restrict__ rstd,
+                                  int D4, float eps) {
+    int row = blockIdx.x;
+    const float4* xr = x4 + (int64_t)row * D4;
+    float sum = 0.0f, sumsq = 0.0f;
+    for (int i = threadIdx.x; i < D4; i += BLOCK) {
+        float4 v = xr[i];
+        sum += v.x + v.y + v.z + v.w;
+        sumsq += v.x*v.x + v.y*v.y + v.z*v.z + v.w*v.w;
+    }
+    // Reduce sum/sumsq across the block into block_sum/block_sumsq.
+    if (threadIdx.x == 0) {
+        float m = block_sum * (1.0f / (D4 * 4.0f));
+        float var = fmaxf(block_sumsq * (1.0f / (D4 * 4.0f)) - m * m, 0.0f);
+        mean[row] = m;
+        rstd[row] = rsqrtf(var + eps);
+    }
+}
+
+__global__ void norm_apply_kernel(const float4* __restrict__ x4,
+                                  const float* __restrict__ mean,
+                                  const float* __restrict__ rstd,
+                                  float4* __restrict__ y4,
+                                  int D4, int total4) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= total4) return;
+    int row = idx / D4;
+    float m = mean[row], rs = rstd[row];
+    float4 v = x4[idx];
+    y4[idx] = make_float4((v.x - m) * rs, (v.y - m) * rs,
+                          (v.z - m) * rs, (v.w - m) * rs);
+}
+```
+
+Launch `norm_stats_kernel<<<rows, 256, 0, stream>>>`, then
+`norm_apply_kernel<<<ceil_div(total4, 256), 256, 0, stream>>>`. Allocate
+`mean` and `rstd` as device tensors of length `rows`. Check `D % 4 == 0`,
+`numel % 4 == 0`, pointer alignment, and int-indexed kernel limits before
+casting to `float4*`.
+
+KernelBench-B `group_norm` improved raw CUDA from ~453 µs to ~170 µs with
+this split. Do not apply it blindly: for softmax/layernorm shapes with many
+rows (for example `[128, 4096]`), the single-kernel template is faster because
+the extra launch and global stats buffers cost more than the apply-pass
+parallelism.
 
 ## Softmax Recipe
 
@@ -279,8 +344,9 @@ __global__ void softmax_kernel(const float* __restrict__ x,
 
 **Pitfalls:**
 
-- Two-kernel `stats` + `apply` split: ~1.3× slower on `[128, 4096]`. Only
-  split if a row must span blocks.
+- Two-kernel `stats` + `apply` split: ~1.3× slower on `[128, 4096]`. For
+  softmax, split only if a row must span blocks; for huge-row group/instance
+  norm, use the separate stats/apply recipe above.
 - Using `0.0f` as max identity → wrong answer on all-negative rows.
 - Computing `1.0f / block_sum` in the pass-2 write loop: hoist outside.
   Scalar division is ~4× slower than multiply.

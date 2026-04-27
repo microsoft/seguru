@@ -2,32 +2,49 @@
 #include <cuda_runtime.h>
 #include <ATen/cuda/CUDAContext.h>
 
-#define BLK 256
+#define TILE_M 16
+#define TILE_N 16
+#define TILE_K 16
 
-__global__ void pointwise_conv2d_kernel(
+__global__ void pointwise_conv2d_tiled_kernel(
     const float* __restrict__ X,
     const float* __restrict__ WGT,
     float* __restrict__ Y,
     int Bsz, int Cin, int H, int Wi, int Cout)
 {
-    const size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    const size_t total = (size_t)Bsz * Cout * H * Wi;
-    if (idx >= total) return;
+    __shared__ float Xs[TILE_M][TILE_K + 1];
+    __shared__ float Ws[TILE_K][TILE_N + 1];
 
-    const int wi = (int)(idx % Wi);
-    size_t t = idx / Wi;
-    const int h = (int)(t % H);
-    t /= H;
-    const int co = (int)(t % Cout);
-    const int b = (int)(t / Cout);
-
+    const int tm = (int)threadIdx.x;
+    const int tn = (int)threadIdx.y;
+    const int hw = (int)blockIdx.x * TILE_M + tm;
+    const int co = (int)blockIdx.y * TILE_N + tn;
+    const int b = (int)blockIdx.z;
+    const int M = H * Wi;
     float acc = 0.0f;
-    for (int ci = 0; ci < Cin; ++ci) {
-        const size_t x_idx = (((size_t)b * Cin + ci) * H + h) * Wi + wi;
-        const size_t w_idx = (size_t)co * Cin + ci;
-        acc += X[x_idx] * WGT[w_idx];
+
+    for (int k0 = 0; k0 < Cin; k0 += TILE_K) {
+        const int x_ci = k0 + tn;
+        const int w_ci = k0 + tm;
+
+        Xs[tm][tn] = (hw < M && x_ci < Cin)
+            ? X[((size_t)b * Cin + x_ci) * M + hw]
+            : 0.0f;
+        Ws[tm][tn] = (w_ci < Cin && co < Cout)
+            ? WGT[(size_t)co * Cin + w_ci]
+            : 0.0f;
+        __syncthreads();
+
+#pragma unroll
+        for (int kk = 0; kk < TILE_K; ++kk) {
+            acc += Xs[tm][kk] * Ws[kk][tn];
+        }
+        __syncthreads();
     }
-    Y[idx] = acc;
+
+    if (hw < M && co < Cout) {
+        Y[((size_t)b * Cout + co) * M + hw] = acc;
+    }
 }
 
 torch::Tensor run(torch::Tensor x, torch::Tensor w)
@@ -47,11 +64,14 @@ torch::Tensor run(torch::Tensor x, torch::Tensor w)
     TORCH_CHECK(w.size(1) == Cin, "w.size(1) must equal x.size(1)");
 
     auto y = torch::empty({Bsz, Cout, H, Wi}, x.options());
-    const size_t total = (size_t)Bsz * Cout * H * Wi;
-    const dim3 block(BLK, 1, 1);
-    const dim3 grid((unsigned int)((total + BLK - 1) / BLK), 1, 1);
+    const int M = H * Wi;
+    const dim3 block(TILE_M, TILE_N, 1);
+    const dim3 grid(
+        (unsigned int)((M + TILE_M - 1) / TILE_M),
+        (unsigned int)((Cout + TILE_N - 1) / TILE_N),
+        (unsigned int)Bsz);
 
-    pointwise_conv2d_kernel<<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+    pointwise_conv2d_tiled_kernel<<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
         x.data_ptr<float>(), w.data_ptr<float>(), y.data_ptr<float>(),
         Bsz, Cin, H, Wi, Cout);
     AT_CUDA_CHECK(cudaGetLastError());

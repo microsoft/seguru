@@ -10,6 +10,7 @@ const BLOCK: u32 = 256;
 const EPS: f32 = 1e-5;
 const GROUPS: usize = 8;
 
+#[allow(clippy::too_many_arguments)]
 #[gpu::cuda_kernel]
 pub fn group_norm_stats_kernel(
     x: &[Float4],
@@ -86,6 +87,7 @@ pub fn group_norm_stats_kernel(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 #[gpu::cuda_kernel]
 pub fn group_norm_apply_kernel(
     x: &[Float4],
@@ -172,8 +174,8 @@ pub fn run(
             ctx,
             md,
             &d_x4,
-            &*d_mean,
-            &*d_rstd,
+            &d_mean,
+            &d_rstd,
             &mut d_y4,
             group_elems4,
             total4,
@@ -203,8 +205,8 @@ pub fn run(
             ctx,
             md,
             &d_x4,
-            &*d_mean,
-            &*d_rstd,
+            &d_mean,
+            &d_rstd,
             &mut d_y4,
             group_elems4,
             total4,
@@ -234,8 +236,8 @@ pub fn run(
             ctx,
             md,
             &d_x4,
-            &*d_mean,
-            &*d_rstd,
+            &d_mean,
+            &d_rstd,
             &mut d_y4,
             group_elems4,
             total4,

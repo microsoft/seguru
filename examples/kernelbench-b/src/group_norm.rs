@@ -132,11 +132,7 @@ pub fn run(
         "group elements must be divisible by Float4 width"
     );
     let n = b * c * hw;
-    assert_eq!(
-        n % 4,
-        0,
-        "total elements must be divisible by Float4 width"
-    );
+    assert_eq!(n % 4, 0, "total elements must be divisible by Float4 width");
     let h_x = crate::read_bin(&in_dir.join("x.bin"), n);
     let mut h_y = vec![0f32; n];
     let h_x4: Vec<Float4> = h_x

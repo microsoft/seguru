@@ -11,6 +11,7 @@ REQUIRED = {
         "requires non-empty",
         "std::numeric_limits<int>::max()",
         "D % BLOCK == 0",
+        "mask.device() == x.device()",
     ],
     "examples/kernelbench-b/src/masked_cumsum.rs": [
         "masked_cumsum_kernel",

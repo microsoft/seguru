@@ -41,6 +41,8 @@ torch::Tensor run(torch::Tensor x, torch::Tensor mask) {
     TORCH_CHECK(x.scalar_type() == torch::kFloat32 && mask.scalar_type() == torch::kFloat32 &&
                 x.dim() == 2 && mask.dim() == 2);
     TORCH_CHECK(mask.sizes() == x.sizes());
+    TORCH_CHECK(mask.device() == x.device(),
+                "mask must be on the same CUDA device as x");
     const int64_t B64 = x.size(0);
     const int64_t D64 = x.size(1);
     TORCH_CHECK(B64 > 0 && D64 > 0, "masked_cumsum requires non-empty B and D");

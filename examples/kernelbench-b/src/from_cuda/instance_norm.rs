@@ -1,6 +1,6 @@
 //! Port of cuda/instance_norm.cu: InstanceNorm2d training-style normalization over each [H,W] plane.
 use gpu::cg::{CGOperations, ReduxAdd, ThreadWarpTile, WarpReduceOp};
-use gpu::chunk_scope::{build_chunk_scope, Block, Grid, Thread};
+use gpu::chunk_scope::{Block, Grid, Thread, build_chunk_scope};
 use gpu::prelude::*;
 use gpu::vector::Float4;
 use std::path::Path;

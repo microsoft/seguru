@@ -3,7 +3,13 @@ use gpu::prelude::*;
 use std::path::Path;
 use std::time::Instant;
 
-const BLOCK: u32 = 256;
+const TILE_M: u32 = 16;
+const TILE_N: u32 = 16;
+const TILE_K: u32 = 16;
+const X_STRIDE: u32 = TILE_K + 1;
+const W_STRIDE: u32 = TILE_N + 1;
+const X_TILE: u32 = TILE_M * X_STRIDE;
+const W_TILE: u32 = TILE_K * W_STRIDE;
 
 fn checked_len(name: &str, dims: &[usize]) -> usize {
     dims.iter()
@@ -16,7 +22,7 @@ fn checked_u32(name: &str, value: usize) -> u32 {
 }
 
 #[gpu::cuda_kernel]
-pub fn pointwise_conv2d_kernel(
+pub fn pointwise_conv2d_tiled_kernel(
     x: &[f32],
     w: &[f32],
     y: &mut [f32],
@@ -25,28 +31,68 @@ pub fn pointwise_conv2d_kernel(
     H: u32,
     Wd: u32,
     Cout: u32,
-    Total: u32,
 ) {
     let _ = B;
-    let mut out = chunk_mut(y, MapContinuousLinear::new(1));
-    let idx = block_id::<DimX>() * block_dim::<DimX>() + thread_id::<DimX>();
-    let total = Total;
-    if idx < total {
-        let wi = idx % Wd;
-        let mut t = idx / Wd;
-        let h = t % H;
-        t /= H;
-        let co = t % Cout;
-        let b = t / Cout;
+    let tx = thread_id::<DimX>();
+    let ty = thread_id::<DimY>();
+    let bx = block_id::<DimX>();
+    let by = block_id::<DimY>();
+    let bz = block_id::<DimZ>();
 
-        let mut acc = 0.0f32;
-        let mut ci = 0u32;
-        while ci < Cin {
-            let x_idx = ((b * Cin + ci) * H + h) * Wd + wi;
-            let w_idx = co * Cin + ci;
-            acc += x[x_idx as usize] * w[w_idx as usize];
-            ci += 1;
+    let m = H * Wd;
+    let hw = bx * TILE_M + tx;
+    let co = by * TILE_N + ty;
+
+    let mut xs = gpu::GpuShared::<[f32; X_TILE as usize]>::zero();
+    let mut ws = gpu::GpuShared::<[f32; W_TILE as usize]>::zero();
+
+    let x_load_map = reshape_map!(
+        [1] | [TILE_M, (TILE_K, X_STRIDE)]
+        => layout: [i0, t1, t0]
+    );
+    let w_load_map = reshape_map!(
+        [1] | [TILE_K, (TILE_N, W_STRIDE)]
+        => layout: [i0, t1, t0]
+    );
+    let out_map = reshape_map!(
+        [1] | [(TILE_M, TILE_M), grid_dim::<DimX>(), (TILE_N, TILE_N), grid_dim::<DimY>(), grid_dim::<DimZ>()]
+        => layout: [i0, t0, t1, t2, t3, t4]
+    );
+    let mut out = chunk_mut(y, out_map);
+
+    let mut acc = 0.0f32;
+    let mut k0 = 0u32;
+    while k0 < Cin {
+        let x_ci = k0 + ty;
+        let w_ci = k0 + tx;
+        {
+            let mut x_chunk = xs.chunk_mut(x_load_map);
+            x_chunk[0] = if hw < m && x_ci < Cin {
+                x[((bz * Cin + x_ci) * m + hw) as usize]
+            } else {
+                0.0
+            };
         }
+        {
+            let mut w_chunk = ws.chunk_mut(w_load_map);
+            w_chunk[0] = if w_ci < Cin && co < Cout {
+                w[(co * Cin + w_ci) as usize]
+            } else {
+                0.0
+            };
+        }
+        sync_threads();
+
+        let mut kk = 0u32;
+        while kk < TILE_K {
+            acc += xs[(tx * X_STRIDE + kk) as usize] * ws[(kk * W_STRIDE + ty) as usize];
+            kk += 1;
+        }
+        sync_threads();
+        k0 += TILE_K;
+    }
+
+    if hw < m && co < Cout {
         out[0] = acc;
     }
 }
@@ -68,7 +114,22 @@ pub fn run(
     let y_len = checked_len("pointwise_conv2d output elements", &[b, cout, h, wd]);
     checked_u32("pointwise_conv2d input elements", x_len);
     checked_u32("pointwise_conv2d weight elements", w_len);
-    let total = checked_u32("pointwise_conv2d output elements", y_len);
+    let _total = checked_u32("pointwise_conv2d output elements", y_len);
+    let spatial = checked_len("pointwise_conv2d spatial elements", &[h, wd]);
+    assert_eq!(
+        spatial % TILE_M as usize,
+        0,
+        "pointwise_conv2d H*W={} must be a multiple of TILE_M={}",
+        spatial,
+        TILE_M
+    );
+    assert_eq!(
+        cout % TILE_N as usize,
+        0,
+        "pointwise_conv2d Cout={} must be a multiple of TILE_N={}",
+        cout,
+        TILE_N
+    );
 
     let h_x = crate::read_bin(&in_dir.join("x.bin"), x_len);
     let h_w = crate::read_bin(&in_dir.join("w.bin"), w_len);
@@ -82,12 +143,14 @@ pub fn run(
     let hh = checked_u32("pointwise_conv2d H", h);
     let ww = checked_u32("pointwise_conv2d W", wd);
     let co = checked_u32("pointwise_conv2d Cout", cout);
-    let grid = total.div_ceil(BLOCK);
+    let spatial_u = checked_u32("pointwise_conv2d spatial elements", spatial);
+    let grid_x = spatial_u.div_ceil(TILE_M);
+    let grid_y = co.div_ceil(TILE_N);
 
     {
-        let cfg = gpu_host::gpu_config!(grid, 1, 1, BLOCK, 1, 1, 0);
-        pointwise_conv2d_kernel::launch(
-            cfg, ctx, md, &d_x, &d_w, &mut d_y, bb, ci, hh, ww, co, total,
+        let cfg = gpu_host::gpu_config!(grid_x, grid_y, bb, TILE_M, TILE_N, 1, 0);
+        pointwise_conv2d_tiled_kernel::launch(
+            cfg, ctx, md, &d_x, &d_w, &mut d_y, bb, ci, hh, ww, co,
         )
         .unwrap();
     }
@@ -96,9 +159,9 @@ pub fn run(
     let wi = 5;
     let wt = Instant::now();
     for _ in 0..wi {
-        let cfg = gpu_host::gpu_config!(grid, 1, 1, BLOCK, 1, 1, 0);
-        pointwise_conv2d_kernel::launch(
-            cfg, ctx, md, &d_x, &d_w, &mut d_y, bb, ci, hh, ww, co, total,
+        let cfg = gpu_host::gpu_config!(grid_x, grid_y, bb, TILE_M, TILE_N, 1, 0);
+        pointwise_conv2d_tiled_kernel::launch(
+            cfg, ctx, md, &d_x, &d_w, &mut d_y, bb, ci, hh, ww, co,
         )
         .unwrap();
     }
@@ -107,9 +170,9 @@ pub fn run(
 
     let t = Instant::now();
     for _ in 0..iters {
-        let cfg = gpu_host::gpu_config!(grid, 1, 1, BLOCK, 1, 1, 0);
-        pointwise_conv2d_kernel::launch(
-            cfg, ctx, md, &d_x, &d_w, &mut d_y, bb, ci, hh, ww, co, total,
+        let cfg = gpu_host::gpu_config!(grid_x, grid_y, bb, TILE_M, TILE_N, 1, 0);
+        pointwise_conv2d_tiled_kernel::launch(
+            cfg, ctx, md, &d_x, &d_w, &mut d_y, bb, ci, hh, ww, co,
         )
         .unwrap();
     }

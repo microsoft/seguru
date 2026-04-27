@@ -1,7 +1,9 @@
 #include <torch/extension.h>
 #include <cuda_runtime.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <cstdint>
+#include <limits>
 
 template <int BLOCK>
 __global__ void group_norm_stats_kernel(const float4* __restrict__ x4,
@@ -36,7 +38,7 @@ __global__ void group_norm_stats_kernel(const float4* __restrict__ x4,
     }
 
     if (tid == 0) {
-        float inv_n = 1.0f / (float)(group_elems4 * 4);
+        float inv_n = 1.0f / (static_cast<float>(group_elems4) * 4.0f);
         float m = s_sum[0] * inv_n;
         float var = s_sumsq[0] * inv_n - m * m;
         var = var < 0.0f ? 0.0f : var;
@@ -68,35 +70,50 @@ __global__ void group_norm_apply_kernel(const float4* __restrict__ x4,
 torch::Tensor run(torch::Tensor x) {
     TORCH_CHECK(x.is_cuda() && x.is_contiguous() && x.scalar_type() == torch::kFloat32);
     TORCH_CHECK(x.dim() == 4, "group_norm expects [B,C,H,W]");
-    int B = (int)x.size(0);
-    int C = (int)x.size(1);
-    int H = (int)x.size(2);
-    int W = (int)x.size(3);
-    constexpr int GROUPS = 8;
-    TORCH_CHECK(C % GROUPS == 0, "C must be divisible by 8 groups");
-    int group_elems = (C / GROUPS) * H * W;
-    int total = B * C * H * W;
-    TORCH_CHECK(group_elems % 4 == 0, "group elements must be divisible by float4 width");
-    TORCH_CHECK(total % 4 == 0, "total elements must be divisible by float4 width");
-    int group_elems4 = group_elems / 4;
-    int total4 = total / 4;
+    const int64_t B64 = x.size(0);
+    const int64_t C64 = x.size(1);
+    const int64_t H64 = x.size(2);
+    const int64_t W64 = x.size(3);
+    constexpr int64_t GROUPS = 8;
+    TORCH_CHECK(B64 > 0 && C64 > 0 && H64 > 0 && W64 > 0,
+                "group_norm requires non-empty B, C, H, and W");
+    TORCH_CHECK(C64 % GROUPS == 0, "C must be divisible by 8 groups");
+    const int64_t group_elems64 = (C64 / GROUPS) * H64 * W64;
+    const int64_t total64 = x.numel();
+    TORCH_CHECK(group_elems64 % 4 == 0, "group elements must be divisible by float4 width");
+    TORCH_CHECK(total64 % 4 == 0, "total elements must be divisible by float4 width");
+    TORCH_CHECK(group_elems64 / 4 <= std::numeric_limits<int>::max(),
+                "group_norm group size exceeds int-indexed kernel limit");
+    TORCH_CHECK(total64 / 4 <= std::numeric_limits<int>::max(),
+                "group_norm input exceeds int-indexed kernel limit");
+    TORCH_CHECK(B64 * GROUPS <= std::numeric_limits<int>::max(),
+                "group_norm group count exceeds int-indexed kernel limit");
+    const int B = static_cast<int>(B64);
+    const int group_elems4 = static_cast<int>(group_elems64 / 4);
+    const int total4 = static_cast<int>(total64 / 4);
+
+    at::cuda::CUDAGuard device_guard(x.device());
+    auto stream = at::cuda::getCurrentCUDAStream();
 
     auto y = torch::empty_like(x);
     TORCH_CHECK(reinterpret_cast<std::uintptr_t>(x.data_ptr<float>()) % alignof(float4) == 0,
                 "x data pointer must be 16-byte aligned for float4 loads");
     TORCH_CHECK(reinterpret_cast<std::uintptr_t>(y.data_ptr<float>()) % alignof(float4) == 0,
                 "y data pointer must be 16-byte aligned for float4 stores");
-    auto mean = torch::empty({B * GROUPS}, x.options());
-    auto rstd = torch::empty({B * GROUPS}, x.options());
+    auto mean = torch::empty({B64 * GROUPS}, x.options());
+    auto rstd = torch::empty({B64 * GROUPS}, x.options());
     const float4* x4 = reinterpret_cast<const float4*>(x.data_ptr<float>());
     float4* y4 = reinterpret_cast<float4*>(y.data_ptr<float>());
 
     constexpr int BLOCK = 256;
-    group_norm_stats_kernel<BLOCK><<<B * GROUPS, BLOCK, 0, at::cuda::getCurrentCUDAStream()>>>(
+    group_norm_stats_kernel<BLOCK><<<B * 8, BLOCK, 0, stream>>>(
         x4, mean.data_ptr<float>(), rstd.data_ptr<float>(), group_elems4, 1e-5f);
     AT_CUDA_CHECK(cudaGetLastError());
-    int grid_apply = (total4 + BLOCK - 1) / BLOCK;
-    group_norm_apply_kernel<<<grid_apply, BLOCK, 0, at::cuda::getCurrentCUDAStream()>>>(
+    const int64_t grid_apply64 = (static_cast<int64_t>(total4) + BLOCK - 1) / BLOCK;
+    TORCH_CHECK(grid_apply64 <= std::numeric_limits<int>::max(),
+                "group_norm apply grid exceeds int-indexed kernel limit");
+    const int grid_apply = static_cast<int>(grid_apply64);
+    group_norm_apply_kernel<<<grid_apply, BLOCK, 0, stream>>>(
         x4, mean.data_ptr<float>(), rstd.data_ptr<float>(), y4, group_elems4, total4);
     AT_CUDA_CHECK(cudaGetLastError());
     return y;

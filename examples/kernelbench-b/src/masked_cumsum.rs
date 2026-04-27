@@ -75,18 +75,21 @@ pub fn run(
     let (b, d) = (shape[0], shape[1]);
     assert!(b > 0 && d > 0, "masked_cumsum requires non-empty B and D");
     assert_eq!(d % BLOCK as usize, 0, "D must be divisible by BLOCK");
+    let dd = u32::try_from(d).expect("masked_cumsum D exceeds u32 limit");
+    let bs = BLOCK;
+    let gs = u32::try_from(b).expect("masked_cumsum grid exceeds u32 limit");
     let n = b
         .checked_mul(d)
         .expect("masked_cumsum input element count overflow");
+    let _byte_len = n
+        .checked_mul(std::mem::size_of::<f32>())
+        .expect("masked_cumsum input byte count overflow");
     let h_x = super::read_bin(&in_dir.join("x.bin"), n);
     let h_mask = super::read_bin(&in_dir.join("mask.bin"), n);
     let mut h_y = vec![0f32; n];
     let d_x = ctx.new_tensor_view(h_x.as_slice()).unwrap();
     let d_mask = ctx.new_tensor_view(h_mask.as_slice()).unwrap();
     let mut d_y = ctx.new_tensor_view(h_y.as_mut_slice()).unwrap();
-    let dd = u32::try_from(d).expect("masked_cumsum D exceeds u32 limit");
-    let bs = BLOCK;
-    let gs = u32::try_from(b).expect("masked_cumsum grid exceeds u32 limit");
     {
         let cfg = gpu_host::gpu_config!(gs, 1, 1, bs, 1, 1, 0);
         masked_cumsum_kernel::launch(cfg, ctx, md, &d_x, &d_mask, &mut d_y, dd).unwrap();

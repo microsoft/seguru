@@ -231,7 +231,11 @@ apply pass gets a full linear grid.
 ```rust
 #[gpu::cuda_kernel]
 pub fn sum_dim_kernel(x: &[f32], y: &mut [f32], B: u32, D: u32) {
-    let mut out = chunk_mut(y, MapContinuousLinear::new(1));
+    let grid2block = build_chunk_scope(Grid, Block);
+    let block2thread = build_chunk_scope(Block, Thread);
+    let mut out = y
+        .chunk_to_scope(grid2block, MapContinuousLinear::new(1))
+        .chunk_to_scope(block2thread, MapContinuousLinear::new(1));
     let row = block_id::<DimX>();                         // 1 block = 1 row
     let tid = thread_id::<DimX>();
     let bdim = block_dim::<DimX>();

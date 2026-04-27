@@ -123,26 +123,38 @@ pub fn run(
 ) -> (f64, f64) {
     assert_eq!(shape.len(), 4, "group_norm: shape=[B,C,H,W]");
     let (b, c, h, w) = (shape[0], shape[1], shape[2], shape[3]);
+    assert!(
+        b > 0 && c > 0 && h > 0 && w > 0,
+        "group_norm requires non-empty B, C, H, and W"
+    );
     assert_eq!(c, 64, "group_norm benchmark keeps C=64");
     assert_eq!(c % GROUPS, 0, "C must be divisible by 8 groups");
-    let hw = h * w;
+    let hw = h.checked_mul(w).expect("group_norm H*W overflow");
     let channels_per_group = c / GROUPS;
-    let group_elems = channels_per_group * hw;
+    let group_elems = channels_per_group
+        .checked_mul(hw)
+        .expect("group_norm group_elems overflow");
     assert_eq!(
         group_elems % 4,
         0,
         "group elements must be divisible by Float4 width"
     );
-    let n = b * c * hw;
+    let n = b
+        .checked_mul(c)
+        .and_then(|v| v.checked_mul(hw))
+        .expect("group_norm input element count overflow");
     assert_eq!(n % 4, 0, "total elements must be divisible by Float4 width");
+    let stats_len = b
+        .checked_mul(GROUPS)
+        .expect("group_norm stats length overflow");
     let h_x = crate::read_bin(&in_dir.join("x.bin"), n);
     let mut h_y = vec![0f32; n];
     let h_x4: Vec<Float4> = h_x
         .chunks_exact(4)
         .map(|c| Float4::new([c[0], c[1], c[2], c[3]]))
         .collect();
-    let mut h_mean = vec![0f32; b * GROUPS];
-    let mut h_rstd = vec![0f32; b * GROUPS];
+    let mut h_mean = vec![0f32; stats_len];
+    let mut h_rstd = vec![0f32; stats_len];
     let mut h_y4 = vec![Float4::new([0.0; 4]); n / 4];
 
     let d_x4 = ctx.new_tensor_view(h_x4.as_slice()).unwrap();
@@ -150,10 +162,12 @@ pub fn run(
     let mut d_rstd = ctx.new_tensor_view(h_rstd.as_mut_slice()).unwrap();
     let mut d_y4 = ctx.new_tensor_view(h_y4.as_mut_slice()).unwrap();
 
-    let group_elems4 = (group_elems / 4) as u32;
-    let total4 = (n / 4) as u32;
-    let gs_stats = (b * GROUPS) as u32;
-    let gs_apply = (n / 4).div_ceil(BLOCK as usize) as u32;
+    let group_elems4 =
+        u32::try_from(group_elems / 4).expect("group_norm group_elems4 exceeds u32 limit");
+    let total4 = u32::try_from(n / 4).expect("group_norm total4 exceeds u32 limit");
+    let gs_stats = u32::try_from(stats_len).expect("group_norm stats grid exceeds u32 limit");
+    let gs_apply = u32::try_from((n / 4).div_ceil(BLOCK as usize))
+        .expect("group_norm apply grid exceeds u32 limit");
 
     {
         let cfg_s = gpu_host::gpu_config!(gs_stats, 1, 1, BLOCK, 1, 1, 0);

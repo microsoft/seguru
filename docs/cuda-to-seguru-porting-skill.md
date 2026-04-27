@@ -915,6 +915,33 @@ Use shared-memory input tiling only after measuring that it improves the raw
 CUDA algorithm you are matching. If it changes occupancy, block count, or active
 thread fraction, re-check ptxas/SASS before keeping it.
 
+**1x1 pointwise port (small-K GEMM):** do not port pointwise conv as direct
+spatial convolution. Match the raw CUDA tiled GEMM shape for
+`x[B,Cin,H,W]`, `w[Cout,Cin,1,1]`, `y[B,Cout,H,W]`: per batch,
+`M = H * W`, `K = Cin`, `N = Cout`, grid `(ceil(HW/16), ceil(Cout/16), B)`,
+and block `(16, 16, 1)`. Thread `x` owns the spatial row in `HW`, thread `y`
+owns the output channel, and each block accumulates one 16x16 output tile.
+
+- Allocate `GpuShared` tiles for input `[16][16]` and weights `[16][16]`.
+- Do shared allocation, `chunk_mut(reshape_map!(...))` setup, tile loads, and
+  syncs unconditionally so every thread reaches the same barriers.
+- Load input as `x[((b * Cin + ci) * (H * W)) + hw]`, weights as
+  `w[(co * Cin) + ci]`, accumulate over `Cin` in 16-wide chunks, and store
+  `y[((b * Cout + co) * (H * W)) + hw]`.
+- Use `reshape_map!` for flattened NCHW output only when divisibility or
+  padding makes the map safe (`H*W % 16 == 0` and `Cout % 16 == 0` for the
+  benchmark-specialized kernel). Otherwise add padding or a separate tail
+  strategy.
+- Non-multiple `Cin` also needs padding or guarded/zero-filled shared loads
+  because the K loop advances in 16-wide chunks.
+- The current load mapping assumes `TILE_M == TILE_N == TILE_K == 16`; if that
+  changes, retune the cooperative loading scheme instead of only changing
+  constants.
+
+For KernelBench-B pointwise, this moved SeGuRu from ~2391 µs / ~2389 µs to
+~1228 µs, matching raw CUDA (~1227 µs). It still trails PyTorch/cuDNN, so do
+not present this as cuDNN parity.
+
 ## Softmax Recipe
 
 Softmax over a row of length D (tensor shape `[B, D]`, softmax over dim=1).

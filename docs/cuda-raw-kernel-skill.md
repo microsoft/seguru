@@ -486,6 +486,39 @@ dim3 grid((Wo + TW - 1)/TW, (Ho + TH - 1)/TH, B * Cout);
 3. **Contiguous output write per thread** — `wo` varies innermost so writes
    coalesce.
 
+**1x1 / pointwise exception (GEMM-shaped):** the 3x3 direct-conv pattern above
+can win, but do not generalize it to `Kh=Kw=1`. Pointwise conv is
+`[HW, Cin] @ [Cin, Cout]` per batch while preserving NCHW layout. A
+one-thread-per-output loop over `Cin` is a correctness baseline only; use a
+tiled small-K GEMM/shared-memory kernel instead. On the KernelBench-B
+pointwise reduced shape, this changed raw CUDA from ~1857 µs to ~1227 µs.
+
+```cpp
+// x[B,Cin,H,W], w[Cout,Cin,1,1], y[B,Cout,H,W]
+M = H * W; K = Cin; N = Cout;
+block = dim3(16, 16, 1);
+grid  = dim3(ceil_div(M, 16), ceil_div(N, 16), B);
+
+tx = threadIdx.x; ty = threadIdx.y; b = blockIdx.z;
+hw = blockIdx.x * 16 + tx;  // row in HW
+co = blockIdx.y * 16 + ty;  // output channel
+for (ko = 0; ko < K; ko += 16) {
+    Xs[tx][ty] = x[((b * Cin + ko + ty) * M) + hw];
+    Ws[tx][ty] = w[(co * Cin) + ko + tx];
+    __syncthreads();
+    for (kk = 0; kk < 16; ++kk) acc += Xs[tx][kk] * Ws[kk][ty];
+    __syncthreads();
+}
+y[((b * Cout + co) * M) + hw] = acc;
+```
+
+This pseudo-code assumes `H*W`, `Cout`, and `Cin` are multiples of 16. For
+general shapes, guard and zero-fill shared tile loads for spatial/channel tails
+and guard the final output store.
+
+This remains far slower than PyTorch/cuDNN (about 143 µs in the same run), so
+the practical target is raw CUDA/SeGuRu parity, not cuDNN parity.
+
 **When to use shared-mem tiling instead:**
 
 - Very large `Kh × Kw` (depthwise conv with `Kh = Kw = 7` or more): the

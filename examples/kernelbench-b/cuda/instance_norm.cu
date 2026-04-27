@@ -68,6 +68,7 @@ __global__ void instance_norm_apply_kernel(const float4* __restrict__ x4,
 }
 
 torch::Tensor run(torch::Tensor x) {
+    constexpr int BLOCK = 256;
     TORCH_CHECK(x.is_cuda() && x.is_contiguous() && x.scalar_type() == torch::kFloat32);
     TORCH_CHECK(x.dim() == 4, "instance_norm expects [B,C,H,W]");
     const int64_t B64 = x.size(0);
@@ -81,8 +82,8 @@ torch::Tensor run(torch::Tensor x) {
     const int64_t rows64 = B64 * C64;
     TORCH_CHECK(hw64 % 4 == 0, "instance_norm spatial size must be divisible by float4 width");
     TORCH_CHECK(total64 % 4 == 0, "instance_norm total elements must be divisible by float4 width");
-    TORCH_CHECK(hw64 / 4 <= std::numeric_limits<int>::max(),
-                "instance_norm spatial size exceeds int-indexed kernel limit");
+    TORCH_CHECK(hw64 / 4 <= std::numeric_limits<int>::max() - BLOCK,
+                "instance_norm spatial size exceeds int-indexed stats kernel loop limit");
     TORCH_CHECK(total64 / 4 <= std::numeric_limits<int>::max(),
                 "instance_norm input exceeds int-indexed kernel limit");
     TORCH_CHECK(rows64 <= std::numeric_limits<int>::max(),
@@ -104,7 +105,6 @@ torch::Tensor run(torch::Tensor x) {
     const float4* x4 = reinterpret_cast<const float4*>(x.data_ptr<float>());
     float4* y4 = reinterpret_cast<float4*>(y.data_ptr<float>());
 
-    constexpr int BLOCK = 256;
     instance_norm_stats_kernel<BLOCK><<<rows, BLOCK, 0, stream>>>(
         x4, mean.data_ptr<float>(), rstd.data_ptr<float>(), hw4, 1e-5f);
     AT_CUDA_CHECK(cudaGetLastError());

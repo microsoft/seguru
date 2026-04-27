@@ -16,6 +16,7 @@ REQUIRED = {
         "getCurrentCUDAStream",
         "requires non-empty",
         "std::numeric_limits<int>::max()",
+        "std::numeric_limits<int>::max() - BLOCK",
     ],
     "examples/kernelbench-b/src/instance_norm.rs": [
         "instance_norm_stats_kernel",

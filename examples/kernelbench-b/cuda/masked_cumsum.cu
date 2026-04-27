@@ -2,6 +2,9 @@
 #include <torch/extension.h>
 #include <cuda_runtime.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <cstdint>
+#include <limits>
 
 template <int BLOCK>
 __global__ void masked_cumsum_kernel(const float* __restrict__ x, const float* __restrict__ mask,
@@ -35,14 +38,28 @@ __global__ void masked_cumsum_kernel(const float* __restrict__ x, const float* _
 
 torch::Tensor run(torch::Tensor x, torch::Tensor mask) {
     TORCH_CHECK(x.is_cuda() && mask.is_cuda() && x.is_contiguous() && mask.is_contiguous());
-    TORCH_CHECK(x.scalar_type() == torch::kFloat32 && mask.scalar_type() == torch::kFloat32 && x.dim() == 2);
+    TORCH_CHECK(x.scalar_type() == torch::kFloat32 && mask.scalar_type() == torch::kFloat32 &&
+                x.dim() == 2 && mask.dim() == 2);
     TORCH_CHECK(mask.sizes() == x.sizes());
-    const int64_t B = x.size(0), D = x.size(1);
+    const int64_t B64 = x.size(0);
+    const int64_t D64 = x.size(1);
+    TORCH_CHECK(B64 > 0 && D64 > 0, "masked_cumsum requires non-empty B and D");
     constexpr int BLOCK = 256;
+    const int64_t D = D64;
     TORCH_CHECK(D % BLOCK == 0, "D must be divisible by BLOCK");
+    TORCH_CHECK(B64 <= std::numeric_limits<int>::max(),
+                "masked_cumsum B exceeds int-indexed kernel limit");
+    TORCH_CHECK(D64 <= std::numeric_limits<int>::max(),
+                "masked_cumsum D exceeds int-indexed kernel limit");
+    const int B = static_cast<int>(B64);
+    const int D_i = static_cast<int>(D64);
+
+    at::cuda::CUDAGuard device_guard(x.device());
+    auto stream = at::cuda::getCurrentCUDAStream();
+
     auto y = torch::empty_like(x);
-    masked_cumsum_kernel<BLOCK><<<(int)B, BLOCK, 0, at::cuda::getCurrentCUDAStream()>>>(
-        x.data_ptr<float>(), mask.data_ptr<float>(), y.data_ptr<float>(), (int)D);
+    masked_cumsum_kernel<BLOCK><<<B, BLOCK, 0, stream>>>(
+        x.data_ptr<float>(), mask.data_ptr<float>(), y.data_ptr<float>(), D_i);
     AT_CUDA_CHECK(cudaGetLastError());
     return y;
 }

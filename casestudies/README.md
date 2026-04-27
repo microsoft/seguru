@@ -23,3 +23,17 @@ cd rust
 cargo r --release
 ```
 
+3. Benchmark
+
+Moved into ../benchmark
+```
+cd ../benchmark
+sh bench.sh
+```
+
+### MSM algorithm in NOVA
+
+```
+cd Nova
+cargo criterion --bench --no-default-features --features rs_gpu --bench msm-gpu
+```

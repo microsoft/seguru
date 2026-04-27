@@ -15,6 +15,8 @@ RUNNER = pathlib.Path(os.environ.get("CARGO_TARGET_DIR", REPO / "examples/target
 CUDA_DIR = REPO / "examples/kernelbench-b/cuda"
 BUILD_DIR = REPO / "examples/kernelbench-b/cuda_build"
 BUILD_DIR.mkdir(exist_ok=True)
+TMP_ROOT = BUILD_DIR / "compare_tmp"
+TMP_ROOT.mkdir(exist_ok=True)
 
 
 def time_fn(fn, iters=50, warmup=10):
@@ -76,6 +78,22 @@ def _rand(*s):
 def _pos(*s):
     return lambda: torch.rand(*s, device="cuda").contiguous()
 
+def _near_one(*s):
+    return lambda: (torch.rand(*s, device="cuda") * 0.002 + 0.999).contiguous()
+
+
+# Full upstream shapes for this batch are very large (argmin B=128 and scans B=32768).
+# Keep the reduction/scan dimensions intact but reduce batch rows for local verification.
+ARGMIN_DIM_SHAPE = [4, 4096, 4095]
+SCAN_32768_SHAPE = [128, 32768]
+# Keep C=64 and [B,C,H,W] semantics while reducing memory for norm-family tests.
+NORM_4D_SHAPE = [4, 64, 256, 256]
+# Preserve KernelBench conv channel/kernel semantics while reducing B/H/W memory.
+DEPTHWISE_CONV2D_SHAPE = [4, 64, 256, 256, 3, 3]
+DEPTHWISE_CONV2D_OUT = [4, 64, 254, 254]
+POINTWISE_CONV2D_SHAPE = [4, 64, 256, 256, 128]
+POINTWISE_CONV2D_OUT = [4, 128, 256, 256]
+
 
 PROBLEMS = {
     "leaky_relu": dict(
@@ -98,6 +116,61 @@ PROBLEMS = {
         in_shape=[112, 64, 512, 512], out_shape=[112, 64, 512, 512],
         cuda_run=lambda mod, x: mod.run(x, 1e-5),
         atol=1e-5,
+    ),
+    "batch_norm": dict(
+        torch_fn=lambda x: F.batch_norm(
+            x,
+            running_mean=None,
+            running_var=None,
+            weight=None,
+            bias=None,
+            training=True,
+            momentum=0.1,
+            eps=1e-5,
+        ),
+        make_x=lambda: _rand(*NORM_4D_SHAPE)(),
+        in_shape=NORM_4D_SHAPE, out_shape=NORM_4D_SHAPE,
+        cuda_run=lambda mod, x: mod.run(x),
+        atol=1e-3,
+    ),
+    "instance_norm": dict(
+        torch_fn=lambda x: F.instance_norm(
+            x,
+            running_mean=None,
+            running_var=None,
+            weight=None,
+            bias=None,
+            use_input_stats=True,
+            momentum=0.1,
+            eps=1e-5,
+        ),
+        make_x=lambda: _rand(*NORM_4D_SHAPE)(),
+        in_shape=NORM_4D_SHAPE, out_shape=NORM_4D_SHAPE,
+        cuda_run=lambda mod, x: mod.run(x),
+        atol=1e-3,
+    ),
+    "group_norm": dict(
+        torch_fn=lambda x: F.group_norm(x, num_groups=8, weight=None, bias=None, eps=1e-5),
+        make_x=lambda: _rand(*NORM_4D_SHAPE)(),
+        in_shape=NORM_4D_SHAPE, out_shape=NORM_4D_SHAPE,
+        cuda_run=lambda mod, x: mod.run(x),
+        atol=1e-3,
+    ),
+    "depthwise_conv2d": dict(
+        torch_fn=lambda xw: F.conv2d(xw[0], xw[1], bias=None, stride=1, padding=0, groups=xw[0].shape[1]),
+        make_x=lambda: (_rand(4, 64, 256, 256)(), _rand(64, 1, 3, 3)()),
+        in_shape=DEPTHWISE_CONV2D_SHAPE, out_shape=DEPTHWISE_CONV2D_OUT,
+        cuda_run=lambda mod, xw: mod.run(xw[0], xw[1]),
+        atol=1e-3,
+        inputs=["x", "w"],
+    ),
+    "pointwise_conv2d": dict(
+        torch_fn=lambda xw: F.conv2d(xw[0], xw[1], bias=None, stride=1, padding=0),
+        make_x=lambda: (_rand(4, 64, 256, 256)(), _rand(128, 64, 1, 1)()),
+        in_shape=POINTWISE_CONV2D_SHAPE, out_shape=POINTWISE_CONV2D_OUT,
+        cuda_run=lambda mod, xw: mod.run(xw[0], xw[1]),
+        atol=1e-2,
+        inputs=["x", "w"],
     ),
     "relu": dict(
         torch_fn=lambda x: F.relu(x),
@@ -223,12 +296,52 @@ PROBLEMS = {
         atol=0,
         out_dtype="int64",
     ),
+    "argmin_dim": dict(
+        torch_fn=lambda x: x.argmin(dim=1).to(torch.int64),
+        make_x=lambda: _rand(*ARGMIN_DIM_SHAPE)(),
+        in_shape=ARGMIN_DIM_SHAPE, out_shape=[ARGMIN_DIM_SHAPE[0], ARGMIN_DIM_SHAPE[2]],
+        cuda_run=lambda mod, x: mod.run(x),
+        atol=0,
+        out_dtype="int64",
+    ),
     "cumsum": dict(
         torch_fn=lambda x: torch.cumsum(x, dim=-1),
         make_x=_rand(1024, 4096),
         in_shape=[1024, 4096], out_shape=[1024, 4096],
         cuda_run=lambda mod, x: mod.run(x),
         atol=1e-3,
+    ),
+    "cumprod": dict(
+        torch_fn=lambda x: torch.cumprod(x, dim=-1),
+        make_x=lambda: _near_one(*SCAN_32768_SHAPE)(),
+        in_shape=SCAN_32768_SHAPE, out_shape=SCAN_32768_SHAPE,
+        cuda_run=lambda mod, x: mod.run(x),
+        atol=1e-3,
+    ),
+    "cumsum_reverse": dict(
+        torch_fn=lambda x: torch.cumsum(x.flip(1), dim=1).flip(1),
+        make_x=lambda: _rand(*SCAN_32768_SHAPE)(),
+        in_shape=SCAN_32768_SHAPE, out_shape=SCAN_32768_SHAPE,
+        cuda_run=lambda mod, x: mod.run(x),
+        atol=1e-3,
+    ),
+    "cumsum_exclusive": dict(
+        torch_fn=lambda x: torch.cat([torch.zeros_like(x[:, :1]), torch.cumsum(x[:, :-1], dim=1)], dim=1),
+        make_x=lambda: _rand(*SCAN_32768_SHAPE)(),
+        in_shape=SCAN_32768_SHAPE, out_shape=SCAN_32768_SHAPE,
+        cuda_run=lambda mod, x: mod.run(x),
+        atol=1e-3,
+    ),
+    "masked_cumsum": dict(
+        torch_fn=lambda xm: torch.cumsum(xm[0] * xm[1], dim=-1),
+        make_x=lambda: (
+            _rand(*SCAN_32768_SHAPE)(),
+            (torch.rand(*SCAN_32768_SHAPE, device="cuda") > 0.5).to(torch.float32).contiguous(),
+        ),
+        in_shape=SCAN_32768_SHAPE, out_shape=SCAN_32768_SHAPE,
+        cuda_run=lambda mod, xm: mod.run(xm[0], xm[1]),
+        atol=1e-3,
+        inputs=["x", "mask"],
     ),
     "mse_loss": dict(
         torch_fn=lambda ab: F.mse_loss(ab[0], ab[1]),
@@ -279,7 +392,7 @@ def run_one(name):
     # SeGuRu arm
     sg_us, sg_err, sg_error = float("inf"), float("inf"), ""
     try:
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(dir=TMP_ROOT) as td:
             tmp = pathlib.Path(td); (tmp / "in").mkdir(); (tmp / "out").mkdir()
             dump_all(tmp / "in")
             sg = run_seguru(name, tmp / "in", tmp / "out", iters=50, shape=p["in_shape"])
@@ -293,7 +406,7 @@ def run_one(name):
     # SeGuRu-from-CUDA arm
     fc_us, fc_err, fc_error = float("inf"), float("inf"), ""
     try:
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(dir=TMP_ROOT) as td:
             tmp = pathlib.Path(td); (tmp / "in").mkdir(); (tmp / "out").mkdir()
             dump_all(tmp / "in")
             fc = run_seguru(f"{name}_fc", tmp / "in", tmp / "out", iters=50, shape=p["in_shape"])

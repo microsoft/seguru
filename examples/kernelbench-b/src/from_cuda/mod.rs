@@ -6,19 +6,29 @@
 //! axis when evaluating LLM-as-porter for SeGuRu.
 
 pub mod argmax_dim;
+pub mod argmin_dim;
 pub mod avg_pool1d;
+pub mod batch_norm;
+pub mod cumprod;
 pub mod cumsum;
+pub mod cumsum_exclusive;
+pub mod cumsum_reverse;
+pub mod depthwise_conv2d;
 pub mod gelu;
+pub mod group_norm;
+pub mod instance_norm;
 pub mod l1_norm;
 pub mod l2_norm;
 pub mod layer_norm;
 pub mod leaky_relu;
 pub mod log_softmax;
+pub mod masked_cumsum;
 pub mod max_dim;
 pub mod max_pool1d;
 pub mod mean_dim;
 pub mod min_dim;
 pub mod mse_loss;
+pub mod pointwise_conv2d;
 pub mod relu;
 pub mod rms_norm;
 pub mod sigmoid;

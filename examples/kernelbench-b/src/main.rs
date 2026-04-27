@@ -28,20 +28,30 @@ use gpu::prelude::*;
 
 // Problem modules — each is written by the LLM sub-agent.
 pub mod argmax_dim;
+pub mod argmin_dim;
 pub mod avg_pool1d;
+pub mod batch_norm;
+pub mod cumprod;
 pub mod cumsum;
+pub mod cumsum_exclusive;
+pub mod cumsum_reverse;
+pub mod depthwise_conv2d;
 pub mod empty;
 pub mod gelu;
+pub mod group_norm;
+pub mod instance_norm;
 pub mod l1_norm;
 pub mod l2_norm;
 pub mod layer_norm;
 pub mod leaky_relu;
 pub mod log_softmax;
+pub mod masked_cumsum;
 pub mod max_dim;
 pub mod max_pool1d;
 pub mod mean_dim;
 pub mod min_dim;
 pub mod mse_loss;
+pub mod pointwise_conv2d;
 pub mod relu;
 pub mod rms_norm;
 pub mod sigmoid;
@@ -157,6 +167,17 @@ fn main() {
             "leaky_relu" => leaky_relu::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "tanh" => tanh::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "rms_norm" => rms_norm::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "batch_norm" => batch_norm::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "instance_norm" => {
+                instance_norm::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape)
+            }
+            "group_norm" => group_norm::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "depthwise_conv2d" => {
+                depthwise_conv2d::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape)
+            }
+            "pointwise_conv2d" => {
+                pointwise_conv2d::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape)
+            }
             "relu" => relu::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "sigmoid" => sigmoid::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "gelu" => gelu::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
@@ -175,7 +196,18 @@ fn main() {
             "max_dim" => max_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "min_dim" => min_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "argmax_dim" => argmax_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "argmin_dim" => argmin_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "cumsum" => cumsum::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "cumprod" => cumprod::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
+            "cumsum_reverse" => {
+                cumsum_reverse::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape)
+            }
+            "cumsum_exclusive" => {
+                cumsum_exclusive::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape)
+            }
+            "masked_cumsum" => {
+                masked_cumsum::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape)
+            }
             "mse_loss" => mse_loss::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "log_softmax_fc" => {
                 from_cuda::log_softmax::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape)
@@ -205,8 +237,23 @@ fn main() {
             "argmax_dim_fc" => {
                 from_cuda::argmax_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape)
             }
+            "argmin_dim_fc" => {
+                from_cuda::argmin_dim::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape)
+            }
             "cumsum_fc" => {
                 from_cuda::cumsum::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape)
+            }
+            "cumprod_fc" => {
+                from_cuda::cumprod::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape)
+            }
+            "cumsum_reverse_fc" => {
+                from_cuda::cumsum_reverse::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape)
+            }
+            "cumsum_exclusive_fc" => {
+                from_cuda::cumsum_exclusive::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape)
+            }
+            "masked_cumsum_fc" => {
+                from_cuda::masked_cumsum::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape)
             }
             "mse_loss_fc" => {
                 from_cuda::mse_loss::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape)
@@ -219,6 +266,21 @@ fn main() {
             "tanh_fc" => from_cuda::tanh::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "rms_norm_fc" => {
                 from_cuda::rms_norm::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape)
+            }
+            "batch_norm_fc" => {
+                from_cuda::batch_norm::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape)
+            }
+            "instance_norm_fc" => {
+                from_cuda::instance_norm::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape)
+            }
+            "group_norm_fc" => {
+                from_cuda::group_norm::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape)
+            }
+            "depthwise_conv2d_fc" => {
+                from_cuda::depthwise_conv2d::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape)
+            }
+            "pointwise_conv2d_fc" => {
+                from_cuda::pointwise_conv2d::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape)
             }
             "relu_fc" => from_cuda::relu::run(ctx, md, &a.in_dir, &a.out_dir, a.iters, &a.shape),
             "sigmoid_fc" => {

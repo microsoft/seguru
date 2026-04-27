@@ -114,7 +114,8 @@ pub fn run(
     let y_len = checked_len("pointwise_conv2d output elements", &[b, cout, h, wd]);
     checked_u32("pointwise_conv2d input elements", x_len);
     checked_u32("pointwise_conv2d weight elements", w_len);
-    let _total = checked_u32("pointwise_conv2d output elements", y_len);
+    let total = checked_u32("pointwise_conv2d output elements", y_len);
+    let _ = total;
     let spatial = checked_len("pointwise_conv2d spatial elements", &[h, wd]);
     assert_eq!(
         spatial % TILE_M as usize,

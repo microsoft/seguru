@@ -1,0 +1,8 @@
+[package]
+name = "polybench-syrk"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+gpu = {workspace = true}
+gpu_host = {workspace = true}

@@ -1,0 +1,9 @@
+[build]
+rustc = "rustc-gpu"
+rustflags = ["--emit=mir", "-Zmir-opt-level=3"]
+
+[env]
+USE_FAST="true"
+USE_FTZ="true"
+NVPTX_FEATURES="+ptx87"
+GPU_EXTERNAL_CRATES="halo2curves"

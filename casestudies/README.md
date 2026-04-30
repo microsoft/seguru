@@ -23,14 +23,6 @@ cd rust
 cargo r --release
 ```
 
-3. Benchmark
-
-Moved into ../benchmark
-```
-cd ../benchmark
-sh bench.sh
-```
-
 ### MSM algorithm in NOVA
 
 ```

@@ -1,12 +1,12 @@
-# Safe GPU Programming via Rust (SeGuRu)
+# Safe GPU Programming in Rust
 
-This is the source code repository for Safe GPU programming in Rust, a toolchain which aims to provide a easy-to-use and safe GPU language in Rust.
+A toolchain providing high performance and safe GPU programming in Rust.
 
 ## Security Overview
 
-SeGuRu extends the Rust ecosystem with compiler and runtime support for safe GPU programming. It leverages Rust’s strong type and memory safety guarantees to support:
+Our tool extends the Rust ecosystem with compiler and runtime support for safe GPU programming. It leverages Rust’s strong type and memory safety guarantees to support:
 
-1. Compile-time safety – A safe CPU–GPU interface in native Rust, where kernel parameters are fully type-checked and compile-time (const/static) execution configurations are guaranteed to be valid.
+1. Compile-time safety – memory safe, race free, and safe CPU–GPU interface in native Rust, where kernel parameters are fully type-checked and compile-time (const/static) execution configurations are guaranteed to be valid.
 
 2. Lightweight runtime safety – Optimized, low-overhead bounds checking to ensure memory access safety without sacrificing performance.
 
@@ -22,14 +22,10 @@ SeGuRu extends the Rust ecosystem with compiler and runtime support for safe GPU
 1. Add dependencies (cuda, llvm)
 
 ```bash
-source ./scripts/deps.sh
+./scripts/deps.sh
 ```
 
 NOTE: Please use Cuda version 12.8, 12.9, or 13.0. Other cuda versions might also work but are not tested yet and may have API mismatch issue in cuda_binding crate.
-
-NOTE: You need to do `apt install binutils` if you encountered the missing
-`libzstd` error. If you see other errros, please try the similar steps in
-`.github/workflows/rust.yml`.
 
 2. Build the tool
 
@@ -44,7 +40,23 @@ cargo build
 cargo install --path ./crates/rustc-gpu
 ```
 
-Refer to [install](doc/install.md) for more information about how to build the tool.
+## Case studies for CCS submission
+
+casestudies: Two case studies implemented by human developers
+    llm-rs: A modified llm.c with rust implementation
+    Nova:
+        provider/msm_gpu.rs: a modified msm provider accelerated by GPU
+        benches/msm-gpu.rs: benchmark for msm-gpu.
+ai_generated/: AI-generated code based on existing PyTorch or CUDA code.
+
+### MicroBenchmark
+
+```
+cd benchmark
+sh bench.sh
+```
+
+Refer to [casestudies/README.md](casestudies/README.md)
 
 ## Examples
 

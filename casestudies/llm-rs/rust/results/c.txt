@@ -1,0 +1,153 @@
++-----------------------+----------------------------------------------------+
+| Parameter             | Value                                              |
++-----------------------+----------------------------------------------------+
+| train data pattern    | dev/data/tinyshakespeare/tiny_shakespeare_train.bin |
+| val data pattern      | dev/data/tinyshakespeare/tiny_shakespeare_val.bin  |
+| output log file       | NULL                                               |
+| batch size B          | 4                                                  |
+| sequence length T     | 1024                                               |
+| learning rate         | 0.000300                                           |
+| val_loss_every        | 20                                                 |
+| val_max_steps         | 20                                                 |
+| sample_every          | 20                                                 |
+| genT                  | 64                                                 |
++-----------------------+----------------------------------------------------+
+| device                | NVIDIA A100 80GB PCIe                              |
+| TF32                  | enabled                                            |
++-----------------------+----------------------------------------------------+
+| max_sequence_length T | 1024                                               |
+| vocab_size V          | 50257                                              |
+| padded_vocab_size Vp  | 50304                                              |
+| num_layers L          | 12                                                 |
+| num_heads NH          | 12                                                 |
+| channels C            | 768                                                |
+| num_parameters        | 124475904                                          |
++-----------------------+----------------------------------------------------+
+| train_num_batches     | 74                                                 |
+| val_num_batches       | 8                                                  |
++-----------------------+----------------------------------------------------+
+allocated 474 MiB for model parameters
+allocated 5706 MiB for activations
+val loss 4.513887
+allocated 474 MiB for parameter gradients
+allocated 252 MiB for activation gradients
+allocated 474 MiB for AdamW optimizer state m
+allocated 474 MiB for AdamW optimizer state v
+step    1/74: train loss 4.287294 (114.750694 ms, 35694 tok/s)
+step    2/74: train loss 4.725433 (115.888218 ms, 35344 tok/s)
+step    3/74: train loss 4.393254 (115.958309 ms, 35323 tok/s)
+step    4/74: train loss 3.628610 (116.404552 ms, 35187 tok/s)
+step    5/74: train loss 3.717146 (117.480752 ms, 34865 tok/s)
+step    6/74: train loss 4.013289 (115.829428 ms, 35362 tok/s)
+step    7/74: train loss 4.111640 (116.359142 ms, 35201 tok/s)
+step    8/74: train loss 3.623641 (116.554623 ms, 35142 tok/s)
+step    9/74: train loss 3.965609 (116.469033 ms, 35168 tok/s)
+step   10/74: train loss 3.581535 (116.759445 ms, 35080 tok/s)
+step   11/74: train loss 4.029176 (116.276674 ms, 35226 tok/s)
+step   12/74: train loss 3.814112 (117.191231 ms, 34951 tok/s)
+step   13/74: train loss 4.029850 (116.466448 ms, 35168 tok/s)
+step   14/74: train loss 3.885654 (116.690707 ms, 35101 tok/s)
+step   15/74: train loss 3.711839 (116.316668 ms, 35214 tok/s)
+step   16/74: train loss 3.553878 (116.456029 ms, 35172 tok/s)
+step   17/74: train loss 3.988411 (116.377412 ms, 35195 tok/s)
+step   18/74: train loss 3.809871 (116.736061 ms, 35087 tok/s)
+step   19/74: train loss 3.534277 (116.051523 ms, 35294 tok/s)
+step   20/74: train loss 3.678141 (116.467790 ms, 35168 tok/s)
+val loss 3.727139
+generating:
+---
+O, but sentence were not so far from being called: first, I am in petition. What's the meaning of the general order of the prison, alpha, in order to-day? I leave no meaning more. This my lady de't
+say, Everett; let me, O Edward, plead it
+---
+step   21/74: train loss 3.609173 (113.848109 ms, 35977 tok/s)
+step   22/74: train loss 3.610843 (116.567669 ms, 35138 tok/s)
+step   23/74: train loss 3.147291 (116.741012 ms, 35086 tok/s)
+step   24/74: train loss 3.344246 (116.366653 ms, 35199 tok/s)
+step   25/74: train loss 3.707432 (116.135301 ms, 35269 tok/s)
+step   26/74: train loss 3.539611 (116.495373 ms, 35160 tok/s)
+step   27/74: train loss 3.844280 (116.535958 ms, 35147 tok/s)
+step   28/74: train loss 3.446345 (115.851681 ms, 35355 tok/s)
+step   29/74: train loss 3.317861 (116.230198 ms, 35240 tok/s)
+step   30/74: train loss 3.279901 (116.774815 ms, 35076 tok/s)
+step   31/74: train loss 3.154474 (116.463553 ms, 35169 tok/s)
+step   32/74: train loss 3.444085 (116.249655 ms, 35234 tok/s)
+step   33/74: train loss 3.566061 (116.762287 ms, 35079 tok/s)
+step   34/74: train loss 3.485113 (116.473533 ms, 35166 tok/s)
+step   35/74: train loss 3.723111 (116.807917 ms, 35066 tok/s)
+step   36/74: train loss 3.379556 (116.436573 ms, 35177 tok/s)
+step   37/74: train loss 3.199775 (116.843694 ms, 35055 tok/s)
+step   38/74: train loss 3.183192 (116.102239 ms, 35279 tok/s)
+step   39/74: train loss 3.600663 (116.512275 ms, 35155 tok/s)
+step   40/74: train loss 3.082489 (116.648719 ms, 35113 tok/s)
+val loss 3.595537
+generating:
+---
+Given frost whilst wot late, fly, order, speed, show, appear for your fill, take three innings, rouse, kisses, and have to go. Cravener
+Think better of this serpent."
+
+<|endoftext|>Pleatest;
+And is that something?
+Cold love, snare
+---
+step   41/74: train loss 3.830650 (113.748653 ms, 36009 tok/s)
+step   42/74: train loss 3.362040 (116.636296 ms, 35117 tok/s)
+step   43/74: train loss 3.355510 (116.940855 ms, 35026 tok/s)
+step   44/74: train loss 3.417981 (116.594558 ms, 35130 tok/s)
+step   45/74: train loss 3.606788 (116.561396 ms, 35140 tok/s)
+step   46/74: train loss 3.128653 (116.603886 ms, 35127 tok/s)
+step   47/74: train loss 3.463892 (116.622365 ms, 35121 tok/s)
+step   48/74: train loss 3.974016 (116.445279 ms, 35175 tok/s)
+step   49/74: train loss 3.223955 (117.305767 ms, 34917 tok/s)
+step   50/74: train loss 3.417722 (116.665190 ms, 35109 tok/s)
+step   51/74: train loss 3.760173 (116.775626 ms, 35075 tok/s)
+step   52/74: train loss 3.770244 (116.268590 ms, 35228 tok/s)
+step   53/74: train loss 3.410235 (117.270901 ms, 34927 tok/s)
+step   54/74: train loss 3.389826 (116.775125 ms, 35075 tok/s)
+step   55/74: train loss 3.273118 (116.457141 ms, 35171 tok/s)
+step   56/74: train loss 3.259672 (116.599126 ms, 35128 tok/s)
+step   57/74: train loss 3.026862 (116.222454 ms, 35242 tok/s)
+step   58/74: train loss 3.479380 (116.705735 ms, 35096 tok/s)
+step   59/74: train loss 3.270801 (116.648679 ms, 35113 tok/s)
+step   60/74: train loss 3.495185 (116.823697 ms, 35061 tok/s)
+val loss 3.506684
+generating:
+---
+stile reverence
+for the town-bills
+whom Montague shall know
+as far as can be
+property of the two-storied and
+Kicking off those still the more gracious.
+
+<|endoftext|>BUCKINGHAM:
+Why, can't they stand not?
+
+<|endoftext|>POLIXEN
+---
+step   61/74: train loss 3.212510 (113.807230 ms, 35990 tok/s)
+step   62/74: train loss 3.450737 (116.305174 ms, 35217 tok/s)
+step   63/74: train loss 3.370998 (117.287880 ms, 34922 tok/s)
+step   64/74: train loss 3.409033 (116.565441 ms, 35139 tok/s)
+step   65/74: train loss 3.579257 (116.636824 ms, 35117 tok/s)
+step   66/74: train loss 3.030982 (116.719699 ms, 35092 tok/s)
+step   67/74: train loss 3.295501 (117.172434 ms, 34957 tok/s)
+step   68/74: train loss 3.675994 (116.670316 ms, 35107 tok/s)
+step   69/74: train loss 3.297442 (116.639509 ms, 35116 tok/s)
+step   70/74: train loss 3.646622 (116.764212 ms, 35079 tok/s)
+step   71/74: train loss 3.566420 (116.910314 ms, 35035 tok/s)
+step   72/74: train loss 3.732046 (117.241413 ms, 34936 tok/s)
+step   73/74: train loss 3.826051 (117.341570 ms, 34906 tok/s)
+step   74/74: train loss 3.380849 (116.581371 ms, 35134 tok/s)
+val loss 3.491571
+generating:
+---
+BUCKINGHAM:
+But of my penitent goodness and not to marry,
+No doubt, I can marry your groaners.
+
+<|endoftext|>TRANIO:<|endoftext|>Speak not so; for we know though you
+Are fools.
+
+<|endoftext|>HORTENSIO:<|endoftext|>Lords, I told
+---
+total average iteration time: 116.454685 ms

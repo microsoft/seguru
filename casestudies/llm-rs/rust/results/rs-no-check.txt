@@ -1,0 +1,289 @@
+params: Args { train_data_pattern: "/home/ziqiaozhou/seguru/llm-rs/rust/llmrs/../../dev/data/tinyshakespeare/tiny_shakespeare_train.bin", val_data_pattern: "/home/ziqiaozhou/seguru/llm-rs/rust/llmrs/../../dev/data/tinyshakespeare/tiny_shakespeare_val.bin", model_path: "/home/ziqiaozhou/seguru/llm-rs/rust/llmrs/../../gpt2_124M.bin", tokenizer_path: "/home/ziqiaozhou/seguru/llm-rs/rust/llmrs/../../gpt2_tokenizer.bin", output_log_file: "llm_rs.log", batch_size: 4, seq_length: 1024, learning_rate: 0.0003, val_loss_every: 20, val_max_steps: 20, sample_every: 20, gen_t: 64 }
+cublas handle: 0x6244217355f0, TF32: true
+[GPT-2]
+max_seq_len: 1024
+vocab_size: 50257
+padded_vocab_size: 50304
+num_layers: 12
+num_heads: 12
+channels: 768
+num_parameters: 124475904
+| max_sequence_length T | 1024 |
+
+| vocab_size V          | 50257 |
+
+| padded_vocab_size Vp  | 50304 |
+
+| num_layers L          | 12 |
+
+| num_heads NH          | 12 |
+
+| channels C            | 768 |
+
+| num_parameters        | 124475904 |
+
++-----------------------+----------------------------------------------------+
+
+| train_num_batches     | 74 |
+
+val_num_batches: 8
++-----------------------+----------------------------------------------------+
+
+allocated 474 MiB for model parameters
+allocated 5706 MiB for activations
+mean loss: 4.5790954
+mean loss: 4.538738
+mean loss: 4.5221896
+mean loss: 4.548102
+mean loss: 4.4727907
+mean loss: 4.407259
+mean loss: 4.472965
+mean loss: 4.5790954
+val loss 4.5150294
+mean loss: 4.3678603
+allocated 474 MiB for parameter gradients
+
+allocated 252 MiB for activation gradients
+
+allocated 474 MiB for AdamW optimizer state m
+
+allocated 474 MiB for AdamW optimizer state v
+
+step 1/74: train loss 4.3678603 (186.992163ms, 21904 tok/s)
+mean loss: 4.4354596
+step 2/74: train loss 4.4354596 (111.71784ms, 36663 tok/s)
+mean loss: 4.350835
+step 3/74: train loss 4.350835 (113.540213ms, 36075 tok/s)
+mean loss: 3.9157283
+step 4/74: train loss 3.9157283 (112.246206ms, 36491 tok/s)
+mean loss: 3.5802689
+step 5/74: train loss 3.5802689 (113.45297ms, 36103 tok/s)
+mean loss: 3.750456
+step 6/74: train loss 3.750456 (113.76879ms, 36002 tok/s)
+mean loss: 3.5467505
+step 7/74: train loss 3.5467505 (113.858789ms, 35974 tok/s)
+mean loss: 3.6930687
+step 8/74: train loss 3.6930687 (113.845844ms, 35978 tok/s)
+mean loss: 3.2900727
+step 9/74: train loss 3.2900727 (113.616687ms, 36051 tok/s)
+mean loss: 3.4276595
+step 10/74: train loss 3.4276595 (113.519885ms, 36081 tok/s)
+mean loss: 3.835685
+step 11/74: train loss 3.835685 (114.055515ms, 35912 tok/s)
+mean loss: 3.459382
+step 12/74: train loss 3.459382 (113.893393ms, 35963 tok/s)
+mean loss: 3.6145072
+step 13/74: train loss 3.6145072 (113.448593ms, 36104 tok/s)
+mean loss: 3.2369645
+step 14/74: train loss 3.2369645 (113.803556ms, 35991 tok/s)
+mean loss: 3.6724892
+step 15/74: train loss 3.6724892 (113.870029ms, 35970 tok/s)
+mean loss: 3.866439
+step 16/74: train loss 3.866439 (113.866654ms, 35971 tok/s)
+mean loss: 3.8513856
+step 17/74: train loss 3.8513856 (113.380405ms, 36126 tok/s)
+mean loss: 3.9174352
+step 18/74: train loss 3.9174352 (113.555562ms, 36070 tok/s)
+mean loss: 3.6594667
+step 19/74: train loss 3.6594667 (114.89314ms, 35650 tok/s)
+mean loss: 3.741284
+step 20/74: train loss 3.741284 (113.791403ms, 35995 tok/s)
+mean loss: 3.798168
+mean loss: 3.6898177
+mean loss: 3.8332582
+mean loss: 3.8063936
+mean loss: 3.6160357
+mean loss: 3.432022
+mean loss: 3.607617
+mean loss: 3.798168
+val loss 3.697685
+generating:
+---
+ANGLOIUS:
+To these low notes of mine may I live?
+To these words of mine may I live?
+To these words of mine may I live?
+To these words<|endoftext|>With no cause that would increase my intelligence
+To meet their thoughts
+To consider their possibility
+To increase
+---
+
+mean loss: 3.699529
+step 21/74: train loss 3.699529 (111.146464ms, 36852 tok/s)
+mean loss: 3.605103
+step 22/74: train loss 3.605103 (114.868244ms, 35658 tok/s)
+mean loss: 3.546994
+step 23/74: train loss 3.546994 (113.703109ms, 36023 tok/s)
+mean loss: 3.340014
+step 24/74: train loss 3.340014 (114.143582ms, 35884 tok/s)
+mean loss: 3.4475582
+step 25/74: train loss 3.4475582 (113.941052ms, 35948 tok/s)
+mean loss: 3.756558
+step 26/74: train loss 3.756558 (114.004111ms, 35928 tok/s)
+mean loss: 3.7879972
+step 27/74: train loss 3.7879972 (113.815949ms, 35987 tok/s)
+mean loss: 3.6390781
+step 28/74: train loss 3.6390781 (113.859561ms, 35974 tok/s)
+mean loss: 3.454722
+step 29/74: train loss 3.454722 (113.823443ms, 35985 tok/s)
+mean loss: 3.578836
+step 30/74: train loss 3.578836 (114.052932ms, 35913 tok/s)
+mean loss: 3.517665
+step 31/74: train loss 3.517665 (113.855834ms, 35975 tok/s)
+mean loss: 3.3669102
+step 32/74: train loss 3.3669102 (113.890318ms, 35964 tok/s)
+mean loss: 3.4107342
+step 33/74: train loss 3.4107342 (113.96654ms, 35940 tok/s)
+mean loss: 3.6892574
+step 34/74: train loss 3.6892574 (113.812803ms, 35988 tok/s)
+mean loss: 3.3601644
+step 35/74: train loss 3.3601644 (114.334007ms, 35824 tok/s)
+mean loss: 3.4058774
+step 36/74: train loss 3.4058774 (114.743933ms, 35696 tok/s)
+mean loss: 3.8101394
+step 37/74: train loss 3.8101394 (113.988992ms, 35933 tok/s)
+mean loss: 3.628274
+step 38/74: train loss 3.628274 (113.849251ms, 35977 tok/s)
+mean loss: 3.4637754
+step 39/74: train loss 3.4637754 (113.783308ms, 35998 tok/s)
+mean loss: 3.1650634
+step 40/74: train loss 3.1650634 (114.008349ms, 35927 tok/s)
+mean loss: 3.7359788
+mean loss: 3.6274161
+mean loss: 3.7922328
+mean loss: 3.7789712
+mean loss: 3.5559726
+mean loss: 3.3775673
+mean loss: 3.573049
+mean loss: 3.7359788
+val loss 3.647146
+generating:
+---
+What by this that prays is my strength? not so much for my strength as for my strength's tenacity.
+
+<|endoftext|>COMIN:
+How many times have I seen your progress?
+
+<|endoftext|>COMIN<|endoftext|>Now is not his cause and first cause is his strength.
+
+<|endoftext|>COMIN<|endoftext|>Now is
+---
+
+mean loss: 3.4672468
+step 41/74: train loss 3.4672468 (110.950247ms, 36917 tok/s)
+mean loss: 3.3252356
+step 42/74: train loss 3.3252356 (114.561571ms, 35753 tok/s)
+mean loss: 3.4933457
+step 43/74: train loss 3.4933457 (113.788678ms, 35996 tok/s)
+mean loss: 3.3489363
+step 44/74: train loss 3.3489363 (113.858648ms, 35974 tok/s)
+mean loss: 4.006018
+step 45/74: train loss 4.006018 (114.623357ms, 35734 tok/s)
+mean loss: 3.858967
+step 46/74: train loss 3.858967 (113.443843ms, 36105 tok/s)
+mean loss: 3.7599227
+step 47/74: train loss 3.7599227 (114.305333ms, 35833 tok/s)
+mean loss: 3.9899726
+step 48/74: train loss 3.9899726 (114.808122ms, 35676 tok/s)
+mean loss: 3.9987843
+step 49/74: train loss 3.9987843 (113.827951ms, 35984 tok/s)
+mean loss: 3.8720493
+step 50/74: train loss 3.8720493 (114.388778ms, 35807 tok/s)
+mean loss: 3.6184697
+step 51/74: train loss 3.6184697 (113.941002ms, 35948 tok/s)
+mean loss: 3.5786114
+step 52/74: train loss 3.5786114 (114.000012ms, 35929 tok/s)
+mean loss: 3.8174574
+step 53/74: train loss 3.8174574 (114.112512ms, 35894 tok/s)
+mean loss: 3.7625425
+step 54/74: train loss 3.7625425 (114.785779ms, 35683 tok/s)
+mean loss: 3.465955
+step 55/74: train loss 3.465955 (113.990965ms, 35932 tok/s)
+mean loss: 3.148259
+step 56/74: train loss 3.148259 (114.249137ms, 35851 tok/s)
+mean loss: 3.3606527
+step 57/74: train loss 3.3606527 (114.695921ms, 35711 tok/s)
+mean loss: 3.5105991
+step 58/74: train loss 3.5105991 (114.14338ms, 35884 tok/s)
+mean loss: 3.346192
+step 59/74: train loss 3.346192 (114.268654ms, 35845 tok/s)
+mean loss: 3.4419036
+step 60/74: train loss 3.4419036 (114.767024ms, 35689 tok/s)
+mean loss: 3.6550639
+mean loss: 3.5246885
+mean loss: 3.687534
+mean loss: 3.647644
+mean loss: 3.4416156
+mean loss: 3.2592685
+mean loss: 3.4710336
+mean loss: 3.6550639
+val loss 3.542739
+generating:
+---
+An ear is like a bonnet: it might do more good and good for you.
+
+<|endoftext|>Toah:
+How now.
+
+<|endoftext|>Toah:
+How now.
+
+<|endoftext|>Toah<|endoftext|>Toah:
+How now.
+
+<|endoftext|>Toah<|endoftext|>Toah<|endoftext|>Toah<|endoftext|>Toah:
+
+---
+
+mean loss: 3.3346758
+step 61/74: train loss 3.3346758 (111.233145ms, 36823 tok/s)
+mean loss: 3.2512069
+step 62/74: train loss 3.2512069 (114.876158ms, 35655 tok/s)
+mean loss: 3.2996929
+step 63/74: train loss 3.2996929 (113.905013ms, 35959 tok/s)
+mean loss: 3.7872372
+step 64/74: train loss 3.7872372 (114.460571ms, 35785 tok/s)
+mean loss: 3.5378191
+step 65/74: train loss 3.5378191 (114.9257ms, 35640 tok/s)
+mean loss: 3.3472548
+step 66/74: train loss 3.3472548 (114.408483ms, 35801 tok/s)
+mean loss: 3.2147882
+step 67/74: train loss 3.2147882 (114.40092ms, 35803 tok/s)
+mean loss: 3.386865
+step 68/74: train loss 3.386865 (114.825944ms, 35671 tok/s)
+mean loss: 3.2992203
+step 69/74: train loss 3.2992203 (114.436976ms, 35792 tok/s)
+mean loss: 3.0745718
+step 70/74: train loss 3.0745718 (114.415977ms, 35799 tok/s)
+mean loss: 3.034625
+step 71/74: train loss 3.034625 (114.841832ms, 35666 tok/s)
+mean loss: 3.0487247
+step 72/74: train loss 3.0487247 (114.332532ms, 35825 tok/s)
+mean loss: 3.7159715
+step 73/74: train loss 3.7159715 (114.432989ms, 35793 tok/s)
+mean loss: 3.4675176
+step 74/74: train loss 3.4675176 (114.854947ms, 35662 tok/s)
+mean loss: 3.634419
+mean loss: 3.4849148
+mean loss: 3.6661627
+mean loss: 3.6321597
+mean loss: 3.4360874
+mean loss: 3.2588768
+mean loss: 3.4623482
+mean loss: 3.634419
+val loss 3.5261734
+generating:
+---
+ASANO:
+And if you make us love you to know
+How we great Appellos defying your approach,
+And how we love you to know what we say.
+
+<|endoftext|>LEONTES:
+Alas, no.
+
+<|endoftext|>LEONTES<|endoftext|>AMENTO:
+What an
+---
+

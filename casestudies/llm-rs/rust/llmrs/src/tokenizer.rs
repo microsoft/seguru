@@ -1,0 +1,95 @@
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
+
+pub struct Tokenizer {
+    vocab_size: u32,
+    token_table: Vec<String>,
+    pub init_ok: bool,
+}
+
+impl Tokenizer {
+    /// Creates a new Tokenizer instance from a file.
+    ///
+    /// # Arguments
+    ///
+    /// * `filename` - Path to the tokenizer file.
+    ///
+    /// # Returns
+    ///
+    /// A new `Tokenizer` instance.
+    pub fn new(filename: &Path) -> Self {
+        let mut file = match File::open(filename) {
+            Ok(file) => file,
+            Err(_) => {
+                panic!(
+                    "---\n
+                    WARNING: Failed to open the tokenizer file\n
+                    The Tokenizer is a new feature added April 14 2024.\n
+                    Re-run `python train_gpt2.py` to write it\n
+                    ---"
+                );
+            }
+        };
+
+        let mut header = [0u32; 256];
+        file.read_exact(unsafe {
+            std::slice::from_raw_parts_mut(
+                header.as_mut_ptr() as *mut u8,
+                header.len() * std::mem::size_of::<u32>(),
+            )
+        })
+        .expect("Failed to read header");
+
+        // Check magic number and version
+        if header[0] != 20240328 {
+            panic!("Bad magic tokenizer file");
+        }
+        if header[1] != 2 {
+            panic!("Bad version in tokenizer file")
+        }
+
+        let vocab_size = header[2];
+        let mut token_table = vec![String::new(); vocab_size as usize];
+
+        for token in &mut token_table {
+            let mut length = [0];
+            file.read_exact(&mut length).expect("Failed to read token length");
+
+            assert!(length[0] > 0); // Every token should be at least one character
+            let mut token_bytes = vec![0u8; length[0] as usize];
+            file.read_exact(&mut token_bytes).expect("Failed to read token bytes");
+            *token = String::from_utf8(token_bytes).unwrap_or_default();
+        }
+
+        Tokenizer { vocab_size, token_table, init_ok: true }
+    }
+
+    /// Decodes a token ID into its corresponding string.
+    ///
+    /// # Arguments
+    ///
+    /// * `token_id` - The token ID to decode.
+    ///
+    /// # Returns
+    ///
+    /// The corresponding string for the token ID.
+    pub fn decode(&mut self, token_id: u32) -> &str {
+        if !self.init_ok {
+            ""
+        } else if let Some(value) = self.token_table.get(token_id as usize) {
+            value
+        } else {
+            println!("invalid token id {}!", token_id);
+            ""
+        }
+    }
+
+    /// Frees the resources allocated by the Tokenizer.
+    pub fn free(&mut self) {
+        if self.init_ok {
+            self.token_table.clear();
+            self.init_ok = false;
+        }
+    }
+}

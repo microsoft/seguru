@@ -66,10 +66,14 @@ cargo run -p aes-gpu --release --features bench --bin aes-bench
 |---|---|
 | **Kernels** | 3 (upsweep, scan, downsweep) |
 | **Tests** | 8 (correctness across sizes) |
-| **Benchmark** | N/A (correctness-focused) |
+| **Benchmark** | SeGuRu vs CUDA |
 
 ```bash
+# Tests
 cargo test -p gpusorting-by-agent --release --lib
+
+# Benchmark (compiles CUDA reference via nvcc)
+cargo run -p gpusorting-by-agent --release --features bench --bin sort-bench
 ```
 
 ---
@@ -169,6 +173,18 @@ cargo test --release --lib \
 
 **Key finding:** SeGuRu is **13% faster** than hand-written CUDA at large sizes (≥16MB) due to shared-memory T-tables vs CUDA's `__constant__` memory. At small sizes, ~5µs fixed launch overhead dominates.
 
+### GPUSorting — SeGuRu vs CUDA Radix Sort
+
+| Size | Elements | SeGuRu (µs) | CUDA (µs) | SG/CUDA | M keys/sec |
+|------|----------|-------------|-----------|---------|------------|
+| 2^16 | 65,536   | 628         | 102       | 6.15×   | 104        |
+| 2^18 | 262,144  | 918         | 92        | 9.95×   | 286        |
+| 2^20 | 1,048,576 | 1,858      | 148       | 12.6×   | 564        |
+| 2^22 | 4,194,304 | 5,132      | 340       | 15.1×   | 817        |
+| 2^24 | 16,777,216 | 18,321    | 1,163     | 15.8×   | 916        |
+
+**Key finding:** SeGuRu sort is **6–16× slower** than CUDA. The radix sort dispatches 12 kernel launches per sort (3 kernels × 4 passes). SeGuRu's per-launch overhead (~5µs × 12 = ~60µs minimum) is significant, and each iteration reallocates device memory via `new_tensor_view` rather than reusing pre-allocated buffers. This is a worst-case scenario for SeGuRu's launch model — many small kernels with high dispatch frequency.
+
 ### HEonGPU — SeGuRu vs CUDA vs CPU (element-wise modular arithmetic)
 
 | Ring Size | Elements | Operation | SeGuRu (µs) | CUDA (µs) | SG/CUDA | CPU (µs) | GPU Speedup |
@@ -203,6 +219,8 @@ cargo test --release --lib \
 | Factor | Impact | Affected Cases |
 |--------|--------|----------------|
 | **Launch overhead** (~2–6µs fixed) | Dominates for small/fast kernels | HEonGPU, KernelBench small sizes |
+| **Multi-launch amplification** | 12 launches per sort × overhead | GPUSorting (6–16× slower) |
+| **Device memory reallocation** | Per-iteration alloc via `new_tensor_view` | GPUSorting (no buffer reuse) |
 | **Shared memory advantage** | SeGuRu faster at scale | AES encrypt (13% faster than CUDA) |
 | **Bounds checking** | ~5–10% overhead when enabled | All (disable with `DISABLE_GPU_BOUND_CHECK=true`) |
 | **Memory bandwidth bound** | Both reach HBM limit equally | AES large sizes (138 GB/s ≈ HBM limit) |
@@ -212,6 +230,9 @@ cargo test --release --lib \
 ```bash
 # AES: SeGuRu vs CUDA C++ vs CPU (all sizes from 16KB to 1GB)
 cargo run -p aes-gpu --release --features bench --bin aes-bench
+
+# GPUSorting: SeGuRu vs CUDA radix sort (sizes 2^16 to 2^24)
+cargo run -p gpusorting-by-agent --release --features bench --bin sort-bench
 
 # HEonGPU: SeGuRu vs CUDA vs CPU (ring sizes 4K–1M)
 cargo run -p heongpu-gpu --release --features bench --bin heongpu-bench
@@ -240,7 +261,7 @@ DISABLE_GPU_BOUND_CHECK=true cargo run -p aes-gpu --release --features bench --b
 | Case Study | Domain | GPU Kernels | Tests | CUDA Ref | Benchmark | Status |
 |---|---|---|---|---|---|---|
 | AES | Cryptography | 2 | 5 | ✅ | ✅ | ✅ Passes |
-| GPUSorting | Sorting | 3 | 8 | — | — | ✅ Passes |
+| GPUSorting | Sorting | 3 | 8 | ✅ | ✅ | ✅ Passes |
 | HEonGPU | Homomorphic Encryption | 42 | 41 | ✅ | ✅ | ✅ Passes |
 | KernelBench | Neural Network Ops | 48 | — | — | ✅ | ✅ Builds |
 | PolyBench | Linear Algebra | ~38 | 19 | — | — | ✅ Passes |

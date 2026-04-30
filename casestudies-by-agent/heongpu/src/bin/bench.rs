@@ -94,7 +94,7 @@ fn main() {
     let mod_bits: Vec<u64> = moduli.iter().map(|m| m.bit).collect();
     let mod_mus: Vec<u64> = moduli.iter().map(|m| m.mu).collect();
 
-    for &n_power in &[12u32, 13, 14, 15, 16] {
+    for &n_power in &[12u32, 13, 14, 15, 16, 17, 18, 19, 20] {
         let ring_size = 1usize << n_power;
         let rns_count = 2usize;
         let total = ring_size * rns_count;

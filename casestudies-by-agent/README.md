@@ -173,15 +173,17 @@ cargo test --release --lib \
 
 | Ring Size | Elements | Operation | SeGuRu (µs) | CUDA (µs) | SG/CUDA | CPU (µs) | GPU Speedup |
 |-----------|----------|-----------|-------------|-----------|---------|----------|-------------|
-| 4,096     | 8,192    | Addition  | 4.9         | 2.8       | 1.75×   | 9.4      | 1.9×        |
-| 4,096     | 8,192    | Barrett Mul | 5.4       | 3.0       | 1.82×   | 29.6     | 5.5×        |
-| 8,192     | 16,384   | Barrett Mul | 5.3       | 3.0       | 1.78×   | 50.1     | 9.4×        |
-| 16,384    | 32,768   | Barrett Mul | 4.6       | 3.4       | 1.36×   | 99.0     | 21.4×       |
-| 32,768    | 65,536   | Cipher×Plain | 4.5     | 3.7       | 1.21×   | 240.8    | 52.9×       |
-| 65,536    | 131,072  | Barrett Mul | 4.5       | 4.2       | **1.07×** | 426.6  | 94.2×       |
-| 65,536    | 131,072  | Cipher×Plain | 5.8     | 4.2       | 1.38×   | 469.6    | 81.4×       |
+| 4,096     | 8,192    | Barrett Mul | 4.4       | 3.0       | 1.48×   | 28.3     | 6.4×        |
+| 16,384    | 32,768   | Barrett Mul | 5.2       | 3.4       | 1.53×   | 100.6    | 19.5×       |
+| 65,536    | 131,072  | Barrett Mul | 5.5       | 4.2       | 1.32×   | 436.1    | 79.3×       |
+| 131,072   | 262,144  | Barrett Mul | 6.2       | 5.1       | 1.22×   | 875.7    | 141.7×      |
+| 262,144   | 524,288  | Addition  | 5.9         | 5.6       | 1.04×   | 532.5    | 90.4×       |
+| 524,288   | 1,048,576| Barrett Mul | 15.3      | 11.2      | 1.36×   | 3,389    | 221×        |
+| 1,048,576 | 2,097,152| Addition  | 35.5        | 35.2      | **1.01×** | 2,180  | 61.3×       |
+| 1,048,576 | 2,097,152| Barrett Mul | 36.8      | 36.4      | **1.01×** | 6,588  | 178.8×      |
+| 1,048,576 | 2,097,152| Cipher×Plain | 37.0    | 36.6      | **1.01×** | 7,429  | 200.9×      |
 
-**Key finding:** At the largest ring size (N=65536), SeGuRu Barrett Mul reaches **1.07× CUDA** — nearly parity. The fixed ~2µs launch overhead shrinks as a fraction of total time. GPU speedup over CPU reaches **94×**.
+**Key finding:** At N=1,048,576 (2M elements), all operations converge to **1.01× CUDA** — full parity. The fixed ~2µs launch overhead is negligible at this scale. GPU speedup over CPU reaches **221×** for Barrett multiplication.
 
 ### KernelBench — Neural Network Kernels (1024×1024 = 1M elements)
 
@@ -211,7 +213,7 @@ cargo test --release --lib \
 # AES: SeGuRu vs CUDA C++ vs CPU (all sizes from 16KB to 1GB)
 cargo run -p aes-gpu --release --features bench --bin aes-bench
 
-# HEonGPU: SeGuRu vs CUDA vs CPU (ring sizes 4K–64K)
+# HEonGPU: SeGuRu vs CUDA vs CPU (ring sizes 4K–1M)
 cargo run -p heongpu-gpu --release --features bench --bin heongpu-bench
 
 # KernelBench: individual kernel timing

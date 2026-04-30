@@ -1,0 +1,11 @@
+[package]
+name = "gpusorting-by-agent"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gpu = { workspace = true }
+gpu_host = { workspace = true }
+
+[dev-dependencies]
+rand = "0.9"

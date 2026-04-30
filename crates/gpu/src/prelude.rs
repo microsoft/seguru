@@ -9,7 +9,7 @@ pub use crate::chunk::{GlobalGroupChunk, GlobalThreadChunk, chunk_mut};
 pub use crate::chunk_impl::{Map2D, MapContinuousLinear, MapLinear, MapLinearWithDim};
 pub use crate::device_intrinsic::GPUDeviceFloatIntrinsics;
 pub use crate::dim::{
-    DimType, DimX, DimY, DimZ, block_dim, block_id, dim, global_id, grid_dim, thread_id,
+    DimType, DimX, DimY, DimZ, block_dim, block_id, dim, global_id, grid_dim, lane_id, thread_id,
 };
 pub use crate::global::GpuGlobal;
 pub use crate::host_dev::HostToDev;

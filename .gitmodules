@@ -1,7 +1,0 @@
-[submodule "llm-rs"]
-	path = casestudies/llm-rs
-	url = https://github.com/ziqiaozhou/llm.c.git
-
-[submodule "Nova"]
-	path = casestudies/Nova
-	url = https://github.com/ziqiaozhou/Nova.git

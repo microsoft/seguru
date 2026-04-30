@@ -1,0 +1,15 @@
+[package]
+name = "llmrs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+memmap2 = {workspace = true}
+cudarc = {workspace = true}
+clap = {workspace = true}
+gpu_host = {workspace = true}
+gpu = {workspace = true}
+llm-rs-gpu = {workspace = true}
+rand = {workspace = true}
+log = {workspace = true}
+env_logger = {workspace = true}

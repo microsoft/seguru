@@ -1,5 +1,8 @@
 [workspace]
 members = [
+    "aes",
+    "gpusorting",
+    "heongpu",
     "kernelbench",
     "polybench/atax",
     "polybench/bicg",

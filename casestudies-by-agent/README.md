@@ -171,15 +171,17 @@ cargo test --release --lib \
 
 ### HEonGPU — SeGuRu vs CUDA vs CPU (element-wise modular arithmetic)
 
-| Ring Size | Operation | SeGuRu (µs) | CUDA (µs) | SG/CUDA | CPU (µs) | GPU Speedup |
-|-----------|-----------|-------------|-----------|---------|----------|-------------|
-| 4,096     | Addition  | 4.4         | 2.7       | 1.64×   | 8.8      | 2.0×        |
-| 4,096     | Barrett Mul | 5.1       | 2.9       | 1.74×   | 26.5     | 5.2×        |
-| 16,384    | Addition  | 5.0         | 3.0       | 1.71×   | 32.0     | 6.3×        |
-| 16,384    | Barrett Mul | 5.4       | 3.2       | 1.66×   | 100.1    | 18.6×       |
-| 16,384    | Cipher×Plain | 5.3      | 3.3       | 1.59×   | 120.1    | 22.6×       |
+| Ring Size | Elements | Operation | SeGuRu (µs) | CUDA (µs) | SG/CUDA | CPU (µs) | GPU Speedup |
+|-----------|----------|-----------|-------------|-----------|---------|----------|-------------|
+| 4,096     | 8,192    | Addition  | 4.9         | 2.8       | 1.75×   | 9.4      | 1.9×        |
+| 4,096     | 8,192    | Barrett Mul | 5.4       | 3.0       | 1.82×   | 29.6     | 5.5×        |
+| 8,192     | 16,384   | Barrett Mul | 5.3       | 3.0       | 1.78×   | 50.1     | 9.4×        |
+| 16,384    | 32,768   | Barrett Mul | 4.6       | 3.4       | 1.36×   | 99.0     | 21.4×       |
+| 32,768    | 65,536   | Cipher×Plain | 4.5     | 3.7       | 1.21×   | 240.8    | 52.9×       |
+| 65,536    | 131,072  | Barrett Mul | 4.5       | 4.2       | **1.07×** | 426.6  | 94.2×       |
+| 65,536    | 131,072  | Cipher×Plain | 5.8     | 4.2       | 1.38×   | 469.6    | 81.4×       |
 
-**Key finding:** ~2–3µs fixed launch overhead causes 1.6–1.9× ratio vs CUDA. Actual PTX arithmetic is identical. Overhead fraction shrinks with larger problems.
+**Key finding:** At the largest ring size (N=65536), SeGuRu Barrett Mul reaches **1.07× CUDA** — nearly parity. The fixed ~2µs launch overhead shrinks as a fraction of total time. GPU speedup over CPU reaches **94×**.
 
 ### KernelBench — Neural Network Kernels (1024×1024 = 1M elements)
 
@@ -209,7 +211,7 @@ cargo test --release --lib \
 # AES: SeGuRu vs CUDA C++ vs CPU (all sizes from 16KB to 1GB)
 cargo run -p aes-gpu --release --features bench --bin aes-bench
 
-# HEonGPU: SeGuRu vs CUDA vs CPU (ring sizes 4K/8K/16K)
+# HEonGPU: SeGuRu vs CUDA vs CPU (ring sizes 4K–64K)
 cargo run -p heongpu-gpu --release --features bench --bin heongpu-bench
 
 # KernelBench: individual kernel timing

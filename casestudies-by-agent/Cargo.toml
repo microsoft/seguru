@@ -26,7 +26,6 @@ resolver = "1"
 [workspace.dependencies]
 gpu_host = {path = "../crates/gpu-host"}
 gpu = { path = "../crates/gpu" }
-syntax_gpu = {path = "syntax/gpu"}
 
 [profile.dev]
 overflow-checks = true

@@ -1,0 +1,35 @@
+[workspace]
+members = [
+    "kernelbench",
+    "polybench/atax",
+    "polybench/bicg",
+    "polybench/conv2d",
+    "polybench/conv3d",
+    "polybench/corr",
+    "polybench/covar",
+    "polybench/doitgen",
+    "polybench/fdtd2d",
+    "polybench/gemm",
+    "polybench/gesummv",
+    "polybench/gramschm",
+    "polybench/jacobi1d",
+    "polybench/jacobi2d",
+    "polybench/lu",
+    "polybench/mvt",
+    "polybench/syr2k",
+    "polybench/syrk",
+    "polybench/threemm",
+    "polybench/twomm",
+]
+resolver = "1"
+
+[workspace.dependencies]
+gpu_host = {path = "../crates/gpu-host"}
+gpu = { path = "../crates/gpu" }
+syntax_gpu = {path = "syntax/gpu"}
+
+[profile.dev]
+overflow-checks = true
+
+[profile.release]
+overflow-checks = false

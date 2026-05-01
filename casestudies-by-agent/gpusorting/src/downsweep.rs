@@ -99,26 +99,9 @@ pub fn radix_downsweep(
     }
 
     // ---- Phase 2: WLMS (Warp-Level Matching Scan) ----
-    // CUDA uses __ballot_sync to compute warpFlags = bitmask of lanes with same digit.
-    // We replace ballot with shuffle-based digit matching:
-    //   For each key, broadcast our digit to all lanes, compare, accumulate match flags.
-    //
-    // CUDA:
-    //   for (i = 0; i < BIN_KEYS_PER_THREAD; ++i) {
-    //       warpFlags = 0xffffffff;
-    //       for (k = 0; k < RADIX_LOG; ++k) {
-    //           t2 = keys[i] >> (k + radixShift) & 1;
-    //           warpFlags &= (t2 ? 0 : 0xffffffff) ^ __ballot_sync(0xffffffff, t2);
-    //       }
-    //       bits = __popc(warpFlags & getLaneMaskLt());
-    //       if (bits == 0)
-    //           preIncrementVal = atomicAdd(&s_warpHist[digit], __popc(warpFlags));
-    //       offsets[i] = __shfl_sync(0xffffffff, preIncrementVal, __ffs(warpFlags)-1) + bits;
-    //   }
-    //
-    // Shuffle-based replacement:
-    //   Each lane has a digit. We iterate over all 32 lanes, broadcast each lane's digit
-    //   via shuffle, count matches to build warpFlags equivalent.
+    // Workaround: replace __ballot_sync (1 hardware instruction) with 32 shuffle
+    // broadcasts per ballot call. Cost: 8 bits × 32 lanes = 256 shuffles/key vs 8 ballots/key.
+    // This is the dominant performance bottleneck (~32× instruction bloat vs CUDA).
     let mut offsets = [0u16; 15]; // BIN_KEYS_PER_THREAD = 15
     {
         let s_atom = gpu::sync::SharedAtomic::new(&mut *smem);
@@ -129,15 +112,13 @@ pub fn radix_downsweep(
         while i < BIN_KEYS_PER_THREAD {
             let digit = (keys[i as usize] >> radix_shift) & RADIX_MASK;
 
-            // Build warpFlags: bitmask of lanes whose digit matches ours.
-            // Use bit-level ballot emulation via shuffle:
-            // For each of the 8 bits of the digit, check which lanes have the same bit.
+            // Workaround: replace __ballot_sync with shuffle-based ballot emulation.
+            // CUDA: warpFlags &= (t2 ? 0 : 0xffffffff) ^ __ballot_sync(0xffffffff, t2);
+            // SeGuRu: iterate all 32 lanes, broadcast each bit via shuffle, build mask.
             let mut warp_flags = 0xFFFFFFFFu32;
             let mut k = 0u32;
             while k < RADIX_LOG {
                 let my_bit = (keys[i as usize] >> (k + radix_shift)) & 1;
-                // Emulate ballot: build match mask via shuffle_xor
-                // Each lane needs to know ALL lanes' bits → scan all 32 lanes
                 let mut ballot = 0u32;
                 let mut lane = 0u32;
                 while lane < 32 {
@@ -147,13 +128,13 @@ pub fn radix_downsweep(
                     }
                     lane += 1;
                 }
-                // warpFlags &= (my_bit ? 0 : 0xffffffff) ^ ballot
                 let mask = if my_bit != 0 { 0u32 } else { 0xFFFFFFFFu32 };
                 warp_flags &= mask ^ ballot;
                 k += 1;
             }
 
             // CUDA: bits = __popc(warpFlags & getLaneMaskLt())
+            // No workaround needed: count_ones() lowers to hardware ctpop.
             let lane_mask_lt = if lane_id > 0 {
                 (1u32 << lane_id) - 1
             } else {
@@ -170,12 +151,11 @@ pub fn radix_downsweep(
                     .atomic_addi(total_count);
             }
 
-            // CUDA: offsets[i] = __shfl_sync(0xffffffff, preIncrementVal, __ffs(warpFlags)-1) + bits
-            // __ffs finds first set bit (1-indexed). Manual implementation since cttz not supported on GPU.
+            // Workaround: replace __ffs (1 hardware instruction) with manual loop.
+            // cttz/trailing_zeros not supported in SeGuRu codegen.
             let mut first_lane = 0u32;
             {
                 let mut tmp = warp_flags;
-                // Find position of lowest set bit
                 let mut pos = 0u32;
                 while pos < 32 {
                     if tmp & 1 != 0 {
@@ -222,10 +202,8 @@ pub fn radix_downsweep(
     }
     sync_threads();
 
-    // CUDA: if (threadIdx.x < (RADIX >> LANE_LOG))
-    //           s_warpHistograms[threadIdx.x << LANE_LOG] =
-    //               ActiveExclusiveWarpScan(s_warpHistograms[threadIdx.x << LANE_LOG]);
-    // JIT hang workaround: thread-0 sequential exclusive scan on 8 warp-boundary positions
+    // Workaround: replace ActiveExclusiveWarpScan (parallel) with sequential scan
+    // on thread 0. SeGuRu JIT hangs with warp shuffle inside narrow conditional.
     if tid == 0 {
         let n_warps = RADIX >> LANE_LOG; // 8
         let mut running = 0u32;
@@ -317,13 +295,10 @@ pub fn radix_downsweep(
     sync_threads();
 
     // ---- Phase 4b: Scatter from shared memory to global memory ----
-    // CUDA: if (blockIdx.x < gridDim.x - 1)
-    //           for (i = threadIdx.x; i < BIN_PART_SIZE; i += blockDim.x)
-    //               alt[s_localHistogram[s_warpHistograms[i] >> radixShift & RADIX_MASK] + i]
-    //                   = s_warpHistograms[i];
-    //       if (blockIdx.x == gridDim.x - 1)
-    //           for (i = threadIdx.x; i < finalPartSize; i += blockDim.x)
-    //               alt[same] = s_warpHistograms[i];
+    // Workaround: replace plain global store with Atomic::atomic_assign.
+    // CUDA uses `alt[idx] = key` (plain store, no conflicts since each key gets a unique position).
+    // SeGuRu requires Atomic wrapper for data-dependent (scatter) writes where the compiler
+    // cannot statically prove non-overlapping indices. This adds atomic exchange overhead.
     {
         let alt_out = gpu::sync::Atomic::new(alt);
         let scatter_count = if bid < grid_dim - 1 {

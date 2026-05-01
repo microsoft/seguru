@@ -83,10 +83,9 @@ pub fn radix_scan(pass_hist: &mut [u32], padded_thread_blocks: u32) {
         // Save my inclusive value before inter-warp scan modifies warp tails
         let my_inclusive = *smem[tid as usize];
 
-        // ---- Step 3: Inter-warp inclusive scan (sequential, tid 0) ----
-        // CUDA: if (tid < (bdim >> LANE_LOG))
-        //           s_scan[(tid+1 << LANE_LOG) - 1] = ActiveInclusiveWarpScan(...)
-        // JIT hang workaround: thread-0 sequential scan on warp-tail positions.
+        // Workaround: replace ActiveInclusiveWarpScan (parallel warp scan on 4 threads)
+        // with sequential scan on thread 0. SeGuRu JIT hangs with warp shuffle inside
+        // narrow conditional (tid < n_warps). Impact: minor (only 4 values).
         if tid == 0 {
             let n_warps = block_dim >> LANE_LOG;
             let mut running = 0u32;
@@ -103,12 +102,10 @@ pub fn radix_scan(pass_hist: &mut [u32], padded_thread_blocks: u32) {
         sync_threads();
 
         // ---- Step 4: Compute exclusive prefix and write back ----
-        // Instead of CUDA's circular-shift scatter, we compute the exclusive
-        // value at each thread's own position and write back in-place.
-        //
-        // CUDA equivalent: passHist[i + digitOffset] = exclusive_prefix(positions 0..i-1)
-        //   = (inclusive of predecessor within warp) + (cross-warp prefix) + (global reduction)
-        //
+        // Workaround: replace circular-lane-shift scatter addressing with in-place
+        // exclusive prefix computation. CUDA scatters to passHist[circularLaneShift + ...]
+        // (data-dependent index). SeGuRu uses chunk_mut for structured writes instead,
+        // computing the equivalent exclusive value at each thread's own position.
         // Exclusive within warp: shuffle_up(my_inclusive, 1) gives predecessor's inclusive.
         let (prev_inclusive, _) = gpu::shuffle!(up, my_inclusive, 1u32, 32);
         let exclusive_within_warp = if lane_id > 0 { prev_inclusive } else { 0u32 };

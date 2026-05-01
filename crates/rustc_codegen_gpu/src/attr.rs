@@ -46,6 +46,7 @@ impl GpuAttributes {
 #[derive(PartialEq, Eq, Debug, Clone, Hash)]
 pub enum GpuItem {
     AllReduce,
+    Ballot,
     ThreadId,
     GlobalThreadId,
     LaneId,
@@ -134,6 +135,7 @@ impl TryFrom<&str> for GpuItem {
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         let ret = match s {
             "gpu::all_reduce" => GpuItem::AllReduce,
+            "gpu::ballot" => GpuItem::Ballot,
             "gpu::thread_id" => GpuItem::ThreadId,
             "gpu::global_thread_id" => GpuItem::GlobalThreadId,
             "gpu::lane_id" => GpuItem::LaneId,
@@ -191,6 +193,7 @@ impl From<GpuItem> for String {
     fn from(item: GpuItem) -> String {
         match item {
             GpuItem::AllReduce => "gpu::all_reduce".into(),
+            GpuItem::Ballot => "gpu::ballot".into(),
             GpuItem::ThreadId => "gpu::thread_id".into(),
             GpuItem::GlobalThreadId => "gpu::global_thread_id".into(),
             GpuItem::LaneId => "gpu::lane_id".into(),

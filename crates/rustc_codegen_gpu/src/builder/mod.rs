@@ -498,6 +498,16 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 self.append_op(melior::dialect::ods::gpu::barrier(self.mlir_ctx, loc).into());
                 Ok(None)
             }
+            GpuItem::Ballot => {
+                // ballot_sync(mask: u32, predicate: bool) -> u32
+                // args[0] = mask, args[1] = predicate (i1)
+                let mask = args[0];
+                let predicate = args[1];
+                let op = crate::mlir::gpu::nvvm_vote_ballot_sync(
+                    self.mlir_ctx, mask, predicate, loc,
+                );
+                Ok(Some(self.append_op(op)))
+            }
             GpuItem::Subslice | GpuItem::SubsliceMut => {
                 trace!("gpu.subslice(_mut) args: {:?}", args);
                 // args[0]: original:      memref<size xi8>

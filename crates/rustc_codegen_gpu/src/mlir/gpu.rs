@@ -119,6 +119,19 @@ pub(crate) fn subgroup_reduce<'ml, 'a>(
     builder.build().into()
 }
 
+pub(crate) fn nvvm_vote_ballot_sync<'ml, 'a>(
+    ctx: &'ml melior::Context,
+    mask: Value<'ml, 'a>,
+    predicate: Value<'ml, 'a>,
+    location: Location<'ml>,
+) -> Operation<'ml> {
+    OperationBuilder::new("nvvm.vote.ballot.sync", location)
+        .add_operands(&[mask, predicate])
+        .add_results(&[Type::from(IntegerType::new(ctx, 32))])
+        .build()
+        .expect("valid operation")
+}
+
 pub(crate) fn nvvm_redux_sync<'ml, 'a>(
     ctx: &'ml melior::Context,
     arg: Value<'ml, 'a>,

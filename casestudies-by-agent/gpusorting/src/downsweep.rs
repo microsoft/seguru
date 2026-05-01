@@ -34,7 +34,7 @@ use crate::{
 
 #[gpu::cuda_kernel(dynamic_shared)]
 pub fn radix_downsweep(
-    sort: &[u32],
+    sort: &[U32_4],
     alt: &mut [u32],
     global_hist: &[u32],
     pass_hist: &[u32],
@@ -85,23 +85,23 @@ pub fn radix_downsweep(
     //           keys[i] = t < size ? sort[t] : 0xffffffff; // last block
     let mut keys = [0u32; 15]; // BIN_KEYS_PER_THREAD = 15
     {
+        // flatten() converts &[U32_4] → &[u32] for scalar indexed access
+        let sort_flat = sort.flatten();
         let start = lane_id + bin_sub_part_start + bin_part_start;
         let mut i = 0u32;
         while i < BIN_KEYS_PER_THREAD {
             let t = start + i * LANE_COUNT;
             if bid < grid_dim - 1 {
-                keys[i as usize] = sort[t as usize];
+                keys[i as usize] = sort_flat[t as usize];
             } else {
-                keys[i as usize] = if t < size { sort[t as usize] } else { 0xFFFFFFFF };
+                keys[i as usize] = if t < size { sort_flat[t as usize] } else { 0xFFFFFFFF };
             }
             i += 1;
         }
     }
 
     // ---- Phase 2: WLMS (Warp-Level Matching Scan) ----
-    // Workaround: replace __ballot_sync (1 hardware instruction) with 32 shuffle
-    // broadcasts per ballot call. Cost: 8 bits × 32 lanes = 256 shuffles/key vs 8 ballots/key.
-    // This is the dominant performance bottleneck (~32× instruction bloat vs CUDA).
+    // Uses ballot_sync to compute warpFlags = bitmask of lanes with same digit.
     let mut offsets = [0u16; 15]; // BIN_KEYS_PER_THREAD = 15
     {
         let s_atom = gpu::sync::SharedAtomic::new(&mut *smem);
@@ -112,29 +112,18 @@ pub fn radix_downsweep(
         while i < BIN_KEYS_PER_THREAD {
             let digit = (keys[i as usize] >> radix_shift) & RADIX_MASK;
 
-            // Workaround: replace __ballot_sync with shuffle-based ballot emulation.
             // CUDA: warpFlags &= (t2 ? 0 : 0xffffffff) ^ __ballot_sync(0xffffffff, t2);
-            // SeGuRu: iterate all 32 lanes, broadcast each bit via shuffle, build mask.
             let mut warp_flags = 0xFFFFFFFFu32;
             let mut k = 0u32;
             while k < RADIX_LOG {
                 let my_bit = (keys[i as usize] >> (k + radix_shift)) & 1;
-                let mut ballot = 0u32;
-                let mut lane = 0u32;
-                while lane < 32 {
-                    let (other_bit, _) = gpu::shuffle!(idx, my_bit, lane, 32u32);
-                    if other_bit != 0 {
-                        ballot |= 1u32 << lane;
-                    }
-                    lane += 1;
-                }
+                let ballot = ballot_sync(0xFFFFFFFF, my_bit != 0);
                 let mask = if my_bit != 0 { 0u32 } else { 0xFFFFFFFFu32 };
                 warp_flags &= mask ^ ballot;
                 k += 1;
             }
 
             // CUDA: bits = __popc(warpFlags & getLaneMaskLt())
-            // No workaround needed: count_ones() lowers to hardware ctpop.
             let lane_mask_lt = if lane_id > 0 {
                 (1u32 << lane_id) - 1
             } else {

@@ -30,11 +30,21 @@ fn seguru_sort(data: &[u32], iters: usize, warmup: usize) -> (f64, Vec<u32>) {
 
         let h_zero_gh = vec![0u32; global_hist_len];
         let h_zero_ph = vec![0u32; pass_hist_len];
-        let h_alt = vec![0u32; data.len()];
+
+        // Reinterpret data as U32_4 slices for type-safe vectorized GPU loads.
+        // U32_4 guarantees correct alignment (16 bytes) and size (4 × u32).
+        assert!(data.len() % 4 == 0, "data length must be multiple of 4 for U32_4");
+        let sort_u32_4: &[gpu::U32_4] = unsafe {
+            core::slice::from_raw_parts(
+                data.as_ptr() as *const gpu::U32_4,
+                data.len() / 4,
+            )
+        };
+        let alt_u32_4 = vec![gpu::U32_4::default(); data.len() / 4];
 
         // Allocate device buffers ONCE — reuse across iterations
-        let mut d_sort = ctx.new_tensor_view::<[u32]>(data).unwrap();
-        let mut d_alt = ctx.new_tensor_view::<[u32]>(&h_alt).unwrap();
+        let mut d_sort = ctx.new_tensor_view::<[gpu::U32_4]>(sort_u32_4).unwrap();
+        let mut d_alt = ctx.new_tensor_view::<[gpu::U32_4]>(&alt_u32_4).unwrap();
         let mut d_global_hist = ctx.new_tensor_view::<[u32]>(&h_zero_gh).unwrap();
         let mut d_ph = ctx.new_tensor_view::<[u32]>(&h_zero_ph).unwrap();
 
@@ -42,7 +52,7 @@ fn seguru_sort(data: &[u32], iters: usize, warmup: usize) -> (f64, Vec<u32>) {
         let mut run_sort = |ctx: &gpu_host::GpuCtxZeroGuard<'_, '_>,
                             m: &gpu_host::GpuModule<gpu_host::CtxSpaceZero>| {
             // Reset input data and zero histograms (no reallocation)
-            d_sort.copy_from_host(data).unwrap();
+            d_sort.copy_from_host(sort_u32_4).unwrap();
             d_global_hist.memset(0).unwrap();
 
             for pass in 0..RADIX_PASSES {
@@ -82,12 +92,12 @@ fn seguru_sort(data: &[u32], iters: usize, warmup: usize) -> (f64, Vec<u32>) {
                 ).unwrap();
                 if pass % 2 == 0 {
                     gpusorting_by_agent::downsweep::radix_downsweep::launch(
-                        ds_cfg, ctx, m, &d_sort, &mut d_alt,
+                        ds_cfg, ctx, m, &d_sort, &mut d_alt.flatten(),
                         &d_global_hist, &d_ph, size, radix_shift, padded_thread_blocks,
                     ).unwrap();
                 } else {
                     gpusorting_by_agent::downsweep::radix_downsweep::launch(
-                        ds_cfg, ctx, m, &d_alt, &mut d_sort,
+                        ds_cfg, ctx, m, &d_alt, &mut d_sort.flatten(),
                         &d_global_hist, &d_ph, size, radix_shift, padded_thread_blocks,
                     ).unwrap();
                 }
@@ -108,7 +118,16 @@ fn seguru_sort(data: &[u32], iters: usize, warmup: usize) -> (f64, Vec<u32>) {
         ctx.sync().unwrap();
         let elapsed = start.elapsed();
 
-        d_sort.copy_to_host(&mut result).unwrap();
+        let mut result_u32_4 = vec![gpu::U32_4::default(); data.len() / 4];
+        d_sort.copy_to_host(&mut result_u32_4).unwrap();
+        // Reinterpret back to u32
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                result_u32_4.as_ptr() as *const u32,
+                result.as_mut_ptr(),
+                data.len(),
+            );
+        }
         elapsed.as_micros() as f64 / iters as f64
     });
     (us, result)

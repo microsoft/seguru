@@ -2,6 +2,8 @@ use gpu::prelude::*;
 
 use crate::{LANE_LOG, PART_SIZE, RADIX, RADIX_MASK};
 
+const VEC_PART_SIZE: u32 = PART_SIZE / 4;
+
 // ============================================================================
 // CUDA reference: DeviceRadixSort::Upsweep
 // See cuda-ref/GPUSortingCUDA/Sort/DeviceRadixSort.cu lines 39–98
@@ -17,7 +19,14 @@ use crate::{LANE_LOG, PART_SIZE, RADIX, RADIX_MASK};
 //     {
 //         uint32_t* s_wavesHist = &s_globalHist[threadIdx.x / 64 * RADIX];
 //         if (blockIdx.x < gridDim.x - 1) {
-//             for (uint32_t i = ...) atomicAdd(&s_wavesHist[...], 1);
+//             const uint4* p = reinterpret_cast<const uint4*>(&sort[partStart]);
+//             for (uint32_t i = tid; i < VEC_PART_SIZE; i += blockDim.x) {
+//                 uint4 t = p[i];
+//                 atomicAdd(&s_wavesHist[t.x >> shift & 0xFF], 1);
+//                 atomicAdd(&s_wavesHist[t.y >> shift & 0xFF], 1);
+//                 atomicAdd(&s_wavesHist[t.z >> shift & 0xFF], 1);
+//                 atomicAdd(&s_wavesHist[t.w >> shift & 0xFF], 1);
+//             }
 //         }
 //         if (blockIdx.x == gridDim.x - 1) {
 //             for (uint32_t i = ...) atomicAdd(&s_wavesHist[sort[i] >> radixShift & RADIX_MASK], 1);
@@ -45,7 +54,7 @@ use crate::{LANE_LOG, PART_SIZE, RADIX, RADIX_MASK};
 
 #[gpu::cuda_kernel(dynamic_shared)]
 pub fn radix_upsweep(
-    sort: &[u32],
+    sort: &[U32_4],
     global_hist: &mut [u32],
     pass_hist: &mut [u32],
     size: u32,
@@ -83,27 +92,41 @@ pub fn radix_upsweep(
         let wave_offset = (tid / 64) * RADIX;
 
         // CUDA: if (blockIdx.x < gridDim.x - 1) — non-last block, full partition
-    // Workaround: replace uint4 vectorized loads (4 keys per load, VEC_PART_SIZE=1920 iterations)
-    // with scalar loads (1 key per load, PART_SIZE=7680 iterations).
-    // SeGuRu does not support uint4 vector types for coalesced multi-element loads.
-    if block_id < grid_dim - 1 {
-            let part_start = block_id * PART_SIZE;
-            let part_end = part_start + PART_SIZE;
-            let mut i = tid + part_start;
-            while i < part_end {
-                let digit = (sort[i as usize] >> radix_shift) & RADIX_MASK;
-                s_atomic
-                    .index((wave_offset + digit) as usize)
-                    .atomic_addi(1u32);
+        // Uses U32_4 vectorized loads (4 keys per load, VEC_PART_SIZE iterations)
+        // matching CUDA's uint4 reinterpret_cast pattern.
+        if block_id < grid_dim - 1 {
+            let vec_part_start = block_id * VEC_PART_SIZE;
+            let mut i = tid + vec_part_start;
+            let vec_part_end = vec_part_start + VEC_PART_SIZE;
+            while i < vec_part_end {
+                let keys = sort[i as usize];
+                let k = keys.data();
+                let d0 = (k[0] >> radix_shift) & RADIX_MASK;
+                let d1 = (k[1] >> radix_shift) & RADIX_MASK;
+                let d2 = (k[2] >> radix_shift) & RADIX_MASK;
+                let d3 = (k[3] >> radix_shift) & RADIX_MASK;
+                s_atomic.index((wave_offset + d0) as usize).atomic_addi(1u32);
+                s_atomic.index((wave_offset + d1) as usize).atomic_addi(1u32);
+                s_atomic.index((wave_offset + d2) as usize).atomic_addi(1u32);
+                s_atomic.index((wave_offset + d3) as usize).atomic_addi(1u32);
                 i += block_dim;
             }
         }
 
         // CUDA: if (blockIdx.x == gridDim.x - 1) — last block, partial
+        // Last block uses scalar access since size may not be multiple of 4
         if block_id == grid_dim - 1 {
-            let mut i = tid + block_id * PART_SIZE;
+            // Scalar fallback for partial last block
+            let scalar_start = block_id * PART_SIZE;
+            let mut i = tid + scalar_start;
             while i < size {
-                let digit = (sort[i as usize] >> radix_shift) & RADIX_MASK;
+                // Reinterpret: element i in u32 space = sort[i/4].data[i%4]
+                let vec_idx = i / 4;
+                let elem_idx = i % 4;
+                let keys = sort[vec_idx as usize];
+                let k = keys.data();
+                let key = k[elem_idx as usize];
+                let digit = (key >> radix_shift) & RADIX_MASK;
                 s_atomic
                     .index((wave_offset + digit) as usize)
                     .atomic_addi(1u32);

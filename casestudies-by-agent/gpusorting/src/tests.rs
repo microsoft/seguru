@@ -21,6 +21,7 @@ mod sort_tests {
     // ============================================================================
 
     fn run_sort(input: &mut [u32]) {
+        assert!(input.len() % 4 == 0, "input length must be multiple of 4 for U32_4");
         cuda_ctx(0, |ctx, m| {
             let size = input.len() as u32;
             let thread_blocks = (size + PART_SIZE - 1) / PART_SIZE;
@@ -32,10 +33,13 @@ mod sort_tests {
 
             let mut h_global_hist = vec![0u32; global_hist_len];
             let mut h_pass_hist = vec![0u32; pass_hist_len];
-            let mut h_alt = vec![0u32; input.len()];
+            let h_alt = vec![gpu::U32_4::default(); input.len() / 4];
 
-            let mut d_data = ctx.new_tensor_view::<[u32]>(input).expect("alloc data");
-            let mut d_alt = ctx.new_tensor_view::<[u32]>(&h_alt).expect("alloc alt");
+            let sort_u32_4: &[gpu::U32_4] = unsafe {
+                core::slice::from_raw_parts(input.as_ptr() as *const gpu::U32_4, input.len() / 4)
+            };
+            let mut d_data = ctx.new_tensor_view::<[gpu::U32_4]>(sort_u32_4).expect("alloc data");
+            let mut d_alt = ctx.new_tensor_view::<[gpu::U32_4]>(&h_alt).expect("alloc alt");
             let mut d_global_hist =
                 ctx.new_tensor_view::<[u32]>(&h_global_hist).expect("alloc global_hist");
             let mut _d_pass_hist =
@@ -82,13 +86,13 @@ mod sort_tests {
                 if pass % 2 == 0 {
                     crate::downsweep::radix_downsweep::launch(
                         downsweep_config, ctx, m,
-                        &d_data, &mut d_alt, &d_global_hist, &d_pass_hist_fresh,
+                        &d_data, &mut d_alt.flatten(), &d_global_hist, &d_pass_hist_fresh,
                         size, radix_shift, padded_thread_blocks,
                     ).expect("downsweep launch failed");
                 } else {
                     crate::downsweep::radix_downsweep::launch(
                         downsweep_config, ctx, m,
-                        &d_alt, &mut d_data, &d_global_hist, &d_pass_hist_fresh,
+                        &d_alt, &mut d_data.flatten(), &d_global_hist, &d_pass_hist_fresh,
                         size, radix_shift, padded_thread_blocks,
                     ).expect("downsweep launch failed");
                 }
@@ -97,7 +101,13 @@ mod sort_tests {
             }
 
             // After 4 passes (even), result is in d_data
-            d_data.copy_to_host(input).expect("copy back failed");
+            let mut result_u32_4 = vec![gpu::U32_4::default(); input.len() / 4];
+            d_data.copy_to_host(&mut result_u32_4).expect("copy back failed");
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    result_u32_4.as_ptr() as *const u32, input.as_mut_ptr(), input.len(),
+                );
+            }
         });
     }
 
@@ -184,12 +194,15 @@ mod sort_tests {
             // Pre-allocate host zeroed buffers
             let h_zero_gh = vec![0u32; global_hist_len];
             let h_zero_ph = vec![0u32; pass_hist_len];
-            let h_alt = vec![0u32; data.len()];
 
             // Warmup run
             {
-                let mut d_sort = ctx.new_tensor_view::<[u32]>(&data).unwrap();
-                let mut d_alt = ctx.new_tensor_view::<[u32]>(&h_alt).unwrap();
+                let sort_u32_4: &[gpu::U32_4] = unsafe {
+                    core::slice::from_raw_parts(data.as_ptr() as *const gpu::U32_4, data.len() / 4)
+                };
+                let h_alt_u32_4 = vec![gpu::U32_4::default(); data.len() / 4];
+                let mut d_sort = ctx.new_tensor_view::<[gpu::U32_4]>(sort_u32_4).unwrap();
+                let mut d_alt = ctx.new_tensor_view::<[gpu::U32_4]>(&h_alt_u32_4).unwrap();
                 let mut d_global_hist = ctx.new_tensor_view::<[u32]>(&h_zero_gh).unwrap();
                 for pass in 0..RADIX_PASSES {
                     let radix_shift = pass * RADIX_LOG;
@@ -204,19 +217,23 @@ mod sort_tests {
                     crate::scan::radix_scan::launch(sc_cfg, ctx, m, &mut d_ph, padded_thread_blocks).unwrap();
                     let ds_cfg = gpu_host::gpu_config!(thread_blocks, 1, 1, DOWNSWEEP_THREADS, 1, 1, (BIN_PART_SIZE + RADIX) * 4);
                     if pass % 2 == 0 {
-                        crate::downsweep::radix_downsweep::launch(ds_cfg, ctx, m, &d_sort, &mut d_alt, &d_global_hist, &d_ph, size, radix_shift, padded_thread_blocks).unwrap();
+                        crate::downsweep::radix_downsweep::launch(ds_cfg, ctx, m, &d_sort, &mut d_alt.flatten(), &d_global_hist, &d_ph, size, radix_shift, padded_thread_blocks).unwrap();
                     } else {
-                        crate::downsweep::radix_downsweep::launch(ds_cfg, ctx, m, &d_alt, &mut d_sort, &d_global_hist, &d_ph, size, radix_shift, padded_thread_blocks).unwrap();
+                        crate::downsweep::radix_downsweep::launch(ds_cfg, ctx, m, &d_alt, &mut d_sort.flatten(), &d_global_hist, &d_ph, size, radix_shift, padded_thread_blocks).unwrap();
                     }
                 }
             }
 
             // Benchmark: 10 iterations
             let iters = 10;
+            let sort_u32_4: &[gpu::U32_4] = unsafe {
+                core::slice::from_raw_parts(data.as_ptr() as *const gpu::U32_4, data.len() / 4)
+            };
+            let h_alt_u32_4 = vec![gpu::U32_4::default(); data.len() / 4];
             let start = std::time::Instant::now();
             for _ in 0..iters {
-                let mut d_sort = ctx.new_tensor_view::<[u32]>(&data).unwrap();
-                let mut d_alt = ctx.new_tensor_view::<[u32]>(&h_alt).unwrap();
+                let mut d_sort = ctx.new_tensor_view::<[gpu::U32_4]>(sort_u32_4).unwrap();
+                let mut d_alt = ctx.new_tensor_view::<[gpu::U32_4]>(&h_alt_u32_4).unwrap();
                 let mut d_global_hist = ctx.new_tensor_view::<[u32]>(&h_zero_gh).unwrap();
                 for pass in 0..RADIX_PASSES {
                     let radix_shift = pass * RADIX_LOG;
@@ -231,14 +248,14 @@ mod sort_tests {
                     crate::scan::radix_scan::launch(sc_cfg, ctx, m, &mut d_ph, padded_thread_blocks).unwrap();
                     let ds_cfg = gpu_host::gpu_config!(thread_blocks, 1, 1, DOWNSWEEP_THREADS, 1, 1, (BIN_PART_SIZE + RADIX) * 4);
                     if pass % 2 == 0 {
-                        crate::downsweep::radix_downsweep::launch(ds_cfg, ctx, m, &d_sort, &mut d_alt, &d_global_hist, &d_ph, size, radix_shift, padded_thread_blocks).unwrap();
+                        crate::downsweep::radix_downsweep::launch(ds_cfg, ctx, m, &d_sort, &mut d_alt.flatten(), &d_global_hist, &d_ph, size, radix_shift, padded_thread_blocks).unwrap();
                     } else {
-                        crate::downsweep::radix_downsweep::launch(ds_cfg, ctx, m, &d_alt, &mut d_sort, &d_global_hist, &d_ph, size, radix_shift, padded_thread_blocks).unwrap();
+                        crate::downsweep::radix_downsweep::launch(ds_cfg, ctx, m, &d_alt, &mut d_sort.flatten(), &d_global_hist, &d_ph, size, radix_shift, padded_thread_blocks).unwrap();
                     }
                 }
                 // Sync to ensure GPU finished
-                let mut result = vec![0u32; data.len()];
-                d_sort.copy_to_host(&mut result).unwrap();
+                let mut result_u32_4 = vec![gpu::U32_4::default(); data.len() / 4];
+                d_sort.copy_to_host(&mut result_u32_4).unwrap();
             }
             let elapsed = start.elapsed();
             let avg_us = elapsed.as_micros() as f64 / iters as f64;
@@ -248,8 +265,8 @@ mod sort_tests {
             );
 
             // Verify correctness on last run
-            let mut d_sort = ctx.new_tensor_view::<[u32]>(&data).unwrap();
-            let mut d_alt = ctx.new_tensor_view::<[u32]>(&vec![0u32; data.len()]).unwrap();
+            let mut d_sort = ctx.new_tensor_view::<[gpu::U32_4]>(sort_u32_4).unwrap();
+            let mut d_alt = ctx.new_tensor_view::<[gpu::U32_4]>(&h_alt_u32_4).unwrap();
             let mut d_global_hist = ctx.new_tensor_view::<[u32]>(&h_zero_gh).unwrap();
             for pass in 0..RADIX_PASSES {
                 let radix_shift = pass * RADIX_LOG;
@@ -264,13 +281,19 @@ mod sort_tests {
                 crate::scan::radix_scan::launch(sc_cfg, ctx, m, &mut d_ph, padded_thread_blocks).unwrap();
                 let ds_cfg = gpu_host::gpu_config!(thread_blocks, 1, 1, DOWNSWEEP_THREADS, 1, 1, (BIN_PART_SIZE + RADIX) * 4);
                 if pass % 2 == 0 {
-                    crate::downsweep::radix_downsweep::launch(ds_cfg, ctx, m, &d_sort, &mut d_alt, &d_global_hist, &d_ph, size, radix_shift, padded_thread_blocks).unwrap();
+                    crate::downsweep::radix_downsweep::launch(ds_cfg, ctx, m, &d_sort, &mut d_alt.flatten(), &d_global_hist, &d_ph, size, radix_shift, padded_thread_blocks).unwrap();
                 } else {
-                    crate::downsweep::radix_downsweep::launch(ds_cfg, ctx, m, &d_alt, &mut d_sort, &d_global_hist, &d_ph, size, radix_shift, padded_thread_blocks).unwrap();
+                    crate::downsweep::radix_downsweep::launch(ds_cfg, ctx, m, &d_alt, &mut d_sort.flatten(), &d_global_hist, &d_ph, size, radix_shift, padded_thread_blocks).unwrap();
                 }
             }
+            let mut result_u32_4 = vec![gpu::U32_4::default(); data.len() / 4];
+            d_sort.copy_to_host(&mut result_u32_4).unwrap();
             let mut result = vec![0u32; data.len()];
-            d_sort.copy_to_host(&mut result).unwrap();
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    result_u32_4.as_ptr() as *const u32, result.as_mut_ptr(), data.len(),
+                );
+            }
             let mut expected = data.clone();
             expected.sort();
             assert_eq!(result, expected);

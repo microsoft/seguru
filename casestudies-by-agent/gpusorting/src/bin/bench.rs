@@ -20,7 +20,7 @@ mod ffi {
 
 fn seguru_sort(data: &[u32], iters: usize, warmup: usize) -> (f64, Vec<u32>) {
     let mut result = vec![0u32; data.len()];
-    gpu_host::cuda_ctx(0, |ctx, m| {
+    let us = gpu_host::cuda_ctx(0, |ctx, m| {
         let size = data.len() as u32;
         let thread_blocks = (size + PART_SIZE - 1) / PART_SIZE;
         let padded_thread_blocks =
@@ -32,20 +32,40 @@ fn seguru_sort(data: &[u32], iters: usize, warmup: usize) -> (f64, Vec<u32>) {
         let h_zero_ph = vec![0u32; pass_hist_len];
         let h_alt = vec![0u32; data.len()];
 
-        // Helper closure to run one sort
+        // Allocate device buffers ONCE — reuse across iterations
+        let mut d_sort = ctx.new_tensor_view::<[u32]>(data).unwrap();
+        let mut d_alt = ctx.new_tensor_view::<[u32]>(&h_alt).unwrap();
+        let mut d_global_hist = ctx.new_tensor_view::<[u32]>(&h_zero_gh).unwrap();
+        let mut d_ph = ctx.new_tensor_view::<[u32]>(&h_zero_ph).unwrap();
+
+        // Helper: run one sort using pre-allocated buffers
         let mut run_sort = |ctx: &gpu_host::GpuCtxZeroGuard<'_, '_>,
                             m: &gpu_host::GpuModule<gpu_host::CtxSpaceZero>| {
-            let mut d_sort = ctx.new_tensor_view::<[u32]>(data).unwrap();
-            let mut d_alt = ctx.new_tensor_view::<[u32]>(&h_alt).unwrap();
-            let mut d_global_hist = ctx.new_tensor_view::<[u32]>(&h_zero_gh).unwrap();
+            // Reset input data and zero histograms (no reallocation)
+            d_sort.copy_from_host(data).unwrap();
+            d_global_hist.memset(0).unwrap();
+
             for pass in 0..RADIX_PASSES {
                 let radix_shift = pass * RADIX_LOG;
-                let mut d_ph = ctx.new_tensor_view::<[u32]>(&h_zero_ph).unwrap();
+                // Zero pass histogram each pass
+                d_ph.memset(0).unwrap();
+
                 let us_cfg = gpu_host::gpu_config!(
                     thread_blocks, 1, 1,
                     UPSWEEP_THREADS, 1, 1,
                     RADIX * 2 * 4
                 );
+                let sc_cfg = gpu_host::gpu_config!(
+                    RADIX, 1, 1,
+                    SCAN_THREADS, 1, 1,
+                    SCAN_THREADS * 4
+                );
+                let ds_cfg = gpu_host::gpu_config!(
+                    thread_blocks, 1, 1,
+                    DOWNSWEEP_THREADS, 1, 1,
+                    (BIN_PART_SIZE + RADIX) * 4
+                );
+
                 if pass % 2 == 0 {
                     gpusorting_by_agent::upsweep::radix_upsweep::launch(
                         us_cfg, ctx, m, &d_sort, &mut d_global_hist, &mut d_ph,
@@ -57,19 +77,9 @@ fn seguru_sort(data: &[u32], iters: usize, warmup: usize) -> (f64, Vec<u32>) {
                         size, radix_shift, padded_thread_blocks,
                     ).unwrap();
                 }
-                let sc_cfg = gpu_host::gpu_config!(
-                    RADIX, 1, 1,
-                    SCAN_THREADS, 1, 1,
-                    SCAN_THREADS * 4
-                );
                 gpusorting_by_agent::scan::radix_scan::launch(
                     sc_cfg, ctx, m, &mut d_ph, padded_thread_blocks,
                 ).unwrap();
-                let ds_cfg = gpu_host::gpu_config!(
-                    thread_blocks, 1, 1,
-                    DOWNSWEEP_THREADS, 1, 1,
-                    (BIN_PART_SIZE + RADIX) * 4
-                );
                 if pass % 2 == 0 {
                     gpusorting_by_agent::downsweep::radix_downsweep::launch(
                         ds_cfg, ctx, m, &d_sort, &mut d_alt,
@@ -82,7 +92,6 @@ fn seguru_sort(data: &[u32], iters: usize, warmup: usize) -> (f64, Vec<u32>) {
                     ).unwrap();
                 }
             }
-            d_sort.copy_to_host(&mut result).unwrap();
         };
 
         // Warmup
@@ -98,72 +107,9 @@ fn seguru_sort(data: &[u32], iters: usize, warmup: usize) -> (f64, Vec<u32>) {
         }
         ctx.sync().unwrap();
         let elapsed = start.elapsed();
+
+        d_sort.copy_to_host(&mut result).unwrap();
         elapsed.as_micros() as f64 / iters as f64
-    });
-    let us = gpu_host::cuda_ctx(0, |ctx, m| {
-        let size = data.len() as u32;
-        let thread_blocks = (size + PART_SIZE - 1) / PART_SIZE;
-        let padded_thread_blocks =
-            ((thread_blocks + SCAN_THREADS - 1) / SCAN_THREADS) * SCAN_THREADS;
-        let global_hist_len = (RADIX * RADIX_PASSES) as usize;
-        let pass_hist_len = (RADIX * padded_thread_blocks) as usize;
-        let h_zero_gh = vec![0u32; global_hist_len];
-        let h_zero_ph = vec![0u32; pass_hist_len];
-        let h_alt = vec![0u32; data.len()];
-
-        // Warmup
-        for _ in 0..warmup {
-            let mut d_sort = ctx.new_tensor_view::<[u32]>(data).unwrap();
-            let mut d_alt = ctx.new_tensor_view::<[u32]>(&h_alt).unwrap();
-            let mut d_global_hist = ctx.new_tensor_view::<[u32]>(&h_zero_gh).unwrap();
-            for pass in 0..RADIX_PASSES {
-                let radix_shift = pass * RADIX_LOG;
-                let mut d_ph = ctx.new_tensor_view::<[u32]>(&h_zero_ph).unwrap();
-                let us_cfg = gpu_host::gpu_config!(thread_blocks, 1, 1, UPSWEEP_THREADS, 1, 1, RADIX * 2 * 4);
-                if pass % 2 == 0 {
-                    gpusorting_by_agent::upsweep::radix_upsweep::launch(us_cfg, ctx, m, &d_sort, &mut d_global_hist, &mut d_ph, size, radix_shift, padded_thread_blocks).unwrap();
-                } else {
-                    gpusorting_by_agent::upsweep::radix_upsweep::launch(us_cfg, ctx, m, &d_alt, &mut d_global_hist, &mut d_ph, size, radix_shift, padded_thread_blocks).unwrap();
-                }
-                let sc_cfg = gpu_host::gpu_config!(RADIX, 1, 1, SCAN_THREADS, 1, 1, SCAN_THREADS * 4);
-                gpusorting_by_agent::scan::radix_scan::launch(sc_cfg, ctx, m, &mut d_ph, padded_thread_blocks).unwrap();
-                let ds_cfg = gpu_host::gpu_config!(thread_blocks, 1, 1, DOWNSWEEP_THREADS, 1, 1, (BIN_PART_SIZE + RADIX) * 4);
-                if pass % 2 == 0 {
-                    gpusorting_by_agent::downsweep::radix_downsweep::launch(ds_cfg, ctx, m, &d_sort, &mut d_alt, &d_global_hist, &d_ph, size, radix_shift, padded_thread_blocks).unwrap();
-                } else {
-                    gpusorting_by_agent::downsweep::radix_downsweep::launch(ds_cfg, ctx, m, &d_alt, &mut d_sort, &d_global_hist, &d_ph, size, radix_shift, padded_thread_blocks).unwrap();
-                }
-            }
-        }
-        ctx.sync().unwrap();
-
-        let start = Instant::now();
-        for _ in 0..iters {
-            let mut d_sort = ctx.new_tensor_view::<[u32]>(data).unwrap();
-            let mut d_alt = ctx.new_tensor_view::<[u32]>(&h_alt).unwrap();
-            let mut d_global_hist = ctx.new_tensor_view::<[u32]>(&h_zero_gh).unwrap();
-            for pass in 0..RADIX_PASSES {
-                let radix_shift = pass * RADIX_LOG;
-                let mut d_ph = ctx.new_tensor_view::<[u32]>(&h_zero_ph).unwrap();
-                let us_cfg = gpu_host::gpu_config!(thread_blocks, 1, 1, UPSWEEP_THREADS, 1, 1, RADIX * 2 * 4);
-                if pass % 2 == 0 {
-                    gpusorting_by_agent::upsweep::radix_upsweep::launch(us_cfg, ctx, m, &d_sort, &mut d_global_hist, &mut d_ph, size, radix_shift, padded_thread_blocks).unwrap();
-                } else {
-                    gpusorting_by_agent::upsweep::radix_upsweep::launch(us_cfg, ctx, m, &d_alt, &mut d_global_hist, &mut d_ph, size, radix_shift, padded_thread_blocks).unwrap();
-                }
-                let sc_cfg = gpu_host::gpu_config!(RADIX, 1, 1, SCAN_THREADS, 1, 1, SCAN_THREADS * 4);
-                gpusorting_by_agent::scan::radix_scan::launch(sc_cfg, ctx, m, &mut d_ph, padded_thread_blocks).unwrap();
-                let ds_cfg = gpu_host::gpu_config!(thread_blocks, 1, 1, DOWNSWEEP_THREADS, 1, 1, (BIN_PART_SIZE + RADIX) * 4);
-                if pass % 2 == 0 {
-                    gpusorting_by_agent::downsweep::radix_downsweep::launch(ds_cfg, ctx, m, &d_sort, &mut d_alt, &d_global_hist, &d_ph, size, radix_shift, padded_thread_blocks).unwrap();
-                } else {
-                    gpusorting_by_agent::downsweep::radix_downsweep::launch(ds_cfg, ctx, m, &d_alt, &mut d_sort, &d_global_hist, &d_ph, size, radix_shift, padded_thread_blocks).unwrap();
-                }
-            }
-            d_sort.copy_to_host(&mut result).unwrap();
-        }
-        ctx.sync().unwrap();
-        start.elapsed().as_micros() as f64 / iters as f64
     });
     (us, result)
 }

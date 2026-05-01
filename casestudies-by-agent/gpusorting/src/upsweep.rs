@@ -83,7 +83,10 @@ pub fn radix_upsweep(
         let wave_offset = (tid / 64) * RADIX;
 
         // CUDA: if (blockIdx.x < gridDim.x - 1) — non-last block, full partition
-        if block_id < grid_dim - 1 {
+    // Workaround: replace uint4 vectorized loads (4 keys per load, VEC_PART_SIZE=1920 iterations)
+    // with scalar loads (1 key per load, PART_SIZE=7680 iterations).
+    // SeGuRu does not support uint4 vector types for coalesced multi-element loads.
+    if block_id < grid_dim - 1 {
             let part_start = block_id * PART_SIZE;
             let part_end = part_start + PART_SIZE;
             let mut i = tid + part_start;
@@ -139,11 +142,9 @@ pub fn radix_upsweep(
     }
     sync_threads();
 
-    // CUDA: if (threadIdx.x < (RADIX >> LANE_LOG))
-    //           s_globalHist[threadIdx.x << LANE_LOG] =
-    //               ActiveExclusiveWarpScan(s_globalHist[threadIdx.x << LANE_LOG]);
-    // NOTE: SeGuRu JIT hangs with warp shuffle inside narrow conditional (tid < 8).
-    // Use thread-0 sequential exclusive scan over the 8 warp-boundary positions.
+    // Workaround: replace ActiveExclusiveWarpScan (parallel warp scan on 8 threads)
+    // with sequential scan on thread 0. SeGuRu JIT hangs with warp shuffle inside
+    // narrow conditional (tid < 8). Impact: minor (only 8 values).
     if tid == 0 {
         let n_warps = RADIX >> LANE_LOG; // 8
         let mut running = 0u32;

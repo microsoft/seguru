@@ -1,5 +1,4 @@
 //! Synchronization and atomic operations for GPU programming.
-
 use crate::{GpuGlobal, GpuShared};
 
 /// Synchronization within a thread block.
@@ -10,6 +9,14 @@ use crate::{GpuGlobal, GpuShared};
 #[rustc_diagnostic_item = "gpu::sync_threads"]
 #[gpu_codegen::sync_data]
 pub fn sync_threads() {
+    unimplemented!();
+}
+
+#[inline(never)]
+#[gpu_codegen::device]
+#[rustc_diagnostic_item = "gpu::ballot"]
+#[gpu_codegen::sync_data]
+pub fn ballot_sync(_mask: u32, _predicate: bool) -> u32 {
     unimplemented!();
 }
 

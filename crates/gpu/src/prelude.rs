@@ -17,5 +17,5 @@ pub use crate::ldst::CacheStreamLoadStore;
 pub use crate::print::{PushPrintfArg, printf};
 pub use crate::reshape_map;
 pub use crate::shared::{DynamicSharedAlloc, DynamicSharedAllocBuilder, GpuShared};
-pub use crate::sync::sync_threads;
-pub use crate::vector::{Float2, Float4, Float8, VecFlatten, VecTypeTrait};
+pub use crate::sync::{ballot_sync, sync_threads};
+pub use crate::vector::{Float2, Float4, Float8, U32_4, VecFlatten, VecFlattenMut, VecTypeTrait};

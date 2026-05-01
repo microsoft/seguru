@@ -184,3 +184,31 @@ where
         }
     }
 }
+
+pub trait VecFlattenMut<T2> {
+    fn flatten_mut(&mut self) -> &mut [T2];
+}
+
+/// Mutable version of VecFlatten for scatter writes through vector-typed buffers.
+impl<T, T2> VecFlattenMut<T2> for [VecType<T>]
+where
+    T: VecTypeTrait<Elem = T2>,
+{
+    fn flatten_mut(&mut self) -> &mut [T2] {
+        assert!(size_of::<T>() >= size_of::<T2>(), "T2 is larger than T");
+        assert!(align_of::<T>() >= align_of::<T2>(), "T2 has stricter alignment than T");
+        unsafe {
+            &mut *core::ptr::slice_from_raw_parts_mut(
+                self.as_mut_ptr() as _,
+                self.len() * size_of::<T>() / size_of::<T2>(),
+            )
+        }
+    }
+}
+
+/// Implement DeviceVecType for all VecType<T> so TensorView/TensorViewMut can flatten.
+// SAFETY: VecType<T> has repr(C) layout with T::Elem array, proper alignment from the macro.
+unsafe impl<T: VecTypeTrait> cuda_bindings::DeviceVecType for VecType<T> {
+    type Elem = T::Elem;
+    const VEC_LEN: usize = size_of::<T>() / size_of::<T::Elem>();
+}

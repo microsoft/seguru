@@ -6,6 +6,17 @@ use super::{CUDA_SUCCESS, CudaError};
 use crate::ctx::{CtxSpaceZero, GpuCtxArenaTrait, GpuCtxGuard, GpuCtxSpace};
 use crate::sized_or_slice::{SizedOrSlice, SizedOrSliceClone};
 
+/// Marker trait for GPU vector types that can be flattened to their scalar element type.
+/// Implementors guarantee proper alignment and size relationships.
+///
+/// # Safety
+/// - `size_of::<Self>()` must equal `VEC_LEN * size_of::<Elem>()`
+/// - `align_of::<Self>()` must be >= `align_of::<Elem>()`
+pub unsafe trait DeviceVecType: Copy {
+    type Elem: Copy;
+    const VEC_LEN: usize;
+}
+
 #[cfg(feature = "gpu")]
 #[macro_export]
 macro_rules! eprintln {
@@ -251,6 +262,19 @@ impl<'a, T> TensorView<'a, [T]> {
             TensorView { devptr: right as _, _marker: PhantomData },
         )
     }
+
+    /// Flatten this tensor view from a vector element type to its scalar element type.
+    /// Only available when `T` implements `DeviceVecType` (e.g., `U32_4` → `u32`).
+    pub fn flatten(&self) -> TensorView<'_, [T::Elem]>
+    where
+        T: DeviceVecType,
+    {
+        let old_len = self.devptr.len();
+        let new_len = old_len * T::VEC_LEN;
+        let ptr = self.devptr as *const T::Elem;
+        let fat_ptr = core::ptr::slice_from_raw_parts(ptr, new_len);
+        TensorView { devptr: fat_ptr, _marker: PhantomData }
+    }
 }
 
 impl<'a, T> TensorViewMut<'a, [T]> {
@@ -294,6 +318,19 @@ impl<'a, T> TensorViewMut<'a, [T]> {
     pub fn split(self, mid: usize) -> (TensorViewMut<'a, [T]>, TensorViewMut<'a, [T]>) {
         let (left, right) = self.inner.split(mid);
         (TensorViewMut { inner: left }, TensorViewMut { inner: right })
+    }
+
+    /// Flatten this mutable tensor view from a vector element type to its scalar element type.
+    /// Only available when `T` implements `DeviceVecType` (e.g., `U32_4` → `u32`).
+    pub fn flatten(&mut self) -> TensorViewMut<'_, [T::Elem]>
+    where
+        T: DeviceVecType,
+    {
+        let old_len = self.inner.devptr.len();
+        let new_len = old_len * T::VEC_LEN;
+        let ptr = self.inner.devptr as *const T::Elem;
+        let fat_ptr = core::ptr::slice_from_raw_parts(ptr, new_len);
+        TensorViewMut { inner: TensorView { devptr: fat_ptr, _marker: PhantomData } }
     }
 }
 

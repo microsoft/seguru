@@ -32,7 +32,7 @@ pub use ctx::{
     GpuCtxToken, GpuCtxZeroGuard, GpuFunction, GpuModule, GpuToken,
 };
 pub use host_mem::PinnedHostBox;
-pub use mem::{TensorMut, TensorRef, TensorView, TensorViewMut};
+pub use mem::{DeviceVecType, TensorMut, TensorRef, TensorView, TensorViewMut};
 pub use params::{AsHostKernelParams, GPUConfig, GPUDynamicConfig, GPUStaticConfig, SafeGpuConfig};
 pub use unsafe_bindings::{CUctx_flags, CUdevprop};
 

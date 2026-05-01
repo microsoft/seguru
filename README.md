@@ -40,16 +40,21 @@ cargo build
 cargo install --path ./crates/rustc-gpu
 ```
 
-## Case studies for CCS submission
+## File Structure
 
-```
-casestudies/                  # Two case studies implemented by human developers
-├── llm-rs/                   # A modified llm.c with Rust implementation
-└── Nova/
-    ├── provider/msm_gpu.rs   # Modified MSM provider accelerated by GPU
-    └── benches/msm-gpu.rs    # Benchmark for msm-gpu
-
-casestudies-by-agent/         # AI-generated code
+```bash
+crates/                       # Toolchain and libraries
+├── rustc-gpu/                # Fontend as a rustc wrapper
+├── rustc_codegen_gpu/        # GPU code generation backend
+    ├── src                   # Source code of MLIR translator + safety checker
+    ├── tests                 # Unit tests for backend
+├── gpu/                      # GPU device-side core library (kernels, primitives)
+├── gpu-host/                 # Host-side library (launch, data transfer)
+├── gpu-macros/               # Procedural macros (#[cuda_kernel], etc.)
+benchmark/                    # Micro-benchmarks (18 kernels for LLM)
+casestudies/                  # Case studies implemented by human developers
+casestudies-by-agent/         # AI-generated case studies (ported from CUDA/PyTorch)
+examples/                     # Small examples
 ```
 
 ### MicroBenchmark

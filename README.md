@@ -42,12 +42,15 @@ cargo install --path ./crates/rustc-gpu
 
 ## Case studies for CCS submission
 
-casestudies: Two case studies implemented by human developers
-    llm-rs: A modified llm.c with rust implementation
-    Nova:
-        provider/msm_gpu.rs: a modified msm provider accelerated by GPU
-        benches/msm-gpu.rs: benchmark for msm-gpu.
-ai_generated/: AI-generated code based on existing PyTorch or CUDA code.
+```
+casestudies/                  # Two case studies implemented by human developers
+├── llm-rs/                   # A modified llm.c with Rust implementation
+└── Nova/
+    ├── provider/msm_gpu.rs   # Modified MSM provider accelerated by GPU
+    └── benches/msm-gpu.rs    # Benchmark for msm-gpu
+
+casestudies-by-agent/         # AI-generated code
+```
 
 ### MicroBenchmark
 

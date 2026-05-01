@@ -37,7 +37,7 @@ cargo build
 3. Install the tool before running casestudies
 
 ```bash
-cargo install --path ./crates/rustc-gpu
+cargo install --path ./crates/rustc-gpu --locked
 ```
 
 ## File Structure

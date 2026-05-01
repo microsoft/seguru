@@ -503,9 +503,8 @@ impl<'tcx, 'ml, 'a> GpuBuilder<'tcx, 'ml, 'a> {
                 // args[0] = mask, args[1] = predicate (i1)
                 let mask = args[0];
                 let predicate = args[1];
-                let op = crate::mlir::gpu::nvvm_vote_ballot_sync(
-                    self.mlir_ctx, mask, predicate, loc,
-                );
+                let op =
+                    crate::mlir::gpu::nvvm_vote_ballot_sync(self.mlir_ctx, mask, predicate, loc);
                 Ok(Some(self.append_op(op)))
             }
             GpuItem::Subslice | GpuItem::SubsliceMut => {

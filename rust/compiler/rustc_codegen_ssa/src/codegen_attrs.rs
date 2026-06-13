@@ -308,7 +308,7 @@ fn process_builtin_attrs(
                         // this is to prevent a bug where a single crate defines both the default and explicit implementation
                         // for an EII. In that case, both of them may be part of the same final object file. I'm not 100% sure
                         // what happens, either rustc deduplicates the symbol or llvm, or it's random/order-dependent.
-                        // However, the fact that the default one of has weak linkage isn't considered and you sometimes get that
+                        // However, the fact that the default one has weak linkage isn't considered and you sometimes get that
                         // the default implementation is used while an explicit implementation is given.
                         if
                         // if this is a default impl

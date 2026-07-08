@@ -1,10 +1,6 @@
 name: GPU
 
 on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
   workflow_dispatch:  # manual trigger
 
 permissions:
@@ -17,6 +13,7 @@ jobs:
   tests:
     name: Run Tests
     runs-on: self-hosted
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     steps:
       - name: Checkout
         uses: actions/checkout@v3

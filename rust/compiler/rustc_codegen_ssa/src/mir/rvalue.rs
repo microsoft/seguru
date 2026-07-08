@@ -24,6 +24,12 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
     ) {
         match *rvalue {
             mir::Rvalue::Use(ref operand) => {
+                if let mir::Operand::Constant(const_op) = operand {
+                    let val = self.eval_mir_constant(&const_op);
+                    if val.all_bytes_uninit(self.cx.tcx()) {
+                        return;
+                    }
+                }
                 let cg_operand = self.codegen_operand(bx, operand);
                 // Crucially, we do *not* use `OperandValue::Ref` for types with
                 // `BackendRepr::Scalar | BackendRepr::ScalarPair`. This ensures we match the MIR
@@ -36,7 +42,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 }
                 // FIXME: consider not copying constants through stack. (Fixable by codegen'ing
                 // constants into `OperandValue::Ref`; why don’t we do that yet if we don’t?)
-                cg_operand.val.store(bx, dest);
+                cg_operand.store_with_annotation(bx, dest);
             }
 
             mir::Rvalue::Cast(
@@ -50,7 +56,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                     // Into-coerce of a thin pointer to a wide pointer -- just
                     // use the operand path.
                     let temp = self.codegen_rvalue_operand(bx, rvalue);
-                    temp.val.store(bx, dest);
+                    temp.store_with_annotation(bx, dest);
                     return;
                 }
 
@@ -70,7 +76,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                         debug!("codegen_rvalue: creating ugly alloca");
                         let scratch = PlaceRef::alloca(bx, operand.layout);
                         scratch.storage_live(bx);
-                        operand.val.store(bx, scratch);
+                        operand.store_with_annotation(bx, scratch);
                         base::coerce_unsized_into(bx, scratch, dest);
                         scratch.storage_dead(bx);
                     }
@@ -183,7 +189,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                         } else {
                             variant_dest.project_field(bx, field_index.as_usize())
                         };
-                        op.val.store(bx, field);
+                        op.store_with_annotation(bx, field);
                     }
                 }
                 dest.codegen_set_discr(bx, variant_index);
@@ -191,7 +197,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
 
             _ => {
                 let temp = self.codegen_rvalue_operand(bx, rvalue);
-                temp.val.store(bx, dest);
+                temp.store_with_annotation(bx, dest);
             }
         }
     }
@@ -221,7 +227,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             // Since in this path we have a place anyway, we can store or copy to it,
             // making sure we use the destination place's alignment even if the
             // source would normally have a higher one.
-            src.val.store(bx, dst.val.with_type(src.layout));
+            src.store_with_annotation(bx, dst.val.with_type(src.layout));
         }
     }
 
@@ -320,7 +326,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 let size = Ord::max(operand.layout.size, cast.size);
                 let temp = PlaceValue::alloca(bx, size, align);
                 bx.lifetime_start(temp.llval, size);
-                operand.val.store(bx, temp.with_type(operand.layout));
+                operand.store_with_annotation(bx, temp.with_type(operand.layout));
                 let val = bx.load_operand(temp.with_type(cast)).val;
                 bx.lifetime_end(temp.llval, size);
                 val
@@ -399,7 +405,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                         let lladdr = bx.ptrtoint(llptr, llcast_ty);
                         OperandValue::Immediate(lladdr)
                     }
-                    mir::CastKind::PointerCoercion(PointerCoercion::ReifyFnPointer, _) => {
+                    mir::CastKind::PointerCoercion(PointerCoercion::ReifyFnPointer(_), _) => {
                         match *operand.layout.ty.kind() {
                             ty::FnDef(def_id, args) => {
                                 let instance = ty::Instance::resolve_for_fn_ptr(
@@ -478,7 +484,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                         let to_backend_ty = bx.cx().immediate_backend_type(cast);
                         if operand.layout.is_uninhabited() {
                             let val = OperandValue::Immediate(bx.cx().const_poison(to_backend_ty));
-                            return OperandRef { val, layout: cast };
+                            return OperandRef { val, layout: cast, move_annotation: None };
                         }
                         let abi::BackendRepr::Scalar(to_scalar) = cast.layout.backend_repr else {
                             bug!("Found non-scalar for cast {cast:?}");
@@ -494,7 +500,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                         self.codegen_transmute_operand(bx, operand, cast)
                     }
                 };
-                OperandRef { val, layout: cast }
+                OperandRef { val, layout: cast, move_annotation: None }
             }
 
             mir::Rvalue::Ref(_, bk, place) => {
@@ -525,7 +531,11 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 );
                 let val_ty = op.ty(bx.tcx(), lhs.layout.ty, rhs.layout.ty);
                 let operand_ty = Ty::new_tup(bx.tcx(), &[val_ty, bx.tcx().types.bool]);
-                OperandRef { val: result, layout: bx.cx().layout_of(operand_ty) }
+                OperandRef {
+                    val: result,
+                    layout: bx.cx().layout_of(operand_ty),
+                    move_annotation: None,
+                }
             }
             mir::Rvalue::BinaryOp(op, box (ref lhs, ref rhs)) => {
                 let lhs = self.codegen_operand(bx, lhs);
@@ -559,6 +569,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 OperandRef {
                     val: OperandValue::Immediate(llresult),
                     layout: bx.cx().layout_of(op.ty(bx.tcx(), lhs.layout.ty, rhs.layout.ty)),
+                    move_annotation: None,
                 }
             }
 
@@ -593,7 +604,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                     val.is_expected_variant_for_type(self.cx, layout),
                     "Made wrong variant {val:?} for type {layout:?}",
                 );
-                OperandRef { val, layout }
+                OperandRef { val, layout, move_annotation: None }
             }
 
             mir::Rvalue::Discriminant(ref place) => {
@@ -604,33 +615,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 OperandRef {
                     val: OperandValue::Immediate(discr),
                     layout: self.cx.layout_of(discr_ty),
-                }
-            }
-
-            mir::Rvalue::NullaryOp(ref null_op, ty) => {
-                let ty = self.monomorphize(ty);
-                let layout = bx.cx().layout_of(ty);
-                let val = match null_op {
-                    mir::NullOp::OffsetOf(fields) => {
-                        let val = bx
-                            .tcx()
-                            .offset_of_subfield(bx.typing_env(), layout, fields.iter())
-                            .bytes();
-                        bx.cx().const_usize(val)
-                    }
-                    mir::NullOp::UbChecks => {
-                        let val = bx.tcx().sess.ub_checks();
-                        bx.cx().const_bool(val)
-                    }
-                    mir::NullOp::ContractChecks => {
-                        let val = bx.tcx().sess.contract_checks();
-                        bx.cx().const_bool(val)
-                    }
-                };
-                let tcx = self.cx.tcx();
-                OperandRef {
-                    val: OperandValue::Immediate(val),
-                    layout: self.cx.layout_of(null_op.ty(tcx)),
+                    move_annotation: None,
                 }
             }
 
@@ -663,7 +648,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 } else {
                     bx.get_static(def_id)
                 };
-                OperandRef { val: OperandValue::Immediate(static_), layout }
+                OperandRef { val: OperandValue::Immediate(static_), layout, move_annotation: None }
             }
             mir::Rvalue::Use(ref operand) => self.codegen_operand(bx, operand),
             mir::Rvalue::Repeat(ref elem, len_const) => {
@@ -675,7 +660,11 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 let array_ty = self.monomorphize(array_ty);
                 let array_layout = bx.layout_of(array_ty);
                 assert!(array_layout.is_zst());
-                OperandRef { val: OperandValue::ZeroSized, layout: array_layout }
+                OperandRef {
+                    val: OperandValue::ZeroSized,
+                    layout: array_layout,
+                    move_annotation: None,
+                }
             }
             mir::Rvalue::Aggregate(ref kind, ref fields) => {
                 let (variant_index, active_field_index) = match **kind {
@@ -704,7 +693,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                         // more optimizability, if that turns out to be helpful.
                         bx.abort();
                         let val = OperandValue::poison(bx, layout);
-                        OperandRef { val, layout }
+                        OperandRef { val, layout, move_annotation: None }
                     }
                     Ok(maybe_tag_value) => {
                         if let Some((tag_field, tag_imm)) = maybe_tag_value {
@@ -718,7 +707,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 let operand = self.codegen_operand(bx, operand);
                 let binder_ty = self.monomorphize(binder_ty);
                 let layout = bx.cx().layout_of(binder_ty);
-                OperandRef { val: operand.val, layout }
+                OperandRef { val: operand.val, layout, move_annotation: None }
             }
             mir::Rvalue::CopyForDeref(_) => bug!("`CopyForDeref` in codegen"),
             mir::Rvalue::ShallowInitBox(..) => bug!("`ShallowInitBox` in codegen"),
@@ -745,7 +734,11 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             "Address of place was unexpectedly {val:?} for pointee type {ty:?}",
         );
 
-        OperandRef { val, layout: self.cx.layout_of(mk_ptr_ty(self.cx.tcx(), ty)) }
+        OperandRef {
+            val,
+            layout: self.cx.layout_of(mk_ptr_ty(self.cx.tcx(), ty)),
+            move_annotation: None,
+        }
     }
 
     fn codegen_scalar_binop(

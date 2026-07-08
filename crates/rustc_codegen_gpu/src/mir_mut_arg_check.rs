@@ -46,7 +46,7 @@ impl<'tcx> Analysis<'tcx> for MutArgAnalysis {
     }
 
     fn apply_primary_statement_effect(
-        &mut self,
+        &self,
         state: &mut Self::Domain,
         stmt: &Statement<'tcx>,
         _location: Location,
@@ -213,7 +213,7 @@ impl<'tcx> Visitor<'tcx> for MutArgMirVisitor<'_, 'tcx> {
 impl<'tcx> ResultsVisitor<'tcx, MutArgAnalysis> for MutArgDataFlowVistors<'tcx> {
     fn visit_after_primary_statement_effect(
         &mut self,
-        _results: &mut MutArgAnalysis,
+        _results: &MutArgAnalysis,
         state: &Domain,
         stmt: &Statement<'tcx>,
         location: Location,
@@ -224,7 +224,7 @@ impl<'tcx> ResultsVisitor<'tcx, MutArgAnalysis> for MutArgDataFlowVistors<'tcx> 
 
     fn visit_after_primary_terminator_effect(
         &mut self,
-        _results: &mut MutArgAnalysis,
+        _results: &MutArgAnalysis,
         state: &Domain,
         terminator: &Terminator<'tcx>,
         location: Location,
@@ -241,9 +241,9 @@ pub(crate) fn analyze_mut_args<'tcx>(
     body: &Body<'tcx>,
 ) -> GpuCodegenResult<()> {
     let analysis = MutArgAnalysis;
-    let mut results = analysis.iterate_to_fixpoint(tcx, body, None);
+    let results = analysis.iterate_to_fixpoint(tcx, body, None);
     let mut result_visitor = MutArgDataFlowVistors::new(tcx, body.local_decls.clone());
-    visit_reachable_results(body, &mut results.analysis, &results.results, &mut result_visitor);
+    visit_reachable_results(body, &results, &mut result_visitor);
     for (place, location) in result_visitor.invalid_write.iter() {
         let span = body.source_info(*location).span;
         tcx.sess

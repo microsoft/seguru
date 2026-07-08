@@ -351,21 +351,21 @@ impl Callbacks for GpuOrCpuRustCallback {
             Some(|_sess, providers| {
                 // Save old provider if you want to call it
                 if REGISTERED_TOOLS.lock().unwrap().is_none() {
-                    REGISTERED_TOOLS.lock().unwrap().replace(providers.registered_tools);
+                    REGISTERED_TOOLS.lock().unwrap().replace(providers.queries.registered_tools);
                 }
                 providers.queries.registered_tools = gpu_register_tool;
 
                 if CODEGEN_FN_ATTRS.lock().unwrap().is_none() {
-                    CODEGEN_FN_ATTRS.lock().unwrap().replace(providers.codegen_fn_attrs);
+                    CODEGEN_FN_ATTRS.lock().unwrap().replace(providers.queries.codegen_fn_attrs);
                 }
-                providers.codegen_fn_attrs = gpu_codegen_fn_attrs;
+                providers.queries.codegen_fn_attrs = gpu_codegen_fn_attrs;
                 providers.queries.eval_to_const_value_raw = gpu_eval_to_const_value_raw;
             })
         } else {
             Some(|_sess, providers| {
                 // Save old provider if you want to call it
                 if REGISTERED_TOOLS.lock().unwrap().is_none() {
-                    REGISTERED_TOOLS.lock().unwrap().replace(providers.registered_tools);
+                    REGISTERED_TOOLS.lock().unwrap().replace(providers.queries.registered_tools);
                 }
                 providers.queries.registered_tools = gpu_register_tool;
                 providers.queries.eval_to_const_value_raw = gpu_eval_to_const_value_raw;

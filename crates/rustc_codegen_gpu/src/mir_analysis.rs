@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use rustc_data_structures::fx::FxHashSet;
 use rustc_index::bit_set::DenseBitSet;
 use rustc_middle::mir::pretty::write_mir_pretty;
@@ -121,7 +123,7 @@ struct TaintTracking<'tcx, 'a> {
     ignore_divergence_due_to_panic_return: bool,
     possible_divergent_cf: bool,
     init: DenseBitSet<Local>,
-    implicit: DenseBitSet<rustc_middle::mir::BasicBlock>,
+    implicit: RefCell<DenseBitSet<rustc_middle::mir::BasicBlock>>,
     tcx: TyCtxt<'tcx>,
     body: &'a Body<'tcx>,
 }
@@ -130,6 +132,7 @@ fn operand_local<'tcx>(op: &Operand<'tcx>) -> Option<Local> {
     match op {
         Operand::Copy(place) | Operand::Move(place) => Some(place.local),
         Operand::Constant(_) => None,
+        Operand::RuntimeChecks(runtime_checks) => todo!(),
     }
 }
 
@@ -147,7 +150,7 @@ impl<'tcx, 'a> TaintTracking<'tcx, 'a> {
             init: tainted,
             ignore_divergence_due_to_panic_return,
             possible_divergent_cf: possible_divergent_cf && !kernel_entry,
-            implicit: DenseBitSet::new_empty(body.basic_blocks.len()),
+            implicit: RefCell::new(DenseBitSet::new_empty(body.basic_blocks.len())),
             tcx,
             body,
         }
@@ -253,7 +256,7 @@ impl<'tcx> Analysis<'tcx> for TaintTracking<'tcx, '_> {
     }
 
     fn apply_primary_statement_effect(
-        &mut self,
+        &self,
         state: &mut Self::Domain,
         statement: &Statement<'tcx>,
         _location: Location,
@@ -308,8 +311,6 @@ impl<'tcx> Analysis<'tcx> for TaintTracking<'tcx, '_> {
                     tainted = state.contains(place.local);
                 }
 
-                Rvalue::NullaryOp(..) => {}
-
                 Rvalue::ThreadLocalRef(_) => {
                     panic!("Thread-local references are not supported in GPU code");
                 }
@@ -322,7 +323,7 @@ impl<'tcx> Analysis<'tcx> for TaintTracking<'tcx, '_> {
     }
 
     fn apply_primary_terminator_effect<'mir>(
-        &mut self,
+        &self,
         state: &mut Self::Domain,
         terminator: &'mir Terminator<'tcx>,
         _location: Location,
@@ -372,7 +373,7 @@ impl<'tcx> Analysis<'tcx> for TaintTracking<'tcx, '_> {
                             divergent_candidates.subtract(intersect);
                         }
 
-                        self.implicit.union(&divergent_candidates);
+                        self.implicit.borrow_mut().union(&divergent_candidates);
                         debug!("Marking blocks {:?} as implicit", divergent_candidates);
                         /*
                         // The union should cover the following strict cases.
@@ -575,7 +576,7 @@ impl<'tcx, 'a> ResultsVisitor<'tcx, TaintTracking<'tcx, 'a>> for TaintResultVisi
     /// the current and future  statement/terminator does not matter.
     fn visit_after_early_terminator_effect(
         &mut self,
-        results: &mut TaintTracking<'tcx, 'a>,
+        results: &TaintTracking<'tcx, 'a>,
         state: &DenseBitSet<Local>,
         terminator: &Terminator<'tcx>,
         location: Location,
@@ -610,7 +611,7 @@ impl<'tcx, 'a> ResultsVisitor<'tcx, TaintTracking<'tcx, 'a>> for TaintResultVisi
                 // If this terminator is control-dependent on a tainted value
                 // (i.e., part of an implicit flow), then it is unsafe to use
                 // divergent or data-dependent values here.
-                for bb in results.implicit.iter() {
+                for bb in results.implicit.borrow().iter() {
                     if self.body.basic_blocks[bb].terminator().source_info == terminator.source_info
                     {
                         self.invalid_diversed.push(span);
@@ -645,9 +646,9 @@ fn analyze_diversed_data<'tcx>(
         tcx,
         body,
     );
-    let mut results = analysis.iterate_to_fixpoint(tcx, body, None);
+    let results = analysis.iterate_to_fixpoint(tcx, body, None);
     let mut result_visitor = TaintResultVisitor::new(tcx, body.clone());
-    visit_reachable_results(body, &mut results.analysis, &results.results, &mut result_visitor);
+    visit_reachable_results(body, &results, &mut result_visitor);
     for span in &result_visitor.invalid_diversed {
         tcx.sess
             .dcx()

@@ -195,7 +195,7 @@ impl<'tcx> Analysis<'tcx> for ThreadSyncAnalysis<'tcx, '_> {
     fn initialize_start_block(&self, body: &Body<'tcx>, state: &mut Self::Domain) {}
 
     fn apply_primary_statement_effect(
-        &mut self,
+        &self,
         state: &mut Self::Domain,
         stmt: &Statement<'tcx>,
         _location: Location,
@@ -210,7 +210,7 @@ impl<'tcx> Analysis<'tcx> for ThreadSyncAnalysis<'tcx, '_> {
     }
 
     fn apply_primary_terminator_effect<'mir>(
-        &mut self,
+        &self,
         state: &mut Self::Domain,
         terminator: &'mir Terminator<'tcx>,
         loc: Location,
@@ -377,7 +377,7 @@ impl ThreadSyncResultsVisitor {
 impl<'mir, 'tcx> ResultsVisitor<'tcx, ThreadSyncAnalysis<'tcx, 'mir>> for ThreadSyncResultsVisitor {
     fn visit_after_primary_statement_effect(
         &mut self,
-        _results: &mut ThreadSyncAnalysis<'tcx, 'mir>,
+        _results: &ThreadSyncAnalysis<'tcx, 'mir>,
         state: &Domain,
         stmt: &Statement<'tcx>,
         location: Location,
@@ -406,9 +406,9 @@ pub(crate) fn analyze_shared_access<'tcx>(
     is_kernel_entry: bool,
 ) -> GpuCodegenResult<()> {
     let analysis = ThreadSyncAnalysis { tcx, body };
-    let mut results = analysis.iterate_to_fixpoint(tcx, body, None);
+    let results = analysis.iterate_to_fixpoint(tcx, body, None);
     let mut result_visitor = ThreadSyncResultsVisitor::new(tcx);
-    visit_reachable_results(body, &mut results.analysis, &results.results, &mut result_visitor);
+    visit_reachable_results(body, &results, &mut result_visitor);
     let mut missing_sync: bool = false;
 
     // Report missing sync error when needed.

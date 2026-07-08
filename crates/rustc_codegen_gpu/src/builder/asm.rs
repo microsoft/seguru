@@ -14,7 +14,7 @@ fn modifier_to_reg_llvm(
     tcx: &rustc_middle::ty::TyCtxt,
     modifier: char,
 ) -> Result<String, GpuCodegenError> {
-    let target: String = tcx.sess.target.arch.clone().into_owned();
+    let target: String = tcx.sess.target.arch.to_string();
     match (target.as_str(), modifier) {
         ("x86_64", 'e') => Ok("r".to_string()),
         ("x86_64", 'r') => Ok("l".to_string()),

@@ -270,7 +270,7 @@ pub(crate) fn generate_test_module<'a>(loc: Loc) -> Module<'a> {
     // operations need a location, even if its "unknown".
     let location = Location::new(
         &context,
-        format!("{}", loc.file.name.prefer_local()).as_str(),
+        format!("{}", loc.file.name.prefer_local_unconditionally()).as_str(),
         loc.line,
         loc.col.0,
     );

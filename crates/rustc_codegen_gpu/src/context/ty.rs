@@ -454,7 +454,7 @@ where
                     }
                     self.type_array(elem, *count)
                 }
-                rustc_abi::FieldsShape::Arbitrary { offsets, memory_index } => {
+                rustc_abi::FieldsShape::Arbitrary { offsets, .. } => {
                     self.arbitrary_mlir_type(&layout, immediate)
                 }
             },
@@ -620,6 +620,7 @@ where
             BackendRepr::Scalar(_) | BackendRepr::SimdVector { .. } => true,
             BackendRepr::ScalarPair(..) => false,
             BackendRepr::Memory { .. } => layout.is_zst(),
+            BackendRepr::ScalableVector { element, count } => todo!(),
         }
     }
 

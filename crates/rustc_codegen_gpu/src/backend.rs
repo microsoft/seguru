@@ -206,7 +206,7 @@ impl CodegenBackend for GPUCodegenBackend {
     fn provide(&self, providers: &mut Providers) {}
 
     fn target_config(&self, sess: &Session) -> rustc_codegen_ssa_gpu::TargetConfig {
-        let target: String = sess.target.arch.clone().into_owned();
+        let target: String = sess.target.arch.to_string();
         let faked_features = match target.as_str() {
             "x86" | "x86_64" => {
                 vec![Symbol::intern("sse"), Symbol::intern("sse2"), Symbol::intern("x87")]

@@ -98,7 +98,9 @@ impl<const SIZE: usize, const STRIDE: usize> ThreadWarpTile<SIZE, STRIDE> {
 
 /// Implement simple flexible warp with STRIDE = 1.
 impl<const SIZE: usize> ThreadWarpTile<SIZE, 1> {
-    pub const BASE_THREAD_MASK: u32 = { (1u32 << Self::CHECKED_SIZE) - 1 };
+    // `1u32 << 32` overflows, so compute the mask by shifting `u32::MAX` down
+    // instead; this keeps the full-warp (SIZE == 32) case usable.
+    pub const BASE_THREAD_MASK: u32 = { u32::MAX >> (32 - Self::CHECKED_SIZE) };
     pub const LANE_MASK: u32 = Self::CHECKED_SIZE - 1;
 
     // warp size == 32 => 0

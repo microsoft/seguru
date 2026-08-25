@@ -16,12 +16,25 @@ fn get_alloc_name(alloc_id: rustc_const_eval::interpret::AllocId) -> String {
 }
 
 impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
+    /// Every GPU global is emitted with external linkage, and an executable links
+    /// its own GPU module together with the GPU module of every extern crate.
+    /// Names therefore have to be unique across crates, not just within a module,
+    /// or `llvm-link` reports `symbol multiply defined`. Suffix names with the
+    /// local crate's stable id to give each crate its own namespace.
+    pub(crate) fn crate_unique_suffix(&self) -> String {
+        format!(
+            "{:016x}",
+            self.tcx.stable_crate_id(rustc_hir::def_id::LOCAL_CRATE).as_u64()
+        )
+    }
+
     fn get_name_by_alloc(
         &self,
         alloc: &rustc_const_eval::interpret::ConstAllocation<'_>,
     ) -> String {
         format!(
-            "const_alloc_{:?}",
+            "const_alloc_{}_{:?}",
+            self.crate_unique_suffix(),
             self.const_alloc_count_no_id.load(std::sync::atomic::Ordering::SeqCst)
         )
     }
@@ -82,7 +95,13 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
     ) -> String {
         let ret_final_type = self.type_shared_memref(self.type_i8(), &[size.bytes() as i64], None);
         let idx = self.static_shared_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let name = format!("static_shared_{}", idx);
+        // The emitted global has external linkage, and an executable links its own GPU
+        // module together with the GPU module of every extern crate. A bare
+        // `static_shared_{idx}` therefore collides whenever a binary launches a library
+        // kernel that also uses shared memory, and `llvm-link` only tolerates the
+        // duplicate when both happen to have the same type. Mangle the local crate's
+        // stable id into the name so each crate gets its own symbol namespace.
+        let name = format!("static_shared_{}_{}", self.crate_unique_suffix(), idx);
         let val_ty = self.type_array(self.type_i8(), size.bytes());
         let value = mlir_ir::attribute::DenseElementsAttribute::new(
             val_ty,
@@ -171,7 +190,7 @@ impl<'tcx, 'ml, 'a> GPUCodegenContext<'tcx, 'ml, 'a> {
                 return const_alloc[&alloc_id];
             }
         }
-        let name = get_alloc_name(alloc_id);
+        let name = format!("{}_{}", get_alloc_name(alloc_id), self.crate_unique_suffix());
         let v = match alloc {
             GlobalAlloc::Memory(alloc) => {
                 self.const_name_to_allocid.write().unwrap().insert(name.clone(), alloc_id);

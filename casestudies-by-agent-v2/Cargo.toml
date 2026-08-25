@@ -1,0 +1,13 @@
+[workspace]
+members = ["aes", "polybench", "kernelbench", "gpusorting", "heongpu"]
+resolver = "1"
+
+[workspace.dependencies]
+gpu_host = { path = "../crates/gpu-host" }
+gpu = { path = "../crates/gpu" }
+
+[profile.dev]
+overflow-checks = true
+
+[profile.release]
+overflow-checks = false

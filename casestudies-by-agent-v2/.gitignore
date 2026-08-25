@@ -1,0 +1,2 @@
+# verify.sh per-crate logs
+.verify-*.log

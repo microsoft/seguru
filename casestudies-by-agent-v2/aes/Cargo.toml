@@ -1,0 +1,23 @@
+[package]
+name = "aes-gpu-v2"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "aes_gpu"
+path = "src/lib.rs"
+
+[dependencies]
+gpu = { workspace = true }
+gpu_host = { workspace = true }
+crunchy = "0.2"
+
+[features]
+# Enables the CUDA C++ reference kernels (compiled by nvcc in build.rs) used by
+# the benchmark binary for a like-for-like comparison.
+bench = []
+
+[[bin]]
+name = "aes-bench"
+path = "src/bin/bench.rs"
+required-features = ["bench"]

@@ -1,0 +1,28 @@
+[package]
+name = "polybench-gpu"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "polybench_gpu"
+path = "src/lib.rs"
+
+[dependencies]
+gpu = { workspace = true }
+gpu_host = { workspace = true }
+crunchy = "0.2"
+
+[features]
+# Enables the CUDA C++ reference kernels (compiled by nvcc in build.rs) used by
+# the benchmark binary for a like-for-like comparison.
+bench = []
+
+[[bin]]
+name = "polybench-bench"
+path = "src/bin/bench.rs"
+required-features = ["bench"]
+
+[[bin]]
+name = "polybench-boundscheck"
+path = "src/bin/boundscheck.rs"
+required-features = ["bench"]

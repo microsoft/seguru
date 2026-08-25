@@ -1,0 +1,24 @@
+[package]
+name = "gpusorting-gpu"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "gpusorting_gpu"
+path = "src/lib.rs"
+
+[dependencies]
+gpu = { workspace = true }
+gpu_host = { workspace = true }
+crunchy = "0.2"
+
+[dev-dependencies]
+rand = "0.9"
+
+[features]
+bench = []
+
+[[bin]]
+name = "sort-bench"
+path = "src/bin/bench.rs"
+required-features = ["bench"]

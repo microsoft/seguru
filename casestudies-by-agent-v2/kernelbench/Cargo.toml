@@ -1,0 +1,21 @@
+[package]
+name = "kernelbench-gpu"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "kernelbench_gpu"
+path = "src/lib.rs"
+
+[dependencies]
+gpu = { workspace = true }
+gpu_host = { workspace = true }
+crunchy = "0.2"
+
+[[bin]]
+name = "kernelbench-bench"
+path = "src/bin/bench.rs"
+
+[[bin]]
+name = "probe"
+path = "src/bin/probe.rs"

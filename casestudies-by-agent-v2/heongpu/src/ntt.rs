@@ -196,7 +196,7 @@ pub fn ntt_forward_tile(inp: &[u64], out: &mut [u64], wp: &[U32_4], q: u64, m0: 
     let tile_base = blk * TILE;
     let base = m0 + (blk & (m0 - 1));
 
-    let mut smem = GpuShared::<[u64; TILE as usize]>::zero();
+    gpu::shared_init!(smem: [u64; TILE as usize], EPT as usize, 0u64);
 
     // Round 0: coefficients tid + j*512, twiddle block index `base`.
     let mut v = [0u64; 8];
@@ -305,7 +305,7 @@ pub fn ntt_inverse_tile(
     let tile_base = blk * TILE;
     let cp = blk & (m0 - 1);
 
-    let mut smem = GpuShared::<[u64; TILE as usize]>::zero();
+    gpu::shared_init!(smem: [u64; TILE as usize], EPT as usize, 0u64);
 
     // Round 0: eight contiguous coefficients per thread (t_hi = tid, LOW = 1).
     let mut v = [0u64; 8];

@@ -22,13 +22,67 @@ pub struct GpuShared<T: ?Sized> {
 }
 
 impl<T> GpuShared<T> {
+    /// Allocate static shared memory **without initialising it**.
+    ///
+    /// # Safety
+    ///
+    /// The returned storage is **uninitialised**. CUDA `__shared__` memory has no
+    /// static-initialiser semantics: it is uninitialised at block start and the
+    /// same physical storage is reused by later blocks and later kernel launches,
+    /// so it commonly contains another block's leftovers rather than zeros.
+    ///
+    /// The caller must ensure every element is written before it is read. When the
+    /// initialising writes are performed cooperatively by the block, they must be
+    /// followed by [`crate::sync::sync_threads`] before any thread reads an element
+    /// written by another thread.
+    ///
+    /// Prefer [`GpuShared::new`], which does this correctly and is safe.
     #[rustc_diagnostic_item = "gpu::new_shared_mem"]
     #[gpu_codegen::device]
     #[gpu_codegen::sync_data]
     #[inline(never)]
-    pub const fn zero() -> Self {
+    pub const unsafe fn uninit() -> Self {
         unimplemented!();
     }
+}
+
+/// Allocate static shared memory and cooperatively initialise every element,
+/// then synchronise. This is the safe replacement for the old `GpuShared::zero()`.
+///
+/// `$per_thread` must be `N / block_size` rounded up: each thread initialises that
+/// many elements. The expansion ends with [`sync_threads`], so on return every
+/// element is initialised and visible block-wide.
+///
+/// Because it is a block-wide collective, **every thread of the block must reach
+/// it**; using it in thread-divergent control flow will deadlock, exactly as a
+/// bare `sync_threads()` would.
+///
+/// This is a statement macro rather than a function, and it declares `$name`
+/// itself rather than returning a value, because a chunked `GpuShared` handle must
+/// never be moved. Returning one from a function makes the data-divergence
+/// analysis reject later `chunk_mut` calls on it as diverged data, and moving one
+/// out of a block expression makes the backend emit a *second* shared allocation,
+/// doubling the block's shared-memory footprint.
+///
+/// ```ignore
+/// gpu::shared_init!(smem: [u64; 4096], 8, 0u64);
+/// // `smem` is now a zeroed `GpuShared<[u64; 4096]>`.
+/// ```
+#[macro_export]
+macro_rules! shared_init {
+    ($name:ident : $ty:ty, $per_thread:expr, $init:expr) => {
+        // SAFETY: every element is written by exactly one thread in the loop
+        // below, and the following `sync_threads()` publishes those writes to the
+        // whole block before `$name` is used.
+        let mut $name = unsafe { $crate::GpuShared::<$ty>::uninit() };
+        {
+            let mut shared_init_chunk = $name.chunk_mut($crate::MapLinear::new(1));
+            for i in 0..$per_thread {
+                shared_init_chunk[i] = $init;
+            }
+        }
+        $crate::sync_threads();
+    };
 }
 
 impl<T> Deref for GpuShared<T> {

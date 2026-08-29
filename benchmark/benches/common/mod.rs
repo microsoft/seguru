@@ -116,6 +116,9 @@ pub fn bench_llm_rs<'a, N: gpu_host::GpuCtxSpace, B: KernelRunner<'a>>(
     m: &'a gpu_host::GpuModule<N>,
 ) {
     let mut group = c.benchmark_group(name);
+    // Flat sampling: linear sampling would need n(n+1)/2 iterations per benchmark,
+    // which is intractable for millisecond-scale GPU kernels at this sample count.
+    group.sampling_mode(criterion::SamplingMode::Flat);
     let batch_size = 1;
     for seq_length_order in [10, 14, 20] {
         let seq_len = 1 << seq_length_order;
@@ -221,7 +224,11 @@ macro_rules! gen_bench {
 
         criterion_group! {
           name = bench;
-          config = Criterion::default().warm_up_time(Duration::from_secs(2)).measurement_time(Duration::from_secs(3)).without_plots();
+          config = Criterion::default()
+                .sample_size(1000)
+                .warm_up_time(Duration::from_secs(2))
+                .measurement_time(Duration::from_secs(10))
+                .without_plots();
           targets = bench_function
         }
 

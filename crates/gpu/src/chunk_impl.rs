@@ -514,3 +514,75 @@ mod test {
         assert_access_map!(S, map_reshape, 8, 12, [0, 1, 4, 5, 0, 1, 4, 5, 0, 1, 4, 5]);
     }
 }
+
+/// A chunk mapping whose destinations are supplied by the caller at run time.
+///
+/// Every other map in this module is an affine function of thread ids and loop
+/// indices, so the compiler can see that distinct threads write distinct slots.
+/// A scatter cannot be written that way: its destinations are computed from the
+/// data. `MapExplicit` closes that gap by carrying the `K` destinations this
+/// thread will write and handing them to the chunk machinery, which then emits
+/// ordinary stores rather than routing the writes through `Atomic`.
+///
+/// The injectivity obligation that the affine maps discharge by construction is
+/// transferred to whoever calls [`MapExplicit::new`].
+#[derive(Clone, Copy)]
+pub struct MapExplicit<const K: usize> {
+    dests: [u32; K],
+    len: u32,
+}
+
+impl<const K: usize> MapExplicit<K> {
+    /// Build a mapping that sends local index `i` to `dests[i]`.
+    ///
+    /// `len` is the length of the region being written; every destination is
+    /// bounds-checked against it, so an out-of-range entry aborts rather than
+    /// corrupting memory. Bounds are *not* the caller's obligation.
+    ///
+    /// # Safety
+    ///
+    /// Uniqueness *is* the caller's obligation. Across every thread in the chunk
+    /// scope, all `dests` entries must be pairwise distinct: no two threads, and
+    /// no two local indices within one thread, may name the same slot. This is
+    /// the [`ScopeUniqueMap`] contract, which cannot be checked here because the
+    /// destinations are only known at run time and each thread sees just its own.
+    ///
+    /// Violating it produces a genuine data race: the writes lower to plain
+    /// stores with no atomicity, so colliding lanes silently lose values.
+    ///
+    /// Typically discharged by a rank computation that assigns each element a
+    /// distinct position — a ballot-based multi-split plus exclusive prefix sums,
+    /// as in a radix-sort downsweep — rather than by inspection.
+    ///
+    /// `ret_sync_data(1000)` declares the returned map non-diversed. The
+    /// destinations genuinely are thread-diverged, so this is not an observation
+    /// about the data; it is the same scope-uniqueness claim the caller makes
+    /// above, restated for the taint analysis, which would otherwise reject any
+    /// map built from data.
+    #[inline(never)]
+    #[gpu_codegen::device]
+    #[gpu_codegen::ret_sync_data(1000)]
+    pub unsafe fn new(dests: [u32; K], len: u32) -> Self {
+        Self { dests, len }
+    }
+}
+
+unsafe impl<CS: ChunkScope, const K: usize> ScopeUniqueMap<CS> for MapExplicit<K> {
+    type IndexType = usize;
+    type GlobalIndexType = usize;
+
+    #[inline]
+    #[gpu_codegen::device]
+    fn map(
+        &self,
+        idx: Self::IndexType,
+        _thread_ids: [u32; TID_MAX_LEN],
+    ) -> (bool, Self::GlobalIndexType) {
+        // Uniqueness is the caller's `new` obligation; bounds are still checked.
+        if idx >= K {
+            return (false, 0);
+        }
+        let dest = self.dests[idx];
+        (dest < self.len, dest as usize)
+    }
+}

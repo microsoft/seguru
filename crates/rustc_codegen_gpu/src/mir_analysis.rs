@@ -209,8 +209,18 @@ impl<'tcx, 'a> TaintTracking<'tcx, 'a> {
         // If the function includes a taint source, we aggresively
         // propagate the taint to the destination and mut args.
         if tainted {
-            if let Some(destination) = destination {
-                state.insert(destination.local);
+            // A function that declares its return value non-diversed keeps that
+            // declaration even when its inputs are diverged: that is precisely
+            // what the declaration asserts. Without this, a map built from
+            // per-thread data can never be handed to `chunk_mut`, however the
+            // uniqueness of its destinations was established.
+            let ret_is_sync = attr
+                .as_ref()
+                .is_some_and(|a| a.ret_sync_data.contains(&GpuAttributes::MAX_FN_IN_PARAMS));
+            if !ret_is_sync {
+                if let Some(destination) = destination {
+                    state.insert(destination.local);
+                }
             }
             for (i, arg) in mut_args.iter() {
                 state.insert(*arg);

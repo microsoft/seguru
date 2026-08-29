@@ -439,3 +439,23 @@ a permutation - every destination is written exactly once - and the type system 
 no way to say so. A "provably disjoint scatter" primitive, consuming a witness that
 the index map is injective and emitting an ordinary `st.global`, would recover most
 of the gap to CUB without weakening safety.
+
+## Finding 8: `ScopeUniqueMap` cannot express a data-dependent permutation (partially unblocked)
+
+The radix-sort scatter writes each key to `offsets[digit] + rank`, a genuine
+permutation of the tile (confirmed independently by four agents on four
+different models). It currently uses `Atomic` purely because the destination
+index is data-dependent, costing ~40% of sort time (24.5 vs 17.4 ms).
+
+`reshape_map!` lowers to a fixed mixed-radix affine formula and cannot express a
+runtime lookup, so a hand-written `ScopeUniqueMap` (`MapExplicit`) is required.
+Two blockers were found; the first is fixed:
+
+1. **Fixed.** `propogate_fn_call` tainted a call's destination whenever *any*
+   argument was tainted, ignoring the callee's `ret_sync_data(MAX_FN_IN_PARAMS)`
+   declaration. That declaration is exactly the assertion that the return is
+   block-uniform regardless of its inputs, so it must survive tainted arguments.
+   Note the constructor must also be `#[inline(never)]`: MIR inlining otherwise
+   erases the call and the attribute with it.
+2. **Open.** `chunk_mut` still reports `InvalidDiversedData` on its receiver.
+   Diagnosis needs a MIR dump to identify which local carries the taint.

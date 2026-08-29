@@ -1218,7 +1218,7 @@ pub fn softmax_autoregressive_backward_kernel(
     );
     let mut dpreatt_bth = chunk_mut(dpreatt, dpreatt_map);
 
-    let mut block_acc = gpu::unsafe { GpuShared::<[f32; 32]>::uninit() };
+    let mut block_acc = unsafe { GpuShared::<[f32; 32]>::uninit() };
     let block2warp = build_chunk_scope(block, warp);
     let warp2thread = build_chunk_scope(warp, Thread);
 
@@ -1440,8 +1440,8 @@ fn prepare_softmax_blockwide_noFloat4<M: ScopeUniqueMap<Grid2BlockScope, IndexTy
     // two reductions of up to 1024 threads:
     // 1) inside warp (shuffle), 2) cross-warp (shared memory), 3) inside warp (shuffle)
     // this results in much cleaner assembly than a multi-warp cg::reduce
-    let mut shared_maxval = gpu::unsafe { GpuShared::<[f32; 32]>::uninit() };
-    let mut shared_sumval = gpu::unsafe { GpuShared::<[f32; 32]>::uninit() };
+    let mut shared_maxval = unsafe { GpuShared::<[f32; 32]>::uninit() };
+    let mut shared_sumval = unsafe { GpuShared::<[f32; 32]>::uninit() };
 
     let warp = ThreadWarpTile::<32>;
     let block2warp = build_chunk_scope(Block, warp);

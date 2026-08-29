@@ -11,7 +11,7 @@ pub fn alloc_shared(a: &[u8], _a_window: usize, b: &mut [u8], b_window: usize, f
     let mut salloc = salloc;
     let mut dy_shared = salloc.alloc::<f32>(gpu::thread_id::<gpu::DimX>() as usize); //~ ERROR Invalid use of diversed data in GPU code
     //~| ERROR Invalid use of diversed data in GPU code
-    let mut shared = gpu::GpuShared::<[u8; 10]>::zero();
+    let mut shared = gpu::unsafe { GpuShared::<[u8; 10]>::uninit() };
     let mut chunk_dy_shared = dy_shared.chunk_mut(gpu::MapLinear::new(1)); //~ ERROR Invalid use of diversed data in GPU code
     //~| ERROR Invalid use of diversed data in GPU code
     let mut chunk_shared = shared.chunk_mut(gpu::MapLinear::new(b_window)); // No error.

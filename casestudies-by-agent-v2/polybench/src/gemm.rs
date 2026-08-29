@@ -42,8 +42,8 @@ pub fn gemm_kernel(a: &[f32], b: &[f32], c: &mut [f32], nk: u32, alpha: f32, bet
     let row0 = block_id::<DimY>() * TILE;
     let col0 = block_id::<DimX>() * TILE;
 
-    let mut as_s = GpuShared::<[f32; SMEM]>::zero();
-    let mut bs_s = GpuShared::<[f32; SMEM]>::zero();
+    let mut as_s = unsafe { GpuShared::<[f32; SMEM]>::uninit() };
+    let mut bs_s = unsafe { GpuShared::<[f32; SMEM]>::uninit() };
 
     // As is stored k-major: As[k][r]; Bs likewise: Bs[k][c].
     let a_map = reshape_map!([4] | [16, 16] => layout: [t1, i0, t0]);

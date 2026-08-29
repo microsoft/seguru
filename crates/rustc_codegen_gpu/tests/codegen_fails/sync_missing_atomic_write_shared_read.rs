@@ -8,7 +8,7 @@
 #[gpu::kernel]
 #[no_mangle]
 pub fn test_atomic_shared_failed(b: &mut f32) {
-    let mut smem = gpu::GpuShared::<f32>::zero();
+    let mut smem = gpu::unsafe { GpuShared::<f32>::uninit() };
     let atomic_smem = gpu::sync::SharedAtomic::new(&mut smem); //~ ERROR The write needs a `sync_threads` called before other read/write
     atomic_smem.atomic_addf(1.0);
     let b_atomic = gpu::sync::Atomic::new(b);

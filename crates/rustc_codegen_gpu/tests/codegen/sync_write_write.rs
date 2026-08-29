@@ -7,7 +7,7 @@
 #[gpu::kernel]
 #[no_mangle]
 pub fn test_shared(a: &[u8], b: &mut [u8]) {
-    let mut shared = gpu::GpuShared::<[u8; 10]>::zero();
+    let mut shared = gpu::unsafe { GpuShared::<[u8; 10]>::uninit() };
     let mut chunk_shared1 = shared.chunk_mut(gpu::MapLinear::new(1));
 
     // Below if the Write-Read test

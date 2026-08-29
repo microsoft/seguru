@@ -8,6 +8,6 @@
 #[gpu::kernel]
 #[no_mangle]
 pub fn mutate_shared() {
-    let mut shared = gpu::GpuShared::<[u8; 10]>::zero();
+    let mut shared = gpu::unsafe { GpuShared::<[u8; 10]>::uninit() };
     shared[0] = 0; //~ ERROR cannot assign to data in dereference of
 }

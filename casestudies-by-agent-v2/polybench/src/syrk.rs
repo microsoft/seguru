@@ -36,8 +36,8 @@ pub fn syrk_kernel(a: &[f32], c: &mut [f32], mm: u32, alpha: f32, beta: f32) {
     let row0 = block_id::<DimY>() * TILE;
     let col0 = block_id::<DimX>() * TILE;
 
-    let mut as_s = GpuShared::<[f32; SMEM]>::zero();
-    let mut bs_s = GpuShared::<[f32; SMEM]>::zero();
+    let mut as_s = unsafe { GpuShared::<[f32; SMEM]>::uninit() };
+    let mut bs_s = unsafe { GpuShared::<[f32; SMEM]>::uninit() };
     let row_map = reshape_map!([4] | [16, 16] => layout: [t1, i0, t0]);
 
     let mut acc = [[0.0f32; TT as usize]; TT as usize];

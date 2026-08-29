@@ -7,7 +7,7 @@
 #[gpu::kernel]
 #[no_mangle]
 pub fn test_shared(a: &[u8], b: &mut [u8]) {
-    let mut shared = gpu::GpuShared::<[u8; 10]>::zero();
+    let mut shared = gpu::unsafe { GpuShared::<[u8; 10]>::uninit() };
     let mut chunk_shared = shared.chunk_mut(gpu::MapLinear::new(1));
     chunk_shared[0] = a[gpu::thread_id::<gpu::DimX>() as usize];
     let mut chunked_b = gpu::chunk_mut(b, gpu::MapLinear::new(1));

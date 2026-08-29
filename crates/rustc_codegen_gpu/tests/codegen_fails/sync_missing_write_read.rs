@@ -7,7 +7,7 @@
 #[gpu::kernel]
 #[no_mangle]
 pub fn test_shared_write_read(a: &[u8], b: &mut [u8]) {
-    let mut shared = gpu::GpuShared::<[u8; 10]>::zero();
+    let mut shared = gpu::unsafe { GpuShared::<[u8; 10]>::uninit() };
     let mut chunk_shared = shared.chunk_mut(gpu::MapLinear::new(1));//~ ERROR The write needs a `sync_threads` called before other read/write
     //~| ERROR The write needs a `sync_threads` called before other read/write
     //~| ERROR The write needs a `sync_threads` called before other read/write

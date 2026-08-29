@@ -43,7 +43,7 @@ impl<'tcx, 'ml, 'a> PreDefineCodegenMethods<'tcx> for GPUCodegenContext<'tcx, 'm
         let llty = self.mlir_type(self.layout_of(ty), false);
         if attr.shared_size {
             panic!(
-                "static shared memory should be defined using SharedGpu::<T>::zero() inside a GPU kernel function"
+                "static shared memory should be defined using GpuShared::<T>::init() or GpuShared::<T>::uninit() inside a GPU kernel function"
             );
         }
         let span = self.tcx.def_span(def_id);

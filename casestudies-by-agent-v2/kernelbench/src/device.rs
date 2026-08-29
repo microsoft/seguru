@@ -21,7 +21,7 @@ use gpu::*;
 #[inline(always)]
 pub fn block_reduce_sum(val: f32) -> f32 {
     let warp = ThreadWarpTile::<32>;
-    let mut smem = GpuShared::<[f32; 32]>::zero();
+    let mut smem = unsafe { GpuShared::<[f32; 32]>::uninit() };
     let lane = warp.thread_rank();
     let num_warps = warp.meta_group_size();
     let warp_val = warp.redux(ReduxAdd, val);
@@ -45,7 +45,7 @@ pub fn block_reduce_sum(val: f32) -> f32 {
 #[inline(always)]
 pub fn block_reduce_max(val: f32) -> f32 {
     let warp = ThreadWarpTile::<32>;
-    let mut smem = GpuShared::<[f32; 32]>::zero();
+    let mut smem = unsafe { GpuShared::<[f32; 32]>::uninit() };
     let lane = warp.thread_rank();
     let num_warps = warp.meta_group_size();
     let warp_val = warp.redux(ReduxMax, val);
@@ -75,7 +75,7 @@ pub fn block_reduce_max(val: f32) -> f32 {
 #[inline(always)]
 pub fn block_reduce_min_i32(val: i32) -> i32 {
     let warp = ThreadWarpTile::<32>;
-    let mut smem = GpuShared::<[i32; 32]>::zero();
+    let mut smem = unsafe { GpuShared::<[i32; 32]>::uninit() };
     let lane = warp.thread_rank();
     let num_warps = warp.meta_group_size();
     let warp_val = warp.redux(ReduxMin, val);
@@ -100,7 +100,7 @@ pub fn block_reduce_min_i32(val: i32) -> i32 {
 #[inline(always)]
 pub fn block_exclusive_scan(val: f32) -> (f32, f32) {
     let warp = ThreadWarpTile::<32>;
-    let mut smem = GpuShared::<[f32; 32]>::zero();
+    let mut smem = unsafe { GpuShared::<[f32; 32]>::uninit() };
     let lane = warp.thread_rank();
     let warp_id = warp.subgroup_id();
     let num_warps = warp.meta_group_size();

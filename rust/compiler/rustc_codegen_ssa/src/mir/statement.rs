@@ -12,6 +12,19 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         match statement.kind {
             mir::StatementKind::Assign(box (ref place, ref rvalue)) => {
                 if let Some(index) = place.as_local() {
+                    // GPU: `GpuShared` locals that copy another such local share one
+                    // shared-memory allocation, so this assignment would be a
+                    // self-copy of the whole buffer. Skip it.
+                    if let mir::Rvalue::Use(
+                        mir::Operand::Move(src) | mir::Operand::Copy(src),
+                    ) = rvalue
+                        && let Some(src_local) = src.as_local()
+                        && let (LocalRef::Place(dst_place), LocalRef::Place(src_place)) =
+                            (&self.locals[index], &self.locals[src_local])
+                        && dst_place.val.llval == src_place.val.llval
+                    {
+                        return;
+                    }
                     match self.locals[index] {
                         LocalRef::Place(cg_dest) => self.codegen_rvalue(bx, cg_dest, rvalue),
                         LocalRef::UnsizedPlace(cg_indirect_dest) => {

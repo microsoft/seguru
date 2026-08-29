@@ -36,7 +36,7 @@ impl<T> GpuShared<T> {
     /// followed by [`crate::sync::sync_threads`] before any thread reads an element
     /// written by another thread.
     ///
-    /// Prefer [`GpuShared::new`], which does this correctly and is safe.
+    /// Prefer [`GpuShared::init`], which does this correctly and is safe.
     #[rustc_diagnostic_item = "gpu::new_shared_mem"]
     #[gpu_codegen::device]
     #[gpu_codegen::sync_data]
@@ -47,67 +47,50 @@ impl<T> GpuShared<T> {
 }
 
 impl<E: Copy, const N: usize> GpuShared<[E; N]> {
-    /// Cooperatively initialise every element to `v`.
+    /// Allocate static shared memory and cooperatively initialise every element
+    /// to `v`.
     ///
-    /// Each thread initialises `PER_THREAD` elements, so `PER_THREAD` must be
-    /// `N / block_size` rounded up.
+    /// This is the safe replacement for the old `GpuShared::zero()`, which never
+    /// actually zeroed anything.
     ///
-    /// The caller **must** call [`sync_threads`] afterwards, before any thread
-    /// reads an element written by another thread. This function deliberately does
-    /// not do it itself: the data-divergence analysis is intra-procedural, so a
-    /// `sync_threads()` inside this callee is not credited to the caller and the
-    /// caller is still rejected with `MissingSyncThreads`.
+    /// The whole block participates: each thread initialises `PER_THREAD`
+    /// elements, so `PER_THREAD` must be `N / block_size` rounded up. The call
+    /// ends with a [`sync_threads`](crate::sync::sync_threads), so on return every
+    /// element is initialised and visible to every thread.
     ///
-    /// Prefer [`shared_init!`], which pairs the allocation, this call and the
-    /// barrier into one safe statement.
+    /// Because it is a block-wide collective, **every thread of the block must
+    /// reach this call**; using it in thread-divergent control flow will deadlock,
+    /// exactly as a bare `sync_threads()` would.
+    ///
+    /// ```ignore
+    /// let mut smem = GpuShared::<[u64; 4096]>::init::<8>(0u64);
+    /// ```
+    ///
+    /// `ret_sync_data(1000)` declares the returned handle non-diversed: index
+    /// `1000` denotes the return value, and a shared-memory handle really is
+    /// uniform across the block. Without it the taint analysis conservatively
+    /// treats the result of any device call as thread-diverged and rejects every
+    /// later `chunk_mut` on the buffer.
     #[gpu_codegen::device]
+    #[gpu_codegen::memspace_shared(1000)]
+    #[gpu_codegen::ret_sync_data(1000)]
     #[inline(always)]
-    pub fn init<const PER_THREAD: usize>(&mut self, v: E) {
+    pub fn init<const PER_THREAD: usize>(v: E) -> Self {
+        // SAFETY: every element is written by exactly one thread in the loop
+        // below, and the `sync_threads()` that follows publishes those writes to
+        // the whole block before the handle is returned.
+        let mut this = unsafe { Self::uninit() };
         {
-            let mut chunk = self.chunk_mut(crate::chunk_impl::MapLinear::new(1));
+            let mut chunk = this.chunk_mut(crate::chunk_impl::MapLinear::new(1));
             for i in 0..PER_THREAD {
                 chunk[i] = v;
             }
         }
+        crate::sync::sync_threads();
+        this
     }
 }
 
-/// Allocate static shared memory and cooperatively initialise every element,
-/// then synchronise. This is the safe replacement for the old `GpuShared::zero()`.
-///
-/// `$per_thread` must be `N / block_size` rounded up: each thread initialises that
-/// many elements. The expansion ends with [`sync_threads`], so on return every
-/// element is initialised and visible block-wide.
-///
-/// Because it is a block-wide collective, **every thread of the block must reach
-/// it**; using it in thread-divergent control flow will deadlock, exactly as a
-/// bare `sync_threads()` would.
-///
-/// The per-element work itself lives in the ordinary function [`GpuShared::init`];
-/// this macro only bundles it with the allocation and the barrier.
-///
-/// It is a statement macro that declares `$name`, rather than a function returning
-/// a fresh `GpuShared`, because the allocation handle must not be moved after it is
-/// bound. `uninit()` is `#[inline(never)]` and its call site *is* the allocation, so
-/// binding the result and then moving it again makes the backend emit a *second*
-/// shared allocation - observed as a ptxas `uses too much shared data` failure at
-/// exactly 2x32 KB in the NTT kernels. Taking `&mut self`, as [`GpuShared::init`]
-/// does, involves no move and works fine.
-///
-/// ```ignore
-/// gpu::shared_init!(smem: [u64; 4096], 8, 0u64);
-/// // `smem` is now a zeroed `GpuShared<[u64; 4096]>`.
-/// ```
-#[macro_export]
-macro_rules! shared_init {
-    ($name:ident : $ty:ty, $per_thread:expr, $init:expr) => {
-        // SAFETY: `init` writes every element exactly once across the block, and
-        // the `sync_threads()` below publishes those writes before `$name` is read.
-        let mut $name = unsafe { $crate::GpuShared::<$ty>::uninit() };
-        $name.init::<{ $per_thread }>($init);
-        $crate::sync_threads();
-    };
-}
 
 impl<T> Deref for GpuShared<T> {
     type Target = T;

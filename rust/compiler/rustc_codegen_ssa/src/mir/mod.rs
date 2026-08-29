@@ -245,14 +245,116 @@ pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
     let traversal_order = traversal::mono_reachable_reverse_postorder(mir, cx.tcx(), instance);
     let memory_locals = analyze::non_ssa_locals(&fx, &traversal_order);
 
+/// GPU: build a map from each `GpuShared` local that is merely a move/copy of
+/// another `GpuShared` local, to the local it copies.
+///
+/// Every local whose type is `GpuShared` is given its own `static_shared_N` global
+/// by `PlaceRef::alloca_size`. A function that allocates shared memory and returns
+/// it therefore produces two such locals - the callee's temporary and the caller's
+/// binding - and the block ends up with two copies of the buffer, overflowing the
+/// shared-memory limit. Such locals denote the *same* physical buffer, so they must
+/// share one allocation.
+///
+/// Only whole-local moves with no projections are treated as aliases, and only when
+/// the destination is assigned exactly once, so distinct `uninit()` calls keep
+/// distinct buffers.
+fn gpu_shared_aliases<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    mir: &mir::Body<'tcx>,
+) -> rustc_data_structures::fx::FxHashMap<Local, Local> {
+    use rustc_data_structures::fx::FxHashMap;
+
+    let Some(gpu_shared) = tcx.get_diagnostic_item(rustc_span::Symbol::intern("gpu::GpuShared"))
+    else {
+        return FxHashMap::default();
+    };
+    let is_gpu_shared = |ty: Ty<'tcx>| {
+        ty.ty_adt_def().map(|def| def.did() == gpu_shared).unwrap_or(false)
+    };
+
+    // Count assignments per local so we only alias single-assignment copies.
+    let mut assign_count: FxHashMap<Local, usize> = FxHashMap::default();
+    for bb in mir.basic_blocks.iter() {
+        for stmt in bb.statements.iter() {
+            if let mir::StatementKind::Assign(box (place, _)) = &stmt.kind {
+                *assign_count.entry(place.local).or_insert(0) += 1;
+            }
+        }
+        if let Some(term) = &bb.terminator {
+            if let mir::TerminatorKind::Call { destination, .. } = &term.kind {
+                *assign_count.entry(destination.local).or_insert(0) += 1;
+            }
+        }
+    }
+
+    let mut aliases: FxHashMap<Local, Local> = FxHashMap::default();
+    for bb in mir.basic_blocks.iter() {
+        for stmt in bb.statements.iter() {
+            let mir::StatementKind::Assign(box (dst, rvalue)) = &stmt.kind else { continue };
+            let mir::Rvalue::Use(op) = rvalue else { continue };
+            let (mir::Operand::Move(src) | mir::Operand::Copy(src)) = op else { continue };
+            if !dst.projection.is_empty() || !src.projection.is_empty() {
+                continue;
+            }
+            if dst.local == src.local {
+                continue;
+            }
+            if !is_gpu_shared(mir.local_decls[dst.local].ty)
+                || !is_gpu_shared(mir.local_decls[src.local].ty)
+            {
+                continue;
+            }
+            let single_assign =
+                |l: Local| assign_count.get(&l).copied().unwrap_or(0) == 1;
+            if dst.local == mir::RETURN_PLACE {
+                // Return-value optimisation. The return place already denotes the
+                // caller's buffer, so the temporary must use that storage instead
+                // of allocating a second shared global and copying into it.
+                if single_assign(src.local) {
+                    aliases.insert(src.local, dst.local);
+                }
+            } else if single_assign(dst.local) {
+                aliases.insert(dst.local, src.local);
+            }
+        }
+    }
+
+    aliases.remove(&mir::RETURN_PLACE);
+
+    // Collapse chains so every alias points at its ultimate storage.
+    let keys: Vec<Local> = aliases.keys().copied().collect();
+    for local in keys {
+        let mut root = aliases[&local];
+        let mut guard = 0;
+        while let Some(&next) = aliases.get(&root) {
+            root = next;
+            guard += 1;
+            if guard > mir.local_decls.len() {
+                break;
+            }
+        }
+        aliases.insert(local, root);
+    }
+    aliases
+}
+
     // Allocate variable and temp allocas
     let local_values = {
         let args = arg_local_refs(&mut start_bx, &mut fx, &memory_locals);
+
+        let gpu_aliases = gpu_shared_aliases(cx.tcx(), mir);
 
         let mut allocate_local = |local: Local| {
             let decl = &mir.local_decls[local];
             let layout = start_bx.layout_of(fx.monomorphize(decl.ty));
             assert!(!layout.ty.has_erasable_regions());
+
+            // Aliased `GpuShared` locals are patched below to share the storage of
+            // the local they copy; allocating here would emit a second shared
+            // global that nothing reads.
+            if gpu_aliases.contains_key(&local) {
+                return LocalRef::new_operand(layout);
+            }
 
             if local == mir::RETURN_PLACE {
                 match fx.fn_abi.ret.mode {
@@ -284,10 +386,18 @@ pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
         };
 
         let retptr = allocate_local(mir::RETURN_PLACE);
-        iter::once(retptr)
+        let mut locals: Vec<LocalRef<'tcx, Bx::Value>> = iter::once(retptr)
             .chain(args.into_iter())
             .chain(mir.vars_and_temps_iter().map(allocate_local))
-            .collect()
+            .collect();
+
+        // Point each aliased `GpuShared` local at the storage it copies.
+        for (&dst, &src) in gpu_aliases.iter() {
+            if let LocalRef::Place(place) = locals[src.index()] {
+                locals[dst.index()] = LocalRef::Place(place);
+            }
+        }
+        locals
     };
     fx.initialize_locals(local_values);
 

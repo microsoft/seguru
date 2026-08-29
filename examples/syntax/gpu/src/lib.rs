@@ -69,7 +69,7 @@ pub fn kernel_arith<const N: u32>(
     let g_local = g[thread_id as usize].ldcs();
     f[0] = g_local.sin();
 
-    let mut shared = gpu::GpuShared::<[f32; 32]>::zero();
+    let mut shared = unsafe { gpu::GpuShared::<[f32; 32]>::uninit() };
     let mut shared_chunk = shared.chunk_mut(gpu::MapLinear::new(1));
     shared_chunk[0] = 1.1 * ((thread_id + 1) as f32);
     gpu::sync_threads(); // TODO: MIR analyzer to check/inject the correct sync.

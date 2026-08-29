@@ -211,6 +211,7 @@ by anything else in the body:
 | `fn new() -> Self`, runtime loop bound, barrier inside | `InvalidDiversedData` |
 | `fn new() -> Self`, `const PER_THREAD`, barrier inside | `InvalidDiversedData` |
 | `fn make() -> Self`, `const PER_THREAD`, barrier at call site | `InvalidDiversedData` |
+| `fn make() -> Self` **+ `ret_sync_data(1000)`** | divergence OK; 2x shared alloc |
 | `fn init(&mut self)`, `const PER_THREAD`, barrier at call site | **compiles, 11/11 pass** |
 
 So neither the loop bound nor the barrier placement matters; only the move does.
@@ -228,15 +229,56 @@ ptxas error: Entry function '...ntt_forward_tile...' uses too much shared data
 `#[inline(never)]` and its call site *is* the allocation, so binding the result and
 moving it again materialises a whole second buffer rather than aliasing the first.
 
-**Cause.** The data-divergence analysis tracks chunk state per MIR local and does
-not propagate it through a move or a return value. Related: the analysis is also
-intra-procedural for barriers, so a `sync_threads()` inside a callee is not
-credited to the caller (`MissingSyncThreads`) even with `#[inline(always)]` — which
-is why `init()` cannot call it and the macro must.
+**Cause — two independent blockers, one of which is already solvable.**
 
-**Impact.** Constructors that both allocate and initialise shared memory cannot be
-written as ordinary functions. Every such API needs the
-`uninit()` + `&mut self` + caller-side barrier shape, or a macro to hide it.
+*1. The divergence rejection is not a real limitation.* `TaintSourceDetector`
+(`mir_analysis.rs:80-110`) conservatively taints the destination of **every**
+`#[gpu_codegen::device]` call, because any device fn might call `thread_id`. It
+exempts functions that declare their return value non-diversed:
+
+```rust
+let trusted_non_diversed = matches!(attr.gpu_item, ...)
+    || attr.ret_sync_data.contains(&GpuAttributes::MAX_FN_IN_PARAMS);
+```
+
+`MAX_FN_IN_PARAMS` is `1000` and index `1000` denotes the return value
+(`attr.rs:15-16, 43`). Annotating the constructor with
+`#[gpu_codegen::ret_sync_data(1000)]` **removes the `InvalidDiversedData` error
+entirely** — verified. A shared-memory handle really is uniform across the block,
+so the annotation is sound rather than a mere silencer.
+
+*2. The remaining blocker is the duplicated allocation.* The forked
+`rustc_codegen_ssa` gives **every MIR local of type `GpuShared` its own shared
+global**:
+
+```rust
+// rust/compiler/rustc_codegen_ssa/src/mir/place.rs:127-133
+if Some(def.did()) == bx.cx().tcx().get_diagnostic_item(sym("gpu::GpuShared")) {
+    return PlaceValue::alloca_shared(bx, size, layout.align.abi).with_type(layout);
+}
+```
+
+and `alloca_shared` calls `define_static_shared_mem`, minting a fresh
+`static_shared_N` every time (`builder/mod.rs:1956-1966`). A constructor produces
+two such locals — the callee's temporary and the caller's binding — so the block
+gets two 32 KB tiles. Neither `#[inline(always)]` nor `#[inline(never)]` avoids
+this, and `-Zmir-enable-passes=+DestinationPropagation` ICEs the `gpu` crate.
+
+**Fix required for `let mut smem = GpuShared::init(...);` to work.** Make a
+`GpuShared` local allocate a shared global only when it is genuinely the result of
+the `gpu::new_shared_mem` intrinsic, and make a move between `GpuShared` places
+alias the existing global instead of allocating and copying. That is a change to
+the vendored `rustc_codegen_ssa`, so it needs its own validation pass across all
+five case studies.
+
+**Impact until then.** Constructors that both allocate and initialise shared memory
+cannot be ordinary functions. Every such API needs the `uninit()` + `&mut self` +
+caller-side barrier shape, or a macro to hide it.
+
+**Also related.** The analysis is intra-procedural for barriers, so a
+`sync_threads()` inside a callee is not credited to the caller
+(`MissingSyncThreads`) even with `#[inline(always)]` — which is why `init()` cannot
+call it and the macro must.
 
 
 ### 6. Alignment is dropped on the memref path, splitting every `u64` global access

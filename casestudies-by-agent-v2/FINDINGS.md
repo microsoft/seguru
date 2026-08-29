@@ -146,7 +146,7 @@ non-zero rank in the parent scope is provably outside the intended slot and coul
 be rejected at compile time. Failing that, the chunk index should be bounds-checked
 against the view length rather than folded into the base address.
 
-### 5. `GpuShared::<T>::zero()` does not zero at run time
+### 5. `GpuShared::<T>::zero()` does not zero at run time *(fixed)*
 
 **Symptom.** A shared buffer created with `zero()` can be observed holding stale
 values from a previous kernel launch — visible in the `only lane 31` row above,
@@ -172,6 +172,71 @@ it is left to the maintainers rather than patched here:
    memory, which is a real cost in kernels that fully overwrite the buffer anyway.
 3. Keep the name but document it loudly and lint uses that read a shared location
    before writing it.
+
+**Fixed** (branch `ziqiao/gpushared-init`) via option 1 plus a safe wrapper:
+
+* `unsafe fn GpuShared::<T>::uninit()` — the allocation intrinsic, renamed and
+  marked `unsafe`, documenting that the caller must write before reading.
+* `fn GpuShared::<[E; N]>::init::<PER_THREAD>(&mut self, v)` — safe cooperative
+  fill across the block.
+* `shared_init!(name: ty, per_thread, init)` — a statement macro bundling
+  allocation, `init` and the barrier into one safe line.
+
+The HEonGPU NTT tile buffers were migrated to `shared_init!`; 11/11 tests pass.
+
+
+### 7. A chunked `GpuShared` handle cannot be returned from a function
+
+**Symptom.** The natural constructor shape is rejected:
+
+```rust
+pub fn make<const PER_THREAD: usize>(v: E) -> Self {
+    let mut this = unsafe { Self::uninit() };
+    { let mut c = this.chunk_mut(MapLinear::new(1));
+      for i in 0..PER_THREAD { c[i] = v; } }
+    this
+}
+```
+
+Every later `chunk_mut` in the *caller* then fails with
+`error: Invalid use of diversed data in GPU code`. This is why the public API is
+`init(&mut self)` plus a macro rather than the more natural
+`let mut smem = GpuShared::init(...); sync_threads();`.
+
+**Isolated.** The rejection is caused by returning the chunked handle itself, not
+by anything else in the body:
+
+| form | result |
+|---|---|
+| `fn new() -> Self`, runtime loop bound, barrier inside | `InvalidDiversedData` |
+| `fn new() -> Self`, `const PER_THREAD`, barrier inside | `InvalidDiversedData` |
+| `fn make() -> Self`, `const PER_THREAD`, barrier at call site | `InvalidDiversedData` |
+| `fn init(&mut self)`, `const PER_THREAD`, barrier at call site | **compiles, 11/11 pass** |
+
+So neither the loop bound nor the barrier placement matters; only the move does.
+
+**A second, independent symptom of the same restriction.** Moving the handle out of
+a *block expression* (an expression-form macro) compiles, but the backend emits a
+**second** shared allocation:
+
+```
+ptxas error: Entry function '...ntt_forward_tile...' uses too much shared data
+             (0x10000 bytes, 0xc000 max)
+```
+
+0x10000 is exactly 2 x 32 KB for one `[u64; 4096]` tile. `uninit()` is
+`#[inline(never)]` and its call site *is* the allocation, so binding the result and
+moving it again materialises a whole second buffer rather than aliasing the first.
+
+**Cause.** The data-divergence analysis tracks chunk state per MIR local and does
+not propagate it through a move or a return value. Related: the analysis is also
+intra-procedural for barriers, so a `sync_threads()` inside a callee is not
+credited to the caller (`MissingSyncThreads`) even with `#[inline(always)]` — which
+is why `init()` cannot call it and the macro must.
+
+**Impact.** Constructors that both allocate and initialise shared memory cannot be
+written as ordinary functions. Every such API needs the
+`uninit()` + `&mut self` + caller-side barrier shape, or a macro to hide it.
 
 
 ### 6. Alignment is dropped on the memref path, splitting every `u64` global access

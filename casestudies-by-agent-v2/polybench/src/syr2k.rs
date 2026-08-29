@@ -34,10 +34,10 @@ pub fn syr2k_kernel(a: &[f32], b: &[f32], c: &mut [f32], mm: u32, alpha: f32, be
     let row0 = block_id::<DimY>() * TILE;
     let col0 = block_id::<DimX>() * TILE;
 
-    let mut ar_s = unsafe { GpuShared::<[f32; SMEM]>::uninit() };
-    let mut ac_s = unsafe { GpuShared::<[f32; SMEM]>::uninit() };
-    let mut br_s = unsafe { GpuShared::<[f32; SMEM]>::uninit() };
-    let mut bc_s = unsafe { GpuShared::<[f32; SMEM]>::uninit() };
+    let mut ar_s = GpuShared::<[f32; SMEM]>::init(0.0f32);
+    let mut ac_s = GpuShared::<[f32; SMEM]>::init(0.0f32);
+    let mut br_s = GpuShared::<[f32; SMEM]>::init(0.0f32);
+    let mut bc_s = GpuShared::<[f32; SMEM]>::init(0.0f32);
     let row_map = reshape_map!([4] | [16, 16] => layout: [t1, i0, t0]);
 
     let mut acc = [[0.0f32; TT as usize]; TT as usize];

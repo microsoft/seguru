@@ -102,8 +102,8 @@ pub fn aes128_encrypt(
 
     // `round_keys` is staged by the host to BLOCK_DIM words (44 live, rest
     // zero) so every thread stages exactly one word with no divergence.
-    let mut te_smem = unsafe { GpuShared::<[u32; BLOCK_DIM as usize]>::uninit() };
-    let mut rk_smem = unsafe { GpuShared::<[u32; BLOCK_DIM as usize]>::uninit() };
+    let mut te_smem = GpuShared::<[u32; BLOCK_DIM as usize]>::init(0u32);
+    let mut rk_smem = GpuShared::<[u32; BLOCK_DIM as usize]>::init(0u32);
     {
         let mut te_chunk = te_smem.chunk_mut(MapContinuousLinear::new(1));
         te_chunk[0] = te0[tid as usize];
@@ -212,9 +212,9 @@ pub fn aes128_decrypt(
 
     let tid = thread_id::<DimX>();
 
-    let mut td_smem = unsafe { GpuShared::<[u32; BLOCK_DIM as usize]>::uninit() };
-    let mut isb_smem = unsafe { GpuShared::<[u32; BLOCK_DIM as usize]>::uninit() };
-    let mut rk_smem = unsafe { GpuShared::<[u32; BLOCK_DIM as usize]>::uninit() };
+    let mut td_smem = GpuShared::<[u32; BLOCK_DIM as usize]>::init(0u32);
+    let mut isb_smem = GpuShared::<[u32; BLOCK_DIM as usize]>::init(0u32);
+    let mut rk_smem = GpuShared::<[u32; BLOCK_DIM as usize]>::init(0u32);
     {
         let mut td_chunk = td_smem.chunk_mut(MapContinuousLinear::new(1));
         td_chunk[0] = td0[tid as usize];

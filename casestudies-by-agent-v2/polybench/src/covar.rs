@@ -80,8 +80,8 @@ pub fn covar_symmat(d: &[f32], symmat: &mut [f32], n: u32, m: u32) {
     let row0 = block_id::<DimY>() * TILE;
     let col0 = block_id::<DimX>() * TILE;
 
-    let mut as_s = unsafe { GpuShared::<[f32; SMEM]>::uninit() };
-    let mut bs_s = unsafe { GpuShared::<[f32; SMEM]>::uninit() };
+    let mut as_s = GpuShared::<[f32; SMEM]>::init(0.0f32);
+    let mut bs_s = GpuShared::<[f32; SMEM]>::init(0.0f32);
     // Row `ty` of the slab, columns `tx + 16*j`: unit-stride in `d`.
     let col_map = reshape_map!([4] | [16, 16] => layout: [t0, i0, t1]);
 

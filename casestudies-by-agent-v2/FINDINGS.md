@@ -459,3 +459,27 @@ Two blockers were found; the first is fixed:
    erases the call and the attribute with it.
 2. **Open.** `chunk_mut` still reports `InvalidDiversedData` on its receiver.
    Diagnosis needs a MIR dump to identify which local carries the taint.
+
+### Finding 5 follow-up: `init` generalised, no `unsafe` left in the case studies
+
+The first `init` took a `PER_THREAD` const generic and ran a fixed loop, so it
+only covered `N` an exact multiple of the block. Every buffer smaller than the
+block (the `[f32; 32]` warp scratch in 256-thread blocks, and the AES tables)
+still needed `unsafe { uninit() }`, leaving 23 `unsafe` sites.
+
+`init` now hands the elements out round-robin and bounds the loop by `N`, so
+thread `t` writes `t, t + block_size, ...` while that stays below `N`. One safe
+call covers `N` larger than the block, smaller than it, or not a multiple of it,
+and the const generic is gone. All 23 sites converted; `verify.sh` passes 67
+tests *and* the no-`unsafe` audit.
+
+Cost: buffers that were fully overwritten before being read now take one
+redundant store and one extra barrier per block. AES, which has five such
+buffers, measured 1.00-1.03x against its CUDA mirror versus 1.00-1.02x before,
+i.e. no measurable change.
+
+**Caveat on benchmarking:** the GPU is shared. A radix-sort run with *no* code
+change at all moved from 2.11x to 2.60x against CUB at 16 Mi keys while another
+process held 17% utilisation. Run-to-run variance therefore exceeds most of the
+differences worth reporting; re-benchmark on an idle GPU before recording any
+ratio.

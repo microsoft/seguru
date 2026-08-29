@@ -53,17 +53,20 @@ impl<E: Copy, const N: usize> GpuShared<[E; N]> {
     /// This is the safe replacement for the old `GpuShared::zero()`, which never
     /// actually zeroed anything.
     ///
-    /// The whole block participates: each thread initialises `PER_THREAD`
-    /// elements, so `PER_THREAD` must be `N / block_size` rounded up. The call
-    /// ends with a [`sync_threads`](crate::sync::sync_threads), so on return every
-    /// element is initialised and visible to every thread.
+    /// The whole block participates: the elements are handed out round-robin, so
+    /// thread `t` writes elements `t`, `t + block_size`, `t + 2 * block_size`, ...
+    /// This works for any `N`, whether it is larger than the block (each thread
+    /// takes several elements), smaller (the surplus threads take none), or not a
+    /// multiple of it. The call ends with a
+    /// [`sync_threads`](crate::sync::sync_threads), so on return every element is
+    /// initialised and visible to every thread.
     ///
     /// Because it is a block-wide collective, **every thread of the block must
     /// reach this call**; using it in thread-divergent control flow will deadlock,
     /// exactly as a bare `sync_threads()` would.
     ///
     /// ```ignore
-    /// let mut smem = GpuShared::<[u64; 4096]>::init::<8>(0u64);
+    /// let mut smem = GpuShared::<[u64; 4096]>::init(0u64);
     /// ```
     ///
     /// `ret_sync_data(1000)` declares the returned handle non-diversed: index
@@ -75,15 +78,26 @@ impl<E: Copy, const N: usize> GpuShared<[E; N]> {
     #[gpu_codegen::memspace_shared(1000)]
     #[gpu_codegen::ret_sync_data(1000)]
     #[inline(always)]
-    pub fn init<const PER_THREAD: usize>(v: E) -> Self {
-        // SAFETY: every element is written by exactly one thread in the loop
-        // below, and the `sync_threads()` that follows publishes those writes to
-        // the whole block before the handle is returned.
+    pub fn init(v: E) -> Self {
+        // SAFETY: `MapLinear::new(1)` sends local index `i` of thread `t` to
+        // element `t + i * block_size`, so every element below `N` is written by
+        // exactly one thread, and the loop bound keeps every write in bounds. The
+        // `sync_threads()` that follows publishes those writes to the whole block
+        // before the handle is returned.
         let mut this = unsafe { Self::uninit() };
         {
             let mut chunk = this.chunk_mut(crate::chunk_impl::MapLinear::new(1));
-            for i in 0..PER_THREAD {
+            let block_size = crate::dim::block_size() as usize;
+            let tid = (crate::dim::thread_id::<crate::dim::DimX>()
+                + (crate::dim::thread_id::<crate::dim::DimZ>()
+                    * crate::dim::block_dim::<crate::dim::DimY>()
+                    + crate::dim::thread_id::<crate::dim::DimY>())
+                    * crate::dim::block_dim::<crate::dim::DimX>())
+                as usize;
+            let mut i = 0usize;
+            while tid + i * block_size < N {
                 chunk[i] = v;
+                i += 1;
             }
         }
         crate::sync::sync_threads();

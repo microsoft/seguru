@@ -37,7 +37,7 @@ pub fn gs_norm(a: &[f32], r: &mut [f32], n: u32, m: u32, k: u32) {
     }
     let ws = warp_sum(acc);
 
-    let mut smem = unsafe { GpuShared::<[f32; RED_BDIM as usize]>::uninit() };
+    let mut smem = GpuShared::<[f32; RED_BDIM as usize]>::init(0.0f32);
     {
         let mut c = smem.chunk_mut(MapContinuousLinear::new(1));
         c[0] = ws;

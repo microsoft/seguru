@@ -9,7 +9,7 @@
 //! from any other lane are lost and corrupt a neighbour, with no compile error,
 //! no bounds check and no runtime diagnostic.
 //!
-//! Bug 2 — *`GpuShared::zero()` does not zero*: `unsafe { GpuShared::<[f32; 32]>::uninit() }`
+//! Bug 2 — *`GpuShared::zero()` does not zero*: `GpuShared::<[f32; 32]>::init(0.0f32)`
 //! leaves the array holding whatever the previous kernel launch left in that
 //! shared address, despite the constructor name promising zeroed memory. A
 //! kernel that reads a slot before writing it therefore observes another
@@ -50,9 +50,11 @@
 //! In `all lanes write`, lane 0 of each warp produced the correct `smem[w] =
 //! 100*w`, while all 248 other lanes raced on `smem[0]` (winner 701 = warp 7,
 //! lane 1). In `only lane 31`, the eight warp totals were never published at
-//! all: `smem[0]` got 731 and `smem[1..8]` are *stale values left over from the
-//! previous kernel launch* - a second observation worth noting, since
-//! `unsafe { GpuShared::<[f32; 32]>::uninit() }` does not zero the array at run time.
+//! all: `smem[0]` got 731 and `smem[1..8]` were *stale values left over from the
+//! previous kernel launch* - a second observation, since the `zero()` of the day
+//! did not zero the array at run time. That was bug 2, now fixed: the probe uses
+//! the safe `GpuShared::init`, so slots no thread wrote read back as 0 rather
+//! than as another launch's leftovers, which makes bug 4 easier to read.
 //!
 use gpu::chunk_scope::{Block, Thread, build_chunk_scope};
 use gpu::prelude::*;
@@ -67,7 +69,7 @@ pub fn stage_probe_kernel(out: &mut [f32], mode: u32) {
     let warp = ThreadWarpTile::<32>;
     let lane = warp.thread_rank();
     let warp_id = warp.subgroup_id();
-    let mut smem = unsafe { GpuShared::<[f32; 32]>::uninit() };
+    let mut smem = GpuShared::<[f32; 32]>::init(0.0f32);
 
     let value = 100.0 * warp_id as f32 + lane as f32;
     sync_threads();

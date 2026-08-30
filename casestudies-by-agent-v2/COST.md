@@ -289,3 +289,70 @@ an idle GPU, which reproduced every baseline number within 0.4%. The generalised
 lesson from this session is the same one phase 2 recorded about the AES harness:
 **when a number moves, check the measurement before believing the code.** Both
 times the measurement was at fault.
+
+---
+
+## Phase 4: the same-algorithm baselines
+
+Phase 3 ended quoting "2.2x slower than CUB" as the cost of safety. Phase 4 spent
+its whole budget establishing that this number, and the two before it, were
+measured against the wrong baseline — and then measuring the right one.
+
+| Question | Answer | What it cost |
+| --- | --- | --- |
+| Is the 2.2x a safety cost? | No. 1.15x is; the rest is algorithm and tuning. | one `nsys` run to see CUB's kernel names, then vendoring `DeviceRadixSort.cu` |
+| Is onesweep expressible in safe Rust? | Yes, and the three reasons given for "no" were all wrong. | three minimal probes |
+| Is the onesweep port's 1.75x a safety cost? | No. It is one missing primitive. | one vendored baseline + one 4-line kernel flag |
+
+### The cost pattern of this phase: predictions are worthless, probes are cheap
+
+Phase 3's `FINDINGS.md` listed three reasons onesweep could not be written in
+safe Rust. Each was written confidently, each was derived by reading the analysis
+source rather than running it, and **all three were false.** The probes that
+falsified them were a few lines each and ran in seconds. The write-up of the
+predictions was longer than the probes that disproved them.
+
+The same shape recurs throughout this project's cost history:
+
+* the AES harness (phase 2), the contended sweep (phase 3), the atomic scatter
+  (phase 3), the occupancy story (phase 3), and the onesweep blockers (phase 3)
+  were **five confident claims, all falsified by a cheap measurement.**
+* Not one was falsified by more reasoning. Every one fell to a probe, a `nsys`
+  run, a PTX grep, or a `nvidia-smi` check.
+
+**The generalised rule, and the single most cost-effective habit found in this
+project: before writing down why something is impossible or where time goes,
+spend the ten minutes to try it or measure it.** The asymmetry is large — a probe
+costs minutes, a wrong finding costs a full phase of downstream reasoning plus
+the write-up that has to be retracted.
+
+### The measurement traps that cost the most in phase 4
+
+Two failed probes cost more than the successful one, and both failed the same
+way — by changing something other than the variable under test:
+
+1. Pre-seeding the look-back flags `FLAG_INCLUSIVE` to skip the spin **hung the
+   GPU** (the publish then wraps the flag field to 3). Diagnosed only after a
+   13-minute silent run.
+2. Eliding the look-back entirely made the kernel **2.8x slower**, because zero
+   prefixes send the scatter to degenerate addresses. The probe was measuring the
+   memory system, not the spin.
+
+The version that worked changed exactly one thing: where the backwards walk
+starts. Same publishes, same reads, no waiting. **A performance probe must hold
+the memory access pattern fixed, or it measures the pattern.**
+
+### What phase 4 bought
+
+| Result | Cost |
+| --- | --- |
+| the sort's cost of safety: 2.2x -> **1.15x**, same algorithm, same tuning | lead |
+| a working safe-Rust onesweep, correct on its first run | lead |
+| its 1.75x localised to the look-back spin (45% of runtime) and to one missing primitive | lead |
+| a latent aliasing bug found in upstream `OneSweep.cu` | free, as a side effect of retuning it |
+| an atomic load in `crates/gpu/src/sync.rs` | not attempted |
+
+The last row is this phase's honest one, and it is the highest-value item now
+open: the finding says an atomic load should recover most of a 1.75x on the most
+important primitive in GPU sorting, and that claim is itself a prediction. By the
+rule above, it should be probed before it is believed.

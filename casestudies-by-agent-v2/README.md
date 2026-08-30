@@ -293,7 +293,8 @@ absolute numbers against machine peak rather than a head-to-head ratio.
 | PolyBench stencils | Bounds-check bound | Parity (1.02-1.05x) after optimisation; was 1.05-1.88x |
 | PolyBench mat-vec | Bandwidth bound, both weak | 0.79x — see caveat, not a real win |
 | HEonGPU NTT | `u64` split into 2x32 by a compiler defect | 1.10-1.47x slower; was 1.3-1.6x |
-| Radix sort | Data-dependent scatter | 2.2x slower at scale; 1.21-1.31x at <=1 Mi keys |
+| Radix sort, reduce-then-scan | Data-dependent scatter | 1.15x vs the same CUDA algorithm at the same tuning |
+| Radix sort, onesweep | Look-back spin (no atomic load) | 1.75x at 256 Mi; 0.38-0.59x below 1 Mi |
 
 The pattern is consistent and, we think, the main technical result of this
 exercise:
@@ -302,11 +303,20 @@ exercise:
   behaviour, safe Rust on SeGuRu reaches parity with hand-written CUDA.** Bounds
   checking is essentially free in these regimes because the bottleneck is
   elsewhere.
-* **Where the kernel needs a data-dependent scatter, SeGuRu pays a real and
-  measurable tax**, because safety forces those writes through atomics. In the
-  radix sort this is ~40% of runtime, even though the scatter is provably a
-  permutation - the type system just cannot express that. A "provably disjoint
-  scatter" primitive would close most of this gap without giving up safety.
+* **Where the kernel needs a data-dependent scatter, SeGuRu pays a real but
+  modest tax**, because safety forces those writes through atomics. Measured
+  against the same algorithm at the same tuning, the reduce-then-scan sort costs
+  1.15x, all of it in the one kernel that scatters; the other two kernels are at
+  0.97-0.98x. (An earlier claim that this scatter was "~40% of runtime" was
+  withdrawn: it was measured against CUB, which runs a different algorithm.)
+* **Where the kernel polls another block's flag, SeGuRu pays for a missing
+  primitive.** The atomic API has no load, so a decoupled-look-back poll must be
+  written as a read-modify-write (`atomic_ori(0)`, lowering to
+  `atom.global.or.b32`) where CUDA uses `ld.volatile.global.u32`. An RMW takes
+  the cache line exclusively, so pollers serialise instead of sharing it. This is
+  45% of the onesweep sort's runtime and the whole of its 1.75x gap - remove the
+  waiting and the safe port is *faster* than the CUDA baseline. An atomic load is
+  race-free and would cost nothing in safety. See FINDINGS.md, Finding 10.
 * **Where the kernel is issue-bound on many small indexed loads** (stencils,
   mat-vecs), SeGuRu pays for bounds checks it cannot elide - a measured **29-31%
   of `conv3d`** and **~50% of the `mvt` column pass**. Unlike the scatter tax this

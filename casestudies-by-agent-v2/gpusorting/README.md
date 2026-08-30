@@ -270,10 +270,10 @@ against 8.74 ms. The 11.6 ms gap splits almost exactly in half.
 
    We cannot copy just the fused-histogram half: our `pass_hist` is *per tile*,
    and tile membership changes after every permutation, so passes 2-4 genuinely
-   cannot be precomputed. Closing this needs decoupled look-back. Whether that is
-   expressible in safe SeGuRu is **an open question, not a finding** — it needs an
-   acquire-ordered atomic load spinning on a neighbour's flag, which is the shape
-   `sync_data` currently rejects, but it has not been attempted.
+   cannot be precomputed. Closing this needs decoupled look-back. An earlier
+   version of this file called that **an open question**, guessing it needed an
+   acquire-ordered atomic load of the shape `sync_data` rejects. It has since
+   been written (`src/onesweep.rs`) and SeGuRu accepts it — see "Onesweep" below.
 
 2. **5.63 ms (49%) is our downsweep running 1.69x slower than CUB's scatter**
    (618 vs 1040 GB/s) while issuing *identical* traffic. `ptxas -arch=sm_80 -O3
@@ -309,3 +309,41 @@ about 40% of the time. It is worth nothing at all — see experiment B above.
   dimension it merely bounds the index, and an out-of-range id yields an invalid
   pointer — a runtime `CUDA_ERROR_ILLEGAL_ADDRESS`, not a panic. `src/upsweep.rs`
   and `src/scan.rs` are worked examples with and without a meaningful override.
+
+
+## Onesweep
+
+`src/onesweep.rs` is a safe-Rust port of upstream's `OneSweep.cu`: a global
+histogram, a seeding scan, and four fused binning passes with decoupled
+look-back. It passed all nine cases in `bin/onesweep_check.rs` on its first run.
+Run it under `timeout` — a wrong look-back hangs the device rather than failing.
+
+`cuda/upstream/OneSweep.cu` is vendored (MIT) and `cuda/os_variant.cu` compiles
+it twice, at upstream's 7680-key tile and at our 4096-key tile, so `bin/bench.rs`
+can print a same-algorithm, same-tuning ratio (`OS ratio`) alongside `RS ratio`.
+**`CUB ratio` is not a like-for-like number and should not be quoted as one.**
+
+At 256 Mi keys the port costs 1.75x the same CUDA onesweep, against a flat 1.15x
+for reduce-then-scan; below 1 Mi keys it is 1.7-2.6x *faster*. `bin/onesweep_lb.rs`
+localises the gap: restart each tile's backwards walk at slot 0 (seeded
+`FLAG_INCLUSIVE` by the scan, so it terminates immediately) and the publishes and
+reads are unchanged but no tile waits. That removes 45% of the runtime and puts
+the safe port at 12.76 ms against the CUDA baseline's 13.31 ms.
+
+So the whole gap is the spin, and the cause is one missing primitive.
+`crates/gpu/src/sync.rs` has no atomic load and no CAS, so the poll is written
+`atomic_ori(0)` — an RMW returning the old value — which lowers to
+`atom.global.or.b32`. CUDA's `volatile` load lowers to `ld.volatile.global.u32`.
+An RMW must take the L2 sector exclusively, so pollers serialise against each
+other and against the publisher. An `atomic_load` lowering to
+`ld.relaxed.gpu.global.u32` would be race-free and should recover most of it.
+
+Two traps worth knowing, both of which cost a debugging session:
+
+* Pre-seeding the flag array `FLAG_INCLUSIVE` to short-circuit the spin **hangs
+  the GPU**. The tile's own `atomic_addi` publish then lands on an already-tagged
+  slot, the flag field wraps to 3, and successors match neither branch.
+* Upstream stashes its acquired partition index in
+  `s_warpHistograms[BIN_PART_SIZE - 1]`, which aliases warp 15 / bin 255 as soon
+  as `BIN_PART_SIZE <= BIN_HISTS_SIZE`. It is correct at 7680 and wild at 4096.
+  Given a dedicated `__shared__` slot here, marked `LOCAL MODIFICATION`.

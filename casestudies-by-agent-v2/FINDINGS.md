@@ -474,12 +474,35 @@ and the const generic is gone. All 23 sites converted; `verify.sh` passes 67
 tests *and* the no-`unsafe` audit.
 
 Cost: buffers that were fully overwritten before being read now take one
-redundant store and one extra barrier per block. AES, which has five such
-buffers, measured 1.00-1.03x against its CUDA mirror versus 1.00-1.02x before,
-i.e. no measurable change.
+redundant store and one extra barrier per block. Measured on an idle GPU, that
+costs nothing detectable:
 
-**Caveat on benchmarking:** the GPU is shared. A radix-sort run with *no* code
-change at all moved from 2.11x to 2.60x against CUB at 16 Mi keys while another
-process held 17% utilisation. Run-to-run variance therefore exceeds most of the
-differences worth reporting; re-benchmark on an idle GPU before recording any
-ratio.
+| | before | after |
+|---|---|---|
+| NTT fwd, N=16384 | 471.4 us | 471.9 us |
+| NTT fwd, N=4096 | 219.4 us | 218.8 us |
+| element-wise add | 65.0 us (1549 GB/s) | 65.2 us (1545 GB/s) |
+| radix sort, 256 Mi | 19.612 ms (2.22x CUB) | 19.603 ms (2.22x) |
+| AES encrypt, 1 GiB | 8299.5 us (1.00x) | 8313.3 us (1.00x) |
+
+Every figure is within 0.4%, i.e. inside run-to-run noise. The redundant store is
+amortised over a whole block and the barrier is one of many the kernels already
+execute.
+
+**Caveat on benchmarking: always confirm the GPU is idle first.** This machine is
+shared. A sweep taken while another process held 17% utilisation showed the NTT
+apparently regressing 40% and the sort going 2.11x -> 2.60x against CUB, and the
+sort contains no shared-memory initialisation at all. The giveaway is that the
+*CUDA baseline* columns slowed by 21-38% at the same time, since they contain no
+SeGuRu code; the cleanest control was heongpu's element-wise kernel, which uses
+no `GpuShared` whatsoever yet appeared 42% slower. Re-running on an idle GPU
+reproduced every baseline number exactly.
+
+Note also that under contention SeGuRu degraded consistently *more* than the CUDA
+baselines (+40% vs +29% on NTT, +42% vs +21% on element-wise). That asymmetry is
+unexplained and is not caused by any code change here; a plausible but unverified
+reading is that the SeGuRu kernels carry a heavier register/shared-memory
+footprint and so lose more occupancy when sharing SMs.
+
+Check `nvidia-smi --query-compute-apps=pid,used_memory --format=csv` before
+recording any ratio.

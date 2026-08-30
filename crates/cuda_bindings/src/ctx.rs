@@ -362,6 +362,19 @@ pub struct GpuFunction<'ctx, N: GpuCtxSpace> {
     _marker: PhantomData<&'ctx N>,
 }
 
+/// A CUDA stream handle.
+///
+/// \[Host-device safety invariant\] `launch` returns as soon as the kernel is
+/// enqueued, so the borrows on its arguments expire while the kernel is still
+/// running. What orders those accesses is that every launch and copy is issued
+/// on the default stream. Making streams reachable from safe code would let it
+/// place two kernels on independent streams and race on the same buffer, so
+/// this type is deliberately not re-exported from the crate root and `raw`
+/// stays private.
+///
+/// ```rust,compile_fail,E0432
+/// use cuda_bindings::CudaStream;
+/// ```
 pub struct CudaStream {
     raw: CUstream,
 }

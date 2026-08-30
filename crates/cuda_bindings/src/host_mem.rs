@@ -10,6 +10,11 @@ use crate::{CUDA_SUCCESS, CudaError, GpuCtxGuard, GpuCtxSpace, TensorView};
 // The memory is page-locked and can be accessed by the GPU directly.
 // It is accessible from any GPU context.
 // No Copy/Clone
+//
+// [Host-device safety invariant] This exposes Deref/DerefMut to the host, so it
+// must never be reachable from a device pointer. We therefore never call
+// cuMemHostGetDevicePointer on it and never pass it as a kernel argument;
+// otherwise the host could mutate it through DerefMut while a kernel reads it.
 pub struct PinnedHostBox<'a, T: ?Sized> {
     ptr: &'a mut T,
 }

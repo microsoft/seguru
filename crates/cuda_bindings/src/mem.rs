@@ -394,6 +394,12 @@ impl<'ctx: 'a, 'a, N: GpuCtxSpace + 'static> GpuCtxGuard<'ctx, 'a, N> {
 
 #[expect(private_bounds)]
 impl<'a, T: ?Sized + SizedOrSliceClone> TensorView<'a, T> {
+    /// Copies device data to host memory.
+    ///
+    /// \[Host-device safety invariant\] `cuMemcpyDtoH_v2` is the blocking form,
+    /// which is what orders this read after any in-flight kernel that wrote
+    /// `self`. Switching to `cuMemcpyDtoHAsync_v2` would let the host observe a
+    /// buffer a kernel is still writing.
     pub fn copy_to_host(&self, dst: &mut T) -> Result<(), CudaError> {
         let len = self.len();
         let dst_len = (dst as &T).len_if_slice().unwrap_or(1);
@@ -413,6 +419,12 @@ impl<'a, T: ?Sized + SizedOrSliceClone> TensorView<'a, T> {
 
 #[expect(private_bounds)]
 impl<'a, T: ?Sized + SizedOrSliceClone> TensorViewMut<'a, T> {
+    /// Copies host data into device memory.
+    ///
+    /// \[Host-device safety invariant\] `cuMemcpyHtoD_v2` is the blocking form,
+    /// which is what orders this write after any in-flight kernel that read
+    /// `self`. Switching to `cuMemcpyHtoDAsync_v2` would let the host overwrite
+    /// a buffer a kernel is still reading.
     pub fn copy_from_host(&mut self, src: &T) -> Result<(), CudaError> {
         let len = self.len();
         let src_len = src.len_if_slice().unwrap_or(1);

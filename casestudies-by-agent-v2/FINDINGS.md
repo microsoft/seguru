@@ -602,31 +602,13 @@ Three corrections to earlier claims fall out of this:
   wrong results**, so the port has an undocumented dependency on the 4096 tile.
   Worth about 5% and left open.
 
-### Why onesweep is not simply the next step
+### Why onesweep is not simply the next step -- all three predictions were wrong
 
-Upstream also ships `OneSweep.cu`, so porting it is not blocked on writing an
-algorithm from scratch. It is blocked on three things, in increasing severity:
-
-1. **Dynamic tile acquisition.** Onesweep calls `atomicAdd(&index[pass], 1)` to
-   *acquire* a partition index rather than deriving it from `blockIdx`. SeGuRu's
-   chunking API proves blocks touch disjoint memory *from `blockIdx`*; a tile
-   index that is the result of a runtime atomic is exactly the diversed data the
-   analysis refuses to index with.
-2. **Unbounded spin on a neighbour's flag.** The look-back loop's trip count
-   depends on what another block has written, through `volatile` loads. SeGuRu
-   rejects control flow driven by non-uniform global data, and the safe API
-   exposes no acquire-ordered load.
-3. **A forward-progress assumption.** Decoupled look-back deadlocks if the
-   predecessor block is not resident. CUDA does not guarantee it is; the
-   technique works by virtue of scheduling behaviour, which is why upstream ships
-   `EmulatedDeadlocking.cu`.
-
-Item 3 is the interesting one for the paper: SeGuRu would be rejecting onesweep
-because onesweep depends on a forward-progress property the platform does not
-guarantee — a legitimate safety objection, not a toolchain limitation.
-
-**Items 1 and 2 are predictions from reading the analysis rules, not results.
-The port has not been attempted.**
+An earlier version of this finding predicted that onesweep could not be written
+in safe Rust, for three reasons: dynamic tile acquisition via `atomicAdd`, an
+unbounded spin on a neighbour's flag, and a forward-progress assumption. Those
+were **predictions from reading the analysis rules, not results.** The port has
+since been written (`src/onesweep.rs`), and all three are false. See Finding 10.
 
 ### Method notes
 
@@ -644,3 +626,128 @@ checking. Before quoting a ratio, confirm the baseline runs the same algorithm �
 nvcc 13.3 no longer macro-expands the operand of `#pragma unroll`, so upstream's
 `#pragma unroll BIN_KEYS_PER_THREAD` needed a one-line `_Pragma` workaround. It
 is marked `LOCAL MODIFICATION` in the vendored file.
+
+---
+
+## Finding 10: onesweep *is* expressible in safe Rust, and its entire cost against CUDA is one missing primitive — an atomic load
+
+Finding 9 predicted that onesweep was out of reach for safe Rust. The port was
+written anyway (`gpusorting/src/onesweep.rs`, ~600 lines, three kernels) and
+**passed all nine correctness cases on its first run**, up to 16 Mi keys. Every
+one of the three predicted blockers is accepted by SeGuRu:
+
+| predicted blocker | reality |
+| --- | --- |
+| tile index from a runtime `atomicAdd`, not `blockIdx` | accepted. The index is stashed in shared memory and broadcast; nothing indexes global memory with a per-thread diverged value. |
+| unbounded spin whose exit condition another block has not written yet | accepted. `mir_thread_sync_check.rs` has **no termination analysis**. The one liveness-adjacent rule is barrier divergence, and the look-back loop contains no barrier, so it is legal. |
+| forward-progress assumption | not checked at all. SeGuRu guarantees memory safety and data-race freedom, **not liveness**. It will happily compile a kernel that hangs. |
+
+That last row is the honest statement of scope, and it cuts both ways: SeGuRu
+does not reject onesweep on liveness grounds, and it also would not have saved us
+if the look-back had been wrong.
+
+### The same-algorithm, same-tuning comparison
+
+`cuda/upstream/OneSweep.cu` is vendored (MIT) and `cuda/os_variant.cu` compiles it
+twice, at upstream's 7680-key tile and at our 4096-key tile, exactly as was done
+for reduce-then-scan. Milliseconds, A100 80GB idle, mean of 20-50 iterations:
+
+| keys | SG-RS | DRS-ours | RS ratio | SG-OS | OS-ours | **OS ratio** | OS-up | CUB | Thrust |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 64 Ki | 0.108 | 0.096 | 1.13x | 0.062 | 0.166 | **0.38x** | 0.171 | 0.077 | 0.088 |
+| 1 Mi | 0.151 | 0.142 | 1.06x | 0.123 | 0.210 | **0.59x** | 0.217 | 0.116 | 0.331 |
+| 4 Mi | 0.383 | 0.323 | 1.19x | 0.405 | 0.346 | 1.17x | 0.371 | 0.233 | 0.478 |
+| 16 Mi | 1.357 | 1.186 | 1.14x | 1.549 | 1.088 | 1.42x | 1.131 | 0.643 | 0.949 |
+| 64 Mi | 5.009 | 4.372 | 1.15x | 5.925 | 3.542 | 1.67x | 3.701 | 2.228 | 2.776 |
+| 256 Mi | 19.608 | 17.053 | **1.15x** | 23.336 | 13.314 | **1.75x** | 13.940 | 8.757 | 10.028 |
+
+Three things stand out:
+
+* **Below ~1 Mi keys the safe-Rust onesweep is 1.7-2.6x *faster* than the CUDA
+  one** (0.38x, 0.59x). At those sizes the run is dominated by launch and clear
+  overhead in the dispatcher, not by the kernels.
+* **The RS ratio is flat at 1.15x; the OS ratio degrades with size**, 1.17x ->
+  1.42x -> 1.67x -> 1.75x. A ratio that grows with the problem is a contention
+  signature, not a codegen one.
+* CUB (8.757) is still 1.52x faster than upstream's *own* onesweep at either
+  tuning (13.3 / 13.9), so CUB's remaining advantage is engineering, not
+  algorithm. It is not a like-for-like baseline for anything.
+
+### Where the OS ratio actually goes: the look-back spin, and why
+
+`bin/onesweep_lb.rs` runs the identical kernel twice. In the second run every
+tile's backwards walk starts at slot 0 instead of at its immediate predecessor;
+slot 0 is seeded `FLAG_INCLUSIVE` by `onesweep_scan`, so the walk terminates on
+its first read. The publish and the read traffic are unchanged — only the
+*waiting* is removed. The result is wrong by construction; the delta is the cost
+of waiting:
+
+| keys | onesweep ms | no wait ms | **waiting** |
+| ---: | ---: | ---: | ---: |
+| 4 Mi | 0.403 | 0.247 | 38.7% |
+| 16 Mi | 1.535 | 0.828 | 46.1% |
+| 64 Mi | 5.908 | 3.228 | 45.4% |
+| 256 Mi | 23.317 | 12.761 | **45.3%** |
+
+**At 256 Mi, removing the waiting takes the safe-Rust onesweep to 12.76 ms —
+faster than the CUDA onesweep at the same tuning (13.31 ms).** The compute half
+of the port is already at or past parity with CUDA C++. The whole 1.75x is spin.
+
+The mechanism is one instruction, and it is visible in the generated code:
+
+| | look-back read | PTX |
+| --- | --- | --- |
+| CUDA (`volatile uint32_t* passHistogram`) | a load | `ld.volatile.global.u32` |
+| SeGuRu (`Atomic::atomic_ori(0)`) | a read-modify-write | `atom.global.or.b32` |
+
+`crates/gpu/src/sync.rs` exposes only `memref.atomic_rmw` — there is **no atomic
+load and no CAS**. The idiomatic read is therefore `atomic_ori(0)`, an RMW that
+returns the old value unchanged. It is correct, and it has the L1-bypassing,
+device-scope coherence that CUDA gets from `volatile`, which is precisely why it
+was used. But an RMW must take exclusive ownership of the L2 sector, so every
+spinner on an address serialises against every other spinner *and* against the
+publisher, where `ld.volatile.global` spinners merely share a line. With 256
+threads per tile polling 256 addresses across thousands of concurrent tiles, that
+is the difference between a shared read and a queue.
+
+**This is the single most actionable result in this document.** It is not a
+codegen quality problem, not an occupancy problem, and not an algorithm problem:
+it is one missing primitive. An `Atomic::<u32>::atomic_load()` lowering to
+`ld.relaxed.gpu.global.u32` (an atomic load — still race-free, so it costs
+nothing in safety) would be expected to close most of a 1.75x gap on the single
+most important GPU sort primitive, and it would benefit every decoupled-look-back
+algorithm, which is most modern GPU scans.
+
+### A latent bug in upstream `OneSweep.cu`, found by retuning it
+
+`OneSweep.cu` stashes the acquired partition index in
+`s_warpHistograms[BIN_PART_SIZE - 1]`. That is only safe while
+`BIN_PART_SIZE > BIN_HISTS_SIZE` (4096). At upstream's 7680-key tile, index 7679
+is past the histograms and all is well; at a **4096**-key tile it *is* warp 15 /
+bin 255, so the histogram increments overwrite the partition index and the kernel
+scatters to a wild address (`compute-sanitizer` reports the wild write at
+`OneSweep.cu:352`). Fixed here with a dedicated `__shared__ uint32_t
+s_partitionIndexSlot`, marked `LOCAL MODIFICATION`. Worth reporting upstream.
+
+The safe-Rust port never had this bug: it already used a dedicated `PART_SLOT`
+because, unlike the CUDA, it had no spare word to alias.
+
+### Method notes
+
+* A `#[gpu::cuda_kernel]` fn is generic over its config and is **only instantiated
+  where `::launch` is called**. With no host caller it is never analysed and never
+  emitted, and the build still says "Finished". Verify before trusting a build:
+  `find target -name '*.ptx' -newermt '-3 minutes' -exec grep -ho 'visible \.entry [a-zA-Z0-9_]*' {} \;`
+* Pre-seeding the flag array as `FLAG_INCLUSIVE` to short-circuit the spin **does
+  not work** and hangs the GPU: the tile's own `atomic_addi` publish then lands on
+  an already-tagged slot, the flag field wraps to 3, and successors match neither
+  branch and spin forever. Hence the start-at-slot-0 formulation above.
+* Eliding the look-back entirely also gives a wrong answer *and* a wrong
+  measurement — it made the kernel 2.8x **slower**, because zero prefixes send the
+  scatter to degenerate addresses and destroy coalescing. Any probe that changes
+  the addresses being written is measuring the memory system, not the thing you
+  removed.
+* Packing all four passes' look-back buffers into one allocation needs
+  `(tiles + 1) * RADIX` words *per pass*: `Scan` seeds row 0 and tile *i* publishes
+  into row *i+1*. Upstream gets away with `tiles` rows because each pass has its
+  own `cudaMalloc`, which rounds up.

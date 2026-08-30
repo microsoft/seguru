@@ -6,6 +6,8 @@ fn main() {
     println!("cargo:rerun-if-changed=cuda/sort_ref.cu");
     println!("cargo:rerun-if-changed=cuda/drs_variant.cu");
     println!("cargo:rerun-if-changed=cuda/upstream/DeviceRadixSort.cu");
+    println!("cargo:rerun-if-changed=cuda/os_variant.cu");
+    println!("cargo:rerun-if-changed=cuda/upstream/OneSweep.cu");
     if env::var("CARGO_FEATURE_BENCH").is_err() {
         return;
     }
@@ -28,7 +30,14 @@ fn main() {
         "-DBIN_KEYS_PER_THREAD=8",
     ];
     let mut objs = Vec::new();
-    let units: [(&str, &str, &[&str]); 3] = [
+    // Our port's onesweep tuning. BIN_WARPS stays at upstream's 16 (512 threads),
+    // as does BIN_HISTS_SIZE; only the tile size and keys-per-thread change.
+    let os_ours_tuning = [
+        "-DBIN_PART_SIZE=4096",
+        "-DBIN_SUB_PART_SIZE=256",
+        "-DBIN_KEYS_PER_THREAD=8",
+    ];
+    let units: [(&str, &str, &[&str]); 5] = [
         ("cuda/sort_ref.cu", "sort_ref.o", &[]),
         (
             "cuda/drs_variant.cu",
@@ -40,6 +49,16 @@ fn main() {
             "drs_ours.o",
             &["-DDeviceRadixSort=DrsOurs", "-DDRS_DISPATCH=drs_dispatch_ours"],
         ),
+        (
+            "cuda/os_variant.cu",
+            "os_up.o",
+            &["-DOneSweep=OsUp", "-DOS_DISPATCH=os_dispatch_up"],
+        ),
+        (
+            "cuda/os_variant.cu",
+            "os_ours.o",
+            &["-DOneSweep=OsOurs", "-DOS_DISPATCH=os_dispatch_ours"],
+        ),
     ];
     for (src_rel, obj_name, extra) in units {
         let src = manifest.join(src_rel);
@@ -50,6 +69,9 @@ fn main() {
             .args(extra);
         if obj_name == "drs_ours.o" {
             cmd.args(ours_tuning);
+        }
+        if obj_name == "os_ours.o" {
+            cmd.args(os_ours_tuning);
         }
         let status = cmd
             .status()

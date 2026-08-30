@@ -36,6 +36,12 @@ pub enum CudaSort {
     /// tile, 8 keys per thread). Same algorithm *and* same tuning as the Rust
     /// code, so this ratio isolates the cost of SeGuRu.
     DrsOurTuning = 3,
+    /// Upstream `OneSweep.cu` at upstream's tuning (7680 keys per tile).
+    OneSweepUpstreamTuning = 4,
+    /// Upstream `OneSweep.cu` rebuilt at our port's tuning (4096 keys per
+    /// tile). This is the like-for-like baseline for the Rust onesweep port --
+    /// unlike CUB, it is neither differently tuned nor differently engineered.
+    OneSweepOurTuning = 5,
 }
 
 pub struct CudaSorter {

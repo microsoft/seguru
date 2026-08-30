@@ -27,6 +27,12 @@ extern "C" void drs_dispatch_up(unsigned int *, unsigned int *, unsigned int *,
                                 unsigned int *, unsigned int);
 extern "C" void drs_dispatch_ours(unsigned int *, unsigned int *, unsigned int *,
                                   unsigned int *, unsigned int);
+extern "C" unsigned int os_dispatch_up_part_size(void);
+extern "C" unsigned int os_dispatch_ours_part_size(void);
+extern "C" void os_dispatch_up(unsigned int *, unsigned int *, unsigned int *,
+                               unsigned int *, unsigned int *, unsigned int);
+extern "C" void os_dispatch_ours(unsigned int *, unsigned int *, unsigned int *,
+                                 unsigned int *, unsigned int *, unsigned int);
 
 #define CUDA_CHECK(expr)                                                          \
   do {                                                                            \
@@ -49,7 +55,22 @@ struct SortCtx {
   // smaller tile, which needs more thread blocks and so a larger histogram.
   unsigned int *d_global_hist;
   unsigned int *d_pass_hist;
+  // Onesweep needs a per-pass look-back buffer (four times as large, since all
+  // four passes are live at once) and the dynamic tile counters.
+  unsigned int *d_os_pass_hist;
+  unsigned int *d_os_index;
 };
+
+// Run one same-algorithm onesweep sort. Result lands back in `c->d_a`.
+static void os_run(SortCtx *c, int kind) {
+  if (kind == 4) {
+    os_dispatch_up(c->d_a, c->d_b, c->d_global_hist, c->d_os_pass_hist,
+                   c->d_os_index, c->n);
+  } else {
+    os_dispatch_ours(c->d_a, c->d_b, c->d_global_hist, c->d_os_pass_hist,
+                     c->d_os_index, c->n);
+  }
+}
 
 // Run one same-algorithm sort. Result lands back in `c->d_a`.
 static void drs_run(SortCtx *c, int kind) {
@@ -82,6 +103,15 @@ extern "C" SortCtx *cuda_sort_create(const unsigned int *h_keys, unsigned int n)
   CUDA_CHECK(cudaMalloc(&c->d_global_hist, 256 * 4 * sizeof(unsigned int)));
   CUDA_CHECK(cudaMalloc(&c->d_pass_hist,
                         (size_t)max_blocks * 256 * sizeof(unsigned int)));
+
+  unsigned int os_up = os_dispatch_up_part_size();
+  unsigned int os_ours = os_dispatch_ours_part_size();
+  unsigned int os_min = os_up < os_ours ? os_up : os_ours;
+  unsigned int os_blocks = (n + os_min - 1) / os_min;
+  // (tiles + 1) rows per pass; see the comment in os_variant.cu.
+  CUDA_CHECK(cudaMalloc(&c->d_os_pass_hist,
+                        (size_t)(os_blocks + 1) * 256 * 4 * sizeof(unsigned int)));
+  CUDA_CHECK(cudaMalloc(&c->d_os_index, 4 * sizeof(unsigned int)));
   return c;
 }
 
@@ -92,11 +122,14 @@ extern "C" void cuda_sort_destroy(SortCtx *c) {
   CUDA_CHECK(cudaFree(c->d_temp));
   CUDA_CHECK(cudaFree(c->d_global_hist));
   CUDA_CHECK(cudaFree(c->d_pass_hist));
+  CUDA_CHECK(cudaFree(c->d_os_pass_hist));
+  CUDA_CHECK(cudaFree(c->d_os_index));
   delete c;
 }
 
 // kind 0 = CUB, 1 = Thrust, 2 = upstream DeviceRadixSort at upstream tuning
-// (7680 keys/tile), 3 = the same kernels at our port's tuning (4096 keys/tile).
+// (7680 keys/tile), 3 = the same kernels at our port's tuning (4096 keys/tile),
+// 4 = upstream OneSweep at upstream tuning, 5 = OneSweep at our tuning.
 // Returns the mean milliseconds of one sort.
 extern "C" float cuda_sort_bench(SortCtx *c, int kind, int warmup, int iters) {
   size_t bytes = (size_t)c->n * sizeof(unsigned int);
@@ -112,6 +145,8 @@ extern "C" float cuda_sort_bench(SortCtx *c, int kind, int warmup, int iters) {
     } else if (kind == 1) {
       thrust::sort(thrust::device_ptr<unsigned int>(c->d_a),
                    thrust::device_ptr<unsigned int>(c->d_a + c->n));
+    } else if (kind >= 4) {
+      os_run(c, kind);
     } else {
       drs_run(c, kind);
     }
@@ -130,6 +165,8 @@ extern "C" float cuda_sort_bench(SortCtx *c, int kind, int warmup, int iters) {
     } else if (kind == 1) {
       thrust::sort(thrust::device_ptr<unsigned int>(c->d_a),
                    thrust::device_ptr<unsigned int>(c->d_a + c->n));
+    } else if (kind >= 4) {
+      os_run(c, kind);
     } else {
       drs_run(c, kind);
     }
@@ -158,7 +195,11 @@ extern "C" void cuda_sort_copy_out(SortCtx *c, int kind, unsigned int *h_out) {
     CUDA_CHECK(cudaMemcpy(h_out, c->d_b, bytes, cudaMemcpyDeviceToHost));
   } else if (kind >= 2) {
     // Four passes ping-pong, so the sorted keys end up back in d_a.
-    drs_run(c, kind);
+    if (kind >= 4) {
+      os_run(c, kind);
+    } else {
+      drs_run(c, kind);
+    }
     CUDA_CHECK(cudaDeviceSynchronize());
     CUDA_CHECK(cudaMemcpy(h_out, c->d_a, bytes, cudaMemcpyDeviceToHost));
   } else {

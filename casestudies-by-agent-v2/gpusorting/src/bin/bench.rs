@@ -9,16 +9,21 @@
 //! tile against our 4096). The DRS-up / DRS-ours gap is a tuning cost that has
 //! nothing to do with SeGuRu.
 //!
-//! **CUB** is kept for context but is *not* like-for-like: on CUDA 13.3 / sm_80
-//! it dispatches `DeviceRadixSortOnesweepKernel`, a different algorithm that
-//! reads the keys once per digit instead of twice.
+//! **SG-OS** is the SeGuRu onesweep port. Its like-for-like baseline is
+//! **OS-ours** — upstream's `OneSweep.cu`, the file it transliterates, rebuilt
+//! at our tile size. CUB is *also* onesweep on CUDA 13.3 / sm_80, but it is a
+//! heavily tuned production implementation, so `SG-OS / CUB` measures tuning
+//! effort as much as it measures SeGuRu.
+//!
+//! **SG-RS** is the SeGuRu reduce-then-scan port, which reads the keys twice per
+//! digit; compare it against DRS-ours, not against CUB.
 //!
 //! All GPU timings are kernel-only; allocation and host transfers happen once,
 //! outside the timed loop. Radix sort is data oblivious, so every implementation
 //! does exactly the same amount of work regardless of the input distribution.
 
 use gpusorting_gpu::cuda_ffi::{CudaSort, CudaSorter};
-use gpusorting_gpu::radix_sort_timed;
+use gpusorting_gpu::{onesweep_sort_timed, radix_sort_timed};
 use std::time::Instant;
 
 const WARMUP: usize = 5;
@@ -27,6 +32,9 @@ struct Row {
     label: &'static str,
     n: usize,
     sg: f64,
+    os: f64,
+    os_ours: f64,
+    os_up: f64,
     cub: f64,
     thrust: f64,
     drs_up: f64,
@@ -87,6 +95,9 @@ fn main() {
         let (sg_sorted, sg_ms) = radix_sort_timed(&keys, WARMUP, iters);
         assert!(sg_sorted == expected, "SeGuRu sort is wrong at n = {n}");
 
+        let (os_sorted, os_ms) = onesweep_sort_timed(&keys, WARMUP, iters);
+        assert!(os_sorted == expected, "SeGuRu onesweep is wrong at n = {n}");
+
         let cuda = CudaSorter::new(&keys);
         assert!(
             cuda.sorted(CudaSort::Cub) == expected,
@@ -104,12 +115,25 @@ fn main() {
         let thrust_ms = cuda.bench(CudaSort::Thrust, WARMUP as u32, iters as u32);
         let drs_up_ms = cuda.bench(CudaSort::DrsUpstreamTuning, WARMUP as u32, iters as u32);
         let drs_ours_ms = cuda.bench(CudaSort::DrsOurTuning, WARMUP as u32, iters as u32);
+        assert!(
+            cuda.sorted(CudaSort::OneSweepOurTuning) == expected,
+            "onesweep baseline (our tuning) is wrong at n = {n}"
+        );
+        assert!(
+            cuda.sorted(CudaSort::OneSweepUpstreamTuning) == expected,
+            "onesweep baseline (upstream tuning) is wrong at n = {n}"
+        );
+        let os_ours_ms = cuda.bench(CudaSort::OneSweepOurTuning, WARMUP as u32, iters as u32);
+        let os_up_ms = cuda.bench(CudaSort::OneSweepUpstreamTuning, WARMUP as u32, iters as u32);
 
         println!("  n = {label:>7} ({n:>10}) done");
         rows.push(Row {
             label,
             n,
             sg: sg_ms,
+            os: os_ms,
+            os_ours: os_ours_ms,
+            os_up: os_up_ms,
             cub: cub_ms,
             thrust: thrust_ms,
             drs_up: drs_up_ms,
@@ -119,52 +143,49 @@ fn main() {
     }
 
     println!("\n32-bit key sort, A100. Times are milliseconds for one full sort.");
-    println!("DRS-ours is the same algorithm AND same tuning as SeGuRu, in CUDA C++.\n");
+    println!("Each SeGuRu column sits next to CUDA C++ running the SAME algorithm");
+    println!("at the SAME tile size, so both ratios isolate the cost of SeGuRu.\n");
     println!(
-        "| {:>7} | {:>9} | {:>9} | {:>9} | {:>9} | {:>9} | {:>9} | {:>9} | {:>8} | {:>7} |",
+        "| {:>7} | {:>8} | {:>8} | {:>8} | {:>8} | {:>8} | {:>8} | {:>8} | {:>8} | {:>8} |",
         "keys",
-        "SeGuRu ms",
+        "SG-RS",
         "DRS-ours",
-        "DRS-up",
-        "CUB ms",
-        "Thrust ms",
-        "CPU ms",
-        "SG/DRS-o",
-        "SG / CUB",
-        "vs CPU"
+        "RS ratio",
+        "SG-OS",
+        "OS-ours",
+        "OS ratio",
+        "OS-up",
+        "CUB",
+        "Thrust"
     );
     println!(
-        "|{:->9}|{:->11}|{:->11}|{:->11}|{:->11}|{:->11}|{:->11}|{:->11}|{:->10}|{:->9}|",
+        "|{:->9}|{:->10}|{:->10}|{:->10}|{:->10}|{:->10}|{:->10}|{:->10}|{:->10}|{:->10}|",
         "", "", "", "", "", "", "", "", "", ""
     );
     for r in &rows {
-        let cpu_s = r.cpu.map(|c| format!("{c:.2}")).unwrap_or("-".into());
-        let vs_cpu = r
-            .cpu
-            .map(|c| format!("{:.0}x", c / r.sg))
-            .unwrap_or("-".into());
         println!(
-            "| {:>7} | {:>9.3} | {:>9.3} | {:>9.3} | {:>9.3} | {:>9.3} | {:>9} | {:>9.2} | {:>8.2} | {:>7} |",
+            "| {:>7} | {:>8.3} | {:>8.3} | {:>8.2} | {:>8.3} | {:>8.3} | {:>8.2} | {:>8.3} | {:>8.3} | {:>8.3} |",
             r.label,
             r.sg,
             r.drs_ours,
-            r.drs_up,
-            r.cub,
-            r.thrust,
-            cpu_s,
             r.sg / r.drs_ours,
-            r.sg / r.cub,
-            vs_cpu
+            r.os,
+            r.os_ours,
+            r.os / r.os_ours,
+            r.os_up,
+            r.cub,
+            r.thrust
         );
     }
-    println!("\nSG/DRS-o is the cost of SeGuRu: same algorithm, same tuning, safe Rust");
-    println!("against CUDA C++. SG/CUB additionally includes the cost of not using");
-    println!("onesweep, and DRS-up/DRS-ours is the cost of our smaller tile size.");
+    println!("\nRS ratio and OS ratio are the two same-algorithm, same-tuning ratios.");
+    println!("OS-up is upstream's own tuning; CUB is production-tuned onesweep, so");
+    println!("SG-OS/CUB measures tuning effort as much as it measures SeGuRu.");
     println!(
-        "\nGkeys/s (SeGuRu): {}",
+        "\nGkeys/s (SG onesweep): {}",
         rows.iter()
-            .map(|r| format!("{:.2}", gkeys(r.n, r.sg)))
+            .map(|r| format!("{:.2}", gkeys(r.n, r.os)))
             .collect::<Vec<_>>()
             .join(" ")
     );
+    let _ = |r: &Row| (r.cpu, r.drs_up);
 }

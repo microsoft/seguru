@@ -26,6 +26,8 @@
 pub mod clear;
 pub mod downsweep;
 pub mod driver;
+pub mod onesweep;
+pub mod onesweep_driver;
 pub mod onesweep_probe;
 pub mod scan;
 pub mod upsweep;
@@ -38,6 +40,7 @@ pub mod cuda_ffi;
 mod tests;
 
 pub use driver::{radix_sort, radix_sort_timed};
+pub use onesweep_driver::{onesweep_sort, onesweep_sort_timed};
 pub use gpu::vector::VecTypeTrait;
 pub use gpu::U32_4;
 

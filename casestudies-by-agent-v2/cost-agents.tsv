@@ -7,3 +7,7 @@ toolu_01ARKqK2TezPApirYFEPTR1Q	polybench-bench
 toolu_01FZkKPSzWzr1rYEtzdpRUQj	opt-polybench
 toolu_01CqHvAXyQoX2TPrMo3GdL8r	opt-heongpu
 toolu_01JWPuNt6VowjD2uXJuhrJRR	opt-nested
+toolu_016aQuizfHJUFKG99zBUiMbA	chunk-consensus (opus-4.5)
+toolu_019TfQjFXDusixnLfpATWtQA	chunk-consensus (sonnet-4.5)
+toolu_01Qku6JEK5MwZ4Ct2QZgDcAd	chunk-consensus (gpt-5.6)
+toolu_01Y4cgzJ4t6aCEKsQJEdzTJk	chunk-consensus (gemini-3.1-pro)

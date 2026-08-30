@@ -222,3 +222,70 @@ what it learned, it did not.
   `opt-heongpu` reported that it had refuted its own leading hypothesis about
   `__restrict__`. Every claim in this phase was independently re-run by the lead
   before being written down, and all of them reproduced.
+
+## Phase 3: toolchain fixes, a safe shared-memory constructor, and the no-`unsafe` goal
+
+Phase 2 left the suite fast but not clean: the compiler bugs it uncovered were
+still open, `GpuShared::zero()` did not zero (bug 2), and the workaround for it
+put 23 `unsafe` blocks into supposedly-safe kernels. Phase 3 closed all of that.
+
+Cost of phase 3 alone (delta from the end of optimisation):
+
+| | +optimisation | +phase 3 | delta |
+| --- | ---: | ---: | ---: |
+| requests | 965 | 1 271 | **+306** |
+| AIU | 9 152.0 | 12 246.4 | **+3 094.4** |
+| model-minutes | 210.4 | 263.6 | **+53.2** |
+
+Phase 3 cost roughly what phase 2 did (+3 094 vs +2 878 AIU), and about half of
+the original build. Almost all of it was lead time: the work was compiler
+changes in `rustc_codegen_ssa` and `rustc_codegen_gpu`, which need one context
+holding the MIR, the analysis and the case studies at once, and did not
+parallelise into background agents the way porting did.
+
+### The one place agents were used, and why
+
+Removing the radix sort's `Atomic` scatter needed a hand-written
+`ScopeUniqueMap`, which is an `unsafe trait` — the exact situation where a wrong
+answer is expensive and hard to detect. Rather than decide alone, four agents on
+four different models were asked independently whether the safe `chunk!` macro
+could express the scatter:
+
+| agent | reqs | AIU | verdict |
+| --- | ---: | ---: | --- |
+| chunk-consensus (opus-4.5) | 13 | 75.2 | CANNOT |
+| chunk-consensus (gpt-5.6) | 12 | 37.9 | CANNOT |
+| chunk-consensus (sonnet-4.5) | 13 | 41.0 | CANNOT |
+| chunk-consensus (gemini-3.1-pro) | 11 | 17.2 | CANNOT |
+| **total** | **49** | **171.3** | unanimous |
+
+**171 AIU — 1.4% of the session — for unanimity on a soundness question.** All
+four also independently confirmed the scatter's writes form a genuine
+permutation, which is the fact the `unsafe impl` rests on. Cheap insurance, and
+a pattern worth reusing: poll several models before writing an `unsafe impl`,
+not after.
+
+### What phase 3 bought
+
+| Result | Cost |
+| --- | --- |
+| 3 compiler bugs fixed (`ctlz`/`cttz`, symbol collisions, `BASE_THREAD_MASK`) | lead |
+| bug 2 fixed: safe `GpuShared::init`, incl. an NRVO fix in `rustc_codegen_ssa` | lead |
+| `unsafe` in the case studies: 23 -> **0**, at no measurable runtime cost | lead |
+| `ret_sync_data` honoured through diverged arguments | lead |
+| radix-sort `Atomic` removal | unfinished |
+
+The last row is the honest one: the scatter still uses `Atomic`. The consensus
+and the analysis fix landed, but `chunk_mut` still rejects the map on its
+receiver, so the ~40% of sort time that the change targets is still on the table.
+
+### Cost observation: the cheap experiment that saved a false result
+
+A benchmark sweep taken while another process held 17% of the GPU showed the NTT
+regressing 40% and the sort dropping from 2.11x to 2.60x against CUB. Writing
+that up as a regression would have cost far more than measuring it did — the
+disproof was two commands: `nvidia-smi --query-compute-apps`, and one re-run on
+an idle GPU, which reproduced every baseline number within 0.4%. The generalised
+lesson from this session is the same one phase 2 recorded about the AES harness:
+**when a number moves, check the measurement before believing the code.** Both
+times the measurement was at fault.

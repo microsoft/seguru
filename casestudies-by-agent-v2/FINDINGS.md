@@ -457,8 +457,40 @@ Two blockers were found; the first is fixed:
    block-uniform regardless of its inputs, so it must survive tainted arguments.
    Note the constructor must also be `#[inline(never)]`: MIR inlining otherwise
    erases the call and the attribute with it.
-2. **Open.** `chunk_mut` still reports `InvalidDiversedData` on its receiver.
-   Diagnosis needs a MIR dump to identify which local carries the taint.
+2. **Fixed.** `chunk_mut` reported `InvalidDiversedData` on its *receiver*. A MIR
+   dump plus an instrumented build of the analysis found the cause:
+   `SharedAtomic::new` takes `&mut GpuShared` and every `&mut` argument of a
+   device call is tainted unconditionally, so the first atomic view of a buffer
+   taints the buffer handle for the rest of the kernel and no later `chunk_mut`
+   on it can be accepted. `chunk_mut` already declares `ret_sync_data(0, 1000)`
+   for the same receiver; `SharedAtomic::new` declared nothing. Adding
+   `ret_sync_data(0)` to it fixes this and is sound: taking an atomic view does
+   not diverge the handle, which stays the same block-uniform base pointer, and
+   what varies per thread is the index each access supplies.
+
+### And the result: the `Atomic` was free all along
+
+With both fixes the scatter compiles as a safe `chunk_mut`. It buys **nothing**:
+
+| | `Atomic` scatter | `MapExplicit` scatter |
+|---|---|---|
+| atom/red in PTX | 29 | 29 |
+| `st.shared.u32` in PTX | 16 | 16 |
+| 256 Mi sort | 19.603 ms | 19.606 ms |
+
+`atomic_assign` is a store, not a read-modify-write, and already lowered to a
+plain `st.shared.u32`; the `Atomic` was a checker artefact with no codegen
+consequence. **The earlier estimate that it cost ~40% of sort time (24.5 ->
+17.4 ms) was wrong**, and the 2.2x gap against CUB is somewhere else entirely.
+
+The map version is therefore not adopted: no speed, and it costs an `unsafe`
+block because `MapExplicit::new` carries the uniqueness obligation. The two
+toolchain fixes are kept, because both were genuine bugs that would block any
+legitimate use of a data-dependent map.
+
+A methodology note, since this is the third time in this project: the 40% figure
+came from an experiment that was never checked against generated code. Reading
+the PTX first would have cost minutes and saved the whole exercise.
 
 ### Finding 5 follow-up: `init` generalised, no `unsafe` left in the case studies
 

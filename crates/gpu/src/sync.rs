@@ -89,6 +89,14 @@ impl<'a, T: ?Sized> SharedAtomic<'a, T> {
     #[gpu_codegen::device]
     #[rustc_diagnostic_item = "gpu::sync::SharedAtomic::new"]
     #[gpu_codegen::memspace_shared(1000)] // returned data is in shared memory
+    // Taking an atomic view of a shared buffer does not diverge the buffer
+    // handle: it is the same block-uniform base pointer afterwards, and what
+    // varies per thread is the *index* each access supplies, which `Atomic`
+    // governs per access. Without this the handle is tainted for the rest of the
+    // kernel and no later `chunk_mut` on it can be accepted, however the chunk's
+    // disjointness was established. `chunk_mut` already declares the same thing
+    // about the same receiver.
+    #[gpu_codegen::ret_sync_data(0)]
     pub fn new(data: &'a mut GpuShared<T>) -> SharedAtomic<'a, T> {
         Self { data }
     }

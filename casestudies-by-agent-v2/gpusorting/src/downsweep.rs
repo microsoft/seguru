@@ -333,20 +333,22 @@ pub fn radix_downsweep(
     // property of the ranking arithmetic three sections above, so the store is
     // spelled `atomic_assign`.
     //
-    // `atomic_assign` is a store, not a read-modify-write, and lowers to `st.shared`
-    // like the original; the cost is not atomicity but the disabled vectorisation
-    // and reordering around it. An early experiment put it at ~40% of sort time
-    // (24.5 ms -> 17.4 ms at 256 Mi keys), but that predates the BIN_PART_SIZE
-    // tuning that brought the same sort to 19.6 ms, so treat 40% as an upper bound
-    // that has not been re-measured against the current kernel.
+    // `atomic_assign` is a store, not a read-modify-write. **It costs nothing.** This
+    // was measured rather than assumed: the whole scatter was rewritten to use a
+    // `MapExplicit` chunk that carries the runtime destinations, removing the
+    // `Atomic` entirely, and the generated PTX was byte-for-byte equivalent -- 29
+    // atom/red instructions and 16 `st.shared.u32` either way, because
+    // `atomic_assign` already lowers to a plain `st.shared.u32`. The 256 Mi sort
+    // measured 19.606 ms with the map and 19.603 ms with the `Atomic`.
     //
-    // Removing it needs a `ScopeUniqueMap` carrying the runtime destinations, so the
-    // uniqueness claim is made once in an `unsafe impl` instead of at every store.
-    // `MapExplicit` in `gpu::chunk_impl` is that map, and four agents on four models
-    // independently confirmed the permutation property it would assert. It does not
-    // work yet: `smem` is itself tainted by the `atomic_assign` writes in section 3,
-    // so `smem.chunk_mut(map)` is rejected on its *receiver* regardless of the map.
-    // Tracked as finding 8 in ../FINDINGS.md.
+    // So an earlier estimate that this `Atomic` cost ~40% of sort time (24.5 ms ->
+    // 17.4 ms) was simply wrong, and the 2.2x gap against CUB is somewhere else.
+    // `Atomic` here is a checker artefact with no codegen consequence.
+    //
+    // The map version is therefore *not* used: it buys no speed and costs an
+    // `unsafe` block, since `MapExplicit::new` carries the uniqueness obligation.
+    // The two toolchain fixes it needed were kept, because they were real bugs --
+    // see finding 8 in ../FINDINGS.md.
     {
         let s = gpu::sync::SharedAtomic::new(&mut *smem);
         unroll! {

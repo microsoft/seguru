@@ -96,27 +96,29 @@ keys being written are contiguous after ranking, so one transaction serves the
 whole warp. Scattering from registers gives each lane an unrelated address and
 serialises the write. Coalescing dominates. Reverted.
 
-### B. Replace the atomic global scatter with a plain structured store — measurement only
+### B. Replace the atomic scatter with a plain structured store — SUPERSEDED, the atomic is free
 
-SeGuRu requires data-dependent writes to go through `gpu::sync::Atomic`, which
-lowers to `atom.global.exch.b32`. To find out what that costs, the scatter was
-temporarily rewritten as a `chunk_mut` store with a static map. The result is
-*wrong* — the map does not express the permutation — but it is a valid timing of
-the same memory traffic without the atomics:
+SeGuRu requires data-dependent writes to go through `gpu::sync::Atomic`. An early
+version of this section reported that removing it took 256 Mi from 24.5 ms to
+17.4 ms and concluded "the mandatory atomic is about 40% of total sort time".
+**That conclusion is wrong and has been withdrawn.**
 
-| 256 Mi keys | time |
-| --- | ---: |
-| atomic scatter (correct) | 24.5 ms |
-| non-atomic store (incorrect, timing only) | 17.4 ms |
+It was retested properly once the toolchain bug that blocked the safe non-atomic
+scatter was fixed (`SharedAtomic::new` was missing `ret_sync_data(0)`, which
+tainted the `&mut GpuShared` handle permanently). Two checks, both negative:
 
-**The mandatory atomic is about 40% of total sort time.** This is the single
-largest, and the most interesting, cost of SeGuRu's safety guarantee in this
-benchmark, because in this algorithm the scatter is provably a permutation: every
-destination index is written exactly once. The type system simply has no way to say
-so. A "provably disjoint scatter" primitive — an API that consumes a proof or a
-witness that the index map is injective and then emits an ordinary `st.global` —
-would recover most of the gap to CUB without giving up memory safety. Reverted;
-the shipped code is the correct atomic version.
+* **PTX diff.** The generated PTX is *identical* with and without the shared
+  `Atomic` — 29 `atom`/`red` instructions and 16 `st.shared.u32` either way.
+  `atomic_assign` on a shared-memory location already lowers to a plain
+  `st.shared.u32`; it never emitted an atomic instruction to begin with.
+* **Wall clock.** 256 Mi keys: **19.606 ms with the atomic, 19.603 ms without.**
+
+The original 24.5 -> 17.4 measurement is not reproducible and was most likely
+taken under GPU contention (see the caveat in `FINDINGS.md`) or against a variant
+that dropped work as well as the atomic. The shipped code keeps the atomic
+version, which is both correct and free. The real gap to CUB is diagnosed in
+"Why the remaining 2.2x gap to CUB" below, and the atomic is no part of it.
+
 
 ### C. Fully unroll the global scatter loop — kept
 
@@ -242,29 +244,53 @@ attempted had `ptxas -v` been read before the PTX instruction histogram.
 
 ## Why the remaining 2.2x gap to CUB
 
-Two independent reasons, in rough order of size:
+Measured, not estimated: `nsys profile -t cuda --stats=true` on `sort-bench`.
+The per-kernel maxima below are the 256 Mi run.
 
-1. **Algorithm.** CUB uses OneSweep: decoupled look-back lets it make a single pass
-   over the data per digit, whereas upsweep+downsweep reads the keys twice per
-   digit. That alone is close to a 2x difference in memory traffic. Whether
-   OneSweep is expressible in safe SeGuRu is an open question — it needs
-   acquire-semantics atomic loads and a spin-wait on a neighbour's flag, and the
-   spin-wait is inside divergent control flow, which is exactly what SeGuRu's
-   `sync_data` analysis rejects.
+| kernel | ms | traffic | achieved BW | % of 1549 GB/s peak |
+| --- | --- | --- | --- | --- |
+| our `radix_upsweep` | 1.18 | 1.07 GB read | 913 GB/s | 59% |
+| our `radix_scan` | 0.50 | 0.13 GB | — | — |
+| our `radix_downsweep` | 3.47 | 2.15 GB read+write | 618 GB/s | 40% |
+| CUB `DeviceRadixSortHistogramKernel` | 0.78 | 1.07 GB read | 1376 GB/s | 89% |
+| CUB `DeviceRadixSortOnesweepKernel` | 2.06 | 2.15 GB read+write | 1040 GB/s | 67% |
 
-   `nsys` kernel counts make the structural difference concrete: for the same
-   workload CUB launched its histogram kernel **1 146** times against our
-   **2 280** upsweeps. CUB computes all four digit histograms in a single pass —
-   legal because a global histogram is order-invariant — and then needs no
-   per-tile histogram pass at all. We cannot copy just that half: our `pass_hist`
-   is *per tile*, and tile membership changes after every permutation, so passes
-   2–4 genuinely cannot be precomputed. Closing this requires decoupled look-back,
-   not a fused histogram.
-2. **The atomic scatter tax** quantified in experiment B above, about 40% of the
-   remaining time.
+These reconstruct both sorts to within 5%: ours is `(1.18 + 0.50 + 3.47) x 4 =
+20.6 ms` against 19.61 ms measured, CUB is `0.78 once + 2.06 x 4 = 9.0 ms`
+against 8.74 ms. The 11.6 ms gap splits almost exactly in half.
 
-Neither is a code-quality problem in this port; both are properties of the
-programming model. That is the useful finding.
+1. **5.92 ms (51%) is algorithmic.** CUB dispatches
+   `DeviceRadixSortOnesweepKernel` — it is running *onesweep*, not the algorithm
+   we ported. It pays one global histogram (0.78 ms, legal because a global
+   histogram is order-invariant) and then fuses scatter with decoupled look-back.
+   We pay `upsweep + scan` on every pass: 1.68 ms x 4 = 6.7 ms. That is also why
+   we move 12.9 GB of key traffic against CUB's 9.7 GB (1.33x) — the upsweep
+   re-reads the whole key array each pass to build a histogram the downsweep then
+   rebuilds locally anyway.
+
+   We cannot copy just the fused-histogram half: our `pass_hist` is *per tile*,
+   and tile membership changes after every permutation, so passes 2-4 genuinely
+   cannot be precomputed. Closing this needs decoupled look-back. Whether that is
+   expressible in safe SeGuRu is **an open question, not a finding** — it needs an
+   acquire-ordered atomic load spinning on a neighbour's flag, which is the shape
+   `sync_data` currently rejects, but it has not been attempted.
+
+2. **5.63 ms (49%) is our downsweep running 1.69x slower than CUB's scatter**
+   (618 vs 1040 GB/s) while issuing *identical* traffic. `ptxas -arch=sm_80 -O3
+   -v` names the cause: 56 registers at `DOWNSWEEP_THREADS = 256` is 14 336
+   registers per block, so only `65536 / 14336 = 4` blocks fit per SM — 1024 of
+   2048 threads, **50% occupancy**, with no spills. Shared memory is not the
+   binding constraint (`SMEM_WORDS = 4352` u32 = 17 408 B/block would allow 9
+   blocks in A100's 164 KB). 51 registers would buy a 5th block (62.5%), 42 a
+   sixth (75%).
+
+Neither half is a cost of safe Rust. The algorithmic half is inherited from the
+CUDA file we ported and an `unsafe` port of the same file would pay it too; the
+occupancy half is a register-allocation outcome, and the inner loop's PTX
+contains no bounds checks or safety instrumentation to blame it on.
+
+Note this supersedes the earlier claim that an "atomic scatter tax" was worth
+about 40% of the time. It is worth nothing at all — see experiment B above.
 
 ## SeGuRu notes specific to this case study
 

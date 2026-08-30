@@ -138,10 +138,15 @@ measured optimisation experiments (three negative, three kept), is in
 | 64 Mi | 5.006 | 2.228 | 2.743 | - | 13.41 | 2.25x | - |
 | 256 Mi | 19.610 | 8.760 | 9.931 | - | 13.69 | 2.24x | - |
 
-This is the one case study where SeGuRu clearly trails, and the reasons are
-understood and quantified: CUB uses OneSweep (one pass over the keys per digit,
-via decoupled look-back) against our two-pass upsweep/downsweep, and SeGuRu's
-mandatory atomic scatter accounts for a measured ~40% of our runtime.
+This is the one case study where SeGuRu clearly trails, and the reasons are now
+measured per kernel with `nsys` (finding 9). The 11.6 ms gap at 256 Mi splits
+almost exactly in half: 5.9 ms because CUB runs *onesweep* (one global histogram,
+then a fused scatter per digit) while we pay upsweep+scan on every pass, and
+5.6 ms because our downsweep is stuck at 50% occupancy (56 registers x 256
+threads = 4 blocks/SM) and so reaches only 40% of peak bandwidth against CUB's
+67%. Neither is a cost of safe Rust — an `unsafe` port of the same CUDA file
+would pay both. An earlier claim that a "mandatory atomic scatter" cost ~40% of
+runtime was falsified: it costs nothing.
 
 ### HEonGPU (NTT and modular arithmetic)
 

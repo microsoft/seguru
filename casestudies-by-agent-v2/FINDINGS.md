@@ -538,3 +538,69 @@ footprint and so lose more occupancy when sharing SMs.
 
 Check `nvidia-smi --query-compute-apps=pid,used_memory --format=csv` before
 recording any ratio.
+
+## Finding 9: the radix sort's 2.2x gap against CUB is half algorithmic, half occupancy — neither is a SeGuRu safety cost
+
+Earlier phases attributed the sort's 2.2x gap to safety overhead, and finding 8
+guessed the shared-memory `Atomic` in the scatter was worth "~40% of sort time".
+Both were wrong. `nsys profile -t cuda --stats=true` on `sort-bench` gives the
+per-kernel breakdown and settles it.
+
+The first thing the profile shows is that **we are not running CUB's algorithm.**
+CUB on CUDA 13.3 / sm_80 dispatches `DeviceRadixSortOnesweepKernel` — it is doing
+*onesweep* (one global histogram, then one fused scatter-with-decoupled-lookback
+per digit). Our port follows the classic `DeviceRadixSort.cu` structure of three
+kernels per digit pass: `radix_upsweep`, `radix_scan`, `radix_downsweep`.
+
+Per-kernel maxima, which are the 256 Mi (268 435 456 key) run:
+
+| kernel | ms | traffic | achieved BW | % of 1549 GB/s peak |
+| --- | --- | --- | --- | --- |
+| our `radix_upsweep` | 1.18 | 1.07 GB read | 913 GB/s | 59% |
+| our `radix_scan` | 0.50 | 0.13 GB | — | — |
+| our `radix_downsweep` | 3.47 | 2.15 GB read+write | 618 GB/s | 40% |
+| CUB `DeviceRadixSortHistogramKernel` | 0.78 | 1.07 GB read | 1376 GB/s | 89% |
+| CUB `DeviceRadixSortOnesweepKernel` | 2.06 | 2.15 GB read+write | 1040 GB/s | 67% |
+
+Reconstructing the whole sort from these validates the reading: ours is
+`(1.18 + 0.50 + 3.47) x 4 passes = 20.6 ms` against 19.61 ms measured, and CUB is
+`0.78 once + 2.06 x 4 = 9.0 ms` against 8.74 ms measured. Both within 5%.
+
+The 11.6 ms gap then splits almost exactly in two:
+
+- **5.92 ms (51%) is algorithmic.** We pay `upsweep + scan` on *every* pass
+  (1.68 ms x 4 = 6.7 ms); onesweep pays a single histogram (0.78 ms). This is
+  also why we move 12.9 GB of key traffic against CUB's 9.7 GB (1.33x): the
+  upsweep re-reads the whole key array each pass purely to build a histogram the
+  downsweep then rebuilds locally anyway.
+- **5.63 ms (49%) is our downsweep being 1.69x slower than CUB's scatter**
+  (618 vs 1040 GB/s) despite issuing identical traffic.
+
+For the second half, `ptxas -arch=sm_80 -O3 -v` names the cause: the downsweep
+uses **56 registers** with `DOWNSWEEP_THREADS = 256`, i.e. 14 336 registers per
+block, so only `65536 / 14336 = 4` blocks fit per SM — 1024 of 2048 threads,
+**50% occupancy**. Shared memory is not the limit (`SMEM_WORDS = 4352` u32 =
+17 408 B/block would allow 9 blocks in A100's 164 KB). There are no spills. At
+50% occupancy there is not enough concurrency to hide the scatter's latency,
+which is exactly the pattern of a memory kernel stuck at 40% of peak. Dropping to
+51 registers would buy a 5th block (62.5%) and 42 would buy a 6th (75%).
+
+Neither half is a cost of safe Rust:
+
+- the algorithmic half is a *choice of algorithm* inherited from the CUDA source
+  we ported, and would be paid identically by an `unsafe` port of the same file;
+- the occupancy half is a register-allocation outcome, and the PTX contains no
+  bounds checks or safety instrumentation in the inner loop to blame it on.
+
+Closing the gap therefore means porting onesweep, not removing safety
+constructs. That is the one place a real safety obstacle may appear: decoupled
+look-back requires a spin-wait on another block's flag with acquire/release
+ordering, and SeGuRu's taint analysis currently has no way to express a
+device-scope acquire load in a loop. **That is a hypothesis, not a finding — it
+has not been attempted.**
+
+Method note: `ncu` is unusable here (`ERR_NVGPUCTRPERM`), but `nsys` needs no
+counter permission and the kernel-summary table was sufficient. It should have
+been the *first* diagnostic rather than the fourth; three successive estimates of
+where sort time went (the AES harness, the contended sweep, the `Atomic`
+scatter) were all falsified by direct measurement.

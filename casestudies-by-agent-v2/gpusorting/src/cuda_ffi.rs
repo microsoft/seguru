@@ -1,4 +1,4 @@
-//! Safe wrapper around the CUDA C++ reference baselines (CUB and Thrust).
+//! Safe wrapper around the CUDA C++ reference baselines.
 //!
 //! This is the only module in the crate that contains `unsafe`, and it exists
 //! solely so the benchmark can compare against vendor-tuned CUDA. The SeGuRu
@@ -17,12 +17,25 @@ unsafe extern "C" {
 }
 
 /// Which CUDA baseline to time.
+///
+/// Only [`CudaSort::DrsOurTuning`] is a like-for-like comparison against the
+/// SeGuRu kernels. CUB is a *different algorithm* (onesweep with decoupled
+/// look-back on CUDA 13.3 / sm_80), so `SeGuRu / CUB` measures the choice of
+/// algorithm rather than the cost of safety.
 #[derive(Clone, Copy)]
 pub enum CudaSort {
-    /// `cub::DeviceRadixSort::SortKeys` — the algorithm SeGuRu's kernels mirror.
+    /// `cub::DeviceRadixSort::SortKeys`. Different algorithm — see above.
     Cub = 0,
     /// `thrust::sort`.
     Thrust = 1,
+    /// The upstream reduce-then-scan `DeviceRadixSort.cu` our kernels are a
+    /// transliteration of, at upstream's own tuning (7680 keys per tile,
+    /// 15 keys per thread).
+    DrsUpstreamTuning = 2,
+    /// The same upstream kernels rebuilt at our port's tuning (4096 keys per
+    /// tile, 8 keys per thread). Same algorithm *and* same tuning as the Rust
+    /// code, so this ratio isolates the cost of SeGuRu.
+    DrsOurTuning = 3,
 }
 
 pub struct CudaSorter {

@@ -26,6 +26,7 @@
 pub mod clear;
 pub mod downsweep;
 pub mod driver;
+pub mod onesweep_probe;
 pub mod scan;
 pub mod upsweep;
 pub mod utils;

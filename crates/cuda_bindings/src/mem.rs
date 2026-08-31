@@ -103,7 +103,7 @@ pub struct TensorView<'a, T: ?Sized> {
 /// ```rust,compile_fail,E0499
 /// use cuda_bindings::*;
 /// fn f(x: &mut TensorViewMut<'_, [f32]>) {}
-/// fn test_tensor_view_mut_index<'a, N: GpuCtxSpace>(t: &mut TensorViewMut<'a, [f32], N>) {
+/// fn test_tensor_view_mut_index<'a>(t: &mut TensorViewMut<'a, [f32]>) {
 ///     let mut t0 = t.index_mut(0..4);
 ///     let mut t1 = t.index_mut(0..1);
 ///     f(&mut t1);

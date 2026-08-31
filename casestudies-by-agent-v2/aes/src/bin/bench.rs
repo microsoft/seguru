@@ -180,6 +180,15 @@ fn main() {
             cpu,
             sp
         );
+
+        let param = param_token(r.label);
+        csv_row("aes", "aes_encrypt", &param, "seguru", "time", r.sg_enc, "us");
+        csv_row("aes", "aes_encrypt", &param, "seguru", "throughput", gbps(r.bytes, r.sg_enc), "GB/s");
+        csv_row("aes", "aes_encrypt", &param, "cuda", "time", r.cu_enc, "us");
+        csv_row("aes", "aes_encrypt_classic", &param, "cuda", "time", r.cu_classic, "us");
+        if let Some(cpu) = r.cpu_enc {
+            csv_row("aes", "aes_encrypt", &param, "cpu", "time", cpu, "us");
+        }
     }
 
     println!("\nAES-128 ECB decryption\n");
@@ -194,5 +203,25 @@ fn main() {
             r.sg_dec / r.cu_dec,
             gbps(r.bytes, r.sg_dec)
         );
+
+        let param = param_token(r.label);
+        csv_row("aes", "aes_decrypt", &param, "seguru", "time", r.sg_dec, "us");
+        csv_row("aes", "aes_decrypt", &param, "seguru", "throughput", gbps(r.bytes, r.sg_dec), "GB/s");
+        csv_row("aes", "aes_decrypt", &param, "cuda", "time", r.cu_dec, "us");
     }
+}
+
+/// Converts a human-readable size label like "16 KiB" into a comma/space-free
+/// CSV parameter token like "16KiB".
+fn param_token(label: &str) -> String {
+    label.replace(' ', "")
+}
+
+/// Appends one measurement row to the CSV file named by `BENCH_CSV`, if set.
+/// No-op (and creates no file) when the environment variable is unset.
+fn csv_row(suite: &str, workload: &str, parameter: &str, implementation: &str, metric: &str, value: f64, units: &str) {
+    use std::io::Write;
+    let Ok(path) = std::env::var("BENCH_CSV") else { return };
+    let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) else { return };
+    let _ = writeln!(f, "{suite},{workload},{parameter},{implementation},{metric},{value:.6},{units}");
 }

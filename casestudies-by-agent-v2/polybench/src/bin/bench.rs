@@ -963,6 +963,13 @@ fn main() {
             sp,
             r.err
         );
+
+        let param = r.size.replace(' ', "");
+        csv_row("polybench", r.kernel, &param, "seguru", "time", r.sg, "us");
+        csv_row("polybench", r.kernel, &param, "cuda", "time", r.cu, "us");
+        if let Some(c) = r.cpu {
+            csv_row("polybench", r.kernel, &param, "cpu", "time", c, "us");
+        }
     }
 
     let extras: Vec<&Row> = rows.iter().filter(|r| r.extra.is_some()).collect();
@@ -981,6 +988,11 @@ fn main() {
                 t,
                 r.sg / t
             );
+
+            if r.ok() {
+                let param = r.size.replace(' ', "");
+                csv_row("polybench", r.kernel, &param, "cublas", "time", t, "us");
+            }
         }
     }
 
@@ -989,4 +1001,13 @@ fn main() {
         eprintln!("\n{bad} kernel/size combinations MISMATCHED; times suppressed for those rows");
         std::process::exit(1);
     }
+}
+
+/// Appends one measurement row to the CSV file named by `BENCH_CSV`, if set.
+/// No-op (and creates no file) when the environment variable is unset.
+fn csv_row(suite: &str, workload: &str, parameter: &str, implementation: &str, metric: &str, value: f64, units: &str) {
+    use std::io::Write;
+    let Ok(path) = std::env::var("BENCH_CSV") else { return };
+    let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) else { return };
+    let _ = writeln!(f, "{suite},{workload},{parameter},{implementation},{metric},{value:.6},{units}");
 }

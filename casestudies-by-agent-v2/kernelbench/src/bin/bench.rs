@@ -270,5 +270,27 @@ fn main() {
     for r in &rows {
         let gbps = r.bytes as f64 / (r.us * 1e-6) / 1e9;
         println!("| {} | {} | {:.1} | {:.0} |", r.op, r.shape, r.us, gbps);
+
+        // Some `op` labels embed extra config (e.g. "max_pool1d k=4 s=4");
+        // split that off into the parameter token, keeping the workload name bare.
+        let mut parts = r.op.split_whitespace();
+        let workload = parts.next().unwrap_or(r.op);
+        let extra: Vec<&str> = parts.collect();
+        let parameter = if extra.is_empty() {
+            r.shape.clone()
+        } else {
+            format!("{}/{}", r.shape, extra.join("/"))
+        };
+        csv_row("kernelbench", workload, &parameter, "seguru", "time", r.us, "us");
+        csv_row("kernelbench", workload, &parameter, "seguru", "throughput", gbps, "GB/s");
     }
+}
+
+/// Appends one measurement row to the CSV file named by `BENCH_CSV`, if set.
+/// No-op (and creates no file) when the environment variable is unset.
+fn csv_row(suite: &str, workload: &str, parameter: &str, implementation: &str, metric: &str, value: f64, units: &str) {
+    use std::io::Write;
+    let Ok(path) = std::env::var("BENCH_CSV") else { return };
+    let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) else { return };
+    let _ = writeln!(f, "{suite},{workload},{parameter},{implementation},{metric},{value:.6},{units}");
 }

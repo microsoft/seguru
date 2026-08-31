@@ -140,6 +140,23 @@ fn main() {
             drs_ours: drs_ours_ms,
             cpu,
         });
+
+        let param = label.replace(' ', "");
+        // Reduce-then-scan family.
+        csv_row("gpusorting", "radix_sort_reduce_then_scan", &param, "seguru", "time", sg_ms, "ms");
+        csv_row("gpusorting", "radix_sort_reduce_then_scan", &param, "seguru", "throughput", gkeys(n, sg_ms), "Gkeys/s");
+        csv_row("gpusorting", "radix_sort_reduce_then_scan", &param, "cuda", "time", drs_ours_ms, "ms");
+        csv_row("gpusorting", "radix_sort_reduce_then_scan", &param, "cuda_upstream_tuning", "time", drs_up_ms, "ms");
+        csv_row("gpusorting", "radix_sort_reduce_then_scan", &param, "cub", "time", cub_ms, "ms");
+        csv_row("gpusorting", "radix_sort_reduce_then_scan", &param, "thrust", "time", thrust_ms, "ms");
+        if let Some(cpu_ms) = cpu {
+            csv_row("gpusorting", "radix_sort_reduce_then_scan", &param, "cpu", "time", cpu_ms, "ms");
+        }
+        // Onesweep family.
+        csv_row("gpusorting", "radix_sort_onesweep", &param, "seguru", "time", os_ms, "ms");
+        csv_row("gpusorting", "radix_sort_onesweep", &param, "seguru", "throughput", gkeys(n, os_ms), "Gkeys/s");
+        csv_row("gpusorting", "radix_sort_onesweep", &param, "cuda", "time", os_ours_ms, "ms");
+        csv_row("gpusorting", "radix_sort_onesweep", &param, "cuda_upstream_tuning", "time", os_up_ms, "ms");
     }
 
     println!("\n32-bit key sort, A100. Times are milliseconds for one full sort.");
@@ -188,4 +205,13 @@ fn main() {
             .join(" ")
     );
     let _ = |r: &Row| (r.cpu, r.drs_up);
+}
+
+/// Appends one measurement row to the CSV file named by `BENCH_CSV`, if set.
+/// No-op (and creates no file) when the environment variable is unset.
+fn csv_row(suite: &str, workload: &str, parameter: &str, implementation: &str, metric: &str, value: f64, units: &str) {
+    use std::io::Write;
+    let Ok(path) = std::env::var("BENCH_CSV") else { return };
+    let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) else { return };
+    let _ = writeln!(f, "{suite},{workload},{parameter},{implementation},{metric},{value:.6},{units}");
 }

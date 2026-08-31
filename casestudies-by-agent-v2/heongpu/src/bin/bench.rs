@@ -203,6 +203,14 @@ fn main() {
             r.cpu_fwd,
             r.cpu_fwd / gpu_per_poly
         );
+
+        let param = format!("ring={}", r.n);
+        csv_row("heongpu", "ntt_forward", &param, "seguru", "time", r.sg_fwd, "us");
+        csv_row("heongpu", "ntt_forward", &param, "cuda", "time", r.cu_fwd, "us");
+        csv_row("heongpu", "ntt_forward", &param, "seguru", "throughput", mcoeff(r.sg_fwd), "Mcoeff/s");
+        csv_row("heongpu", "ntt_forward", &param, "cpu", "time", r.cpu_fwd, "us");
+        csv_row("heongpu", "ntt_inverse", &param, "seguru", "time", r.sg_inv, "us");
+        csv_row("heongpu", "ntt_inverse", &param, "cuda", "time", r.cu_inv, "us");
     }
 
     println!("\nElement-wise ciphertext operations (same 4 Mi coefficients)\n");
@@ -216,5 +224,23 @@ fn main() {
             "| {} | {:.1} | {:.1} | {:.1} | {:.1} | {:.1} | {:.1} | {:.0} |",
             r.n, r.sg_add, r.cu_add, r.sg_mul, r.cu_mul, r.sg_cpm, r.cu_cpm, gb
         );
+
+        let param = format!("ring={}", r.n);
+        csv_row("heongpu", "poly_add", &param, "seguru", "time", r.sg_add, "us");
+        csv_row("heongpu", "poly_add", &param, "cuda", "time", r.cu_add, "us");
+        csv_row("heongpu", "poly_add", &param, "seguru", "throughput", gb, "GB/s");
+        csv_row("heongpu", "poly_mul", &param, "seguru", "time", r.sg_mul, "us");
+        csv_row("heongpu", "poly_mul", &param, "cuda", "time", r.cu_mul, "us");
+        csv_row("heongpu", "cipher_plain_mul", &param, "seguru", "time", r.sg_cpm, "us");
+        csv_row("heongpu", "cipher_plain_mul", &param, "cuda", "time", r.cu_cpm, "us");
     }
+}
+
+/// Appends one measurement row to the CSV file named by `BENCH_CSV`, if set.
+/// No-op (and creates no file) when the environment variable is unset.
+fn csv_row(suite: &str, workload: &str, parameter: &str, implementation: &str, metric: &str, value: f64, units: &str) {
+    use std::io::Write;
+    let Ok(path) = std::env::var("BENCH_CSV") else { return };
+    let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) else { return };
+    let _ = writeln!(f, "{suite},{workload},{parameter},{implementation},{metric},{value:.6},{units}");
 }

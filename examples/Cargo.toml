@@ -1,6 +1,5 @@
 [workspace]
 members = [
-    "aes-by-agent",
     "hello",
     "llm-rs-gpu",
     "matrix/matmul-gpu",

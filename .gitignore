@@ -23,3 +23,13 @@ target/
 # Objects
 *.o
 target-nobc/
+
+# Criterion output from benchmark/run_*.sh
+benchmark/results/
+
+# Agent session artifacts
+**/.copilot/
+__pycache__/
+
+# Separate checkout of the paper repo (MSRSSP/seguru-paper); not a submodule
+/seguru-paper/

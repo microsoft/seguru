@@ -42,6 +42,19 @@ run_variant() {
         local rc=$?
         echo "    rc=$rc  rows=$( [ -f "$csv" ] && wc -l < "$csv" || echo 0 )"
     done
+
+    # Onesweep again with its global scatter written through the safe atomic API
+    # instead of the one `unsafe` MapExplicit, so the table can price that line.
+    # It reports itself as `radix_sort_onesweep_safe`.
+    echo "### building $variant sort-bench (safe_only)"
+    CARGO_TARGET_DIR="$targetdir-safe" cargo build --release \
+        --features bench,safe_only --bin sort-bench \
+        >>"$OUT/raw/${variant}.build.log" 2>&1 \
+        || { echo "BUILD FAILED (safe_only)"; return 1; }
+    echo "### $variant: sort-bench (safe_only)"
+    BENCH_CSV="$PWD/$csv" "$targetdir-safe/release/sort-bench" \
+        >"$OUT/raw/${variant}.sort-bench-safe.txt" 2>&1
+    echo "    rc=$?  rows=$( [ -f "$csv" ] && wc -l < "$csv" || echo 0 )"
 }
 
 # The no-bounds-check build is the one that needs the env var at codegen time.

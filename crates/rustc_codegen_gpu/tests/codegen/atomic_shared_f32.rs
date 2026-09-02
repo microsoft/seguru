@@ -8,7 +8,7 @@
 #[gpu::kernel(dynamic_shared)]
 #[no_mangle]
 pub fn test_atomic_shared(f: f32, b: &mut f32) {
-    let mut smem = smem_alloc.alloc::<f32>(1);
+    let mut smem = smem_alloc.alloc::<f32>(1, 0.0f32);
     let atomic_smem = gpu::sync::SharedAtomic::new(&mut smem);
     atomic_smem.index(0).atomic_addf(f);
     let b_atomic = gpu::sync::Atomic::new(b);
@@ -21,4 +21,3 @@ pub fn test_atomic_shared(f: f32, b: &mut f32) {
 // PTX_CHECK: .visible .entry atomic_
 // PTX_CHECK: atom.global.add.f32
 // PTX_CHECK: atom.shared.add.f32
-

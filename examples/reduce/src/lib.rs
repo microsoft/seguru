@@ -10,7 +10,7 @@ pub fn reduce_per_grid<C: Copy + Sync + Default + 'static + core::ops::Add<Outpu
     let id = tid + block_dim * block_id::<DimX>();
     let grid_dim = grid_dim::<DimX>();
     let grid_size = block_dim * grid_dim * 2;
-    let smem = smem_alloc.alloc::<C>(block_dim as usize);
+    let smem = smem_alloc.alloc::<C>(block_dim as usize, C::default());
     let mut smem_chunk = smem.chunk_mut(MapLinear::new(1));
     let mut partial_sums_chunk = chunk_mut(
         partial_sums,

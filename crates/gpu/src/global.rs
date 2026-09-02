@@ -105,3 +105,10 @@ impl<'a, T: ?Sized> !core::ops::Deref for GpuGlobal<'a, T> {}
 /// This ensures that the user cannot access the data without using chunk or
 /// atomic operations.
 impl<'a, T: Sized> !core::ops::DerefMut for GpuGlobal<'a, T> {}
+
+/// Never implement Copy or Clone. A handle is a capability: `Atomic::new` and
+/// `chunk_mut` consume it precisely so that no second path to the region
+/// survives. A duplicable handle would defeat that, allowing two chunks or two
+/// atomic views over the same memory.
+impl<'a, T: ?Sized> !Copy for GpuGlobal<'a, T> {}
+impl<'a, T: ?Sized> !Clone for GpuGlobal<'a, T> {}

@@ -29,13 +29,16 @@ mod rs_gpu {
     scalars: &[T],
     bases: &[C],
     partial_sums: &mut [C::Curve],
-  ) {
+  )
+  where
+    C::Curve: Copy,
+  {
     let tid = thread_id::<DimX>();
     let block_dim = block_dim::<DimX>();
     let grid_dim = grid_dim::<DimX>();
     let grid_size = block_dim * grid_dim * 2;
     let id = tid + block_dim * block_id::<DimX>();
-    let smem = smem_alloc.alloc::<C::Curve>(block_dim as usize);
+    let smem = smem_alloc.alloc::<C::Curve>(block_dim as usize, C::Curve::identity());
     let mut smem_chunk = smem.chunk_mut(MapLinear::new(1));
     let mut partial_sums_chunk = chunk_mut(
       partial_sums,
@@ -100,7 +103,7 @@ mod rs_gpu {
     let id = tid + block_dim * block_id::<DimX>();
     let grid_dim = grid_dim::<DimX>();
     let grid_size = block_dim * grid_dim * 2;
-    let smem = smem_alloc.alloc::<C2>(block_dim as usize);
+    let smem = smem_alloc.alloc::<C2>(block_dim as usize, C2::default());
     let mut smem_chunk = smem.chunk_mut(MapLinear::new(1));
     let mut partial_sums_chunk = chunk_mut(
       partial_sums,

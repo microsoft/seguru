@@ -88,12 +88,7 @@ impl<E: Copy, const N: usize> GpuShared<[E; N]> {
         {
             let mut chunk = this.chunk_mut(crate::chunk_impl::MapLinear::new(1));
             let block_size = crate::dim::block_size() as usize;
-            let tid = (crate::dim::thread_id::<crate::dim::DimX>()
-                + (crate::dim::thread_id::<crate::dim::DimZ>()
-                    * crate::dim::block_dim::<crate::dim::DimY>()
-                    + crate::dim::thread_id::<crate::dim::DimY>())
-                    * crate::dim::block_dim::<crate::dim::DimX>())
-                as usize;
+            let tid = linear_thread_id();
             let mut i = 0usize;
             while tid + i * block_size < N {
                 chunk[i] = v;
@@ -103,6 +98,17 @@ impl<E: Copy, const N: usize> GpuShared<[E; N]> {
         crate::sync::sync_threads();
         this
     }
+}
+
+/// Index of the calling thread within its block, flattened over x, y, z.
+#[gpu_codegen::device]
+#[inline(always)]
+fn linear_thread_id() -> usize {
+    (crate::dim::thread_id::<crate::dim::DimX>()
+        + (crate::dim::thread_id::<crate::dim::DimZ>()
+            * crate::dim::block_dim::<crate::dim::DimY>()
+            + crate::dim::thread_id::<crate::dim::DimY>())
+            * crate::dim::block_dim::<crate::dim::DimX>()) as usize
 }
 
 
@@ -119,6 +125,13 @@ impl<T> Deref for GpuShared<T> {
 
 impl<T> !DerefMut for GpuShared<T> {}
 
+/// Never implement Copy or Clone; see [`crate::global::GpuGlobal`]. Duplicating a
+/// shared handle would allow two `chunk_mut` borrows of the same tile, so the
+/// element bound on [`GpuShared::init`] would no longer keep `GpuShared` out of
+/// its own element type either.
+impl<T: ?Sized> !Copy for GpuShared<T> {}
+impl<T: ?Sized> !Clone for GpuShared<T> {}
+
 /// Dynamic GPU shared memory allocation.
 #[allow(dead_code)]
 pub struct DynamicSharedAlloc {
@@ -133,12 +146,28 @@ impl DynamicSharedAlloc {
         unimplemented!()
     }
 
+    /// Carve `len` elements out of the block's dynamic shared memory
+    /// **without initialising them**.
+    ///
+    /// # Safety
+    ///
+    /// The returned storage is **uninitialised**. CUDA dynamic shared memory has
+    /// no static-initialiser semantics: it is uninitialised at block start and the
+    /// same physical storage is reused by later blocks and later kernel launches,
+    /// so it commonly holds another block's leftovers rather than zeros. Since
+    /// [`GpuShared`] is readable through [`Deref`] and [`core::ops::Index`], the
+    /// caller must ensure every element is written before it is read, and that
+    /// writes performed cooperatively are followed by
+    /// [`sync_threads`](crate::sync::sync_threads) before any thread reads an
+    /// element written by another.
+    ///
+    /// Prefer [`DynamicSharedAlloc::alloc`], which does this correctly and is safe.
     #[gpu_codegen::device]
     #[inline(always)]
     #[gpu_codegen::memspace_shared(1000)]
     #[gpu_codegen::sync_data(1)] // len is non-divergent
     #[gpu_codegen::ret_sync_data(1000)] // return pointer is divergent
-    pub fn alloc<T: Sized>(&mut self, len: usize) -> &'static mut GpuShared<[T]> {
+    pub unsafe fn alloc_uninit<T: Sized>(&mut self, len: usize) -> &'static mut GpuShared<[T]> {
         let size = core::mem::size_of::<T>() * len;
         assert!(size <= self.size);
         self.size -= size;
@@ -147,6 +176,45 @@ impl DynamicSharedAlloc {
             &mut *(core::ptr::slice_from_raw_parts_mut(raw as *mut T, len) as *const [T]
                 as *mut GpuShared<[T]>)
         }
+    }
+
+    /// Carve `len` elements out of the block's dynamic shared memory and
+    /// cooperatively initialise every one to `v`.
+    ///
+    /// This is the safe counterpart of [`DynamicSharedAlloc::alloc_uninit`], and
+    /// the dynamic analogue of [`GpuShared::init`]. The elements are handed out
+    /// round-robin, so thread `t` writes elements `t`, `t + block_size`, ..., which
+    /// works whether `len` exceeds the block size or not. The call ends with a
+    /// [`sync_threads`](crate::sync::sync_threads), so on return every element is
+    /// initialised and visible to every thread.
+    ///
+    /// Because it is a block-wide collective, **every thread of the block must
+    /// reach this call**; using it in thread-divergent control flow will deadlock,
+    /// exactly as a bare `sync_threads()` would.
+    #[gpu_codegen::device]
+    #[inline(always)]
+    #[gpu_codegen::memspace_shared(1000)]
+    #[gpu_codegen::sync_data(1, 2)]
+    #[gpu_codegen::ret_sync_data(1000)]
+    pub fn alloc<T: Sized + Copy>(&mut self, len: usize, v: T) -> &'static mut GpuShared<[T]> {
+        // SAFETY: `MapLinear::new(1)` sends local index `i` of thread `t` to element
+        // `t + i * block_size`, so every element below `len` is written by exactly
+        // one thread, and the loop bound keeps every write in bounds. The
+        // `sync_threads()` that follows publishes those writes to the whole block
+        // before the handle is returned, discharging `alloc_uninit`'s obligation.
+        let this = unsafe { self.alloc_uninit::<T>(len) };
+        {
+            let mut chunk = this.chunk_mut(crate::chunk_impl::MapLinear::new(1));
+            let block_size = crate::dim::block_size() as usize;
+            let tid = linear_thread_id();
+            let mut i = 0usize;
+            while tid + i * block_size < len {
+                chunk[i] = v;
+                i += 1;
+            }
+        }
+        crate::sync::sync_threads();
+        this
     }
 }
 

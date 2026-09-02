@@ -767,7 +767,7 @@ pub fn matmul_backward_bias_kernel4(dbias: &mut [f32], dout: &[f32], B: u32, T: 
             [1] | [warp.size(), (warp.meta_group_size(), 1), grid_dim::<DimX>()] => layout: [i0, t0, t1, t2]
         ),
     );
-    let smem = smem_alloc.alloc::<f32>(block_size as usize);
+    let smem = smem_alloc.alloc::<f32>(block_size as usize, 0.0f32);
     let mut smem_chunk = smem.chunk_mut(MapContinuousLinear::new(1));
 
     let warp_id = thread_id::<DimX>() / warp.size(); // warp index in the block, 0,1,2,3
@@ -930,22 +930,9 @@ pub fn layernorm_backward_kernel2(
     let inp_bt = &inp[(warp_offset * C) as usize..];
     let mean_bt = mean[warp_offset as usize];
     let rstd_bt = rstd[warp_offset as usize];
-    // the first half of shared memory is bias, second is weight
-    let dbias_shared = smem_alloc.alloc::<f32>(C as usize);
-    let mut dbias_shared_chunk = dbias_shared.chunk_mut(gpu::MapLinear::new(1));
-    let dweight_shared = smem_alloc.alloc::<f32>(C as usize);
-    let mut dweight_shared_chunk = dweight_shared.chunk_mut(gpu::MapLinear::new(1));
-    // init shared memory to zero
-    // replace iterator with while loop
-    let mut id = tid;
-    let mut i = 0;
-    while id < C {
-        dbias_shared_chunk[i as _] = 0.0;
-        dweight_shared_chunk[i as _] = 0.0;
-        id += bdim_x;
-        i += 1;
-    }
-    sync_threads();
+    // Shared accumulators for bias and weight gradients.
+    let dbias_shared = smem_alloc.alloc::<f32>(C as usize, 0.0f32);
+    let dweight_shared = smem_alloc.alloc::<f32>(C as usize, 0.0f32);
 
     // first: two reduce operations
     let mut dnorm_mean_local = 0.0f32;
@@ -1063,17 +1050,9 @@ pub fn layernorm_backward_kernel2(
     let inp_bt = &inp[(warp_offset * C) as usize..];
     let mean_bt = mean[warp_offset as usize];
     let rstd_bt = rstd[warp_offset as usize];
-    // the first half of shared memory is bias, second is weight
-    let dbias_shared = smem_alloc.alloc::<f32>(C as usize);
-    let mut dbias_shared_chunk = dbias_shared.chunk_mut(gpu::MapLinear::new(1));
-    let dweight_shared = smem_alloc.alloc::<f32>(C as usize);
-    let mut dweight_shared_chunk = dweight_shared.chunk_mut(gpu::MapLinear::new(1));
-    // init shared memory to zero
-    for (i, _) in (tid..C).step_by(block_dim::<DimX>() as usize).enumerate() {
-        dbias_shared_chunk[i as _] = 0.0;
-        dweight_shared_chunk[i as _] = 0.0;
-    }
-    sync_threads();
+    // Shared accumulators for bias and weight gradients.
+    let dbias_shared = smem_alloc.alloc::<f32>(C as usize, 0.0f32);
+    let dweight_shared = smem_alloc.alloc::<f32>(C as usize, 0.0f32);
 
     // first: two reduce operations
     let mut dnorm_mean_local = 0.0f32;

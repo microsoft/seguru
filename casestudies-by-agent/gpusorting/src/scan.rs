@@ -46,7 +46,7 @@ pub fn radix_scan(pass_hist: &mut [u32], padded_thread_blocks: u32) {
     let lane_id = lane_id();
 
     // smem for within-block scan
-    let smem = smem_alloc.alloc::<u32>(block_dim as usize);
+    let smem = smem_alloc.alloc::<u32>(block_dim as usize, 0u32);
 
     let warp_id = tid >> LANE_LOG;
     let local_size = padded_thread_blocks / block_dim;

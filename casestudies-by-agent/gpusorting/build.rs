@@ -13,10 +13,21 @@ fn main() {
 
     // Compile DeviceRadixSort.cu (the kernel implementations)
     let nvcc = format!("{cuda_dir}/bin/nvcc");
-    let common_args = ["-O3", "--compiler-options", "-fPIC", "-I", &cuda_ref, "-I", &format!("{cuda_dir}/include")];
+    let common_args = [
+        "-O3",
+        "--compiler-options",
+        "-fPIC",
+        "-I",
+        &cuda_ref,
+        "-I",
+        &format!("{cuda_dir}/include"),
+    ];
 
     for (src, obj_name) in [
-        (format!("{cuda_ref}/Sort/DeviceRadixSort.cu"), "DeviceRadixSort.o"),
+        (
+            format!("{cuda_ref}/Sort/DeviceRadixSort.cu"),
+            "DeviceRadixSort.o",
+        ),
         (format!("{manifest_dir}/cuda/sort_bench.cu"), "sort_bench.o"),
     ] {
         let obj_path = format!("{out_dir}/{obj_name}");

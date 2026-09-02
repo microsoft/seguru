@@ -61,7 +61,11 @@ pub fn inclusive_warp_scan(val: u32) -> u32 {
 pub fn exclusive_warp_scan(val: u32) -> u32 {
     let inc = inclusive_warp_scan(val);
     let (t, _) = gpu::shuffle!(up, inc, 1u32, 32);
-    if lane_id() != 0 { t } else { 0 }
+    if lane_id() != 0 {
+        t
+    } else {
+        0
+    }
 }
 
 /// Inclusive warp scan with circular shift: lane k gets lane (k-1 mod 32)'s

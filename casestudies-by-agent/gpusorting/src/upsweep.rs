@@ -69,19 +69,7 @@ pub fn radix_upsweep(
 
     // CUDA: __shared__ uint32_t s_globalHist[RADIX * 2];
     // Two sub-histograms of RADIX bins each, used by two wave groups (tid/64).
-    let smem = smem_alloc.alloc::<u32>(RADIX as usize * 2);
-
-    // Zero shared memory: chunk_mut with MapLinear gives each thread a strided chunk
-    {
-        let mut smem_chunk = smem.chunk_mut(MapLinear::new(1));
-        let num_per_thread = (RADIX * 2) / block_dim;
-        let mut k = 0u32;
-        while k < num_per_thread {
-            smem_chunk[k as usize] = 0u32;
-            k += 1;
-        }
-    }
-    sync_threads();
+    let smem = smem_alloc.alloc::<u32>(RADIX as usize * 2, 0u32);
 
     // CUDA: histogram — atomicAdd to per-wave shared histogram
     // Two wave groups (threads 0-63 → sub-hist 0, threads 64-127 → sub-hist 1).

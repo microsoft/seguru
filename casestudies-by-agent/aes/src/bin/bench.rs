@@ -42,8 +42,8 @@ impl BenchResult {
 
 fn main() {
     let key: [u8; 16] = [
-        0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf,
-        0x4f, 0x3c,
+        0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f,
+        0x3c,
     ];
     let enc_keys = aes_common::key_expansion(&key);
     let dec_keys = aes_common::inv_round_keys(&enc_keys);
@@ -51,7 +51,9 @@ fn main() {
     let td_tables = build_td_tables();
     let inv_sbox_packed: Vec<u32> = aes_common::INV_SBOX
         .chunks(4)
-        .map(|c| ((c[0] as u32) << 24) | ((c[1] as u32) << 16) | ((c[2] as u32) << 8) | (c[3] as u32))
+        .map(|c| {
+            ((c[0] as u32) << 24) | ((c[1] as u32) << 16) | ((c[2] as u32) << 8) | (c[3] as u32)
+        })
         .collect();
 
     let sizes: Vec<(&str, u32)> = vec![
@@ -69,7 +71,9 @@ fn main() {
     let mut results: Vec<BenchResult> = Vec::new();
 
     // Print CSV header
-    println!("kernel,size,num_blocks,seguru_us,cuda_us,cpu_us,gpu_cuda_ratio,gpu_cpu_speedup,seguru_gbps,cuda_gbps,cpu_gbps");
+    println!(
+        "kernel,size,num_blocks,seguru_us,cuda_us,cpu_us,gpu_cuda_ratio,gpu_cpu_speedup,seguru_gbps,cuda_gbps,cpu_gbps"
+    );
 
     cuda_ctx(0, |ctx, m| {
         for &(label, num_blocks) in &sizes {
@@ -92,8 +96,16 @@ fn main() {
             for _ in 0..WARMUP {
                 let config = gpu_host::gpu_config!(grid_size, 1, 1, block_size, 1, 1, shared_bytes);
                 aes128_encrypt_ttable_kernel::launch(
-                    config, ctx, m, &d_input, &mut d_output, &d_rk, &d_te, num_blocks,
-                ).unwrap();
+                    config,
+                    ctx,
+                    m,
+                    &d_input,
+                    &mut d_output,
+                    &d_rk,
+                    &d_te,
+                    num_blocks,
+                )
+                .unwrap();
                 ctx.sync().unwrap();
             }
             // Timed runs
@@ -102,8 +114,16 @@ fn main() {
                 let config = gpu_host::gpu_config!(grid_size, 1, 1, block_size, 1, 1, shared_bytes);
                 let start = Instant::now();
                 aes128_encrypt_ttable_kernel::launch(
-                    config, ctx, m, &d_input, &mut d_output, &d_rk, &d_te, num_blocks,
-                ).unwrap();
+                    config,
+                    ctx,
+                    m,
+                    &d_input,
+                    &mut d_output,
+                    &d_rk,
+                    &d_te,
+                    num_blocks,
+                )
+                .unwrap();
                 ctx.sync().unwrap();
                 times.push(start.elapsed().as_nanos() as f64 / 1000.0);
             }
@@ -163,9 +183,17 @@ fn main() {
             for _ in 0..WARMUP {
                 let config = gpu_host::gpu_config!(grid_size, 1, 1, block_size, 1, 1, shared_bytes);
                 aes128_decrypt_ttable_kernel::launch(
-                    config, ctx, m, &d_enc_input, &mut d_dec_output,
-                    &d_dec_rk, &d_td, &d_inv_sbox, num_blocks,
-                ).unwrap();
+                    config,
+                    ctx,
+                    m,
+                    &d_enc_input,
+                    &mut d_dec_output,
+                    &d_dec_rk,
+                    &d_td,
+                    &d_inv_sbox,
+                    num_blocks,
+                )
+                .unwrap();
                 ctx.sync().unwrap();
             }
             let mut times = Vec::new();
@@ -173,9 +201,17 @@ fn main() {
                 let config = gpu_host::gpu_config!(grid_size, 1, 1, block_size, 1, 1, shared_bytes);
                 let start = Instant::now();
                 aes128_decrypt_ttable_kernel::launch(
-                    config, ctx, m, &d_enc_input, &mut d_dec_output,
-                    &d_dec_rk, &d_td, &d_inv_sbox, num_blocks,
-                ).unwrap();
+                    config,
+                    ctx,
+                    m,
+                    &d_enc_input,
+                    &mut d_dec_output,
+                    &d_dec_rk,
+                    &d_td,
+                    &d_inv_sbox,
+                    num_blocks,
+                )
+                .unwrap();
                 ctx.sync().unwrap();
                 times.push(start.elapsed().as_nanos() as f64 / 1000.0);
             }
@@ -244,7 +280,16 @@ fn main() {
     eprintln!("\n{:-<120}", "");
     eprintln!(
         "{:<18} {:>8} {:>12} {:>12} {:>12} {:>8} {:>10} {:>10} {:>10} {:>10}",
-        "Kernel", "Blocks", "SeGuRu(µs)", "CUDA(µs)", "CPU(µs)", "SG/CUDA", "CPU→SG×", "SG GB/s", "CUDA GB/s", "CPU GB/s"
+        "Kernel",
+        "Blocks",
+        "SeGuRu(µs)",
+        "CUDA(µs)",
+        "CPU(µs)",
+        "SG/CUDA",
+        "CPU→SG×",
+        "SG GB/s",
+        "CUDA GB/s",
+        "CPU GB/s"
     );
     eprintln!("{:-<120}", "");
     for r in &results {
@@ -265,7 +310,8 @@ fn main() {
     eprintln!("{:-<120}", "");
 
     let avg_ratio: f64 = results.iter().map(|r| r.ratio()).sum::<f64>() / results.len() as f64;
-    let avg_speedup: f64 = results.iter().map(|r| r.speedup_vs_cpu()).sum::<f64>() / results.len() as f64;
+    let avg_speedup: f64 =
+        results.iter().map(|r| r.speedup_vs_cpu()).sum::<f64>() / results.len() as f64;
     eprintln!("Average SeGuRu/CUDA ratio: {:.4}×", avg_ratio);
     eprintln!("Average GPU speedup vs CPU: {:.1}×", avg_speedup);
 }

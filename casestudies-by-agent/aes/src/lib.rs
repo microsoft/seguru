@@ -20,7 +20,7 @@ pub fn aes128_encrypt_ttable_kernel(
     let ltid = thread_id::<DimX>();
 
     // Shared memory allocation BEFORE any divergent code
-    let smem = smem_alloc.alloc::<u32>(1024);
+    let smem = smem_alloc.alloc::<u32>(1024, 0u32);
 
     // Cooperative load: all threads load 4 entries each (block_size must be 256)
     let mut sc = smem.chunk_mut(MapLinear::new(4));
@@ -121,7 +121,7 @@ pub fn aes128_decrypt_ttable_kernel(
     let ltid = thread_id::<DimX>();
 
     // Shared memory allocation BEFORE any divergent code
-    let smem = smem_alloc.alloc::<u32>(1024);
+    let smem = smem_alloc.alloc::<u32>(1024, 0u32);
 
     // Cooperative load: all threads load 4 entries each (block_size must be 256)
     let mut sc = smem.chunk_mut(MapLinear::new(4));

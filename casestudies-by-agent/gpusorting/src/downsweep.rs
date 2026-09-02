@@ -58,7 +58,7 @@ pub fn radix_downsweep(
     // CUDA: __shared__ uint32_t s_warpHistograms[BIN_PART_SIZE];
     //       __shared__ uint32_t s_localHistogram[RADIX];
     // Total smem: BIN_PART_SIZE + RADIX = 7680 + 256 = 7936 u32s
-    let smem = smem_alloc.alloc::<u32>((BIN_PART_SIZE + RADIX) as usize);
+    let smem = smem_alloc.alloc::<u32>((BIN_PART_SIZE + RADIX) as usize, 0u32);
 
     // Alias: s_warpHist is smem[0..BIN_HISTS_SIZE], s_localHist is smem[BIN_PART_SIZE..+RADIX]
 

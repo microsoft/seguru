@@ -1,3 +1,5 @@
+#![feature(register_tool)]
+#![register_tool(gpu_codegen)]
 //! GPU radix sort (LSD, 8 bits per pass) written in safe Rust with SeGuRu.
 //!
 //! Algorithm follows Thomas Smith's `GPUSorting` CUDA reference

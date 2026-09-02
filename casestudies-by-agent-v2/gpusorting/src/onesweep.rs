@@ -43,6 +43,8 @@
 //! true in practice, and it is the reason upstream ships `EmulatedDeadlocking.cu`.
 
 use crunchy::unroll;
+use gpu::chunk::ScopeUniqueMap;
+use gpu::chunk_scope::{ChunkScope, TID_MAX_LEN};
 use gpu::prelude::*;
 
 use crate::utils::{
@@ -56,6 +58,73 @@ use crate::{
 
 const KPT: usize = (BIN_PART_SIZE / DOWNSWEEP_THREADS) as usize;
 const VEC_PART_SIZE: u32 = PART_SIZE / 4;
+
+/// A chunk mapping whose destinations are supplied by the caller at run time.
+///
+/// Every map in `gpu::chunk_impl` is an affine function of thread ids and loop
+/// indices, so the compiler can see that distinct threads write distinct slots.
+/// A scatter cannot be written that way: its destinations are computed from the
+/// data. `MapExplicit` closes that gap by carrying the `K` destinations this
+/// thread will write and handing them to the chunk machinery, which then emits
+/// ordinary stores rather than routing the writes through `Atomic`.
+///
+/// It lives here rather than in `gpu` because it is the one map that cannot
+/// discharge the [`ScopeUniqueMap`] contract by construction. Keeping it in the
+/// case study leaves the library's trusted surface free of maps whose soundness
+/// rests on a caller's argument.
+#[derive(Clone, Copy)]
+struct MapExplicit<const K: usize> {
+    dests: [u32; K],
+}
+
+impl<const K: usize> MapExplicit<K> {
+    /// Build a mapping that sends local index `i` to `dests[i]`.
+    ///
+    /// Bounds are not the caller's obligation: indexing the resulting chunk
+    /// bounds-checks each destination against the underlying slice.
+    ///
+    /// # Safety
+    ///
+    /// Uniqueness *is* the caller's obligation. Across every thread in the chunk
+    /// scope, all `dests` entries must be pairwise distinct: no two threads, and
+    /// no two local indices within one thread, may name the same slot. This is
+    /// the [`ScopeUniqueMap`] contract, which cannot be checked here because the
+    /// destinations are only known at run time and each thread sees just its own.
+    ///
+    /// Violating it produces a genuine data race: the writes lower to plain
+    /// stores with no atomicity, so colliding lanes silently lose values.
+    ///
+    /// Typically discharged by a rank computation that assigns each element a
+    /// distinct position — a ballot-based multi-split plus exclusive prefix sums,
+    /// as in a radix-sort downsweep — rather than by inspection.
+    ///
+    /// `ret_sync_data(1000)` declares the returned map non-diversed. The
+    /// destinations genuinely are thread-diverged, so this is not an observation
+    /// about the data; it is the same scope-uniqueness claim the caller makes
+    /// above, restated for the taint analysis, which would otherwise reject any
+    /// map built from data.
+    #[inline(never)]
+    #[gpu_codegen::device]
+    #[gpu_codegen::ret_sync_data(1000)]
+    unsafe fn new(dests: [u32; K]) -> Self {
+        Self { dests }
+    }
+}
+
+unsafe impl<CS: ChunkScope, const K: usize> ScopeUniqueMap<CS> for MapExplicit<K> {
+    type IndexType = usize;
+    type GlobalIndexType = usize;
+
+    #[inline]
+    #[gpu_codegen::device]
+    fn map(
+        &self,
+        idx: Self::IndexType,
+        _thread_ids: [u32; TID_MAX_LEN],
+    ) -> (bool, Self::GlobalIndexType) {
+        (true, self.dests[idx] as usize)
+    }
+}
 
 /// Two sub-histograms halve shared-atomic contention, as in `upsweep.rs`.
 const SUB_HISTS: u32 = 2;
@@ -641,10 +710,9 @@ pub fn digit_binning_pass(
                 vals[k] = key;
             }
         }
-        let len = alt.len() as u32;
         // SAFETY: `base` is the digit's global offset and `i` the key's rank within
         // that digit, so `base + i` is injective over the whole grid.
-        let map = unsafe { MapExplicit::<KPT>::new(dests, len) };
+        let map = unsafe { MapExplicit::<KPT>::new(dests) };
         let mut w = chunk_mut(alt, map);
         unroll! {
             for k in 0..8 {

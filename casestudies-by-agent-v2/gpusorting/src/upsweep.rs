@@ -13,7 +13,7 @@
 use crunchy::unroll;
 use gpu::prelude::*;
 
-use crate::utils::{inclusive_warp_scan_circular_shift, LANE_LOG};
+use crate::utils::{LANE_LOG, inclusive_warp_scan_circular_shift};
 use crate::{PART_SIZE, RADIX, RADIX_MASK, UPSWEEP_THREADS};
 
 const VEC_PART_SIZE: u32 = PART_SIZE / 4;
@@ -33,19 +33,7 @@ pub fn radix_upsweep(
     let bid = block_id::<DimX>();
     let lane = lane_id();
 
-    let smem = smem_alloc.alloc::<u32>((RADIX * SUB_HISTS) as usize);
-
-    // Zero both sub-histograms; MapLinear(1) gives thread `tid` the strided
-    // elements tid, tid+BDIM, tid+2*BDIM, ... which is fully coalesced.
-    {
-        let mut z = smem.chunk_mut(MapLinear::new(1));
-        unroll! {
-            for k in 0..4 {
-                z[k] = 0u32;
-            }
-        }
-    }
-    sync_threads();
+    let smem = smem_alloc.alloc::<u32>((RADIX * SUB_HISTS) as usize, 0u32);
 
     // Histogram the block's partition. Threads 0..63 accumulate into sub-histogram
     // 0 and threads 64..127 into sub-histogram 1.

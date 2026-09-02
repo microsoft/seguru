@@ -21,7 +21,7 @@
 //!
 //! # The three constructs that were assumed to be impossible
 //!
-//! All three turned out to be expressible; see `onesweep_probe.rs`.
+//! All three turned out to be expressible.
 //!
 //! 1. **Decoupled look-back** -- an unbounded spin loop whose exit condition
 //!    depends on what a *different block* published. SeGuRu accepts it: the loop
@@ -46,8 +46,8 @@ use crunchy::unroll;
 use gpu::prelude::*;
 
 use crate::utils::{
-    exclusive_warp_scan, inclusive_warp_scan_circular_shift, lane_mask_lt, lowest_set_bit,
-    LANE_COUNT, LANE_LOG,
+    LANE_COUNT, LANE_LOG, exclusive_warp_scan, inclusive_warp_scan_circular_shift, lane_mask_lt,
+    lowest_set_bit,
 };
 use crate::{
     BIN_HISTS_SIZE, BIN_PART_SIZE, BIN_SUB_PART_SIZE, DOWNSWEEP_THREADS, PART_SIZE, RADIX,
@@ -59,10 +59,11 @@ const VEC_PART_SIZE: u32 = PART_SIZE / 4;
 
 /// Two sub-histograms halve shared-atomic contention, as in `upsweep.rs`.
 const SUB_HISTS: u32 = 2;
-/// One sub-histogram covers all four digit positions.
-const GH_STRIDE: u32 = RADIX * RADIX_PASSES;
-/// Shared words used by [`global_histogram`].
-pub const GH_SMEM_WORDS: u32 = GH_STRIDE * SUB_HISTS;
+/// One digit pass's pair of sub-histograms: upstream's `RADIX * 2` array.
+const GH_PASS_WORDS: u32 = RADIX * SUB_HISTS;
+/// Shared words used by [`global_histogram`]: upstream's four `RADIX * 2`
+/// arrays, concatenated.
+const GH_SMEM_WORDS: usize = (GH_PASS_WORDS * RADIX_PASSES) as usize;
 
 /// Neither a reduction nor an inclusive prefix has been published for this tile.
 const FLAG_NOT_READY: u32 = 0;
@@ -119,46 +120,54 @@ pub fn pass_hist_len(tiles: u32) -> usize {
 ///     atomicAdd(&globalHistogram[i], s_globalHistFirst[i] + s_globalHistFirst[i + RADIX]);
 /// ```
 ///
-/// Here the four arrays are one buffer indexed `sub * GH_STRIDE + pass * RADIX +
-/// digit`, and the byte extraction is a shift-and-mask loop, which generates the
-/// same code. The host pads the key array to a whole number of `PART_SIZE`
-/// partitions with `u32::MAX`, so there is no ragged-tail branch: the padding
-/// keys are counted in the histogram, scatter to the very end because the sort
-/// is stable, and are dropped on the way back to the host.
-#[gpu::cuda_kernel(dynamic_shared)]
+/// Here the four arrays are one buffer indexed `pass * GH_PASS_WORDS + sub *
+/// RADIX + digit`, which is the four of them concatenated, and the byte
+/// extraction is a shift-and-mask loop rather than sixteen hand-written
+/// `reinterpret_cast<uint8_t*>` reads. Byte `4 * j + p` of the `uint4` is byte
+/// `p` of key `j` on a little-endian device, so the two agree.
+///
+/// The clear loop and its barrier are gone: [`GpuShared::init`] is a block-wide
+/// collective that hands the elements out round-robin and ends with its own
+/// `sync_threads`, so the buffer is zeroed and published before it returns.
+///
+/// The shared accumulation keeps its atomic. A bin index is a *key digit*, so
+/// two threads holding the same digit must reach the same address; that is not
+/// statically disjoint under any chunk map, and privatising per thread would
+/// need 512 KB against the 164 KB a block has. Upstream reaches the same
+/// conclusion -- all sixteen of its shared updates are `atomicAdd`. The reduce
+/// loop below is the opposite case: it only *reads* shared memory, which needs
+/// no permission at all, and its `atomicAdd` is on global memory because every
+/// block accumulates into the same device histogram.
+///
+/// The host pads the key array to a whole number of `PART_SIZE` partitions with
+/// `u32::MAX`, so there is no ragged-tail branch: the padding keys are counted
+/// in the histogram, scatter to the very end because the sort is stable, and are
+/// dropped on the way back to the host.
+#[gpu::cuda_kernel]
 pub fn global_histogram(sort: &[U32_4], global_hist: &mut [u32]) {
     assert!(Config::BDIM_X == UPSWEEP_THREADS);
     let tid = thread_id::<DimX>();
     let bid = block_id::<DimX>();
 
-    let smem = smem_alloc.alloc::<u32>(GH_SMEM_WORDS as usize);
+    let mut smem = GpuShared::<[u32; GH_SMEM_WORDS]>::init(0u32);
 
+    // 64 threads to a sub-histogram, as upstream.
     {
-        let mut z = smem.chunk_mut(MapLinear::new(1));
-        unroll! {
-            for k in 0..16 {
-                z[k] = 0u32;
-            }
-        }
-    }
-    sync_threads();
-
-    // Threads 0..63 accumulate into sub-histogram 0, 64..127 into 1.
-    {
-        let hist = gpu::sync::SharedAtomic::new(&mut *smem);
-        let wave = (tid / 64) * GH_STRIDE;
+        let hist: gpu::sync::SharedAtomic<[u32]> = gpu::sync::SharedAtomic::new(&mut smem);
+        let wave = (tid / 64) * RADIX;
         let start = bid * VEC_PART_SIZE;
-        let mut i = start + tid;
         let end = start + VEC_PART_SIZE;
+        let mut i = start + tid;
         while i < end {
-            let v = sort[i as usize].data();
+            let k = sort[i as usize];
+            let v = k.data();
             unroll! {
                 for j in 0..4 {
                     let key = v[j];
                     unroll! {
                         for p in 0..4 {
                             let d = (key >> ((p as u32) * RADIX_LOG)) & RADIX_MASK;
-                            hist.index((wave + (p as u32) * RADIX + d) as usize)
+                            hist.index(((p as u32) * GH_PASS_WORDS + wave + d) as usize)
                                 .atomic_addi(1u32);
                         }
                     }
@@ -169,14 +178,19 @@ pub fn global_histogram(sort: &[U32_4], global_hist: &mut [u32]) {
     }
     sync_threads();
 
-    // Fold the two sub-histograms and accumulate into the device histogram.
+    // Fold each pass's two sub-histograms and add them to the device histogram.
     {
+        let s = &*smem;
         let gh = gpu::sync::Atomic::new(global_hist);
         let mut i = tid;
-        while i < GH_STRIDE {
-            let a = *smem[i as usize];
-            let b = *smem[(i + GH_STRIDE) as usize];
-            gh.index(i as usize).atomic_addi(a + b);
+        while i < RADIX {
+            unroll! {
+                for p in 0..4 {
+                    let base = (p as u32) * GH_PASS_WORDS + i;
+                    let total = s[base as usize] + s[(base + RADIX) as usize];
+                    gh.index(((p as u32) * RADIX + i) as usize).atomic_addi(total);
+                }
+            }
             i += UPSWEEP_THREADS;
         }
     }
@@ -213,41 +227,49 @@ pub fn onesweep_scan(global_hist: &[u32], pass_hist: &mut [u32], tiles: u32) {
     let pass = block_id::<DimX>();
     let lane = lane_id();
 
-    let smem = smem_alloc.alloc::<u32>(RADIX as usize);
+    let smem = smem_alloc.alloc::<u32>(RADIX as usize, 0u32);
 
     {
-        let scanned = inclusive_warp_scan_circular_shift(global_hist[(tid + pass * RADIX) as usize]);
-        let w = gpu::sync::SharedAtomic::new(&mut *smem);
-        w.index(tid as usize).atomic_assign(scanned);
+        let scanned =
+            inclusive_warp_scan_circular_shift(global_hist[(tid + pass * RADIX) as usize]);
+        let mut w = smem.chunk_mut(MapLinear::new(1));
+        w[0] = scanned;
     }
     sync_threads();
 
-    if tid < 32 {
-        let groups = RADIX >> LANE_LOG; // 8
-        let v = if tid < groups {
-            *smem[(tid << LANE_LOG) as usize]
-        } else {
-            0u32
-        };
-        let s = exclusive_warp_scan(v);
-        if tid < groups {
-            let w = gpu::sync::SharedAtomic::new(&mut *smem);
-            w.index((tid << LANE_LOG) as usize).atomic_assign(s);
+    let groups = RADIX >> LANE_LOG; // 8
+    let v = if tid < groups {
+        *smem[(tid << LANE_LOG) as usize]
+    } else {
+        0u32
+    };
+    {
+        let mut w = smem.chunk_mut(MapLinear::new(1usize << LANE_LOG));
+        if tid < 32 {
+            let s = exclusive_warp_scan(v);
+            if tid < groups {
+                w[0] = s;
+            }
         }
     }
     sync_threads();
 
     {
         let mine = *smem[tid as usize];
-        let prev = if tid > 0 { *smem[(tid - 1) as usize] } else { 0u32 };
+        let prev = if tid > 0 {
+            *smem[(tid - 1) as usize]
+        } else {
+            0u32
+        };
         let (group_base, _) = gpu::shuffle!(idx, prev, 1u32, 32);
         let base = if lane != 0 { mine + group_base } else { mine };
 
         // Tile 0's slot of this pass. Stride between passes is (tiles + 1) * RADIX.
-        let ph = gpu::sync::Atomic::new(pass_hist);
-        let slot = pass * (tiles + 1) * RADIX + tid;
-        ph.index(slot as usize)
-            .atomic_assign((base << 2) | FLAG_INCLUSIVE);
+        let mut ph = chunk_mut(
+            pass_hist,
+            reshape_map!([1u32] | [(RADIX, (tiles + 1) * RADIX), grid_dim::<DimX>()] => layout: [t0, t1, i0]),
+        );
+        ph[0u32] = (base << 2) | FLAG_INCLUSIVE;
     }
 }
 
@@ -267,6 +289,7 @@ pub fn onesweep_scan(global_hist: &[u32], pass_hist: &mut [u32], tiles: u32) {
 /// That is the whole of the algorithmic difference, and it is what removes the
 /// upsweep and the scan from every pass.
 #[gpu::cuda_kernel(dynamic_shared)]
+#[cfg_attr(feature = "launch_bound", gpu::attr(nvvm_launch_bound(512, 1, 1, 3)))]
 pub fn digit_binning_pass(
     sort: &[u32],
     alt: &mut [u32],
@@ -288,7 +311,7 @@ pub fn digit_binning_pass(
     let warp = tid >> LANE_LOG;
     let pass = radix_shift >> 3;
 
-    let smem = smem_alloc.alloc::<u32>(BIN_SMEM_WORDS as usize);
+    let smem = smem_alloc.alloc::<u32>(BIN_SMEM_WORDS as usize, 0u32);
     // `Atomic::new` consumes the slice, and both the publish in section 3 and the
     // look-back in section 5 need it, so the view is taken once up front.
     let ph = gpu::sync::Atomic::new(pass_hist);
@@ -393,6 +416,7 @@ pub fn digit_binning_pass(
     // what the successors' look-back needs. Publishing it here -- before the ranking
     // work below and well before the scatter -- is what lets the whole grid make
     // progress concurrently.
+    let mut scanned = 0u32;
     if tid < RADIX {
         let mut running = *smem[tid as usize];
         let mut j = tid + RADIX;
@@ -408,34 +432,49 @@ pub fn digit_binning_pass(
         ph.index(slot as usize)
             .atomic_addi(FLAG_REDUCTION | (running << 2));
 
-        let scanned = inclusive_warp_scan_circular_shift(running);
-        let w = gpu::sync::SharedAtomic::new(&mut *smem);
-        w.index(tid as usize).atomic_assign(scanned);
+        scanned = inclusive_warp_scan_circular_shift(running);
     }
-    sync_threads();
-
-    if tid < 32 {
-        let groups = RADIX >> LANE_LOG; // 8
-        let v = if tid < groups {
-            *smem[(tid << LANE_LOG) as usize]
-        } else {
-            0u32
-        };
-        let s = exclusive_warp_scan(v);
-        if tid < groups {
-            let w = gpu::sync::SharedAtomic::new(&mut *smem);
-            w.index((tid << LANE_LOG) as usize).atomic_assign(s);
+    {
+        let mut w = smem.chunk_mut(MapLinear::new(1));
+        if tid < RADIX {
+            w[0] = scanned;
         }
     }
     sync_threads();
 
+    let groups = RADIX >> LANE_LOG; // 8
+    let v = if tid < groups {
+        *smem[(tid << LANE_LOG) as usize]
+    } else {
+        0u32
+    };
+    {
+        let mut w = smem.chunk_mut(MapLinear::new(1usize << LANE_LOG));
+        if tid < 32 {
+            let s = exclusive_warp_scan(v);
+            if tid < groups {
+                w[0] = s;
+            }
+        }
+    }
+    sync_threads();
+
+    let mut total = 0u32;
     if tid < RADIX {
         let mine = *smem[tid as usize];
-        let prev = if tid > 0 { *smem[(tid - 1) as usize] } else { 0u32 };
+        let prev = if tid > 0 {
+            *smem[(tid - 1) as usize]
+        } else {
+            0u32
+        };
         let (group_base, _) = gpu::shuffle!(idx, prev, 1u32, 32);
-        let total = if lane != 0 { mine + group_base } else { mine };
-        let w = gpu::sync::SharedAtomic::new(&mut *smem);
-        w.index(tid as usize).atomic_assign(total);
+        total = if lane != 0 { mine + group_base } else { mine };
+    }
+    {
+        let mut w = smem.chunk_mut(MapLinear::new(1));
+        if tid < RADIX {
+            w[0] = total;
+        }
     }
     sync_threads();
 
@@ -462,16 +501,35 @@ pub fn digit_binning_pass(
     // from it afterwards. Our tile buffer and histogram region are the same
     // `BIN_PART_SIZE == BIN_HISTS_SIZE` words, so the value has to be moved out of
     // the way first. Same arithmetic, one extra copy.
-    if tid < RADIX {
-        let local = *smem[tid as usize];
-        let w = gpu::sync::SharedAtomic::new(&mut *smem);
-        w.index((BASE_SLOT + tid) as usize).atomic_assign(local);
+    let local = if tid < RADIX {
+        *smem[tid as usize]
+    } else {
+        0u32
+    };
+    {
+        let mut w = smem.chunk_mut(
+            reshape_map!([1] | [DOWNSWEEP_THREADS] => layout: [t0, i0], offset: BASE_SLOT),
+        );
+        if tid < RADIX {
+            w[0] = local;
+        }
     }
     sync_threads();
 
     // ---- 4. Stage the tile in shared memory ----------------------------------------
-    // See `downsweep.rs` 4a: `atomic_assign` is a plain `st.shared.u32` and costs
-    // nothing; it is a checker artefact, measured and confirmed by PTX diff.
+    // `offsets[i]` is a rank, so the destinations are injective but only by a
+    // counting argument -- the ballot multi-split gives each key a distinct rank
+    // within its warp+digit group, and the two prefix sums lift that to a distinct
+    // rank in the tile. That is a theorem about the preceding sections, not a
+    // property of the index expression, so `chunk_mut` can only accept it through
+    // `MapExplicit`, whose obligation is discharged by hand.
+    //
+    // Measured: the `MapExplicit` form does turn all eight stores into plain
+    // `st.shared.u32` (`atom.shared.exch` 18 -> 10), but it is worth *nothing* --
+    // 23.556 ms against 23.555 ms at 256 Mi. Uncontended `atom.shared.exch.b32`
+    // already runs at store throughput, so the scatter stays on the safe API and
+    // the port keeps a single `unsafe` line, in section 6, where the same change
+    // to the *global* scatter is worth 25%.
     {
         let s = gpu::sync::SharedAtomic::new(&mut *smem);
         unroll! {
@@ -518,11 +576,13 @@ pub fn digit_binning_pass(
     // `atom.global.or.b32` -- device-scope and L1-bypassing, which is the property
     // the CUDA gets by declaring the buffer `volatile`. A plain load would be
     // allowed to hit a stale non-coherent L1 line and spin forever.
+    let mut reduction = 0u32;
     if tid < RADIX {
-        let mut reduction = 0u32;
         let mut k = if do_lookback != 0 { part } else { 0 };
         loop {
-            let flag = ph.index((pass_base + k * RADIX + tid) as usize).atomic_ori(0u32);
+            let flag = ph
+                .index((pass_base + k * RADIX + tid) as usize)
+                .atomic_ori(0u32);
             let kind = flag & FLAG_MASK;
             if kind == FLAG_INCLUSIVE {
                 reduction += flag >> 2;
@@ -541,17 +601,58 @@ pub fn digit_binning_pass(
             }
             // FLAG_NOT_READY: spin on the same slot until the predecessor publishes.
         }
+    }
 
-        let local = *smem[(BASE_SLOT + tid) as usize];
-        let w = gpu::sync::SharedAtomic::new(&mut *smem);
-        w.index((BASE_SLOT + tid) as usize)
-            .atomic_assign(reduction - local);
+    let base_local = if tid < RADIX {
+        *smem[(BASE_SLOT + tid) as usize]
+    } else {
+        0u32
+    };
+    {
+        let mut w = smem.chunk_mut(
+            reshape_map!([1] | [DOWNSWEEP_THREADS] => layout: [t0, i0], offset: BASE_SLOT),
+        );
+        if tid < RADIX {
+            w[0] = reduction - base_local;
+        }
     }
     sync_threads();
 
     // ---- 6. Scatter out to global memory -------------------------------------------
     // Consecutive threads read consecutive shared slots, so keys sharing a digit
     // land in consecutive global addresses: coalesced runs.
+    //
+    // This is where the cost is. `base + i` is a global rank, injective for the same
+    // counting reason as section 4, but as an `Atomic` each store lowers to
+    // `atom.global.exch.b32`, which does not coalesce. Routing it through
+    // `MapExplicit` restores eight plain `st.global.u32` and takes 256 Mi from
+    // 23.555 ms to 17.687 ms -- the whole of the onesweep gap over CUDA.
+    #[cfg(not(feature = "safe_only"))]
+    {
+        let mut dests = [0u32; KPT];
+        let mut vals = [0u32; KPT];
+        unroll! {
+            for k in 0..8 {
+                let i = tid + (k as u32) * DOWNSWEEP_THREADS;
+                let key = *smem[i as usize];
+                let digit = (key >> radix_shift) & RADIX_MASK;
+                let base = *smem[(BASE_SLOT + digit) as usize];
+                dests[k] = base + i;
+                vals[k] = key;
+            }
+        }
+        let len = alt.len() as u32;
+        // SAFETY: `base` is the digit's global offset and `i` the key's rank within
+        // that digit, so `base + i` is injective over the whole grid.
+        let map = unsafe { MapExplicit::<KPT>::new(dests, len) };
+        let mut w = chunk_mut(alt, map);
+        unroll! {
+            for k in 0..8 {
+                w[k as usize] = vals[k];
+            }
+        }
+    }
+    #[cfg(feature = "safe_only")]
     {
         let out = gpu::sync::Atomic::new(alt);
         unroll! {

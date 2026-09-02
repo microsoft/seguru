@@ -13,8 +13,8 @@
 
 use gpu::prelude::*;
 
-use crate::utils::{inclusive_warp_scan, LANE_LOG};
 use crate::SCAN_THREADS;
+use crate::utils::{LANE_LOG, inclusive_warp_scan};
 
 #[gpu::cuda_kernel(dynamic_shared)]
 pub fn radix_scan(pass_hist: &mut [u32], padded_thread_blocks: u32) {
@@ -24,7 +24,7 @@ pub fn radix_scan(pass_hist: &mut [u32], padded_thread_blocks: u32) {
     let warp = tid >> LANE_LOG;
     const WARPS: u32 = SCAN_THREADS >> LANE_LOG;
 
-    let smem = smem_alloc.alloc::<u32>(SCAN_THREADS as usize);
+    let smem = smem_alloc.alloc::<u32>(SCAN_THREADS as usize, 0u32);
 
     // chunk[k] -> pass_hist[bid * padded_thread_blocks + k * SCAN_THREADS + tid]
     let local = padded_thread_blocks / SCAN_THREADS;
@@ -48,7 +48,7 @@ pub fn radix_scan(pass_hist: &mut [u32], padded_thread_blocks: u32) {
         // shuffles keep a full warp (unused lanes contribute 0).
         if tid < 32 {
             let v = if tid < WARPS {
-                *smem[((((tid + 1) << LANE_LOG) - 1)) as usize]
+                *smem[(((tid + 1) << LANE_LOG) - 1) as usize]
             } else {
                 0u32
             };

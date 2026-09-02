@@ -47,7 +47,10 @@ fn main() {
         (
             "cuda/drs_variant.cu",
             "drs_ours.o",
-            &["-DDeviceRadixSort=DrsOurs", "-DDRS_DISPATCH=drs_dispatch_ours"],
+            &[
+                "-DDeviceRadixSort=DrsOurs",
+                "-DDRS_DISPATCH=drs_dispatch_ours",
+            ],
         ),
         (
             "cuda/os_variant.cu",
@@ -65,7 +68,15 @@ fn main() {
         let obj = out_dir.join(obj_name);
         let mut cmd = Command::new(format!("{cuda_dir}/bin/nvcc"));
         cmd.args(["-c", src.to_str().unwrap(), "-o", obj.to_str().unwrap()])
-            .args(["-O3", "-lineinfo", "-arch=native", "-std=c++17", "--extended-lambda", "--compiler-options", "-fPIC"])
+            .args([
+                "-O3",
+                "-lineinfo",
+                "-arch=native",
+                "-std=c++17",
+                "--extended-lambda",
+                "--compiler-options",
+                "-fPIC",
+            ])
             .args(extra);
         if obj_name == "drs_ours.o" {
             cmd.args(ours_tuning);
@@ -76,7 +87,10 @@ fn main() {
         let status = cmd
             .status()
             .expect("failed to invoke nvcc; set CUDA_PATH or disable the `bench` feature");
-        assert!(status.success(), "nvcc failed to compile {src_rel} -> {obj_name}");
+        assert!(
+            status.success(),
+            "nvcc failed to compile {src_rel} -> {obj_name}"
+        );
         objs.push(obj);
     }
 

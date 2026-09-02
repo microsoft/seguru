@@ -51,7 +51,10 @@ fn main() {
             .take(1 << 16)
             .collect(),
     );
-    check("high bits only", lcg(5, 1 << 18).iter().map(|k| k & 0xFF00_0000).collect());
+    check(
+        "high bits only",
+        lcg(5, 1 << 18).iter().map(|k| k & 0xFF00_0000).collect(),
+    );
     check("large", lcg(6, 1 << 24));
     println!("all OK");
 }

@@ -63,7 +63,12 @@ fn sort_large() {
 #[test]
 fn sort_high_bits_only() {
     // Exercises the upper radix passes: low 16 bits are constant.
-    check(lcg(5, 20_000).into_iter().map(|x| x & 0xFFFF_0000).collect());
+    check(
+        lcg(5, 20_000)
+            .into_iter()
+            .map(|x| x & 0xFFFF_0000)
+            .collect(),
+    );
 }
 
 #[test]

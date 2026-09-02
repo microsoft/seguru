@@ -8,13 +8,13 @@
 use gpu_host::gpu_config;
 
 use crate::{
-    clear::{clear_grid, clear_padded_len, clear_u32, CLEAR_THREADS},
+    BIN_PART_SIZE, DOWNSWEEP_THREADS, PART_SIZE, RADIX, RADIX_LOG, RADIX_PASSES, U32_4,
+    UPSWEEP_THREADS,
+    clear::{CLEAR_THREADS, clear_grid, clear_padded_len, clear_u32},
     onesweep::{
-        digit_binning_pass, global_histogram, onesweep_scan, pass_hist_len, BIN_SMEM_WORDS,
-        GH_SMEM_WORDS,
+        BIN_SMEM_WORDS, digit_binning_pass, global_histogram, onesweep_scan, pass_hist_len,
     },
-    pack_padded, thread_blocks, unpack, BIN_PART_SIZE, DOWNSWEEP_THREADS, PART_SIZE, RADIX,
-    RADIX_LOG, RADIX_PASSES, U32_4, UPSWEEP_THREADS,
+    pack_padded, thread_blocks, unpack,
 };
 
 /// Sort `keys` ascending with OneSweep. Same contract as `radix_sort_timed`:
@@ -80,7 +80,7 @@ pub fn onesweep_sort_inner(
 
                 // One pass over the keys builds all four digits' histograms.
                 let ghist_cfg = gpu_config!(
-                    hist_blocks, 1, 1, @const UPSWEEP_THREADS, 1, 1, GH_SMEM_WORDS * 4
+                    hist_blocks, 1, 1, @const UPSWEEP_THREADS, 1, 1, 0
                 );
                 global_histogram::launch(ghist_cfg, ctx, m, &d_a, &mut d_gh).unwrap();
 

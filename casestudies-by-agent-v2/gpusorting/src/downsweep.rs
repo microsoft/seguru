@@ -26,9 +26,9 @@
 //!
 //! * **Shared memory is one allocation.** CUDA declares `s_warpHistograms` and
 //!   `s_localHistogram` separately and aliases the first with the scatter buffer;
-//!   SeGuRu takes a single `smem_alloc.alloc::<u32>(SMEM_WORDS)` and gives the
-//!   regions names in comments, because overlapping typed allocations cannot be
-//!   expressed safely.
+//!   SeGuRu takes a single `smem_alloc.alloc::<u32>(SMEM_WORDS as usize, 0u32)`
+//!   and gives the regions names in comments, because overlapping typed
+//!   allocations cannot be expressed safely.
 //! * **Data-dependent shared writes go through `Atomic`.** CUDA writes
 //!   `s_warpHistograms[i] = x` with a plain store wherever `i` is a runtime value.
 //!   SeGuRu's checker cannot prove two lanes never pick the same `i`, so those
@@ -39,8 +39,8 @@ use crunchy::unroll;
 use gpu::prelude::*;
 
 use crate::utils::{
-    exclusive_warp_scan, inclusive_warp_scan_circular_shift, lane_mask_lt, lowest_set_bit,
-    LANE_COUNT, LANE_LOG,
+    LANE_COUNT, LANE_LOG, exclusive_warp_scan, inclusive_warp_scan_circular_shift, lane_mask_lt,
+    lowest_set_bit,
 };
 use crate::{
     BIN_HISTS_SIZE, BIN_KEYS_PER_THREAD, BIN_PART_SIZE, BIN_SUB_PART_SIZE, DOWNSWEEP_THREADS,
@@ -77,7 +77,7 @@ pub fn radix_downsweep(
     // `s_warpHist` is a per-warp view into the shared array. SeGuRu has no aliasing
     // pointer to hand out, so every use below indexes `smem` at `wbase + ..` instead,
     // with `wbase = warp << RADIX_LOG` recomputed where it is needed.
-    let smem = smem_alloc.alloc::<u32>(SMEM_WORDS as usize);
+    let smem = smem_alloc.alloc::<u32>(SMEM_WORDS as usize, 0u32);
 
     // CUDA:
     //     for (uint32_t i = threadIdx.x; i < BIN_HISTS_SIZE; i += blockDim.x)
@@ -261,7 +261,11 @@ pub fn radix_downsweep(
     // `if lane != 0`, because the mask argument is not expressible here.
     if tid < RADIX {
         let mine = *smem[tid as usize];
-        let prev = if tid > 0 { *smem[(tid - 1) as usize] } else { 0u32 };
+        let prev = if tid > 0 {
+            *smem[(tid - 1) as usize]
+        } else {
+            0u32
+        };
         let (group_base, _) = gpu::shuffle!(idx, prev, 1u32, 32);
         let total = if lane != 0 { mine + group_base } else { mine };
         let w = gpu::sync::SharedAtomic::new(&mut *smem);
@@ -333,17 +337,20 @@ pub fn radix_downsweep(
     // property of the ranking arithmetic three sections above, so the store is
     // spelled `atomic_assign`.
     //
-    // `atomic_assign` is a store, not a read-modify-write. **It costs nothing.** This
-    // was measured rather than assumed: the whole scatter was rewritten to use a
-    // `MapExplicit` chunk that carries the runtime destinations, removing the
-    // `Atomic` entirely, and the generated PTX was byte-for-byte equivalent -- 29
-    // atom/red instructions and 16 `st.shared.u32` either way, because
-    // `atomic_assign` already lowers to a plain `st.shared.u32`. The 256 Mi sort
-    // measured 19.606 ms with the map and 19.603 ms with the `Atomic`.
+    // `atomic_assign` is a store, not a read-modify-write, but it does *not* lower to
+    // a plain `st.shared.u32`: `radix_downsweep` emits 21 `atom.shared.exch.b32` and
+    // only 13 `st.shared.u32`, so each of the eight scatter stores is an exchange.
+    //
+    // Replacing the `Atomic` with a `MapExplicit` chunk that carries the runtime
+    // destinations does not help -- the PTX was equivalent and the 256 Mi sort
+    // measured 19.606 ms with the map against 19.603 ms with the `Atomic` -- because
+    // a map over runtime destinations still cannot be proved injective statically.
+    // Only a *static* map lowers to a plain store; see `onesweep::onesweep_scan`,
+    // where three `atomic_assign`s became 3 `st.shared.u32` + 1 `st.global.u32`.
     //
     // So an earlier estimate that this `Atomic` cost ~40% of sort time (24.5 ms ->
-    // 17.4 ms) was simply wrong, and the 2.2x gap against CUB is somewhere else.
-    // `Atomic` here is a checker artefact with no codegen consequence.
+    // 17.4 ms) was still wrong, but the cost is not zero either: it is the missing
+    // release-store primitive, not a checker artefact.
     //
     // The map version is therefore *not* used: it buys no speed and costs an
     // `unsafe` block, since `MapExplicit::new` carries the uniqueness obligation.

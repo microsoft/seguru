@@ -3,15 +3,14 @@
 use gpu_host::gpu_config;
 
 use crate::{
-    clear::{clear_grid, clear_padded_len, clear_u32, CLEAR_THREADS},
+    BIN_PART_SIZE, DOWNSWEEP_THREADS, RADIX, RADIX_LOG, RADIX_PASSES, SCAN_THREADS, SMEM_WORDS,
+    U32_4, UPSWEEP_THREADS,
+    clear::{CLEAR_THREADS, clear_grid, clear_padded_len, clear_u32},
     downsweep::radix_downsweep,
-    padded_thread_blocks, pack_padded,
+    pack_padded, padded_thread_blocks,
     scan::radix_scan,
     thread_blocks, unpack,
     upsweep::radix_upsweep,
-    BIN_PART_SIZE, DOWNSWEEP_THREADS, RADIX, RADIX_LOG, RADIX_PASSES, SCAN_THREADS, SMEM_WORDS,
-    U32_4,
-    UPSWEEP_THREADS,
 };
 
 /// Sort `keys` ascending on the GPU.

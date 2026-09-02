@@ -17,6 +17,17 @@ rand = "0.9"
 
 [features]
 bench = []
+# Write the two rank-indexed scatters in `digit_binning_pass` through
+# `Atomic`/`SharedAtomic` instead of `MapExplicit` chunks, keeping the port free
+# of `unsafe`. The chunked form is faster only at the default occupancy; with
+# `launch_bound` the two are equal. See `onesweep.rs` sections 4 and 6.
+safe_only = []
+# Ask ptxas for 3 resident blocks per SM in `digit_binning_pass` (512 threads).
+# Without it the kernel takes 56 registers and only 2 blocks fit, against nvcc's
+# 40 and 3; with it, 8 bytes spill and 256 Mi drops 23.6 ms -> 15.9 ms. NOT
+# default: one intermittent wrong result was seen at n = 65536 under this
+# setting and is not yet explained.
+launch_bound = []
 
 [[bin]]
 name = "sort-bench"

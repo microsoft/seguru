@@ -28,6 +28,15 @@ use std::time::Instant;
 
 const WARMUP: usize = 5;
 
+// The onesweep port has two builds: the default one writes its global scatter
+// through a single `unsafe` MapExplicit, and `safe_only` writes it with atomics.
+// They are reported as separate workloads so the table can price the difference.
+const ONESWEEP: &str = if cfg!(feature = "safe_only") {
+    "radix_sort_onesweep_safe"
+} else {
+    "radix_sort_onesweep"
+};
+
 struct Row {
     label: &'static str,
     n: usize,
@@ -124,7 +133,11 @@ fn main() {
             "onesweep baseline (upstream tuning) is wrong at n = {n}"
         );
         let os_ours_ms = cuda.bench(CudaSort::OneSweepOurTuning, WARMUP as u32, iters as u32);
-        let os_up_ms = cuda.bench(CudaSort::OneSweepUpstreamTuning, WARMUP as u32, iters as u32);
+        let os_up_ms = cuda.bench(
+            CudaSort::OneSweepUpstreamTuning,
+            WARMUP as u32,
+            iters as u32,
+        );
 
         println!("  n = {label:>7} ({n:>10}) done");
         rows.push(Row {
@@ -142,21 +155,114 @@ fn main() {
         });
 
         let param = label.replace(' ', "");
+        // The `safe_only` build exists only to re-measure onesweep, so it emits
+        // just that family; duplicating the rest would give the shared workloads
+        // two baseline rows apiece.
         // Reduce-then-scan family.
-        csv_row("gpusorting", "radix_sort_reduce_then_scan", &param, "seguru", "time", sg_ms, "ms");
-        csv_row("gpusorting", "radix_sort_reduce_then_scan", &param, "seguru", "throughput", gkeys(n, sg_ms), "Gkeys/s");
-        csv_row("gpusorting", "radix_sort_reduce_then_scan", &param, "cuda", "time", drs_ours_ms, "ms");
-        csv_row("gpusorting", "radix_sort_reduce_then_scan", &param, "cuda_upstream_tuning", "time", drs_up_ms, "ms");
-        csv_row("gpusorting", "radix_sort_reduce_then_scan", &param, "cub", "time", cub_ms, "ms");
-        csv_row("gpusorting", "radix_sort_reduce_then_scan", &param, "thrust", "time", thrust_ms, "ms");
-        if let Some(cpu_ms) = cpu {
-            csv_row("gpusorting", "radix_sort_reduce_then_scan", &param, "cpu", "time", cpu_ms, "ms");
+        if !cfg!(feature = "safe_only") {
+            csv_row(
+                "gpusorting",
+                "radix_sort_reduce_then_scan",
+                &param,
+                "seguru",
+                "time",
+                sg_ms,
+                "ms",
+            );
+            csv_row(
+                "gpusorting",
+                "radix_sort_reduce_then_scan",
+                &param,
+                "seguru",
+                "throughput",
+                gkeys(n, sg_ms),
+                "Gkeys/s",
+            );
+            csv_row(
+                "gpusorting",
+                "radix_sort_reduce_then_scan",
+                &param,
+                "cuda",
+                "time",
+                drs_ours_ms,
+                "ms",
+            );
+            csv_row(
+                "gpusorting",
+                "radix_sort_reduce_then_scan",
+                &param,
+                "cuda_upstream_tuning",
+                "time",
+                drs_up_ms,
+                "ms",
+            );
+            csv_row(
+                "gpusorting",
+                "radix_sort_reduce_then_scan",
+                &param,
+                "cub",
+                "time",
+                cub_ms,
+                "ms",
+            );
+            csv_row(
+                "gpusorting",
+                "radix_sort_reduce_then_scan",
+                &param,
+                "thrust",
+                "time",
+                thrust_ms,
+                "ms",
+            );
+            if let Some(cpu_ms) = cpu {
+                csv_row(
+                    "gpusorting",
+                    "radix_sort_reduce_then_scan",
+                    &param,
+                    "cpu",
+                    "time",
+                    cpu_ms,
+                    "ms",
+                );
+            }
         }
         // Onesweep family.
-        csv_row("gpusorting", "radix_sort_onesweep", &param, "seguru", "time", os_ms, "ms");
-        csv_row("gpusorting", "radix_sort_onesweep", &param, "seguru", "throughput", gkeys(n, os_ms), "Gkeys/s");
-        csv_row("gpusorting", "radix_sort_onesweep", &param, "cuda", "time", os_ours_ms, "ms");
-        csv_row("gpusorting", "radix_sort_onesweep", &param, "cuda_upstream_tuning", "time", os_up_ms, "ms");
+        csv_row(
+            "gpusorting",
+            ONESWEEP,
+            &param,
+            "seguru",
+            "time",
+            os_ms,
+            "ms",
+        );
+        csv_row(
+            "gpusorting",
+            ONESWEEP,
+            &param,
+            "seguru",
+            "throughput",
+            gkeys(n, os_ms),
+            "Gkeys/s",
+        );
+        csv_row(
+            "gpusorting",
+            ONESWEEP,
+            &param,
+            "cuda",
+            "time",
+            os_ours_ms,
+            "ms",
+        );
+        csv_row(
+            "gpusorting",
+            ONESWEEP,
+            &param,
+            "cuda_upstream_tuning",
+            "time",
+            os_up_ms,
+            "ms",
+        );
     }
 
     println!("\n32-bit key sort, A100. Times are milliseconds for one full sort.");
@@ -209,9 +315,28 @@ fn main() {
 
 /// Appends one measurement row to the CSV file named by `BENCH_CSV`, if set.
 /// No-op (and creates no file) when the environment variable is unset.
-fn csv_row(suite: &str, workload: &str, parameter: &str, implementation: &str, metric: &str, value: f64, units: &str) {
+fn csv_row(
+    suite: &str,
+    workload: &str,
+    parameter: &str,
+    implementation: &str,
+    metric: &str,
+    value: f64,
+    units: &str,
+) {
     use std::io::Write;
-    let Ok(path) = std::env::var("BENCH_CSV") else { return };
-    let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) else { return };
-    let _ = writeln!(f, "{suite},{workload},{parameter},{implementation},{metric},{value:.6},{units}");
+    let Ok(path) = std::env::var("BENCH_CSV") else {
+        return;
+    };
+    let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    else {
+        return;
+    };
+    let _ = writeln!(
+        f,
+        "{suite},{workload},{parameter},{implementation},{metric},{value:.6},{units}"
+    );
 }

@@ -28,7 +28,6 @@ pub mod downsweep;
 pub mod driver;
 pub mod onesweep;
 pub mod onesweep_driver;
-pub mod onesweep_probe;
 pub mod scan;
 pub mod upsweep;
 pub mod utils;
@@ -40,9 +39,9 @@ pub mod cuda_ffi;
 mod tests;
 
 pub use driver::{radix_sort, radix_sort_timed};
-pub use onesweep_driver::{onesweep_sort, onesweep_sort_timed};
-pub use gpu::vector::VecTypeTrait;
 pub use gpu::U32_4;
+pub use gpu::vector::VecTypeTrait;
+pub use onesweep_driver::{onesweep_sort, onesweep_sort_timed};
 
 pub const RADIX: u32 = 256;
 pub const RADIX_LOG: u32 = 8;
@@ -73,8 +72,6 @@ pub const SMEM_WORDS: u32 = if BIN_PART_SIZE > BIN_HISTS_SIZE {
 } else {
     BIN_HISTS_SIZE
 } + RADIX;
-
-
 
 /// Number of partitions needed for `n` keys.
 pub fn thread_blocks(n: usize) -> u32 {

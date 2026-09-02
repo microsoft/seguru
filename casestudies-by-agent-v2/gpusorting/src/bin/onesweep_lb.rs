@@ -19,9 +19,17 @@ fn lcg(seed: u32, n: usize) -> Vec<u32> {
 }
 
 fn main() {
-    println!("| {:>7} | {:>12} | {:>14} | {:>9} |", "keys", "onesweep ms", "no wait ms", "wait");
+    println!(
+        "| {:>7} | {:>12} | {:>14} | {:>9} |",
+        "keys", "onesweep ms", "no wait ms", "wait"
+    );
     println!("|{:->9}|{:->14}|{:->16}|{:->11}|", "", "", "", "");
-    for (label, n) in [("4 Mi", 1usize << 22), ("16 Mi", 1 << 24), ("64 Mi", 1 << 26), ("256 Mi", 1 << 28)] {
+    for (label, n) in [
+        ("4 Mi", 1usize << 22),
+        ("16 Mi", 1 << 24),
+        ("64 Mi", 1 << 26),
+        ("256 Mi", 1 << 28),
+    ] {
         let keys = lcg(0x5EED, n);
         let iters = if n <= 1 << 24 { 50 } else { 20 };
         let (_, full) = onesweep_sort_inner(&keys, 5, iters, false);

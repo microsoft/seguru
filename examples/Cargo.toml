@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "aligntest",
     "hello",
     "llm-rs-gpu",
     "matrix/matmul-gpu",

@@ -86,8 +86,10 @@ pub(crate) fn create_top_module<'ml>(
     let location = Location::unknown(ctx);
     let mut module = Module::new(location);
     let unit_attr = melior::ir::Attribute::unit(ctx);
+    let data_layout = StringAttribute::new(ctx, NVPTX_DATA_LAYOUT).into();
 
     module.as_operation_mut().set_attribute("gpu.container_module", unit_attr);
+    module.as_operation_mut().set_attribute(DATA_LAYOUT_SYM, data_layout);
     let region = Region::new();
     let block = Block::new(&[]);
     let gpu_block = region.append_block(block);
@@ -95,6 +97,7 @@ pub(crate) fn create_top_module<'ml>(
         melior::dialect::ods::gpu::module(ctx, region, StringAttribute::new(ctx, "gpu"), location)
             .into();
     gpu_mod.set_attribute("visibility", StringAttribute::new(ctx, "public").into());
+    gpu_mod.set_attribute(DATA_LAYOUT_SYM, data_layout);
     let region = Region::new();
     let block = Block::new(&[]);
     let cpu_block = region.append_block(block);
@@ -112,6 +115,13 @@ pub enum MLIRVisibility {
 }
 
 const VALUE_SYM: &str = "value";
+const DATA_LAYOUT_SYM: &str = "llvm.data_layout";
+
+/// Without this, MLIR->LLVM translation falls back to LLVM's default layout,
+/// where `i64` has an ABI alignment of 4. Every 64-bit global access would then
+/// be split into a pair of 32-bit accesses by the NVPTX backend.
+const NVPTX_DATA_LAYOUT: &str = "e-i64:64-i128:128-v16:16-v32:32-n16:32:64";
+
 const FUNCTION_TYPE_SYM: &str = "function_type";
 const VISIBILITY_SYM: &str = "sym_visibility";
 const NAME_SYM: &str = "name";

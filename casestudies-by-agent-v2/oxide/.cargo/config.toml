@@ -1,0 +1,7 @@
+# Undo `../.cargo/config.toml`, which selects SeGuRu's `rustc-gpu` driver for
+# everything under `casestudies-by-agent-v2/`. The crates in this directory are
+# compiled by cuda-oxide's own codegen backend, which `cargo oxide` injects via
+# `CARGO_ENCODED_RUSTFLAGS` on top of a stock `rustc`.
+[build]
+rustc = "rustc"
+rustflags = []

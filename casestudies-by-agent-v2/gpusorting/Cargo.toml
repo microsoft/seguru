@@ -33,3 +33,9 @@ launch_bound = []
 name = "sort-bench"
 path = "src/bin/bench.rs"
 required-features = ["bench"]
+
+# Times `radix_upsweep` alone, for the kernel-for-kernel comparison against the
+# cuda-oxide port in `../oxide/sort-upsweep/`.
+[[bin]]
+name = "upsweep-bench"
+path = "src/bin/upsweep_bench.rs"

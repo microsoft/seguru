@@ -1,0 +1,11 @@
+[package]
+name = "polybench-gemm"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+cuda-device = { path = "../.cuda-oxide/crates/cuda-device" }
+cuda-host = { path = "../.cuda-oxide/crates/cuda-host" }
+cuda-core = { path = "../.cuda-oxide/crates/cuda-core" }

@@ -1,0 +1,7 @@
+# Symlink to a local cuda-oxide checkout; point CUDA_OXIDE at your own.
+.cuda-oxide
+# Per-crate build output and collected measurements.
+target/
+results/
+# LLVM IR dumps emitted by cargo-oxide.
+*.ll

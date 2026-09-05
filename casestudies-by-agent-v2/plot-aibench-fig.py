@@ -136,8 +136,7 @@ def main():
     A(r"  ylabel={\sys{}/CUDA},")
     A(r"  ylabel near ticks,")
     A(r"  tick label style={font=\small},")
-    A(r"  x tick label style={font=\scriptsize, rotate=18,"
-      r" anchor=north east, xshift=6pt, yshift=2pt},")
+    A(r"  x tick label style={font=\scriptsize},")
     A(r"  label style={font=\small},")
     A(r"  xtick={" + ",".join(str(i) for i in range(1, len(SUITES) + 1)) + r"},")
     A(r"  xticklabels={" + ",".join(
@@ -158,7 +157,7 @@ def main():
         A(r"\addplot[boxplot prepared={"
           rf"lower whisker={wlo:.4f}, lower quartile={q1:.4f}, median={med:.4f},"
           rf" upper quartile={q3:.4f}, upper whisker={whi:.4f}, draw position={i},"
-          r" box extend=0.5}, draw=black!65, fill=gray!10, thick,"
+          r" box extend=0.35}, draw=black!65, fill=gray!10, thick,"
           r" mark=o, mark options={scale=0.55,draw=black!45},"
           r" forget plot] coordinates {"
           + " ".join(f"({v:.4f},0)" for v in out) + "};")
@@ -183,16 +182,6 @@ def main():
       r" fill=white, line width=0.7pt] coordinates {"
       + " ".join(f"({i},{geo[s]:.4f})" for i, s in enumerate(SUITES, start=1))
       + "};")
-    A(r"\addlegendentry{geomean}")
-
-    allgeo = gmean([r for s in SUITES for r, _, _, _ in pts[s]])
-    A(rf"\draw[densely dotted, sgGeo, line width=0.9pt]"
-      rf" ({{rel axis cs:0,0}}|-{{axis cs:0,{allgeo:.4f}}})"
-      rf" -- ({{rel axis cs:1,0}}|-{{axis cs:0,{allgeo:.4f}}});")
-    A(rf"\node[anchor=south west, font=\scriptsize, sgGeo,"
-      rf" inner sep=1pt] at ({{rel axis cs:0,0}}|-{{axis cs:0,{allgeo:.4f}}})"
-      rf" {{overall geomean {allgeo:.2f}}};")
-
     A(r"\end{axis}")
     A(r"\end{tikzpicture}")
     A(r"\caption{Agent-written kernels in \sys{}; lower is better.")

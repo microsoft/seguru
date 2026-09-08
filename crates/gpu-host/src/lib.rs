@@ -3,9 +3,25 @@ mod ctx;
 pub use ctx::{cuda_ctx, cuda_ctx_no_mod, cuda_scope};
 pub use cuda_bindings::*;
 
-pub fn get_fn_name<T>(_: T) -> String {
+use std::collections::HashMap;
+use std::sync::{OnceLock, RwLock};
+
+pub fn get_fn_name<T>(_: T) -> &'static str {
+    // Called on every launch, so the mangled name is derived once per kernel
+    // type and leaked rather than rebuilt.
+    static CACHE: OnceLock<RwLock<HashMap<(usize, usize), &'static str>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| RwLock::new(HashMap::new()));
     let name = std::any::type_name::<T>();
-    gpu_name::convert_def_path_to_gpu_sym_name(name)
+    // `type_name` returns the same static string for a given `T`, so its
+    // address and length identify the kernel without hashing the path.
+    let key = (name.as_ptr() as usize, name.len());
+    if let Some(cached) = cache.read().unwrap().get(&key) {
+        return cached;
+    }
+    let mangled: &'static str =
+        Box::leak(gpu_name::convert_def_path_to_gpu_sym_name(name).into_boxed_str());
+    cache.write().unwrap().insert(key, mangled);
+    mangled
 }
 
 #[test]

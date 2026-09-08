@@ -174,9 +174,55 @@ Reading the numbers: at 4096x1024 (16 MiB in, 16 MiB out) every elementwise
 kernel is within a few percent of achievable HBM bandwidth, and the reductions
 (one 16 MiB read, negligible write) hit 1.9 TB/s — i.e. read-only streaming at
 near peak. The 1024x1024 shapes are launch-latency dominated (~5 µs floor), so
-their GB/s figures understate the kernels. No PyTorch/CUDA baseline was measured
-because no CUDA C++ reference or PyTorch install is available in this
-environment; the comparison above is against machine peak bandwidth instead.
+their GB/s figures understate the kernels. The SeGuRu measurements above are
+shown against machine peak bandwidth; the standalone CUDA comparison is
+documented below.
+
+## Hand-written CUDA baseline
+
+`cuda/baseline.cu` is a standalone CUDA C++ baseline for the same operators and
+the same `1024x1024` and `4096x1024` workloads. It uses device-resident inputs,
+20 warmup launches, and 200 launches timed with CUDA events, matching the
+SeGuRu benchmark's methodology. The sources are adapted from the earlier
+KernelBench CUDA implementations, without a PyTorch or libtorch dependency.
+
+Build and run it with:
+
+```bash
+cd cuda
+make CUDA_ARCH=sm_80
+./kernelbench-cuda
+```
+
+Measured on the same A100 with CUDA 13.3:
+
+| Operator | 1024x1024 (us) | 4096x1024 (us) |
+|---|---:|---:|
+| relu | 5.6 | 23.1 |
+| gelu | 6.4 | 25.4 |
+| sigmoid | 6.2 | 24.7 |
+| tanh | 5.8 | 23.6 |
+| swish | 6.2 | 24.6 |
+| softplus | 6.8 | 27.1 |
+| leaky_relu | 5.7 | 23.1 |
+| softmax | 8.4 | 26.1 |
+| log_softmax | 7.1 | 23.7 |
+| cumsum | 101.8 | 225.6 |
+| rms_norm | 6.0 | 22.4 |
+| l1_norm | 6.0 | 22.5 |
+| l2_norm | 5.9 | 22.4 |
+| layer_norm | 8.8 | 25.4 |
+| sum_dim | 4.8 | 9.0 |
+| mean_dim | 4.9 | 9.2 |
+| max_dim | 4.8 | 9.1 |
+| argmax_dim | 5.7 | 12.1 |
+| mse_loss | 7.3 | 26.0 |
+| max_pool1d (k=4, s=4) | 4.1 | 7.5 |
+
+The CUDA source is a standalone reference implementation rather than a
+PyTorch-extension build. The `cumsum` reference intentionally uses a simple
+single-thread row scan, so its timing is not an optimized CUDA comparison for
+the parallel SeGuRu implementation.
 
 ## Findings
 

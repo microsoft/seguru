@@ -49,13 +49,9 @@ fn main() {
     let dec_staged = staged_round_keys(&dec_rk);
     let isb = inv_sbox_u32();
 
-    let sizes: &[(&str, usize)] = &[
-        ("16 KiB", 1 << 14),
-        ("1 MiB", 1 << 20),
-        ("16 MiB", 1 << 24),
-        ("256 MiB", 1 << 28),
-        ("1 GiB", 1 << 30),
-    ];
+    // Three sizes an order of magnitude apart. Anything below ~16 MiB sits on
+    // the kernel launch floor (~15 us), where the size no longer moves the time.
+    let sizes: &[(&str, usize)] = &[("16 MiB", 1 << 24), ("256 MiB", 1 << 28), ("1 GiB", 1 << 30)];
 
     let mut rows = Vec::new();
 

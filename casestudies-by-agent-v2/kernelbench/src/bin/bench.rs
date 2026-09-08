@@ -33,7 +33,7 @@ struct Row {
 }
 
 fn main() {
-    let shapes: &[(usize, usize)] = &[(1024, 1024), (4096, 1024)];
+    let shapes: &[(usize, usize)] = &[(2048, 2048), (8192, 8192), (32768, 32768)];
     let mut rows: Vec<Row> = Vec::new();
 
     for &(nrows, ncols) in shapes {
@@ -240,14 +240,12 @@ fn main() {
                 let mut d_pool_out = ctx.new_tensor_view::<[f32]>(&pool_out).unwrap();
                 let us = time(&mut || {
                     let cfg = gpu_config!(pool_grid, 1, 1, @const POOL_BLOCK, 1, 1, 0);
-                    max_pool1d_kernel::launch(
+                    max_pool1d_kernel::launch::<4, 4, _, _>(
                         cfg,
                         ctx,
                         m,
                         &d_pool_in,
                         &mut d_pool_out,
-                        k as u32,
-                        s as u32,
                         l_in as u32,
                         l_out as u32,
                         n_out as u32,

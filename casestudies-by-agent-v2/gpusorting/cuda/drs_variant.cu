@@ -25,6 +25,7 @@
 
 #include "upstream/DeviceRadixSort.cu"
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 
@@ -35,6 +36,7 @@
 #define DRS_CAT_(a, b) a##b
 #define DRS_CAT(a, b) DRS_CAT_(a, b)
 #define DRS_PART_FN DRS_CAT(DRS_DISPATCH, _part_size)
+#define DRS_TIMES_FN DRS_CAT(DRS_DISPATCH, _kernel_times)
 
 #define DRS_CHECK(expr)                                                        \
   do {                                                                         \
@@ -72,4 +74,67 @@ extern "C" void DRS_DISPATCH(unsigned int *sort, unsigned int *alt,
     DeviceRadixSort::DownsweepKeysOnly<<<threadblocks, downsweepThreads>>>(
         in, out, globalHist, passHist, size, shift);
   }
+}
+
+// Mean milliseconds per launch of each kernel of one pass: upsweep, scan,
+// downsweep, written to `out[0..3]`.
+//
+// Mirrors `radix_sort_kernel_times` in `driver.rs` launch for launch, including
+// the order: scan is timed last because it rewrites `passHist` in place, and
+// downsweep needs those offsets intact. Timing is host-side around a batch of
+// launches followed by one sync, which is what the Rust side measures.
+extern "C" void DRS_TIMES_FN(unsigned int *sort, unsigned int *alt,
+                             unsigned int *globalHist, unsigned int *passHist,
+                             unsigned int size, unsigned int warmup,
+                             unsigned int iters, double *out) {
+  const unsigned int threadblocks = (size + PART_SIZE - 1) / PART_SIZE;
+  const unsigned int upsweepThreads = 128;
+  const unsigned int scanThreads = 128;
+  const unsigned int downsweepThreads = 512;
+  const unsigned int ghBytes = RADIX * 4 * sizeof(unsigned int);
+  const size_t phBytes = (size_t)RADIX * threadblocks * sizeof(unsigned int);
+  if (iters == 0) iters = 1;
+
+  auto now = []() { return std::chrono::steady_clock::now(); };
+  auto ms = [](auto a, auto b) {
+    return std::chrono::duration<double, std::milli>(b - a).count();
+  };
+
+  DRS_CHECK(cudaMemsetAsync(globalHist, 0, ghBytes));
+  DRS_CHECK(cudaMemsetAsync(passHist, 0, phBytes));
+  for (unsigned int i = 0; i < warmup; ++i)
+    DeviceRadixSort::Upsweep<<<threadblocks, upsweepThreads>>>(
+        sort, globalHist, passHist, size, 0);
+  DRS_CHECK(cudaDeviceSynchronize());
+  auto t0 = now();
+  for (unsigned int i = 0; i < iters; ++i)
+    DeviceRadixSort::Upsweep<<<threadblocks, upsweepThreads>>>(
+        sort, globalHist, passHist, size, 0);
+  DRS_CHECK(cudaDeviceSynchronize());
+  out[0] = ms(t0, now()) / iters;
+
+  DRS_CHECK(cudaMemsetAsync(globalHist, 0, ghBytes));
+  DRS_CHECK(cudaMemsetAsync(passHist, 0, phBytes));
+  DeviceRadixSort::Upsweep<<<threadblocks, upsweepThreads>>>(
+      sort, globalHist, passHist, size, 0);
+  DeviceRadixSort::Scan<<<RADIX, scanThreads>>>(passHist, threadblocks);
+  for (unsigned int i = 0; i < warmup; ++i)
+    DeviceRadixSort::DownsweepKeysOnly<<<threadblocks, downsweepThreads>>>(
+        sort, alt, globalHist, passHist, size, 0);
+  DRS_CHECK(cudaDeviceSynchronize());
+  t0 = now();
+  for (unsigned int i = 0; i < iters; ++i)
+    DeviceRadixSort::DownsweepKeysOnly<<<threadblocks, downsweepThreads>>>(
+        sort, alt, globalHist, passHist, size, 0);
+  DRS_CHECK(cudaDeviceSynchronize());
+  out[2] = ms(t0, now()) / iters;
+
+  for (unsigned int i = 0; i < warmup; ++i)
+    DeviceRadixSort::Scan<<<RADIX, scanThreads>>>(passHist, threadblocks);
+  DRS_CHECK(cudaDeviceSynchronize());
+  t0 = now();
+  for (unsigned int i = 0; i < iters; ++i)
+    DeviceRadixSort::Scan<<<RADIX, scanThreads>>>(passHist, threadblocks);
+  DRS_CHECK(cudaDeviceSynchronize());
+  out[1] = ms(t0, now()) / iters;
 }

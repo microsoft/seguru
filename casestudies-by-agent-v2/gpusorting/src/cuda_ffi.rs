@@ -14,6 +14,22 @@ unsafe extern "C" {
     fn cuda_sort_destroy(ctx: *mut SortCtxRaw);
     fn cuda_sort_bench(ctx: *mut SortCtxRaw, kind: i32, warmup: i32, iters: i32) -> f32;
     fn cuda_sort_copy_out(ctx: *mut SortCtxRaw, kind: i32, h_out: *mut u32);
+    fn cuda_sort_kernel_times(
+        ctx: *mut SortCtxRaw,
+        algo: i32,
+        warmup: i32,
+        iters: i32,
+        out: *mut f64,
+    );
+}
+
+/// Which same-algorithm baseline to break down per kernel.
+#[derive(Clone, Copy)]
+pub enum CudaAlgo {
+    /// Reduce-then-scan: upsweep, scan, downsweep.
+    ReduceThenScan = 0,
+    /// OneSweep: global histogram, scan, digit binning.
+    OneSweep = 1,
 }
 
 /// Which CUDA baseline to time.
@@ -64,6 +80,24 @@ impl CudaSorter {
     pub fn sorted(&self, kind: CudaSort) -> Vec<u32> {
         let mut out = vec![0u32; self.n];
         unsafe { cuda_sort_copy_out(self.raw, kind as i32, out.as_mut_ptr()) };
+        out
+    }
+
+    /// Mean milliseconds per launch of each kernel of `algo`, in launch order.
+    ///
+    /// Always at our port's tuning, so each entry is the like-for-like baseline
+    /// for the corresponding SeGuRu kernel.
+    pub fn kernel_times(&self, algo: CudaAlgo, warmup: u32, iters: u32) -> [f64; 3] {
+        let mut out = [0.0f64; 3];
+        unsafe {
+            cuda_sort_kernel_times(
+                self.raw,
+                algo as i32,
+                warmup as i32,
+                iters as i32,
+                out.as_mut_ptr(),
+            )
+        };
         out
     }
 }

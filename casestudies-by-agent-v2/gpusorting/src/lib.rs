@@ -40,10 +40,10 @@ pub mod cuda_ffi;
 #[cfg(test)]
 mod tests;
 
-pub use driver::{radix_sort, radix_sort_timed};
+pub use driver::{radix_sort, radix_sort_kernel_times, radix_sort_timed};
 pub use gpu::U32_4;
 pub use gpu::vector::VecTypeTrait;
-pub use onesweep_driver::{onesweep_sort, onesweep_sort_timed};
+pub use onesweep_driver::{onesweep_kernel_times, onesweep_sort, onesweep_sort_timed};
 
 pub const RADIX: u32 = 256;
 pub const RADIX_LOG: u32 = 8;

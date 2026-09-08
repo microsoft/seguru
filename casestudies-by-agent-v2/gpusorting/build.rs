@@ -32,10 +32,16 @@ fn main() {
     let mut objs = Vec::new();
     // Our port's onesweep tuning. BIN_WARPS stays at upstream's 16 (512 threads),
     // as does BIN_HISTS_SIZE; only the tile size and keys-per-thread change.
+    // The global histogram is retuned too: our `global_histogram` gives each
+    // block one `PART_SIZE` tile, so leaving upstream's 65536-key tile here
+    // would launch a sixteenth as many blocks and compare two different
+    // partitionings of the same kernel.
     let os_ours_tuning = [
         "-DBIN_PART_SIZE=4096",
         "-DBIN_SUB_PART_SIZE=256",
         "-DBIN_KEYS_PER_THREAD=8",
+        "-DG_HIST_PART_SIZE=4096",
+        "-DG_HIST_VEC_SIZE=1024",
     ];
     let units: [(&str, &str, &[&str]); 5] = [
         ("cuda/sort_ref.cu", "sort_ref.o", &[]),

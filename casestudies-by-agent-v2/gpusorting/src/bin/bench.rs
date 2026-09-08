@@ -22,8 +22,10 @@
 //! outside the timed loop. Radix sort is data oblivious, so every implementation
 //! does exactly the same amount of work regardless of the input distribution.
 
-use gpusorting_gpu::cuda_ffi::{CudaSort, CudaSorter};
-use gpusorting_gpu::{onesweep_sort_timed, radix_sort_timed};
+use gpusorting_gpu::cuda_ffi::{CudaAlgo, CudaSort, CudaSorter};
+use gpusorting_gpu::{
+    onesweep_kernel_times, onesweep_sort_timed, radix_sort_kernel_times, radix_sort_timed,
+};
 use std::time::Instant;
 
 const WARMUP: usize = 5;
@@ -76,14 +78,10 @@ fn lcg(seed: u32, n: usize) -> Vec<u32> {
 }
 
 fn main() {
-    let sizes: &[(&str, usize)] = &[
-        ("64 Ki", 1 << 16),
-        ("1 Mi", 1 << 20),
-        ("4 Mi", 1 << 22),
-        ("16 Mi", 1 << 24),
-        ("64 Mi", 1 << 26),
-        ("256 Mi", 1 << 28),
-    ];
+    // Small/medium/large at roughly 1x/10x/100x of CUDA runtime. Sizes below
+    // 4 Mi are dominated by onesweep's fixed multi-kernel launch cost rather
+    // than by the sort itself.
+    let sizes: &[(&str, usize)] = &[("4 Mi", 1 << 22), ("64 Mi", 1 << 26), ("1 Gi", 1 << 30)];
 
     let mut rows = Vec::new();
 
@@ -155,6 +153,47 @@ fn main() {
         });
 
         let param = label.replace(' ', "");
+
+        // Per-kernel breakdown. Each SeGuRu kernel is timed alone against the
+        // same kernel of the same-algorithm CUDA baseline at the same tuning,
+        // so these ratios isolate one kernel instead of averaging the twelve
+        // launches an end-to-end sort makes.
+        let sg_os = onesweep_kernel_times(&keys, WARMUP, iters);
+        let cu_os = cuda.kernel_times(CudaAlgo::OneSweep, WARMUP as u32, iters as u32);
+
+        // The global scatter is the only part of onesweep that differs between
+        // the two builds (`MapExplicit` under one `unsafe`, against `Atomic`),
+        // and it sits in the binning kernel. So that kernel is measured in both
+        // builds as two workloads, and every other kernel -- identical in both
+        // -- is measured once, by the default build.
+        let binning = if cfg!(feature = "safe_only") {
+            "onesweep_digit_binning_safe"
+        } else {
+            "onesweep_digit_binning"
+        };
+        csv_row("gpusorting", binning, &param, "seguru", "time", sg_os[2], "ms");
+        csv_row("gpusorting", binning, &param, "cuda", "time", cu_os[2], "ms");
+
+        if !cfg!(feature = "safe_only") {
+            let sg_drs = radix_sort_kernel_times(&keys, WARMUP, iters);
+            let cu_drs = cuda.kernel_times(CudaAlgo::ReduceThenScan, WARMUP as u32, iters as u32);
+
+            const DRS_KERNELS: [&str; 3] = ["radix_upsweep", "radix_scan", "radix_downsweep"];
+            for i in 0..3 {
+                let k = DRS_KERNELS[i];
+                csv_row("gpusorting", k, &param, "seguru", "time", sg_drs[i], "ms");
+                csv_row("gpusorting", k, &param, "cuda", "time", cu_drs[i], "ms");
+            }
+            for (i, k) in ["onesweep_global_histogram", "onesweep_scan"]
+                .into_iter()
+                .enumerate()
+            {
+                csv_row("gpusorting", k, &param, "seguru", "time", sg_os[i], "ms");
+                csv_row("gpusorting", k, &param, "cuda", "time", cu_os[i], "ms");
+            }
+        }
+
+
         // The `safe_only` build exists only to re-measure onesweep, so it emits
         // just that family; duplicating the rest would give the shared workloads
         // two baseline rows apiece.

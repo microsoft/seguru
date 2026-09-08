@@ -135,4 +135,96 @@ pub fn onesweep_sort(keys: &[u32]) -> Vec<u32> {
     onesweep_sort_timed(keys, 0, 1).0
 }
 
+/// Mean milliseconds per launch of each OneSweep kernel, in launch order:
+/// global histogram, scan, digit binning.
+///
+/// The first two are timed as a batch of `iters` launches followed by one sync.
+/// Digit binning cannot be: replaying it over a used pass histogram leaves stale
+/// look-back flags that make successor tiles spin forever (see `sort_once!`), so
+/// every binning launch is preceded by an untimed re-seed and timed on its own
+/// between two syncs. The CUDA mirror in `os_variant.cu` uses the same two
+/// protocols for the same kernels, so the per-launch sync appears on both sides.
+pub fn onesweep_kernel_times(keys: &[u32], warmup: usize, iters: usize) -> [f64; 3] {
+    let n = keys.len();
+    let host_in = pack_padded(keys);
+    let vec_len = host_in.len();
+    let hist_blocks = thread_blocks(n);
+    let tiles = ((vec_len * 4) as u32).div_ceil(BIN_PART_SIZE);
+    let iters = iters.max(1);
+
+    let gh_len = clear_padded_len((RADIX * RADIX_PASSES) as usize);
+    let ph_len = clear_padded_len(pass_hist_len(tiles));
+    let idx_len = clear_padded_len(RADIX_PASSES as usize);
+
+    gpu_host::cuda_ctx(0, |ctx, m| {
+        let scratch = vec![U32_4::default(); vec_len];
+        let zeros_gh = vec![0u32; gh_len];
+        let zeros_ph = vec![0u32; ph_len];
+        let zeros_idx = vec![0u32; idx_len];
+
+        let mut d_a = ctx.new_tensor_view::<[U32_4]>(&host_in).unwrap();
+        let mut d_b = ctx.new_tensor_view::<[U32_4]>(&scratch).unwrap();
+        let mut d_gh = ctx.new_tensor_view::<[u32]>(&zeros_gh).unwrap();
+        let mut d_ph = ctx.new_tensor_view::<[u32]>(&zeros_ph).unwrap();
+        let mut d_idx = ctx.new_tensor_view::<[u32]>(&zeros_idx).unwrap();
+
+        // Launch configs are not `Copy`, so each launch site builds its own.
+        macro_rules! gh_cfg { () => { gpu_config!(clear_grid(gh_len), 1, 1, @const CLEAR_THREADS, 1, 1, 0) } }
+        macro_rules! ph_cfg { () => { gpu_config!(clear_grid(ph_len), 1, 1, @const CLEAR_THREADS, 1, 1, 0) } }
+        macro_rules! idx_cfg { () => { gpu_config!(clear_grid(idx_len), 1, 1, @const CLEAR_THREADS, 1, 1, 0) } }
+        macro_rules! ghist_cfg { () => { gpu_config!(hist_blocks, 1, 1, @const UPSWEEP_THREADS, 1, 1, 0) } }
+        macro_rules! scan_cfg { () => { gpu_config!(RADIX_PASSES, 1, 1, @const RADIX, 1, 1, RADIX * 4) } }
+        macro_rules! bin_cfg { () => { gpu_config!(tiles, 1, 1, @const DOWNSWEEP_THREADS, 1, 1, BIN_SMEM_WORDS * 4) } }
+
+        let mut times = [0.0f64; 3];
+
+        clear_u32::launch(gh_cfg!(), ctx, m, &mut d_gh).unwrap();
+        for _ in 0..warmup {
+            global_histogram::launch(ghist_cfg!(), ctx, m, &d_a, &mut d_gh).unwrap();
+        }
+        ctx.sync().unwrap();
+        let t0 = std::time::Instant::now();
+        for _ in 0..iters {
+            global_histogram::launch(ghist_cfg!(), ctx, m, &d_a, &mut d_gh).unwrap();
+        }
+        ctx.sync().unwrap();
+        times[0] = t0.elapsed().as_secs_f64() * 1e3 / iters as f64;
+
+        clear_u32::launch(gh_cfg!(), ctx, m, &mut d_gh).unwrap();
+        global_histogram::launch(ghist_cfg!(), ctx, m, &d_a, &mut d_gh).unwrap();
+        for _ in 0..warmup {
+            onesweep_scan::launch(scan_cfg!(), ctx, m, &d_gh, &mut d_ph, tiles).unwrap();
+        }
+        ctx.sync().unwrap();
+        let t0 = std::time::Instant::now();
+        for _ in 0..iters {
+            onesweep_scan::launch(scan_cfg!(), ctx, m, &d_gh, &mut d_ph, tiles).unwrap();
+        }
+        ctx.sync().unwrap();
+        times[1] = t0.elapsed().as_secs_f64() * 1e3 / iters as f64;
+
+        let mut acc = 0.0f64;
+        for i in 0..warmup + iters {
+            clear_u32::launch(ph_cfg!(), ctx, m, &mut d_ph).unwrap();
+            clear_u32::launch(idx_cfg!(), ctx, m, &mut d_idx).unwrap();
+            onesweep_scan::launch(scan_cfg!(), ctx, m, &d_gh, &mut d_ph, tiles).unwrap();
+            ctx.sync().unwrap();
+
+            let t0 = std::time::Instant::now();
+            digit_binning_pass::launch(
+                bin_cfg!(), ctx, m,
+                &d_a.flatten(), &mut d_b.flatten(), &mut d_ph, &mut d_idx, 0, tiles, 1,
+            )
+            .unwrap();
+            ctx.sync().unwrap();
+            if i >= warmup {
+                acc += t0.elapsed().as_secs_f64() * 1e3;
+            }
+        }
+        times[2] = acc / iters as f64;
+
+        times
+    })
+}
+
 const _: () = assert!(PART_SIZE == BIN_PART_SIZE);

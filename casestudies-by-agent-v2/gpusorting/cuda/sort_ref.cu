@@ -34,6 +34,19 @@ extern "C" void os_dispatch_up(unsigned int *, unsigned int *, unsigned int *,
 extern "C" void os_dispatch_ours(unsigned int *, unsigned int *, unsigned int *,
                                  unsigned int *, unsigned int *, unsigned int);
 
+// Per-kernel timings of the same-algorithm baselines, at our port's tuning.
+// `out` receives three means in launch order; see the definitions in
+// `drs_variant.cu` / `os_variant.cu` for the timing protocol.
+extern "C" void drs_dispatch_ours_kernel_times(unsigned int *, unsigned int *,
+                                               unsigned int *, unsigned int *,
+                                               unsigned int, unsigned int,
+                                               unsigned int, double *);
+extern "C" void os_dispatch_ours_kernel_times(unsigned int *, unsigned int *,
+                                              unsigned int *, unsigned int *,
+                                              unsigned int *, unsigned int,
+                                              unsigned int, unsigned int,
+                                              double *);
+
 #define CUDA_CHECK(expr)                                                          \
   do {                                                                            \
     cudaError_t _e = (expr);                                                      \
@@ -207,5 +220,26 @@ extern "C" void cuda_sort_copy_out(SortCtx *c, int kind, unsigned int *h_out) {
                  thrust::device_ptr<unsigned int>(c->d_a + c->n));
     CUDA_CHECK(cudaDeviceSynchronize());
     CUDA_CHECK(cudaMemcpy(h_out, c->d_a, bytes, cudaMemcpyDeviceToHost));
+  }
+}
+
+
+// Mean milliseconds per launch of each kernel of the same-algorithm baseline.
+// `algo` selects reduce-then-scan (0) or onesweep (1); `out` receives three
+// means in launch order. The keys are restored first, so every call measures
+// the same unsorted input the Rust side uses.
+extern "C" void cuda_sort_kernel_times(SortCtx *c, int algo, int warmup,
+                                       int iters, double *out) {
+  CUDA_CHECK(cudaMemcpy(c->d_a, c->d_src, (size_t)c->n * sizeof(unsigned int),
+                   cudaMemcpyDeviceToDevice));
+  if (algo == 0) {
+    drs_dispatch_ours_kernel_times(c->d_a, c->d_b, c->d_global_hist,
+                                   c->d_pass_hist, c->n, (unsigned int)warmup,
+                                   (unsigned int)iters, out);
+  } else {
+    os_dispatch_ours_kernel_times(c->d_a, c->d_b, c->d_global_hist,
+                                  c->d_os_pass_hist, c->d_os_index, c->n,
+                                  (unsigned int)warmup, (unsigned int)iters,
+                                  out);
   }
 }

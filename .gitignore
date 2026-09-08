@@ -23,6 +23,8 @@ target/
 # Objects
 *.o
 target-nobc/
+target-safe/
+target-nobc-safe/
 
 # Criterion output from benchmark/run_*.sh
 benchmark/results/

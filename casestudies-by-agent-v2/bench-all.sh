@@ -43,6 +43,22 @@ run_variant() {
         echo "    rc=$rc  rows=$( [ -f "$csv" ] && wc -l < "$csv" || echo 0 )"
     done
 
+    # KernelBench's CUDA mirror is a standalone nvcc binary rather than a row
+    # emitted by the Rust bench, so run it here. It is variant-independent
+    # (DISABLE_GPU_BOUND_CHECK only affects SeGuRu codegen) and ratios() keys off
+    # the stock CUDA number, so measuring it once in the stock pass is enough.
+    if [ "$variant" = "stock" ]; then
+        echo "### $variant: kernelbench-cuda"
+        if make -C kernelbench/cuda >"$OUT/raw/kernelbench-cuda.build.log" 2>&1; then
+            BENCH_CSV="$PWD/$csv" ./kernelbench/cuda/kernelbench-cuda \
+                >"$OUT/raw/${variant}.kernelbench-cuda.txt" 2>&1
+            echo "    rc=$?  rows=$(wc -l < "$csv")"
+        else
+            echo "    BUILD FAILED (kernelbench-cuda); ratios will omit kernelbench"
+            tail -5 "$OUT/raw/kernelbench-cuda.build.log"
+        fi
+    fi
+
     # Onesweep again with its global scatter written through the safe atomic API
     # instead of the one `unsafe` MapExplicit, so the table can price that line.
     # It reports itself as `radix_sort_onesweep_safe`.

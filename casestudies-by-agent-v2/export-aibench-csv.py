@@ -26,11 +26,6 @@ CSV_IN = HERE / "benchdata" / "all.csv"
 OUT = HERE.parent / "seguru-paper" / "src" / "data" / "aibench.csv"
 
 SUITE_ORDER = ["aes", "heongpu", "polybench", "kernelbench", "gpusorting"]
-GPUSORT_E2E = {
-    "radix_sort_onesweep",
-    "radix_sort_onesweep_safe",
-    "radix_sort_reduce_then_scan",
-}
 SUITE_TITLE = {"aes": "AES", "heongpu": "HEonGPU",
                "polybench": "PolyBench", "kernelbench": "KernelBench",
                "gpusorting": "GPUSorting"}
@@ -103,8 +98,6 @@ def load(src):
         if r["variant"] != "stock" or r["metric"] != "time":
             continue
         if r["suite"] not in SUITE_ORDER:
-            continue
-        if r["suite"] == "gpusorting" and r["workload"] not in GPUSORT_E2E:
             continue
         k = (r["suite"], r["workload"], r["parameter"])
         times[k][r["implementation"]] = float(r["value"])

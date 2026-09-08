@@ -296,12 +296,6 @@ SUITE_UNIT = {"aes": "input bytes", "heongpu": "coefficients",
               "polybench": "array dimensions", "kernelbench": "tensor shape",
               "gpusorting": "keys"}
 SUITE_ORDER = ["aes", "heongpu", "polybench", "kernelbench", "gpusorting"]
-PAPER_WORKLOADS = {
-    "radix_sort_onesweep",
-    "radix_sort_onesweep_safe",
-    "radix_sort_reduce_then_scan",
-}
-
 # The onesweep port is measured twice: once with its global scatter written
 # through a single `unsafe` MapExplicit, once with that scatter on the safe
 # atomic API. They are shown as a pair so the table prices that one line.
@@ -340,9 +334,7 @@ def write_latex(df, rat):
     # does the same work at every input size and cannot be a size-scaling
     # measurement.
     st = rat[(rat.variant == "stock") & rat.suite.isin(SUITE_ORDER)
-             & (rat.workload != "onesweep_scan")
-             & ((rat.suite != "gpusorting")
-                | rat.workload.isin(PAPER_WORKLOADS))].copy()
+             & (rat.workload != "onesweep_scan")].copy()
     st["suite_rank"] = st.suite.map(SUITE_ORDER.index)
     # Within a workload, order sizes by the CUDA time rather than by the
     # parameter string, which is not comparable across suites.

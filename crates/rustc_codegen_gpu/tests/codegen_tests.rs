@@ -13,12 +13,24 @@ fn find_lib(search_dir: &Path, lib_name: &str, suffix: &str) -> PathBuf {
     let entries = std::fs::read_dir(search_dir)
         .unwrap_or_else(|_| panic!("Could not read deps dir {}", search_dir.display()));
 
+    // Stale rlibs from earlier builds keep their own metadata hash, so picking one
+    // at random makes the build fail with a metadata mismatch. Take the newest.
+    let mut newest: Option<(std::time::SystemTime, PathBuf)> = None;
     for entry in entries.flatten() {
         let file_name = entry.file_name();
         let file_name = file_name.to_string_lossy();
         if file_name.starts_with(lib_name) && file_name.ends_with(suffix) {
-            return entry.path();
+            let mtime = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            if newest.as_ref().is_none_or(|(best, _)| mtime > *best) {
+                newest = Some((mtime, entry.path()));
+            }
         }
+    }
+    if let Some((_, path)) = newest {
+        return path;
     }
 
     panic!("Proc macro dylib for '{}' not found in {:?}", lib_name, search_dir);
@@ -46,6 +58,11 @@ fn run_codegen_tests(src: PathBuf, mode: &str) {
     let num_traits_path = find_lib(&target_dir.join("deps"), "libnum_traits-", ".rlib");
     let num_traits = format!("num_traits={}", &num_traits_path.to_str().unwrap());
 
+    // `gpu` names `cuda_bindings` in trait impls (e.g. `DeviceVecType for VecType<T>`),
+    // so building it standalone needs the rlib on the command line.
+    let cuda_bindings_path = find_lib(&target_dir.join("deps"), "libcuda_bindings-", ".rlib");
+    let cuda_bindings = format!("cuda_bindings={}", &cuda_bindings_path.to_str().unwrap());
+
     let gpu_src = target_dir.join("../../gpu/src/lib.rs");
     let gpu_target = target_dir.join("tests/gpu");
     let codegen = format!("-Zcodegen-backend={}", backend_path.to_str().unwrap());
@@ -67,6 +84,8 @@ fn run_codegen_tests(src: PathBuf, mode: &str) {
     ];
     let mut rustc_gpu_flags = rustc_flags.clone();
     rustc_gpu_flags.extend([
+        "--extern",
+        cuda_bindings.as_str(),
         //"--target",
         //TARGET,
         "--out-dir",

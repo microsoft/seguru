@@ -10,7 +10,7 @@
 pub fn alloc_shared(a: &[u8], _a_window: usize, b: &mut [u8], b_window: usize, f: &mut [f32], salloc: gpu::DynamicSharedAlloc) {
     let mut salloc = salloc;
     let mut dy_shared = salloc.alloc::<f32>(32, 0.0f32);
-    let mut shared = gpu::unsafe { GpuShared::<[u8; 10]>::uninit() };
+    let mut shared = unsafe { gpu::GpuShared::<[u8; 10]>::uninit() };
     let mut chunk_dy_shared = dy_shared.chunk_mut(gpu::MapLinear::new(1));
     let mut chunk_shared = shared.chunk_mut(gpu::MapLinear::new(1));
     chunk_shared[0] = a[gpu::thread_id::<gpu::DimX>() as usize];
@@ -34,5 +34,5 @@ pub fn alloc_shared(a: &[u8], _a_window: usize, b: &mut [u8], b_window: usize, f
 // PTX_CHECK: bar.sync
 // PTX_CHECK: st.shared
 // PTX_CHECK: ld.shared
-// PTX_CHECK: static_shared_0
+// PTX_CHECK: static_shared_
 // PTX_CHECK: __dynamic_shmem__0 

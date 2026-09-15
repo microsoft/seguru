@@ -91,7 +91,10 @@ pub fn decode_ret_value<'ml: 'a, 'a>(
     debug!("decode_ret_value: val type: {ty:?} val:{val:?} at location {location:?}");
     let opval =
         OperationResult::<'ml, 'a>::try_from(val).expect("expected a tuple value for insert_value");
-    let op: &Operation<'ml> = unsafe { opval.owner().to_ref() };
+    // `to_ref` transmutes `&OperationRef`, so the owner must be bound to a named
+    // local: borrowing the temporary returned by `owner()` leaves `op` dangling.
+    let owner = opval.owner();
+    let op: &Operation<'ml> = unsafe { owner.to_ref() };
     assert!(op.result_count() == 1);
     let ty = op.result(0).unwrap().r#type();
     assert!(ty.is_tuple());

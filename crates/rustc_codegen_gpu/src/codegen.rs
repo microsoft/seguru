@@ -183,15 +183,24 @@ pub(crate) fn module_codegen<'tcx>(
             mono_item.predefine::<GpuBuilder<'_, '_, '_>>(&cx, data.linkage, data.visibility);
             cx.define_indirect_if_needed();
         }
+        // Analysis must complete for every item before any codegen, so that a codegen
+        // failure cannot hide a diagnostic from a later item.
+        for (mono_item, _) in &mono_items {
+            if let rustc_middle::mir::mono::MonoItem::Fn(instance) = mono_item {
+                let attr = cx.gpu_attrs(instance);
+                if !attr.is_builtin() {
+                    crate::mir_analysis::analyze_gpu_code(tcx, instance, attr.kernel)
+                        .unwrap_or_else(|err| {
+                            err.fatal(tcx);
+                        });
+                }
+            }
+        }
         for (mono_item, mono_data) in mono_items {
             match &mono_item {
                 rustc_middle::mir::mono::MonoItem::Fn(instance) => {
                     let attr = cx.gpu_attrs(instance);
                     if !attr.is_builtin() {
-                        crate::mir_analysis::analyze_gpu_code(tcx, instance, attr.kernel)
-                            .unwrap_or_else(|err| {
-                                err.fatal(tcx);
-                            });
                         mono_item.define::<GpuBuilder<'_, '_, '_>>(&cx);
                         if attr.kernel {}
                     }

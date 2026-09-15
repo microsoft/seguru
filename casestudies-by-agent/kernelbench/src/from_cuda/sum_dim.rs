@@ -32,7 +32,7 @@ pub fn sum_dim_kernel(x: &[Float4], y: &mut [f32], D4: u32) {
     let num_warps = warp.meta_group_size(); // BLOCK / 32
 
     // One shared-memory slot per warp (up to 32 warps, mirrors warp_sums[WARPS]).
-    let mut smem_sum = GpuShared::<[f32; 32]>::zero();
+    let mut smem_sum = GpuShared::<[f32; 32]>::init(0.0f32);
 
     // One output f32 per block — chained Grid→Block→Thread scope.
     let mut sum_out = y

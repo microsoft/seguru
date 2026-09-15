@@ -47,7 +47,7 @@ pub fn l2_norm_kernel(x: &[Float4], y: &mut [Float4], D4: u32, eps: f32) {
     let num_warps = warp.meta_group_size(); // BLOCK / 32
 
     // Reserve 32 slots (max warps for BLOCK≤1024). Tail padded with 0.0.
-    let mut smem_sumsq = GpuShared::<[f32; 32]>::zero();
+    let mut smem_sumsq = GpuShared::<[f32; 32]>::init(0.0f32);
 
     // Subslice this block's Float4 row once.
     let row = block_id::<DimX>() as usize;

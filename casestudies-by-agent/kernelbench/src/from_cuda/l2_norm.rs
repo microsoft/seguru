@@ -45,7 +45,7 @@ pub fn l2_norm_kernel(x: &[Float4], y: &mut [Float4], D4: u32, eps: f32) {
     let num_warps = warp.meta_group_size(); // BLOCK / 32
 
     // One slot per warp for cross-warp reduction (BLOCK/32 ≤ 32).
-    let mut smem_sumsq = GpuShared::<[f32; 32]>::zero();
+    let mut smem_sumsq = GpuShared::<[f32; 32]>::init(0.0f32);
 
     // Subslice the row once — O(1) bounds checks for element reads.
     let row = block_id::<DimX>() as usize;

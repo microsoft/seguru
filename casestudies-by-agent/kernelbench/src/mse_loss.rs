@@ -16,7 +16,7 @@ pub fn mse_loss_kernel(a: &[f32], b: &[f32], out: &mut [f32], N: u32, inv_n: f32
     let tid = thread_id::<DimX>();
     let lane_id = warp.thread_rank();
     let num_warps = warp.meta_group_size();
-    let mut smem = GpuShared::<[f32; 32]>::zero();
+    let mut smem = GpuShared::<[f32; 32]>::init(0.0f32);
 
     let mut acc = 0.0f32;
     let mut i = tid;

@@ -14,7 +14,7 @@ pub fn l1_norm_kernel(x: &[Float4], y: &mut [Float4], D4: u32, eps: f32) {
     let tid = thread_id::<DimX>();
     let lane_id = warp.thread_rank();
     let num_warps = warp.meta_group_size();
-    let mut smem = GpuShared::<[f32; 32]>::zero();
+    let mut smem = GpuShared::<[f32; 32]>::init(0.0f32);
     let row = block_id::<DimX>() as usize;
     let x_row = &x[(row * D4 as usize)..((row + 1) * D4 as usize)];
     let mut s = 0.0f32;

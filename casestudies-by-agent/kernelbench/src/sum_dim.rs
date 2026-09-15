@@ -44,7 +44,7 @@ pub fn sum_dim_kernel(x: &[Float4], y: &mut [f32], D4: u32) {
     let num_warps = warp.meta_group_size();
 
     // Scratch: one slot per warp (≤32 warps for BLOCK≤1024).
-    let mut smem_sum = GpuShared::<[f32; 32]>::zero();
+    let mut smem_sum = GpuShared::<[f32; 32]>::init(0.0f32);
 
     // Subslice this block's Float4 row once.
     let row = block_id::<DimX>() as usize;

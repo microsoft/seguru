@@ -47,11 +47,11 @@ pub fn layer_norm_kernel(x: &[Float4], y: &mut [Float4], D: u32, D4: u32, eps: f
     let num_warps = warp.meta_group_size(); // BLOCK / 32
 
     // Cross-warp scratch: one slot per warp for `sum` and `sum_sq`.
-    let mut smem_sum = GpuShared::<[f32; 32]>::zero();
-    let mut smem_sumsq = GpuShared::<[f32; 32]>::zero();
+    let mut smem_sum = GpuShared::<[f32; 32]>::init(0.0f32);
+    let mut smem_sumsq = GpuShared::<[f32; 32]>::init(0.0f32);
     // 1-element broadcast buffers for `mean` / `rstd` (mirrors `s_mean`, `s_rstd`).
-    let mut smem_mean = GpuShared::<[f32; 1]>::zero();
-    let mut smem_rstd = GpuShared::<[f32; 1]>::zero();
+    let mut smem_mean = GpuShared::<[f32; 1]>::init(0.0f32);
+    let mut smem_rstd = GpuShared::<[f32; 1]>::init(0.0f32);
 
     // Subslice the row once (Float4-stride).
     let row = block_id::<DimX>() as usize;

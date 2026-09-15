@@ -56,8 +56,8 @@ pub fn softmax_kernel(x: &[f32], y: &mut [f32], D: u32) {
     let num_warps = warp.meta_group_size(); // BLOCK / 32
 
     // Reserve 32 slots (max warps for BLOCK=1024). Unused slots stay at identity.
-    let mut smem_max = GpuShared::<[f32; 32]>::zero();
-    let mut smem_sum = GpuShared::<[f32; 32]>::zero();
+    let mut smem_max = GpuShared::<[f32; 32]>::init(0.0f32);
+    let mut smem_sum = GpuShared::<[f32; 32]>::init(0.0f32);
 
     // Subslice the row once — O(1) bounds-check amortization over both passes.
     let row = block_id::<DimX>() as usize;

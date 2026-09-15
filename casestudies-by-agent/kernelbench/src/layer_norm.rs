@@ -53,8 +53,10 @@ pub fn layer_norm_kernel(x: &[Float4], y: &mut [Float4], D4: u32, eps: f32) {
 
     // One slot per warp (max 32 warps for BLOCK=1024). Unused slots stay 0.0
     // (identity for ReduxAdd) so the second warp redux is safe.
-    let mut smem_sum = GpuShared::<[f32; 32]>::zero();
-    let mut smem_sq = GpuShared::<[f32; 32]>::zero();
+    let mut smem_sum = GpuShared::<[f32; 32]>::init(0.0f32);
+    let mut smem_sq = GpuShared::<[f32; 32]>::init(0.0f32);
+
+    sync_threads();
 
     // Subslice this block's Float4 row once.
     let row = block_id::<DimX>() as usize;

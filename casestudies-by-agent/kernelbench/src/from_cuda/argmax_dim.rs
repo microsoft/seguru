@@ -15,8 +15,8 @@ pub fn argmax_dim_kernel(x: &[f32], y: &mut [i64], D: u32) {
     let tid = thread_id::<DimX>();
     let lane_id = warp.thread_rank();
     let num_warps = warp.meta_group_size();
-    let mut smax = GpuShared::<[f32; 32]>::zero();
-    let mut smin_full = GpuShared::<[i32; 256]>::zero();
+    let mut smax = GpuShared::<[f32; 32]>::init(0.0f32);
+    let mut smin_full = GpuShared::<[i32; 256]>::init(0i32);
     let mut y_chunk = y
         .chunk_to_scope(grid2block, MapContinuousLinear::new(1))
         .chunk_to_scope(block2thread, MapContinuousLinear::new(1));

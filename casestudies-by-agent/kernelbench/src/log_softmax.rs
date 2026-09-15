@@ -17,8 +17,8 @@ pub fn log_softmax_kernel(x: &[f32], y: &mut [f32], D: u32) {
     let lane_id = warp.thread_rank();
     let num_warps = warp.meta_group_size();
 
-    let mut smem_max = GpuShared::<[f32; 32]>::zero();
-    let mut smem_sum = GpuShared::<[f32; 32]>::zero();
+    let mut smem_max = GpuShared::<[f32; 32]>::init(0.0f32);
+    let mut smem_sum = GpuShared::<[f32; 32]>::init(0.0f32);
 
     let row = block_id::<DimX>() as usize;
     let x_row = &x[(row * D as usize)..((row + 1) * D as usize)];

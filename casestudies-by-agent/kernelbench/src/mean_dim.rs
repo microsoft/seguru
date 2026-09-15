@@ -16,7 +16,7 @@ pub fn mean_dim_kernel(x: &[Float4], y: &mut [f32], D4: u32, inv_d: f32) {
     let tid = thread_id::<DimX>();
     let lane_id = warp.thread_rank();
     let num_warps = warp.meta_group_size();
-    let mut smem = GpuShared::<[f32; 32]>::zero();
+    let mut smem = GpuShared::<[f32; 32]>::init(0.0f32);
     let mut y_chunk = y
         .chunk_to_scope(grid2block, MapContinuousLinear::new(1))
         .chunk_to_scope(block2thread, MapContinuousLinear::new(1));
